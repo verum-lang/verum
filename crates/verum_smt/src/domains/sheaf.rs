@@ -106,10 +106,7 @@ mod tests {
     #[test]
     fn test_cover_without_compatibility_undetermined() {
         let p = DescentProblem::new("c").add_cover("f1", "s1");
-        assert_eq!(
-            verify_descent(&p),
-            DescentResult::CompatibilityNotVerified
-        );
+        assert_eq!(verify_descent(&p), DescentResult::CompatibilityNotVerified);
     }
 
     #[test]

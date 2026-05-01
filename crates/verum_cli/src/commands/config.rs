@@ -138,8 +138,11 @@ fn print_json(
             },
         },
     });
-    println!("{}", serde_json::to_string_pretty(&value)
-        .map_err(|e| CliError::Custom(format!("json serialize: {}", e)))?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&value)
+            .map_err(|e| CliError::Custom(format!("json serialize: {}", e)))?
+    );
     Ok(())
 }
 
@@ -175,10 +178,15 @@ fn print_human(
     println!("  {}", "Resolved language-feature set".bold().cyan());
     println!("{}", hr);
     println!();
-    println!("  Cog:     {} v{}",
+    println!(
+        "  Cog:     {} v{}",
         manifest.cog.name.as_str().bold(),
-        manifest.cog.version.as_str());
-    println!("  Source:  {}", manifest_path.display().to_string().dimmed());
+        manifest.cog.version.as_str()
+    );
+    println!(
+        "  Source:  {}",
+        manifest_path.display().to_string().dimmed()
+    );
     println!("  Profile: {:?}", manifest.language.profile);
     println!();
 
@@ -187,17 +195,26 @@ fn print_human(
     kv_bool("refinement", features.types.refinement);
     kv_bool("cubical", features.types.cubical);
     kv_bool("higher_kinded", features.types.higher_kinded);
-    kv_bool("universe_polymorphism", features.types.universe_polymorphism);
+    kv_bool(
+        "universe_polymorphism",
+        features.types.universe_polymorphism,
+    );
     kv_bool("coinductive", features.types.coinductive);
     kv_bool("quotient", features.types.quotient);
     kv_bool("instance_search", features.types.instance_search);
-    kv_num("coherence_check_depth", features.types.coherence_check_depth as u64);
+    kv_num(
+        "coherence_check_depth",
+        features.types.coherence_check_depth as u64,
+    );
     println!();
 
     section("runtime");
     kv_str("cbgr_mode", features.runtime.cbgr_mode.as_str());
     kv_str("async_scheduler", features.runtime.async_scheduler.as_str());
-    kv_num("async_worker_threads", features.runtime.async_worker_threads as u64);
+    kv_num(
+        "async_worker_threads",
+        features.runtime.async_worker_threads as u64,
+    );
     kv_bool("futures", features.runtime.futures);
     kv_bool("nurseries", features.runtime.nurseries);
     kv_str("heap_policy", features.runtime.heap_policy.as_str());
@@ -209,35 +226,62 @@ fn print_human(
     kv_bool("mlir_gpu", features.codegen.mlir_gpu);
     kv_str("gpu_backend", features.codegen.gpu_backend.as_str());
     kv_bool("proof_erasure", features.codegen.proof_erasure);
-    kv_bool("tail_call_optimization", features.codegen.tail_call_optimization);
+    kv_bool(
+        "tail_call_optimization",
+        features.codegen.tail_call_optimization,
+    );
     kv_bool("vectorize", features.codegen.vectorize);
     kv_num("inline_depth", features.codegen.inline_depth as u64);
     kv_str("debug_info", features.codegen.debug_info.as_str());
     println!();
 
     section("meta");
-    kv_bool("compile_time_functions", features.meta.compile_time_functions);
+    kv_bool(
+        "compile_time_functions",
+        features.meta.compile_time_functions,
+    );
     kv_bool("quote_syntax", features.meta.quote_syntax);
     kv_bool("reflection", features.meta.reflection);
     kv_bool("derive", features.meta.derive);
-    kv_num("macro_recursion_limit", features.meta.macro_recursion_limit as u64);
+    kv_num(
+        "macro_recursion_limit",
+        features.meta.macro_recursion_limit as u64,
+    );
     kv_num("max_stage_level", features.meta.max_stage_level as u64);
     println!();
 
     section("protocols");
     kv_str("coherence", features.protocols.coherence.as_str());
-    kv_str("resolution_strategy", features.protocols.resolution_strategy.as_str());
+    kv_str(
+        "resolution_strategy",
+        features.protocols.resolution_strategy.as_str(),
+    );
     kv_bool("blanket_impls", features.protocols.blanket_impls);
-    kv_bool("higher_kinded_protocols", features.protocols.higher_kinded_protocols);
+    kv_bool(
+        "higher_kinded_protocols",
+        features.protocols.higher_kinded_protocols,
+    );
     kv_bool("associated_types", features.protocols.associated_types);
-    kv_bool("generic_associated_types", features.protocols.generic_associated_types);
+    kv_bool(
+        "generic_associated_types",
+        features.protocols.generic_associated_types,
+    );
     println!();
 
     section("context");
     kv_bool("enabled", features.context.enabled);
-    kv_str("unresolved_policy", features.context.unresolved_policy.as_str());
-    kv_bool("negative_constraints", features.context.negative_constraints);
-    kv_num("propagation_depth", features.context.propagation_depth as u64);
+    kv_str(
+        "unresolved_policy",
+        features.context.unresolved_policy.as_str(),
+    );
+    kv_bool(
+        "negative_constraints",
+        features.context.negative_constraints,
+    );
+    kv_num(
+        "propagation_depth",
+        features.context.propagation_depth as u64,
+    );
     println!();
 
     section("safety");
@@ -291,5 +335,10 @@ fn kv_str(key: &str, value: &str) {
 }
 
 fn kv_num(key: &str, value: u64) {
-    println!("    {} {:<28}  {}", "·".dimmed(), key, value.to_string().cyan());
+    println!(
+        "    {} {:<28}  {}",
+        "·".dimmed(),
+        key,
+        value.to_string().cyan()
+    );
 }

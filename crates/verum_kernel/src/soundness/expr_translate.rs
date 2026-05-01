@@ -243,7 +243,11 @@ fn render_expr_coq(expr: &Expr) -> Option<String> {
                 None
             }
         }
-        ExprKind::If { condition, then_branch, else_branch } => {
+        ExprKind::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
             // `if cond { p } else q` → `(if cond then p else q)`.
             // Coq + Lean both accept the same surface syntax for the
             // propositional if-then-else. Restrictions:
@@ -477,7 +481,11 @@ fn render_expr_lean(expr: &Expr) -> Option<String> {
                 None
             }
         }
-        ExprKind::If { condition, then_branch, else_branch } => {
+        ExprKind::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
             let cond_kinds: Vec<&verum_ast::expr::ConditionKind> =
                 condition.conditions.iter().collect();
             if cond_kinds.len() != 1 {
@@ -774,10 +782,7 @@ fn render_type_coq(ty: &Type) -> Option<String> {
                 other => other,
             }
             .to_string();
-            let arg_parts: Vec<String> = args
-                .iter()
-                .filter_map(generic_arg_to_coq_text)
-                .collect();
+            let arg_parts: Vec<String> = args.iter().filter_map(generic_arg_to_coq_text).collect();
             if arg_parts.is_empty() {
                 Some(mapped_base)
             } else {
@@ -867,17 +872,15 @@ fn render_type_lean(ty: &Type) -> Option<String> {
         TypeKind::Float => Some("Float".to_string()),
         TypeKind::Char => Some("Char".to_string()),
         TypeKind::Text => Some("String".to_string()),
-        TypeKind::Path(path) => path.as_ident().map(|i| {
-            match i.as_str() {
-                "Int" => "Int".to_string(),
-                "Bool" => "Bool".to_string(),
-                "Float" => "Float".to_string(),
-                "Text" => "String".to_string(),
-                "Char" => "Char".to_string(),
-                "Unit" => "Unit".to_string(),
-                "Nat" => "Nat".to_string(),
-                other => other.to_string(),
-            }
+        TypeKind::Path(path) => path.as_ident().map(|i| match i.as_str() {
+            "Int" => "Int".to_string(),
+            "Bool" => "Bool".to_string(),
+            "Float" => "Float".to_string(),
+            "Text" => "String".to_string(),
+            "Char" => "Char".to_string(),
+            "Unit" => "Unit".to_string(),
+            "Nat" => "Nat".to_string(),
+            other => other.to_string(),
         }),
         TypeKind::Tuple(elems) => {
             let parts: Vec<String> = elems
@@ -906,10 +909,7 @@ fn render_type_lean(ty: &Type) -> Option<String> {
                 other => other,
             }
             .to_string();
-            let arg_parts: Vec<String> = args
-                .iter()
-                .filter_map(generic_arg_to_lean_text)
-                .collect();
+            let arg_parts: Vec<String> = args.iter().filter_map(generic_arg_to_lean_text).collect();
             if arg_parts.is_empty() {
                 Some(mapped_base)
             } else {
@@ -1066,11 +1066,7 @@ fn render_expr_agda(expr: &Expr) -> Option<String> {
             // `method receiver args...` so the proposition
             // type-checks structurally.
             let receiver_text = render_expr_agda(receiver)?;
-            let mut out = format!(
-                "{} {}",
-                method.as_str(),
-                parens_if_complex(&receiver_text),
-            );
+            let mut out = format!("{} {}", method.as_str(), parens_if_complex(&receiver_text),);
             for a in args.iter() {
                 let arg_text = render_expr_agda(a)?;
                 out.push(' ');
@@ -1220,10 +1216,7 @@ fn render_type_agda(ty: &Type) -> Option<String> {
                 other => other,
             }
             .to_string();
-            let arg_parts: Vec<String> = args
-                .iter()
-                .filter_map(generic_arg_to_agda_text)
-                .collect();
+            let arg_parts: Vec<String> = args.iter().filter_map(generic_arg_to_agda_text).collect();
             if arg_parts.is_empty() {
                 Some(mapped_base)
             } else {
@@ -1369,11 +1362,7 @@ fn render_expr_isabelle(expr: &Expr) -> Option<String> {
             // Isabelle has no method-call dot-notation; fall back to
             // function-application form.
             let receiver_text = render_expr_isabelle(receiver)?;
-            let mut out = format!(
-                "{} {}",
-                method.as_str(),
-                parens_if_complex(&receiver_text),
-            );
+            let mut out = format!("{} {}", method.as_str(), parens_if_complex(&receiver_text),);
             for a in args.iter() {
                 let arg_text = render_expr_isabelle(a)?;
                 out.push(' ');
@@ -1673,11 +1662,7 @@ fn render_expr_dedukti(expr: &Expr) -> Option<String> {
             ..
         } => {
             let receiver_text = render_expr_dedukti(receiver)?;
-            let mut out = format!(
-                "{} {}",
-                method.as_str(),
-                parens_if_complex(&receiver_text),
-            );
+            let mut out = format!("{} {}", method.as_str(), parens_if_complex(&receiver_text),);
             for a in args.iter() {
                 let arg_text = render_expr_dedukti(a)?;
                 out.push(' ');
@@ -1918,11 +1903,11 @@ fn classify_unrenderable(expr: &Expr) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use verum_ast::Literal;
+    use verum_ast::Span;
     use verum_ast::literal::IntLit;
     use verum_ast::pattern::{Pattern, PatternKind};
     use verum_ast::ty::{Ident, Path};
-    use verum_ast::Span;
-    use verum_ast::Literal;
     use verum_common::Heap;
 
     fn ident_expr(name: &str) -> Expr {
@@ -2048,7 +2033,11 @@ mod tests {
             },
             Span::dummy(),
         );
-        let text = CoqExprRenderer::new().render(&e).text().unwrap().to_string();
+        let text = CoqExprRenderer::new()
+            .render(&e)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "~ p");
     }
 
@@ -2061,7 +2050,11 @@ mod tests {
             },
             Span::dummy(),
         );
-        let text = LeanExprRenderer::new().render(&e).text().unwrap().to_string();
+        let text = LeanExprRenderer::new()
+            .render(&e)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "¬ p");
     }
 
@@ -2079,7 +2072,11 @@ mod tests {
             },
             Span::dummy(),
         );
-        let text = CoqExprRenderer::new().render(&e).text().unwrap().to_string();
+        let text = CoqExprRenderer::new()
+            .render(&e)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "(forall x, (x = x))");
     }
 
@@ -2097,7 +2094,11 @@ mod tests {
             },
             Span::dummy(),
         );
-        let text = LeanExprRenderer::new().render(&e).text().unwrap().to_string();
+        let text = LeanExprRenderer::new()
+            .render(&e)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "(∀ x, (x = x))");
     }
 
@@ -2115,7 +2116,11 @@ mod tests {
             },
             Span::dummy(),
         );
-        let text = CoqExprRenderer::new().render(&e).text().unwrap().to_string();
+        let text = CoqExprRenderer::new()
+            .render(&e)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "(exists y, (y = 0))");
     }
 
@@ -2133,7 +2138,11 @@ mod tests {
             },
             Span::dummy(),
         );
-        let text = LeanExprRenderer::new().render(&e).text().unwrap().to_string();
+        let text = LeanExprRenderer::new()
+            .render(&e)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "(∃ y, (y = 0))");
     }
 
@@ -2170,7 +2179,11 @@ mod tests {
             binop(BinOp::Add, ident_expr("a"), ident_expr("b")),
             int_lit(2),
         );
-        let text = CoqExprRenderer::new().render(&e).text().unwrap().to_string();
+        let text = CoqExprRenderer::new()
+            .render(&e)
+            .text()
+            .unwrap()
+            .to_string();
         // Outer parenthesisation guarantees no precedence ambiguity.
         assert!(text.starts_with('('));
         assert!(text.contains("(a + b)"));
@@ -2181,7 +2194,11 @@ mod tests {
     #[test]
     fn lean_translates_comparison_with_ne() {
         let e = binop(BinOp::Ne, ident_expr("p"), bool_lit(true));
-        let text = LeanExprRenderer::new().render(&e).text().unwrap().to_string();
+        let text = LeanExprRenderer::new()
+            .render(&e)
+            .text()
+            .unwrap()
+            .to_string();
         assert!(text.contains("≠"));
     }
 
@@ -2201,7 +2218,11 @@ mod tests {
             },
             Span::dummy(),
         );
-        let text = CoqExprRenderer::new().render(&e).text().unwrap().to_string();
+        let text = CoqExprRenderer::new()
+            .render(&e)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "(f a b)");
     }
 
@@ -2220,7 +2241,11 @@ mod tests {
             },
             Span::dummy(),
         );
-        let text = LeanExprRenderer::new().render(&e).text().unwrap().to_string();
+        let text = LeanExprRenderer::new()
+            .render(&e)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "(f a b)");
     }
 
@@ -2258,7 +2283,11 @@ mod tests {
     fn coq_translates_zero_arg_method_call() {
         // obj.foo() → (foo obj)
         let e = method_call(ident_expr("obj"), "foo", vec![]);
-        let text = CoqExprRenderer::new().render(&e).text().unwrap().to_string();
+        let text = CoqExprRenderer::new()
+            .render(&e)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "(foo obj)");
     }
 
@@ -2269,7 +2298,11 @@ mod tests {
         // the receiver's type, which is more idiomatic than the
         // applicative form Coq uses.
         let e = method_call(ident_expr("obj"), "foo", vec![]);
-        let text = LeanExprRenderer::new().render(&e).text().unwrap().to_string();
+        let text = LeanExprRenderer::new()
+            .render(&e)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "(obj.foo)");
     }
 
@@ -2282,7 +2315,11 @@ mod tests {
             "foo",
             vec![ident_expr("a"), ident_expr("b")],
         );
-        let text = LeanExprRenderer::new().render(&e).text().unwrap().to_string();
+        let text = LeanExprRenderer::new()
+            .render(&e)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "(obj.foo a b)");
     }
 
@@ -2294,7 +2331,11 @@ mod tests {
             "foo",
             vec![ident_expr("a"), ident_expr("b")],
         );
-        let text = CoqExprRenderer::new().render(&e).text().unwrap().to_string();
+        let text = CoqExprRenderer::new()
+            .render(&e)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "(foo obj a b)");
     }
 
@@ -2317,10 +2358,7 @@ mod tests {
             .text()
             .unwrap()
             .to_string();
-        assert_eq!(
-            text,
-            "(has_phi_X (cond_F_S (articulation_view cand)))"
-        );
+        assert_eq!(text, "(has_phi_X (cond_F_S (articulation_view cand)))");
     }
 
     #[test]
@@ -2346,10 +2384,7 @@ mod tests {
             .text()
             .unwrap()
             .to_string();
-        assert_eq!(
-            text,
-            "(cand.articulation_view.cond_F_S.has_phi_X)"
-        );
+        assert_eq!(text, "(cand.articulation_view.cond_F_S.has_phi_X)");
     }
 
     #[test]
@@ -2361,7 +2396,11 @@ mod tests {
             method_call(ident_expr("w"), "exhibitor_in_outer_stratum", vec![]),
             method_call(ident_expr("w"), "exhibitor_not_in_inner_stratum", vec![]),
         );
-        let text = CoqExprRenderer::new().render(&e).text().unwrap().to_string();
+        let text = CoqExprRenderer::new()
+            .render(&e)
+            .text()
+            .unwrap()
+            .to_string();
         assert!(text.contains("(exhibitor_in_outer_stratum w)"));
         assert!(text.contains("(exhibitor_not_in_inner_stratum w)"));
         assert!(text.contains("/\\"));
@@ -2371,7 +2410,11 @@ mod tests {
     fn coq_translates_field_access() {
         // obj.field → (field obj)
         let e = field(ident_expr("obj"), "depth");
-        let text = CoqExprRenderer::new().render(&e).text().unwrap().to_string();
+        let text = CoqExprRenderer::new()
+            .render(&e)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "(depth obj)");
     }
 
@@ -2379,7 +2422,11 @@ mod tests {
     fn lean_translates_field_access() {
         // Lean dot-notation for record projections: `obj.field`.
         let e = field(ident_expr("obj"), "depth");
-        let text = LeanExprRenderer::new().render(&e).text().unwrap().to_string();
+        let text = LeanExprRenderer::new()
+            .render(&e)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "(obj.depth)");
     }
 
@@ -2394,7 +2441,11 @@ mod tests {
             "method",
             vec![ident_expr("a")],
         );
-        let text = LeanExprRenderer::new().render(&e).text().unwrap().to_string();
+        let text = LeanExprRenderer::new()
+            .render(&e)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "(obj.field.method a)");
     }
 
@@ -2405,7 +2456,11 @@ mod tests {
         // so the receiver gets parenthesised: ((a + b).method).
         let plus = binop(BinOp::Add, ident_expr("a"), ident_expr("b"));
         let e = method_call(plus, "method", vec![]);
-        let text = LeanExprRenderer::new().render(&e).text().unwrap().to_string();
+        let text = LeanExprRenderer::new()
+            .render(&e)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "((a + b).method)");
     }
 
@@ -2475,7 +2530,11 @@ mod tests {
         // renders as the inner expression's translation.
         let inner = binop(BinOp::Eq, ident_expr("x"), ident_expr("y"));
         let block = block_with_expr(inner);
-        let text = CoqExprRenderer::new().render(&block).text().unwrap().to_string();
+        let text = CoqExprRenderer::new()
+            .render(&block)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "(x = y)");
     }
 
@@ -2483,7 +2542,11 @@ mod tests {
     fn lean_translates_block_passthrough() {
         let inner = binop(BinOp::Eq, ident_expr("x"), ident_expr("y"));
         let block = block_with_expr(inner);
-        let text = LeanExprRenderer::new().render(&block).text().unwrap().to_string();
+        let text = LeanExprRenderer::new()
+            .render(&block)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "(x = y)");
     }
 
@@ -2516,7 +2579,11 @@ mod tests {
         let then_e = ident_expr("b");
         let else_e = ident_expr("c");
         let e = if_expr(cond, then_e, else_e);
-        let text = CoqExprRenderer::new().render(&e).text().unwrap().to_string();
+        let text = CoqExprRenderer::new()
+            .render(&e)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "(if (a = 0) then b else c)");
     }
 
@@ -2526,7 +2593,11 @@ mod tests {
         let then_e = ident_expr("b");
         let else_e = ident_expr("c");
         let e = if_expr(cond, then_e, else_e);
-        let text = LeanExprRenderer::new().render(&e).text().unwrap().to_string();
+        let text = LeanExprRenderer::new()
+            .render(&e)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "(if (a = 0) then b else c)");
     }
 
@@ -2571,7 +2642,11 @@ mod tests {
         let else_e = ident_expr("q");
         let if_e = if_expr(cond, then_e, else_e);
         let outer = binop(BinOp::And, if_e, ident_expr("r"));
-        let text = CoqExprRenderer::new().render(&outer).text().unwrap().to_string();
+        let text = CoqExprRenderer::new()
+            .render(&outer)
+            .text()
+            .unwrap()
+            .to_string();
         assert!(text.contains("(if c then p else q)"));
         assert!(text.contains("/\\"));
         assert!(text.contains("r"));
@@ -2579,7 +2654,9 @@ mod tests {
 
     #[test]
     fn translated_text_accessor_works() {
-        let translated = TranslatedExpr::Translated { text: "x = y".into() };
+        let translated = TranslatedExpr::Translated {
+            text: "x = y".into(),
+        };
         assert_eq!(translated.text(), Some("x = y"));
         let fallback = TranslatedExpr::Fallback {
             reason: "match".into(),
@@ -2603,7 +2680,10 @@ mod tests {
     }
 
     fn path_ty(name: &str) -> Type {
-        ty(TypeKind::Path(Path::single(Ident::new(name, Span::dummy()))))
+        ty(TypeKind::Path(Path::single(Ident::new(
+            name,
+            Span::dummy(),
+        ))))
     }
 
     #[test]
@@ -2695,8 +2775,7 @@ mod tests {
     fn coq_translates_generic_list_maybe() {
         // Generic { base: List, args: [Int] } → `(list Z)`.
         let r = CoqTypeRenderer::new();
-        let mut args: verum_common::List<verum_ast::ty::GenericArg> =
-            verum_common::List::new();
+        let mut args: verum_common::List<verum_ast::ty::GenericArg> = verum_common::List::new();
         args.push(verum_ast::ty::GenericArg::Type(ty(TypeKind::Int)));
         let t = ty(TypeKind::Generic {
             base: verum_common::Heap::new(path_ty("List")),
@@ -2705,8 +2784,7 @@ mod tests {
         assert_eq!(r.render(&t).text(), Some("(list Z)"));
 
         // Maybe<Bool> → option bool.
-        let mut args2: verum_common::List<verum_ast::ty::GenericArg> =
-            verum_common::List::new();
+        let mut args2: verum_common::List<verum_ast::ty::GenericArg> = verum_common::List::new();
         args2.push(verum_ast::ty::GenericArg::Type(ty(TypeKind::Bool)));
         let t2 = ty(TypeKind::Generic {
             base: verum_common::Heap::new(path_ty("Maybe")),
@@ -2718,8 +2796,7 @@ mod tests {
     #[test]
     fn lean_translates_generic_list_option() {
         let r = LeanTypeRenderer::new();
-        let mut args: verum_common::List<verum_ast::ty::GenericArg> =
-            verum_common::List::new();
+        let mut args: verum_common::List<verum_ast::ty::GenericArg> = verum_common::List::new();
         args.push(verum_ast::ty::GenericArg::Type(ty(TypeKind::Int)));
         let t = ty(TypeKind::Generic {
             base: verum_common::Heap::new(path_ty("List")),
@@ -2727,8 +2804,7 @@ mod tests {
         });
         assert_eq!(r.render(&t).text(), Some("(List Int)"));
 
-        let mut args2: verum_common::List<verum_ast::ty::GenericArg> =
-            verum_common::List::new();
+        let mut args2: verum_common::List<verum_ast::ty::GenericArg> = verum_common::List::new();
         args2.push(verum_ast::ty::GenericArg::Type(ty(TypeKind::Bool)));
         let t2 = ty(TypeKind::Generic {
             base: verum_common::Heap::new(path_ty("Maybe")),
@@ -2776,7 +2852,11 @@ mod tests {
         // type with `it` as binder.
         let pred = binop(BinOp::Gt, ident_expr("it"), int_lit(0));
         let t = refined(TypeKind::Int, pred, None);
-        let text = CoqTypeRenderer::new().render(&t).text().unwrap().to_string();
+        let text = CoqTypeRenderer::new()
+            .render(&t)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "{ it : Z | (it > 0) }");
     }
 
@@ -2784,7 +2864,11 @@ mod tests {
     fn lean_translates_refined_int_with_implicit_binder() {
         let pred = binop(BinOp::Gt, ident_expr("it"), int_lit(0));
         let t = refined(TypeKind::Int, pred, None);
-        let text = LeanTypeRenderer::new().render(&t).text().unwrap().to_string();
+        let text = LeanTypeRenderer::new()
+            .render(&t)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "{ it : Int // (it > 0) }");
     }
 
@@ -2793,7 +2877,11 @@ mod tests {
         // `Int where |x| x >= 0` (binding=Some("x")).
         let pred = binop(BinOp::Ge, ident_expr("x"), int_lit(0));
         let t = refined(TypeKind::Int, pred, Some("x"));
-        let text = CoqTypeRenderer::new().render(&t).text().unwrap().to_string();
+        let text = CoqTypeRenderer::new()
+            .render(&t)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "{ x : Z | (x >= 0) }");
     }
 
@@ -2801,7 +2889,11 @@ mod tests {
     fn lean_translates_refined_with_explicit_binder() {
         let pred = binop(BinOp::Ge, ident_expr("x"), int_lit(0));
         let t = refined(TypeKind::Int, pred, Some("x"));
-        let text = LeanTypeRenderer::new().render(&t).text().unwrap().to_string();
+        let text = LeanTypeRenderer::new()
+            .render(&t)
+            .text()
+            .unwrap()
+            .to_string();
         // Lean's `>=` renders as `≥` per the comparison-op map.
         assert_eq!(text, "{ x : Int // (x ≥ 0) }");
     }
@@ -2813,7 +2905,11 @@ mod tests {
         // emitted form is the predicate text verbatim.
         let pred = ident_expr("is_email");
         let t = refined(TypeKind::Text, pred, None);
-        let text = CoqTypeRenderer::new().render(&t).text().unwrap().to_string();
+        let text = CoqTypeRenderer::new()
+            .render(&t)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "{ it : string | is_email }");
     }
 
@@ -2824,14 +2920,17 @@ mod tests {
         // base. This is the MSFS surface shape — `List<CategoricalLevel>`.
         let pred = binop(BinOp::Ge, ident_expr("x"), int_lit(0));
         let inner = refined(TypeKind::Int, pred, Some("x"));
-        let mut args: verum_common::List<verum_ast::ty::GenericArg> =
-            verum_common::List::new();
+        let mut args: verum_common::List<verum_ast::ty::GenericArg> = verum_common::List::new();
         args.push(verum_ast::ty::GenericArg::Type(inner));
         let t = ty(TypeKind::Generic {
             base: verum_common::Heap::new(path_ty("List")),
             args,
         });
-        let text = CoqTypeRenderer::new().render(&t).text().unwrap().to_string();
+        let text = CoqTypeRenderer::new()
+            .render(&t)
+            .text()
+            .unwrap()
+            .to_string();
         assert_eq!(text, "(list { x : Z | (x >= 0) })");
     }
 

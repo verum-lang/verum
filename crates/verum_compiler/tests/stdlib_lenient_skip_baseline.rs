@@ -53,13 +53,11 @@ fn main() {
 /// because the line-predicate is specific to this test file.
 fn collect_lenient_skips(target_path: &std::path::Path) -> (Option<i32>, Vec<String>) {
     let out = vtest_run_capture(target_path);
-    let skips =
-        out.lines_matching(|l| l.contains("[lenient]") && l.contains("SKIP"));
+    let skips = out.lines_matching(|l| l.contains("[lenient]") && l.contains("SKIP"));
     (out.exit_code, skips)
 }
 
-const FAILURE_HINT: &str =
-    "Each SKIP is a stdlib body that VBC codegen could not compile and \
+const FAILURE_HINT: &str = "Each SKIP is a stdlib body that VBC codegen could not compile and \
      dropped silently, surfacing later as `method 'X.Y' not found on \
      value` or `FunctionNotFound(...)` runtime panics.\n\n\
      Most likely diagnostic classes:\n\
@@ -131,7 +129,12 @@ fn assert_no_lenient_skips(scenario: &str, spec: &std::path::Path) {
         skips.len(),
         code,
         FAILURE_HINT,
-        skips.iter().take(8).map(|s| s.as_str()).collect::<Vec<_>>().join("\n"),
+        skips
+            .iter()
+            .take(8)
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n"),
     );
 }
 
@@ -157,7 +160,12 @@ fn stdlib_loading_emits_no_lenient_skips_minimal() {
          bare-`None` fixture.\n\n{}\n\nFirst few warnings:\n{}",
         skips.len(),
         FAILURE_HINT,
-        skips.iter().take(8).map(|s| s.as_str()).collect::<Vec<_>>().join("\n"),
+        skips
+            .iter()
+            .take(8)
+            .map(|s| s.as_str())
+            .collect::<Vec<_>>()
+            .join("\n"),
     );
 }
 
@@ -169,9 +177,8 @@ fn stdlib_loading_emits_no_lenient_skips_minimal() {
 #[test]
 #[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
 fn stdlib_loading_emits_no_lenient_skips_sqlite() {
-    let target = workspace_root().join(
-        "vcs/specs/L2-standard/database/sqlite/l0_vfs/memdb_open_write_read.vr",
-    );
+    let target = workspace_root()
+        .join("vcs/specs/L2-standard/database/sqlite/l0_vfs/memdb_open_write_read.vr");
     assert_no_lenient_skips("SQLite-VFS", &target);
 }
 
@@ -184,9 +191,8 @@ fn stdlib_loading_emits_no_lenient_skips_sqlite() {
 #[test]
 #[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
 fn stdlib_loading_emits_no_lenient_skips_l1_pager() {
-    let target = workspace_root().join(
-        "vcs/specs/L2-standard/database/sqlite/l1_pager/page_roundtrip.vr",
-    );
+    let target =
+        workspace_root().join("vcs/specs/L2-standard/database/sqlite/l1_pager/page_roundtrip.vr");
     assert_no_lenient_skips("L1-pager", &target);
 }
 
@@ -203,9 +209,8 @@ fn stdlib_loading_emits_no_lenient_skips_l1_pager() {
 #[test]
 #[ignore = "requires built target/{release,debug}/vtest; run with --ignored"]
 fn stdlib_loading_emits_no_lenient_skips_l4_vdbe() {
-    let target = workspace_root().join(
-        "vcs/specs/L2-standard/database/sqlite/l4_vdbe/simple_select_program.vr",
-    );
+    let target = workspace_root()
+        .join("vcs/specs/L2-standard/database/sqlite/l4_vdbe/simple_select_program.vr");
     assert_no_lenient_skips("L4-VDBE", &target);
 }
 

@@ -824,7 +824,11 @@ impl SemanticQueryCache {
         let mut entries: Vec<_> = cache.iter().collect();
         entries.sort_by_key(|(_, e)| (e.access_count, e.cached_at));
 
-        let keys_to_remove: Vec<_> = entries.iter().take(num_to_remove).map(|(k, _)| **k).collect();
+        let keys_to_remove: Vec<_> = entries
+            .iter()
+            .take(num_to_remove)
+            .map(|(k, _)| **k)
+            .collect();
 
         for key in keys_to_remove {
             cache.remove(&key);
@@ -900,7 +904,11 @@ impl SemanticQueryCache {
         let mut entries: Vec<_> = cache.iter().collect();
         entries.sort_by_key(|(_, e)| (e.access_count, e.cached_at));
 
-        let keys_to_remove: Vec<_> = entries.iter().take(num_to_remove).map(|(k, _)| **k).collect();
+        let keys_to_remove: Vec<_> = entries
+            .iter()
+            .take(num_to_remove)
+            .map(|(k, _)| **k)
+            .collect();
 
         for key in keys_to_remove {
             cache.remove(&key);
@@ -961,7 +969,11 @@ impl SemanticQueryCache {
         let mut entries: Vec<_> = cache.iter().collect();
         entries.sort_by_key(|(_, e)| (e.access_count, e.cached_at));
 
-        let keys_to_remove: Vec<_> = entries.iter().take(num_to_remove).map(|(k, _)| **k).collect();
+        let keys_to_remove: Vec<_> = entries
+            .iter()
+            .take(num_to_remove)
+            .map(|(k, _)| **k)
+            .collect();
 
         for key in keys_to_remove {
             cache.remove(&key);
@@ -1138,21 +1150,9 @@ impl SemanticQueryCache {
 
     /// Get current cache sizes.
     pub fn cache_sizes(&self) -> (usize, usize, usize) {
-        let type_size = self
-            .type_cache
-            .read()
-            .map(|c| c.len())
-            .unwrap_or(0);
-        let function_size = self
-            .function_cache
-            .read()
-            .map(|c| c.len())
-            .unwrap_or(0);
-        let verification_size = self
-            .verification_cache
-            .read()
-            .map(|c| c.len())
-            .unwrap_or(0);
+        let type_size = self.type_cache.read().map(|c| c.len()).unwrap_or(0);
+        let function_size = self.function_cache.read().map(|c| c.len()).unwrap_or(0);
+        let verification_size = self.verification_cache.read().map(|c| c.len()).unwrap_or(0);
         (type_size, function_size, verification_size)
     }
 
@@ -1177,7 +1177,7 @@ impl SemanticQueryCache {
                     types_saved: 0,
                     functions_saved: 0,
                     verifications_saved: 0,
-                })
+                });
             }
         };
 
@@ -1320,10 +1320,7 @@ impl SemanticQueryCache {
     ///
 
     /// Falls back to persistent storage if not in memory cache.
-    pub fn get_verification_with_fallback(
-        &self,
-        key: &SemanticKey,
-    ) -> Maybe<VerificationResult> {
+    pub fn get_verification_with_fallback(&self, key: &SemanticKey) -> Maybe<VerificationResult> {
         // First check memory cache
         if let result @ Maybe::Some(_) = self.get_verification(key) {
             return result;
@@ -1367,9 +1364,7 @@ impl SemanticQueryCache {
     }
 
     /// Get persistent storage statistics.
-    pub fn persistent_stats(
-        &self,
-    ) -> Option<crate::content_addressed_storage::ArtifactStoreStats> {
+    pub fn persistent_stats(&self) -> Option<crate::content_addressed_storage::ArtifactStoreStats> {
         self.persistent_store.as_ref().map(|s| s.stats())
     }
 
@@ -1440,7 +1435,11 @@ pub fn compute_verification_key(item_key: &SemanticKey, verification_level: u8) 
 }
 
 /// Compute a semantic key for a protocol implementation.
-pub fn compute_impl_key(protocol_name: &str, impl_type: &str, impl_hash: &HashValue) -> SemanticKey {
+pub fn compute_impl_key(
+    protocol_name: &str,
+    impl_type: &str,
+    impl_hash: &HashValue,
+) -> SemanticKey {
     let mut hasher = ContentHash::new();
     hasher.update_str("impl:");
     hasher.update_str(protocol_name);

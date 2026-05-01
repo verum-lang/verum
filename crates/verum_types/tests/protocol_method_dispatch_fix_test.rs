@@ -207,7 +207,10 @@ fn test_named_type_normalization() {
         type_param_fn_bounds: Map::new(),
     };
 
-    let _ = checker.protocol_checker.write().register_impl(protocol_impl);
+    let _ = checker
+        .protocol_checker
+        .write()
+        .register_impl(protocol_impl);
 
     // Now verify that we can find the implementation using the Named type
     // This would fail before the fix because Type::Named wasn't being normalized

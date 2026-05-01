@@ -417,14 +417,10 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
         // T-Pi-Form
         Term::Pi(a, b) => {
             let a_ty = infer(ctx, a)?;
-            let n = expect_universe(&a_ty).ok_or_else(|| {
-                CheckError::NotAType((**a).clone())
-            })?;
+            let n = expect_universe(&a_ty).ok_or_else(|| CheckError::NotAType((**a).clone()))?;
             let extended = ctx.extend((**a).clone());
             let b_ty = infer(&extended, b)?;
-            let m = expect_universe(&b_ty).ok_or_else(|| {
-                CheckError::NotAType((**b).clone())
-            })?;
+            let m = expect_universe(&b_ty).ok_or_else(|| CheckError::NotAType((**b).clone()))?;
             Ok(Term::Universe(n.max(m)))
         }
 
@@ -432,9 +428,7 @@ pub fn infer(ctx: &Context, term: &Term) -> Result<Term, CheckError> {
         Term::Lam(domain, body) => {
             let dom_ty = infer(ctx, domain)?;
             // Domain annotation must be a type.
-            expect_universe(&dom_ty).ok_or_else(|| {
-                CheckError::NotAType((**domain).clone())
-            })?;
+            expect_universe(&dom_ty).ok_or_else(|| CheckError::NotAType((**domain).clone()))?;
             let extended = ctx.extend((**domain).clone());
             let body_ty = infer(&extended, body)?;
             Ok(Term::Pi(domain.clone(), Box::new(body_ty)))
@@ -524,14 +518,8 @@ mod tests {
     fn t_universe_lives_in_next_level() {
         // T-Univ: Universe(0) : Universe(1)
         let ctx = Context::new();
-        assert_eq!(
-            infer(&ctx, &Term::Universe(0)).unwrap(),
-            Term::Universe(1)
-        );
-        assert_eq!(
-            infer(&ctx, &Term::Universe(5)).unwrap(),
-            Term::Universe(6)
-        );
+        assert_eq!(infer(&ctx, &Term::Universe(0)).unwrap(), Term::Universe(1));
+        assert_eq!(infer(&ctx, &Term::Universe(5)).unwrap(), Term::Universe(6));
     }
 
     #[test]
@@ -668,10 +656,7 @@ mod tests {
         // shift_up(Var(0), 1, 0) → Var(1) (free var gets shifted)
         // shift_up(Lam(_, Var(0)), 1, 0) → Lam(_, Var(0)) (bound stays)
         // shift_up(Lam(_, Var(1)), 1, 0) → Lam(_, Var(2)) (free in body shifts)
-        assert_eq!(
-            shift_up(Term::Var(0), 1, 0),
-            Term::Var(1),
-        );
+        assert_eq!(shift_up(Term::Var(0), 1, 0), Term::Var(1),);
         let lam_bound = Term::lam(Term::Universe(0), Term::Var(0));
         assert_eq!(shift_up(lam_bound.clone(), 1, 0), lam_bound);
         let lam_free = Term::lam(Term::Universe(0), Term::Var(1));
@@ -704,10 +689,7 @@ mod tests {
         // present at depth 0). Inside the lambda, that becomes Var(1).
         let f_outer = Term::Var(0);
         // Inside lambda body: Var(0) is the bound x; Var(1) is f.
-        let lam_eta = Term::lam(
-            Term::Universe(0),
-            Term::app(Term::Var(1), Term::Var(0)),
-        );
+        let lam_eta = Term::lam(Term::Universe(0), Term::app(Term::Var(1), Term::Var(0)));
         // Outer context: f : Π(_:Univ(0)).Univ(0). The lam_eta's type
         // is the same Pi, and η-equality with f_outer should hold.
         // For the def_eq test, we don't need the context — we just
@@ -735,10 +717,7 @@ mod tests {
     fn def_eq_eta_rejects_when_var_escapes_into_function() {
         // λ(x : Univ(0)). (x x) has the bound variable in the
         // FUNCTION part — η would be unsound here, must be rejected.
-        let lam_unsound = Term::lam(
-            Term::Universe(0),
-            Term::app(Term::Var(0), Term::Var(0)),
-        );
+        let lam_unsound = Term::lam(Term::Universe(0), Term::app(Term::Var(0), Term::Var(0)));
         let any_other = Term::Var(0); // outer context "any other f"
         assert!(!def_eq(&lam_unsound, &any_other));
     }
@@ -797,10 +776,7 @@ mod tests {
         let inferred = infer(&ctx, &id).unwrap();
         // Type: Pi(Univ(0), Pi(Var(0), Var(1)))
         // Inner-Pi body Var(1) refers to A in the outer Pi's binder.
-        let expected_type = Term::pi(
-            Term::Universe(0),
-            Term::pi(Term::Var(0), Term::Var(1)),
-        );
+        let expected_type = Term::pi(Term::Universe(0), Term::pi(Term::Var(0), Term::Var(1)));
         assert!(
             def_eq(&inferred, &expected_type),
             "polymorphic id expected type, got {:?}",

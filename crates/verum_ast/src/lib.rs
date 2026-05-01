@@ -168,9 +168,9 @@ pub use attr::{
     AttributeCategory,
     AttributeMetadata,
     AttributeTarget,
+    BitOffsetAttr,
     // Bitfield attributes
     BitfieldAttr,
-    BitOffsetAttr,
     BitsAttr,
     EndianAttr,
     FeatureAttr,
@@ -181,6 +181,15 @@ pub use attr::{
     Stability,
     StdAttr,
     TaggedLiteralAttr,
+};
+pub use bitfield::{
+    // Bitfield system for low-level bit manipulation
+    BitLayout,
+    BitSpec,
+    BitWidth,
+    ByteOrder,
+    ResolvedBitField,
+    ResolvedBitLayout,
 };
 pub use cfg::{
     // Conditional compilation via @cfg(...) predicates. Supports target_os, target_arch,
@@ -210,11 +219,11 @@ pub use decl::{
     FunctionParam,
     FunctionParamKind,
     ImplDecl,
+    Item,
+    ItemKind,
     MountDecl,
     MountTree,
     MountTreeKind,
-    Item,
-    ItemKind,
     ProofBody,
     ProofCase,
     ProofMethod,
@@ -234,10 +243,6 @@ pub use decl::{
     TypeDecl,
     TypeDeclBody,
     Visibility,
-};
-pub use bitfield::{
-    // Bitfield system for low-level bit manipulation
-    BitLayout, BitSpec, BitWidth, ByteOrder, ResolvedBitField, ResolvedBitLayout,
 };
 pub use expr::{
     ArrayExpr, BinOp, Block, Capability, CapabilitySet, ClosureParam, ComprehensionClause,

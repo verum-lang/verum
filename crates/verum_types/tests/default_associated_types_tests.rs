@@ -58,7 +58,8 @@ fn test_default_associated_type_used() {
                                 vec![
                                     PathSegment::Name(Ident::new("Self", Span::default())),
                                     PathSegment::Name(Ident::new("Item", Span::default())),
-                                ].into(),
+                                ]
+                                .into(),
                                 Span::default(),
                             ),
                             args: List::new(),
@@ -71,7 +72,7 @@ fn test_default_associated_type_used() {
                     context_requirements: List::new(),
                     type_param_names: List::new(),
                     type_param_bounds: Map::new(),
-            receiver_kind: Maybe::None,
+                    receiver_kind: Maybe::None,
                 },
             );
             methods

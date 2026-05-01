@@ -10,7 +10,9 @@
 //! Includes smart suggestions for typos and similar names using Levenshtein distance.
 
 use crate::path::{ModuleId, ModulePath};
-use crate::suggestions::{find_similar_items, find_similar_modules, format_module_suggestions, format_suggestions};
+use crate::suggestions::{
+    find_similar_items, find_similar_modules, format_module_suggestions, format_suggestions,
+};
 use std::fmt;
 use verum_ast::{Path, Span};
 use verum_common::{List, Text};
@@ -30,7 +32,11 @@ pub struct CycleBreakSuggestion {
 
 impl CycleBreakSuggestion {
     /// Create a new cycle break suggestion.
-    pub fn new(kind: CycleBreakKind, modules: List<ModulePath>, description: impl Into<Text>) -> Self {
+    pub fn new(
+        kind: CycleBreakKind,
+        modules: List<ModulePath>,
+        description: impl Into<Text>,
+    ) -> Self {
         let complexity = kind.default_complexity();
         Self {
             kind,
@@ -245,21 +251,21 @@ impl ModuleError {
     /// existing CI rules keep passing.
     pub fn code(&self) -> &'static str {
         match self {
-            ModuleError::ModuleNotFound { .. }      => "E_MODULE_NOT_FOUND",
-            ModuleError::ItemNotFound { .. }        => "E_MODULE_ITEM_NOT_FOUND",
-            ModuleError::AmbiguousImport { .. }     => "E_MODULE_AMBIGUOUS_IMPORT",
-            ModuleError::CircularDependency { .. }  => "E_MODULE_CIRCULAR_DEPENDENCY",
-            ModuleError::PrivateAccess { .. }       => "E_MODULE_PRIVATE_ACCESS",
+            ModuleError::ModuleNotFound { .. } => "E_MODULE_NOT_FOUND",
+            ModuleError::ItemNotFound { .. } => "E_MODULE_ITEM_NOT_FOUND",
+            ModuleError::AmbiguousImport { .. } => "E_MODULE_AMBIGUOUS_IMPORT",
+            ModuleError::CircularDependency { .. } => "E_MODULE_CIRCULAR_DEPENDENCY",
+            ModuleError::PrivateAccess { .. } => "E_MODULE_PRIVATE_ACCESS",
             ModuleError::VisibilityViolation { .. } => "E_MODULE_VISIBILITY",
-            ModuleError::ConflictingModule { .. }   => "E_MODULE_CONFLICTING_MODULE",
-            ModuleError::PathCollision { .. }       => "E_MODULE_PATH_COLLISION",
-            ModuleError::InvalidPath { .. }         => "E_MODULE_INVALID_PATH",
-            ModuleError::IoError { .. }             => "E_MODULE_IO",
-            ModuleError::ParseError { .. }          => "E_MODULE_PARSE",
-            ModuleError::InvalidReexport { .. }     => "E_MODULE_INVALID_REEXPORT",
-            ModuleError::OrphanImpl { .. }          => "E_MODULE_ORPHAN_IMPL",
+            ModuleError::ConflictingModule { .. } => "E_MODULE_CONFLICTING_MODULE",
+            ModuleError::PathCollision { .. } => "E_MODULE_PATH_COLLISION",
+            ModuleError::InvalidPath { .. } => "E_MODULE_INVALID_PATH",
+            ModuleError::IoError { .. } => "E_MODULE_IO",
+            ModuleError::ParseError { .. } => "E_MODULE_PARSE",
+            ModuleError::InvalidReexport { .. } => "E_MODULE_INVALID_REEXPORT",
+            ModuleError::OrphanImpl { .. } => "E_MODULE_ORPHAN_IMPL",
             ModuleError::ProfileIncompatible { .. } => "E_MODULE_PROFILE_INCOMPAT",
-            ModuleError::Other { .. }               => "E_MODULE_OTHER",
+            ModuleError::Other { .. } => "E_MODULE_OTHER",
         }
     }
 
@@ -336,10 +342,7 @@ impl ModuleError {
     }
 
     /// Create an item not found error without computing suggestions
-    pub fn item_not_found_simple(
-        item_name: impl Into<Text>,
-        module_path: ModulePath,
-    ) -> Self {
+    pub fn item_not_found_simple(item_name: impl Into<Text>, module_path: ModulePath) -> Self {
         ModuleError::ItemNotFound {
             item_name: item_name.into(),
             module_path,
@@ -563,12 +566,16 @@ impl fmt::Display for ModuleError {
                 )
             }
             ModuleError::PathCollision {
-                path, winning_path, losing_paths, ..
+                path,
+                winning_path,
+                losing_paths,
+                ..
             } => {
                 write!(
                     f,
                     "module path collision: '{}' resolves to multiple files on disk:\n  using:    {}",
-                    path, winning_path.display(),
+                    path,
+                    winning_path.display(),
                 )?;
                 for p in losing_paths.iter() {
                     write!(f, "\n  ignoring: {}", p.display())?;
@@ -652,7 +659,9 @@ impl From<std::io::Error> for ModuleError {
 ///
 
 /// Suggestions are sorted by complexity (easiest first).
-pub fn generate_cycle_break_suggestions(cycle_paths: &List<ModulePath>) -> List<CycleBreakSuggestion> {
+pub fn generate_cycle_break_suggestions(
+    cycle_paths: &List<ModulePath>,
+) -> List<CycleBreakSuggestion> {
     let mut suggestions = List::new();
 
     if cycle_paths.is_empty() {

@@ -130,26 +130,35 @@ impl SymbolManifest {
     }
 
     fn parse_archive(data: &[u8]) -> Option<Self> {
-        if data.len() < 4 { return None; }
+        if data.len() < 4 {
+            return None;
+        }
         let module_count = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
         let mut cursor = 4usize;
         let mut by_module: HashMap<String, ModuleSymbols> = HashMap::with_capacity(module_count);
 
         for _ in 0..module_count {
             let module = read_str(data, &mut cursor)?;
-            if cursor + 2 > data.len() { return None; }
-            let sym_count =
-                u16::from_le_bytes([data[cursor], data[cursor + 1]]) as usize;
+            if cursor + 2 > data.len() {
+                return None;
+            }
+            let sym_count = u16::from_le_bytes([data[cursor], data[cursor + 1]]) as usize;
             cursor += 2;
 
             let mut symbols = Vec::with_capacity(sym_count);
             for _ in 0..sym_count {
-                if cursor + 2 > data.len() { return None; }
+                if cursor + 2 > data.len() {
+                    return None;
+                }
                 let kind = SymbolKind::from_u8(data[cursor])?;
                 let vis = Visibility::from_u8(data[cursor + 1]);
                 cursor += 2;
                 let name = read_str(data, &mut cursor)?;
-                symbols.push(Symbol { kind, visibility: vis, name });
+                symbols.push(Symbol {
+                    kind,
+                    visibility: vis,
+                    name,
+                });
             }
             by_module.insert(module, ModuleSymbols { symbols });
         }
@@ -180,10 +189,14 @@ impl SymbolManifest {
 }
 
 fn read_str(data: &[u8], cursor: &mut usize) -> Option<String> {
-    if *cursor + 2 > data.len() { return None; }
+    if *cursor + 2 > data.len() {
+        return None;
+    }
     let len = u16::from_le_bytes([data[*cursor], data[*cursor + 1]]) as usize;
     *cursor += 2;
-    if *cursor + len > data.len() { return None; }
+    if *cursor + len > data.len() {
+        return None;
+    }
     let s = String::from_utf8(data[*cursor..*cursor + len].to_vec()).ok()?;
     *cursor += len;
     Some(s)
@@ -209,33 +222,48 @@ mod tests {
 
     #[test]
     fn manifest_loads() {
-        let Some(m) = get_manifest() else { return; };
-        assert!(m.module_count() > 0, "embedded manifest should have modules");
+        let Some(m) = get_manifest() else {
+            return;
+        };
+        assert!(
+            m.module_count() > 0,
+            "embedded manifest should have modules"
+        );
     }
 
     #[test]
     fn shell_module_has_symbols() {
-        let Some(m) = get_manifest() else { return; };
+        let Some(m) = get_manifest() else {
+            return;
+        };
         // `core.shell.exec` should have at least one public function
         // — it's the canonical shell-dispatch module.
         if let Some(syms) = m.module("core.shell.exec") {
-            let public_fns: Vec<_> =
-                syms.public().filter(|s| s.kind == SymbolKind::Function).collect();
-            assert!(!public_fns.is_empty(),
-                "core.shell.exec should declare at least one public fn");
+            let public_fns: Vec<_> = syms
+                .public()
+                .filter(|s| s.kind == SymbolKind::Function)
+                .collect();
+            assert!(
+                !public_fns.is_empty(),
+                "core.shell.exec should declare at least one public fn"
+            );
         }
     }
 
     #[test]
     fn lookup_returns_none_for_unknown_symbol() {
-        let Some(m) = get_manifest() else { return; };
+        let Some(m) = get_manifest() else {
+            return;
+        };
         let result = m.lookup("core.shell.exec", "ZZZ_NONEXISTENT_SYMBOL_ZZZ");
         assert!(result.is_none());
     }
 
     #[test]
     fn protocol_symbols_classified_separately() {
-        let Some(m) = get_manifest() else { return; };
+        let Some(m) = get_manifest() else {
+            return;
+        };
         // Walk all modules; some module should have at least one
         // `Protocol` symbol — the stdlib has many `type X is protocol`
         // declarations.
@@ -247,12 +275,19 @@ mod tests {
 
     #[test]
     fn private_visibility_default() {
-        let Some(m) = get_manifest() else { return; };
+        let Some(m) = get_manifest() else {
+            return;
+        };
         // Walk to find a private symbol — the stdlib uses internal
         // helpers in many modules.
-        let any_private = m
-            .iter()
-            .any(|(_, ms)| ms.symbols.iter().any(|s| s.visibility == Visibility::Private));
-        assert!(any_private, "stdlib should have at least one private symbol");
+        let any_private = m.iter().any(|(_, ms)| {
+            ms.symbols
+                .iter()
+                .any(|s| s.visibility == Visibility::Private)
+        });
+        assert!(
+            any_private,
+            "stdlib should have at least one private symbol"
+        );
     }
 }

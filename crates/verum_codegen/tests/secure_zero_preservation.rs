@@ -52,14 +52,12 @@
 //!  still works), but the framing comments may need updating.
 
 use verum_codegen::llvm::ffi::FfiLowering;
+use verum_llvm::OptimizationLevel;
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
 use verum_llvm::passes::PassBuilderOptions;
-use verum_llvm::targets::{
-    CodeModel, InitializationConfig, RelocMode, Target, TargetMachine,
-};
+use verum_llvm::targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine};
 use verum_llvm::values::FunctionValue;
-use verum_llvm::OptimizationLevel;
 
 /// Build a one-function LLVM module:
 ///
@@ -145,8 +143,7 @@ fn module_ir<'ctx>(module: &Module<'ctx>) -> String {
 /// Initialise LLVM targets and produce a host TargetMachine — required
 /// for `Module::run_passes`.
 fn host_target_machine() -> TargetMachine {
-    Target::initialize_native(&InitializationConfig::default())
-        .expect("initialize_native");
+    Target::initialize_native(&InitializationConfig::default()).expect("initialize_native");
     let triple = TargetMachine::get_default_triple();
     let target = Target::from_triple(&triple).expect("from_triple");
     target

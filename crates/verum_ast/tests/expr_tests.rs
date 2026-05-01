@@ -567,13 +567,7 @@ fn test_try_recover() {
         span,
     };
 
-    let expr = Expr::new(
-        ExprKind::TryRecover {
-            try_block,
-            recover,
-        },
-        span,
-    );
+    let expr = Expr::new(ExprKind::TryRecover { try_block, recover }, span);
 
     match expr.kind {
         ExprKind::TryRecover { .. } => {}

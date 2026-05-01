@@ -12,11 +12,11 @@ use verum_llvm_sys::prelude::LLVMPassManagerRef;
 use verum_llvm_sys::transforms::pass_builder::{
     LLVMCreatePassBuilderOptions, LLVMDisposePassBuilderOptions, LLVMPassBuilderOptionsRef,
     LLVMPassBuilderOptionsSetCallGraphProfile, LLVMPassBuilderOptionsSetDebugLogging,
-    LLVMPassBuilderOptionsSetForgetAllSCEVInLoopUnroll, LLVMPassBuilderOptionsSetLicmMssaNoAccForPromotionCap,
-    LLVMPassBuilderOptionsSetLicmMssaOptCap, LLVMPassBuilderOptionsSetLoopInterleaving,
-    LLVMPassBuilderOptionsSetLoopUnrolling, LLVMPassBuilderOptionsSetLoopVectorization,
-    LLVMPassBuilderOptionsSetMergeFunctions, LLVMPassBuilderOptionsSetSLPVectorization,
-    LLVMPassBuilderOptionsSetVerifyEach,
+    LLVMPassBuilderOptionsSetForgetAllSCEVInLoopUnroll,
+    LLVMPassBuilderOptionsSetLicmMssaNoAccForPromotionCap, LLVMPassBuilderOptionsSetLicmMssaOptCap,
+    LLVMPassBuilderOptionsSetLoopInterleaving, LLVMPassBuilderOptionsSetLoopUnrolling,
+    LLVMPassBuilderOptionsSetLoopVectorization, LLVMPassBuilderOptionsSetMergeFunctions,
+    LLVMPassBuilderOptionsSetSLPVectorization, LLVMPassBuilderOptionsSetVerifyEach,
 };
 
 use crate::module::Module;

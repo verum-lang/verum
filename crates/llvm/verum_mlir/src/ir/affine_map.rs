@@ -2,14 +2,14 @@ use crate::{
     context::{Context, ContextRef},
     utility::print_callback,
 };
-use verum_mlir_sys::{
-    MlirAffineMap, mlirAffineMapDump, mlirAffineMapEqual, mlirAffineMapGetContext,
-    mlirAffineMapPrint,
-};
 use std::{
     ffi::c_void,
     fmt::{self, Debug, Display, Formatter},
     marker::PhantomData,
+};
+use verum_mlir_sys::{
+    MlirAffineMap, mlirAffineMapDump, mlirAffineMapEqual, mlirAffineMapGetContext,
+    mlirAffineMapPrint,
 };
 
 /// An affine map.

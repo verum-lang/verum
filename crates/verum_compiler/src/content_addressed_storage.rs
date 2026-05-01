@@ -61,7 +61,7 @@ use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::hash::{hash_bytes, HashValue};
+use crate::hash::{HashValue, hash_bytes};
 use crate::semantic_query::{
     CachedFunctionInfo, CachedTypeInfo, SemanticKey, SemanticKind, VerificationResult,
 };
@@ -308,10 +308,7 @@ impl StorageBackend for LocalFsBackend {
                 continue;
             }
 
-            let fanout = fanout_entry
-                .file_name()
-                .to_string_lossy()
-                .to_string();
+            let fanout = fanout_entry.file_name().to_string_lossy().to_string();
 
             for obj_entry in fs::read_dir(fanout_entry.path())? {
                 let obj_entry = obj_entry?;
@@ -529,7 +526,10 @@ impl ArtifactStore {
     }
 
     /// Load a function definition by hash.
-    pub fn load_function_by_hash(&self, hash: &HashValue) -> io::Result<Option<CachedFunctionInfo>> {
+    pub fn load_function_by_hash(
+        &self,
+        hash: &HashValue,
+    ) -> io::Result<Option<CachedFunctionInfo>> {
         if !self.backend.exists(hash)? {
             return Ok(None);
         }
@@ -1541,20 +1541,20 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let backend = LocalFsBackend::new(temp_dir.path());
 
-        let hash = HashValue::from_hex(
-            "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
-        )
-        .unwrap();
+        let hash =
+            HashValue::from_hex("abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789")
+                .unwrap();
 
         let path = backend.hash_to_path(&hash);
 
         // Should be: objects/ab/cdef...
         assert!(path.to_string_lossy().contains("objects"));
         assert!(path.to_string_lossy().contains("ab"));
-        assert!(path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .starts_with("cdef"));
+        assert!(
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("cdef")
+        );
     }
 }

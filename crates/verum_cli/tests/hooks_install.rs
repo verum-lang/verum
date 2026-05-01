@@ -42,7 +42,10 @@ fn install_writes_pre_commit_with_marker() {
         "hook must carry our header marker: {content}"
     );
     assert!(content.contains("verum lint"), "hook must run verum lint");
-    assert!(content.contains("verum fmt --check"), "hook must run verum fmt --check");
+    assert!(
+        content.contains("verum fmt --check"),
+        "hook must run verum fmt --check"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -50,8 +53,7 @@ fn install_writes_pre_commit_with_marker() {
 fn install_refuses_to_overwrite_user_hook() {
     let dir = make_git_repo("refuse_clobber");
     let hook = dir.join(".git").join("hooks").join("pre-commit");
-    std::fs::write(&hook, "#!/bin/sh\n# my hand-written hook\necho 'hi'\n")
-        .expect("seed hook");
+    std::fs::write(&hook, "#!/bin/sh\n# my hand-written hook\necho 'hi'\n").expect("seed hook");
     let out = run(&dir, &["install"]);
     assert!(
         !out.status.success(),
@@ -90,7 +92,10 @@ fn uninstall_removes_only_managed_hooks() {
     // First install, then uninstall.
     let _ = run(&dir, &["install"]);
     let out = run(&dir, &["uninstall"]);
-    assert!(out.status.success(), "uninstall should succeed on managed hook");
+    assert!(
+        out.status.success(),
+        "uninstall should succeed on managed hook"
+    );
     let hook = dir.join(".git").join("hooks").join("pre-commit");
     assert!(!hook.exists(), "managed hook should be removed");
     let _ = std::fs::remove_dir_all(&dir);

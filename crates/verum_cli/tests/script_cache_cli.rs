@@ -10,7 +10,7 @@
 use std::path::Path;
 use std::process::{Command, Output};
 use tempfile::TempDir;
-use verum_cli::script::cache::{key_for, ScriptCache};
+use verum_cli::script::cache::{ScriptCache, key_for};
 
 fn run_cache(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_verum"))
@@ -43,7 +43,11 @@ fn cache_path_prints_root() {
     let root = tmp.path().join("script-cache");
     let _ = ScriptCache::at(root.clone()).unwrap();
     let out = run_cache(&["path", "--root", root.to_str().unwrap()]);
-    assert!(out.status.success(), "stderr={}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.trim().ends_with("script-cache"),
@@ -111,7 +115,11 @@ fn cache_clear_removes_all_entries_with_yes_flag() {
     let root = tmp.path().join("c");
     populate(&root, 4);
     let out = run_cache(&["clear", "--root", root.to_str().unwrap(), "--yes"]);
-    assert!(out.status.success(), "stderr={}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(String::from_utf8_lossy(&out.stdout).contains("removed 4 entries"));
 
     // Subsequent list must be empty.
@@ -144,7 +152,11 @@ fn cache_gc_dry_run_evicts_nothing() {
         "0",
         "--dry-run",
     ]);
-    assert!(out.status.success(), "stderr={}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("dry-run"), "got {stdout:?}");
     let after = ScriptCache::at(root.clone()).unwrap().list().unwrap().len();
@@ -156,13 +168,7 @@ fn cache_gc_evicts_to_target_size() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().join("c");
     populate(&root, 5);
-    let out = run_cache(&[
-        "gc",
-        "--root",
-        root.to_str().unwrap(),
-        "--max-size",
-        "0",
-    ]);
+    let out = run_cache(&["gc", "--root", root.to_str().unwrap(), "--max-size", "0"]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("evicted"), "got {stdout:?}");
@@ -175,13 +181,7 @@ fn cache_gc_rejects_bad_size() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().join("c");
     let _ = ScriptCache::at(root.clone()).unwrap();
-    let out = run_cache(&[
-        "gc",
-        "--root",
-        root.to_str().unwrap(),
-        "--max-size",
-        "12X",
-    ]);
+    let out = run_cache(&["gc", "--root", root.to_str().unwrap(), "--max-size", "12X"]);
     assert!(!out.status.success(), "must fail on bad size");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("--max-size"), "got stderr={stderr:?}");
@@ -198,7 +198,11 @@ fn cache_show_finds_unique_prefix() {
     let hex = key.to_hex();
     let prefix = &hex[..12];
     let out = run_cache(&["show", "--root", root.to_str().unwrap(), prefix]);
-    assert!(out.status.success(), "stderr={}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains(&hex), "full key not echoed: {stdout:?}");
     assert!(stdout.contains("source_path"));
@@ -222,12 +226,7 @@ fn cache_show_no_match_errors() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path().join("c");
     populate(&root, 1);
-    let out = run_cache(&[
-        "show",
-        "--root",
-        root.to_str().unwrap(),
-        "ffffffffffff",
-    ]);
+    let out = run_cache(&["show", "--root", root.to_str().unwrap(), "ffffffffffff"]);
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("no cache entry"), "got stderr={stderr:?}");

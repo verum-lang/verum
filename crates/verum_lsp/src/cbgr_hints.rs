@@ -895,8 +895,7 @@ mod tests {
     #[test]
     fn test_overhead_hint_creation() {
         let provider = CbgrHintProvider::new();
-        let hint =
-            provider.create_overhead_hint(tier0_ref_info(), EscapeResult::EscapesViaReturn);
+        let hint = provider.create_overhead_hint(tier0_ref_info(), EscapeResult::EscapesViaReturn);
         assert_eq!(hint.kind, Some(InlayHintKind::TYPE));
     }
 

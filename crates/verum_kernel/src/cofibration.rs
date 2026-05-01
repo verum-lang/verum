@@ -50,12 +50,18 @@ pub struct FaceLit {
 impl FaceLit {
     /// Construct a literal `i = 0`.
     pub fn zero(var: impl Into<Text>) -> Self {
-        FaceLit { var: var.into(), end: false }
+        FaceLit {
+            var: var.into(),
+            end: false,
+        }
     }
 
     /// Construct a literal `i = 1`.
     pub fn one(var: impl Into<Text>) -> Self {
-        FaceLit { var: var.into(), end: true }
+        FaceLit {
+            var: var.into(),
+            end: true,
+        }
     }
 
     /// True iff `self` and `other` are contradictory literals on the
@@ -76,7 +82,9 @@ pub struct Clause {
 
 impl Clause {
     /// The empty clause `⊤` — no face constraints.
-    pub fn empty() -> Self { Self::default() }
+    pub fn empty() -> Self {
+        Self::default()
+    }
 
     /// A clause containing exactly one face literal.
     pub fn singleton(lit: FaceLit) -> Self {
@@ -133,17 +141,23 @@ pub struct FaceFormula {
 impl FaceFormula {
     /// Always-false (never-true): `⊥`. Empty disjunction.
     pub fn bottom() -> Self {
-        FaceFormula { clauses: Vec::new() }
+        FaceFormula {
+            clauses: Vec::new(),
+        }
     }
 
     /// Always-true: `⊤`. Single empty clause.
     pub fn top() -> Self {
-        FaceFormula { clauses: vec![Clause::empty()] }
+        FaceFormula {
+            clauses: vec![Clause::empty()],
+        }
     }
 
     /// Atomic literal as a one-clause-one-literal formula.
     pub fn lit(l: FaceLit) -> Self {
-        FaceFormula { clauses: vec![Clause::singleton(l)] }
+        FaceFormula {
+            clauses: vec![Clause::singleton(l)],
+        }
     }
 
     /// `(i = 0)` shorthand.
@@ -169,7 +183,12 @@ impl FaceFormula {
     /// Logical OR via clause-set union. Subsumed clauses are dropped
     /// to maintain canonical / minimal DNF form.
     pub fn or(&self, other: &FaceFormula) -> FaceFormula {
-        let mut all: Vec<Clause> = self.clauses.iter().chain(other.clauses.iter()).cloned().collect();
+        let mut all: Vec<Clause> = self
+            .clauses
+            .iter()
+            .chain(other.clauses.iter())
+            .cloned()
+            .collect();
         // Remove subsumed clauses: if clause A's literals ⊆ clause B's,
         // then A ⇒ B in DNF (the larger constraint subsumes the smaller),
         // so B is redundant.
@@ -178,9 +197,13 @@ impl FaceFormula {
         // = subsumes the larger.
         let mut keep: Vec<bool> = vec![true; all.len()];
         for i in 0..all.len() {
-            if !keep[i] { continue; }
+            if !keep[i] {
+                continue;
+            }
             for j in 0..all.len() {
-                if i == j || !keep[j] { continue; }
+                if i == j || !keep[j] {
+                    continue;
+                }
                 // If all[j] is properly contained in all[i] (smaller
                 // literal-set), then all[i] is subsumed by all[j].
                 if all[j].lits.is_subset(&all[i].lits) && all[j].lits != all[i].lits {

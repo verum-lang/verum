@@ -4,21 +4,23 @@
 //! High-level builders for constructing Verum MLIR operations with
 //! convenient APIs and proper error handling.
 
+use crate::mlir::dialect::ops::*;
+use crate::mlir::dialect::types::{RefTier, VerumType};
+use crate::mlir::error::{MlirError, Result};
+use verum_common::Text;
 use verum_mlir::{
     Context,
-    ir::{Block, BlockLike, Identifier, Location, Module, Operation, Region, RegionLike, Type, Value},
-    ir::operation::OperationBuilder,
     dialect::{arith, cf, func, llvm, memref, scf},
     ir::attribute::{
-        DenseI32ArrayAttribute, DenseI64ArrayAttribute, FlatSymbolRefAttribute,
-        IntegerAttribute, StringAttribute, TypeAttribute, FloatAttribute,
+        DenseI32ArrayAttribute, DenseI64ArrayAttribute, FlatSymbolRefAttribute, FloatAttribute,
+        IntegerAttribute, StringAttribute, TypeAttribute,
     },
+    ir::operation::OperationBuilder,
     ir::r#type::{FunctionType, IntegerType, MemRefType},
+    ir::{
+        Block, BlockLike, Identifier, Location, Module, Operation, Region, RegionLike, Type, Value,
+    },
 };
-use verum_common::Text;
-use crate::mlir::error::{MlirError, Result};
-use crate::mlir::dialect::types::{RefTier, VerumType};
-use crate::mlir::dialect::ops::*;
 
 /// Builder for constructing Verum MLIR operations.
 ///
@@ -98,12 +100,7 @@ impl<'c> VerumOpBuilder<'c> {
     // =========================================================================
 
     /// Build an integer constant.
-    pub fn constant_int(
-        &self,
-        location: Location<'c>,
-        value: i64,
-        bits: u32,
-    ) -> Operation<'c> {
+    pub fn constant_int(&self, location: Location<'c>, value: i64, bits: u32) -> Operation<'c> {
         let int_type = IntegerType::new(self.context, bits).into();
         arith::constant(
             self.context,
@@ -308,7 +305,13 @@ impl<'c> VerumOpBuilder<'c> {
         after_region: Region<'c>,
         location: Location<'c>,
     ) -> Operation<'c> {
-        scf::r#while(initial_values, result_types, before_region, after_region, location)
+        scf::r#while(
+            initial_values,
+            result_types,
+            before_region,
+            after_region,
+            location,
+        )
     }
 
     /// Build a yield operation.
@@ -577,20 +580,12 @@ impl<'c> VerumOpBuilder<'c> {
     }
 
     /// Build a print operation.
-    pub fn print(
-        &self,
-        location: Location<'c>,
-        value: Value<'c, '_>,
-    ) -> Result<Operation<'c>> {
+    pub fn print(&self, location: Location<'c>, value: Value<'c, '_>) -> Result<Operation<'c>> {
         PrintOp::build(self.context, location, value)
     }
 
     /// Build a panic operation.
-    pub fn panic(
-        &self,
-        location: Location<'c>,
-        message: Value<'c, '_>,
-    ) -> Result<Operation<'c>> {
+    pub fn panic(&self, location: Location<'c>, message: Value<'c, '_>) -> Result<Operation<'c>> {
         PanicOp::build(self.context, location, message)
     }
 
@@ -620,10 +615,16 @@ impl<'c> VerumOpBuilder<'c> {
         alignment: Option<i64>,
         location: Location<'c>,
     ) -> Operation<'c> {
-        let align_attr = alignment.map(|a| {
-            IntegerAttribute::new(IntegerType::new(self.context, 64).into(), a)
-        });
-        memref::alloc(self.context, memref_type, dynamic_sizes, &[], align_attr, location)
+        let align_attr =
+            alignment.map(|a| IntegerAttribute::new(IntegerType::new(self.context, 64).into(), a));
+        memref::alloc(
+            self.context,
+            memref_type,
+            dynamic_sizes,
+            &[],
+            align_attr,
+            location,
+        )
     }
 
     /// Build a memref.alloca operation (stack allocation).
@@ -634,10 +635,16 @@ impl<'c> VerumOpBuilder<'c> {
         alignment: Option<i64>,
         location: Location<'c>,
     ) -> Operation<'c> {
-        let align_attr = alignment.map(|a| {
-            IntegerAttribute::new(IntegerType::new(self.context, 64).into(), a)
-        });
-        memref::alloca(self.context, memref_type, dynamic_sizes, &[], align_attr, location)
+        let align_attr =
+            alignment.map(|a| IntegerAttribute::new(IntegerType::new(self.context, 64).into(), a));
+        memref::alloca(
+            self.context,
+            memref_type,
+            dynamic_sizes,
+            &[],
+            align_attr,
+            location,
+        )
     }
 
     /// Build a memref.dealloc operation.
@@ -703,8 +710,7 @@ impl<'c> VerumOpBuilder<'c> {
         alignment: Option<i64>,
         location: Location<'c>,
     ) -> Operation<'c> {
-        let options = llvm::AllocaOptions::new()
-            .elem_type(Some(TypeAttribute::new(element_type)));
+        let options = llvm::AllocaOptions::new().elem_type(Some(TypeAttribute::new(element_type)));
         let options = if let Some(align) = alignment {
             options.align(Some(IntegerAttribute::new(
                 IntegerType::new(self.context, 64).into(),
@@ -748,7 +754,14 @@ impl<'c> VerumOpBuilder<'c> {
         location: Location<'c>,
     ) -> Operation<'c> {
         let indices_attr = DenseI32ArrayAttribute::new(self.context, indices);
-        llvm::get_element_ptr(self.context, ptr, indices_attr, element_type, result_type, location)
+        llvm::get_element_ptr(
+            self.context,
+            ptr,
+            indices_attr,
+            element_type,
+            result_type,
+            location,
+        )
     }
 
     /// Build an llvm.getelementptr operation with dynamic indices.
@@ -760,7 +773,14 @@ impl<'c> VerumOpBuilder<'c> {
         result_type: Type<'c>,
         location: Location<'c>,
     ) -> Operation<'c> {
-        llvm::get_element_ptr_dynamic(self.context, ptr, indices, element_type, result_type, location)
+        llvm::get_element_ptr_dynamic(
+            self.context,
+            ptr,
+            indices,
+            element_type,
+            result_type,
+            location,
+        )
     }
 
     /// Build an llvm.extractvalue operation.
@@ -908,11 +928,7 @@ impl<'c> VerumOpBuilder<'c> {
     }
 
     /// Build an arith.negf operation (floating-point negation).
-    pub fn negf(
-        &self,
-        value: Value<'c, '_>,
-        location: Location<'c>,
-    ) -> Operation<'c> {
+    pub fn negf(&self, value: Value<'c, '_>, location: Location<'c>) -> Operation<'c> {
         arith::negf(value, location)
     }
 
@@ -1146,8 +1162,9 @@ impl<'c> VerumOpBuilder<'c> {
 
     /// Parse an MLIR type from string.
     pub fn parse_type(&self, type_str: &str) -> Result<Type<'c>> {
-        Type::parse(self.context, type_str)
-            .ok_or_else(|| MlirError::type_translation("custom", format!("Failed to parse type: {}", type_str)))
+        Type::parse(self.context, type_str).ok_or_else(|| {
+            MlirError::type_translation("custom", format!("Failed to parse type: {}", type_str))
+        })
     }
 
     /// Create an LLVM struct type.
@@ -1170,9 +1187,7 @@ impl<'c> VerumOpBuilder<'c> {
 }
 
 /// Helper for building blocks with arguments.
-pub fn build_block_with_args<'c>(
-    arg_types: &[(Type<'c>, Location<'c>)],
-) -> Block<'c> {
+pub fn build_block_with_args<'c>(arg_types: &[(Type<'c>, Location<'c>)]) -> Block<'c> {
     Block::new(arg_types)
 }
 

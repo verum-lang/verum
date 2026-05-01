@@ -41,12 +41,15 @@ pub enum MetaError {
     // =========================================================================
     // M0XX - Core meta errors (8 codes)
     // =========================================================================
-
     /// M001: Meta function not found in scope
     MetaFunctionNotFound(Text),
 
     /// M002: Wrong number of arguments to meta function
-    MetaArityMismatch { function: Text, expected: usize, got: usize },
+    MetaArityMismatch {
+        function: Text,
+        expected: usize,
+        got: usize,
+    },
 
     /// M003: Type mismatch in meta expression
     TypeMismatch { expected: Text, found: Text },
@@ -61,7 +64,11 @@ pub enum MetaError {
     InvalidMetaStage { stage: i64, message: Text },
 
     /// M007: Stage coherence violation
-    MetaStageMismatch { current: u32, target: u32, message: Text },
+    MetaStageMismatch {
+        current: u32,
+        target: u32,
+        message: Text,
+    },
 
     /// M008: Meta function must be pure but has side effects
     MetaFunctionNotPure { function: Text, reason: Text },
@@ -69,7 +76,6 @@ pub enum MetaError {
     // =========================================================================
     // M1XX - Builtin errors (5 codes)
     // =========================================================================
-
     /// M101: Unknown builtin function
     UnknownBuiltin(Text),
 
@@ -77,7 +83,11 @@ pub enum MetaError {
     ArityMismatch { expected: usize, got: usize },
 
     /// M103: Argument type doesn't match builtin signature
-    TypeMismatchBuiltin { function: Text, expected: Text, found: Text },
+    TypeMismatchBuiltin {
+        function: Text,
+        expected: Text,
+        found: Text,
+    },
 
     /// M104: Builtin execution failed
     BuiltinEvalError { function: Text, message: Text },
@@ -91,7 +101,6 @@ pub enum MetaError {
     // =========================================================================
     // M2XX - Context errors (5 codes)
     // =========================================================================
-
     /// M201: Required context not declared in using clause
     MissingContext {
         function: Text,
@@ -113,7 +122,6 @@ pub enum MetaError {
     // =========================================================================
     // M3XX - Sandbox errors (7 codes)
     // =========================================================================
-
     /// M301: Operation not allowed in sandbox
     ForbiddenOperation { operation: Text, reason: Text },
 
@@ -141,7 +149,6 @@ pub enum MetaError {
     // =========================================================================
     // M4XX - Quote/Hygiene errors (10 codes: M400-M409)
     // =========================================================================
-
     /// M400: Invalid syntax inside quote block
     InvalidQuoteSyntax { message: Text },
 
@@ -167,15 +174,22 @@ pub enum MetaError {
     InvalidTokenTree { message: Text },
 
     /// M408: Variable captured without explicit capture clause
-    CaptureNotDeclared { identifier: Text, span: verum_common::Span },
+    CaptureNotDeclared {
+        identifier: Text,
+        span: verum_common::Span,
+    },
 
     /// M409: Mismatched lengths in $[for...] expansion
-    RepetitionMismatch { first_name: Text, first_len: usize, second_name: Text, second_len: usize },
+    RepetitionMismatch {
+        first_name: Text,
+        first_len: usize,
+        second_name: Text,
+        second_len: usize,
+    },
 
     // =========================================================================
     // M5XX - Type-level computation errors (6 codes)
     // =========================================================================
-
     /// M501: Type-level computation failed to reduce
     TypeReductionFailed { ty: Text, message: Text },
 
@@ -197,7 +211,6 @@ pub enum MetaError {
     // =========================================================================
     // M6XX - Const evaluation errors (7 codes)
     // =========================================================================
-
     /// M601: Expression cannot be evaluated at compile time
     NonConstExpression { expr: Text, reason: Text },
 
@@ -222,7 +235,6 @@ pub enum MetaError {
     // =========================================================================
     // User-initiated and other errors
     // =========================================================================
-
     /// Compile-time error emitted by compile_error!
     CompileError(Text),
 
@@ -372,8 +384,7 @@ impl MetaError {
         match self.error_code().chars().nth(1) {
             Some('0') => match self {
                 // Name resolution phase (2)
-                MetaError::MetaFunctionNotFound(_) |
-                MetaError::CircularDependency { .. } => 2,
+                MetaError::MetaFunctionNotFound(_) | MetaError::CircularDependency { .. } => 2,
                 // Evaluation phase (4)
                 MetaError::MetaEvaluationFailed { .. } => 4,
                 // Type checking phase (3) - default for M0XX
@@ -383,17 +394,15 @@ impl MetaError {
             Some('2') => 2, // Context errors: Name resolution
             Some('3') => 4, // Sandbox errors: Evaluation
             Some('4') => match self {
-                MetaError::InvalidQuoteSyntax { .. } |
-                MetaError::UnquoteOutsideQuote |
-                MetaError::InvalidTokenTree { .. } => 1, // Parser
-                MetaError::CaptureNotDeclared { .. } |
-                MetaError::RepetitionMismatch { .. } => 5, // Hygiene
+                MetaError::InvalidQuoteSyntax { .. }
+                | MetaError::UnquoteOutsideQuote
+                | MetaError::InvalidTokenTree { .. } => 1, // Parser
+                MetaError::CaptureNotDeclared { .. } | MetaError::RepetitionMismatch { .. } => 5, // Hygiene
                 _ => 5, // Hygiene
             },
             Some('5') => 3, // Type-level errors: Type checking
             Some('6') => match self {
-                MetaError::NonConstExpression { .. } |
-                MetaError::ConstTypeMismatch { .. } => 3, // Type checking
+                MetaError::NonConstExpression { .. } | MetaError::ConstTypeMismatch { .. } => 3, // Type checking
                 _ => 4, // Evaluation
             },
             _ => 0,
@@ -405,22 +414,45 @@ impl std::fmt::Display for MetaError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let code = self.error_code();
         // Include equivalent E-code suffix for compatibility with standard error matchers
-        let e_suffix = self.equivalent_e_code()
+        let e_suffix = self
+            .equivalent_e_code()
             .map(|ec| format!(" [{}]", ec))
             .unwrap_or_default();
 
         match self {
             // M0XX - Core meta errors
             MetaError::MetaFunctionNotFound(name) => {
-                write!(f, "{}: Meta function not found: {}{}", code, name.as_str(), e_suffix)
+                write!(
+                    f,
+                    "{}: Meta function not found: {}{}",
+                    code,
+                    name.as_str(),
+                    e_suffix
+                )
             }
-            MetaError::MetaArityMismatch { function, expected, got } => {
-                write!(f, "{}: Meta function '{}': expected {} arguments, got {}",
-                    code, function.as_str(), expected, got)
+            MetaError::MetaArityMismatch {
+                function,
+                expected,
+                got,
+            } => {
+                write!(
+                    f,
+                    "{}: Meta function '{}': expected {} arguments, got {}",
+                    code,
+                    function.as_str(),
+                    expected,
+                    got
+                )
             }
             MetaError::TypeMismatch { expected, found } => {
-                write!(f, "{}: Type mismatch: expected {}, found {}{}",
-                    code, expected.as_str(), found.as_str(), e_suffix)
+                write!(
+                    f,
+                    "{}: Type mismatch: expected {}, found {}{}",
+                    code,
+                    expected.as_str(),
+                    found.as_str(),
+                    e_suffix
+                )
             }
             MetaError::MetaEvaluationFailed { message } => {
                 write!(f, "{}: Meta evaluation failed: {}", code, message.as_str())
@@ -429,15 +461,36 @@ impl std::fmt::Display for MetaError {
                 write!(f, "{}: Circular dependency: {}", code, path.as_str())
             }
             MetaError::InvalidMetaStage { stage, message } => {
-                write!(f, "{}: Invalid meta stage {}: {}", code, stage, message.as_str())
+                write!(
+                    f,
+                    "{}: Invalid meta stage {}: {}",
+                    code,
+                    stage,
+                    message.as_str()
+                )
             }
-            MetaError::MetaStageMismatch { current, target, message } => {
-                write!(f, "{}: Stage mismatch (current: {}, target: {}): {}",
-                    code, current, target, message.as_str())
+            MetaError::MetaStageMismatch {
+                current,
+                target,
+                message,
+            } => {
+                write!(
+                    f,
+                    "{}: Stage mismatch (current: {}, target: {}): {}",
+                    code,
+                    current,
+                    target,
+                    message.as_str()
+                )
             }
             MetaError::MetaFunctionNotPure { function, reason } => {
-                write!(f, "{}: Meta function '{}' not pure: {}",
-                    code, function.as_str(), reason.as_str())
+                write!(
+                    f,
+                    "{}: Meta function '{}' not pure: {}",
+                    code,
+                    function.as_str(),
+                    reason.as_str()
+                )
             }
 
             // M1XX - Builtin errors
@@ -447,17 +500,38 @@ impl std::fmt::Display for MetaError {
             MetaError::ArityMismatch { expected, got } => {
                 write!(f, "{}: Expected {} arguments, got {}", code, expected, got)
             }
-            MetaError::TypeMismatchBuiltin { function, expected, found } => {
-                write!(f, "{}: Builtin '{}': expected {}, found {}{}",
-                    code, function.as_str(), expected.as_str(), found.as_str(), e_suffix)
+            MetaError::TypeMismatchBuiltin {
+                function,
+                expected,
+                found,
+            } => {
+                write!(
+                    f,
+                    "{}: Builtin '{}': expected {}, found {}{}",
+                    code,
+                    function.as_str(),
+                    expected.as_str(),
+                    found.as_str(),
+                    e_suffix
+                )
             }
             MetaError::BuiltinEvalError { function, message } => {
-                write!(f, "{}: Builtin '{}' failed: {}",
-                    code, function.as_str(), message.as_str())
+                write!(
+                    f,
+                    "{}: Builtin '{}' failed: {}",
+                    code,
+                    function.as_str(),
+                    message.as_str()
+                )
             }
             MetaError::BuiltinNotAvailable { function, stage } => {
-                write!(f, "{}: Builtin '{}' not available at stage {}",
-                    code, function.as_str(), stage)
+                write!(
+                    f,
+                    "{}: Builtin '{}' not available at stage {}",
+                    code,
+                    function.as_str(),
+                    stage
+                )
             }
             MetaError::AssertionFailed { message } => {
                 write!(f, "{}: Assertion failed: {}", code, message.as_str())
@@ -465,19 +539,41 @@ impl std::fmt::Display for MetaError {
 
             // M2XX - Context errors
             MetaError::MissingContext { function, required } => {
-                write!(f, "{}: '{}' requires `using [{}]`{}",
-                    code, function.as_str(), required.context_name(), e_suffix)
+                write!(
+                    f,
+                    "{}: '{}' requires `using [{}]`{}",
+                    code,
+                    function.as_str(),
+                    required.context_name(),
+                    e_suffix
+                )
             }
             MetaError::UnknownContext(name) => {
-                write!(f, "{}: Unknown context: {}{}", code, name.as_str(), e_suffix)
+                write!(
+                    f,
+                    "{}: Unknown context: {}{}",
+                    code,
+                    name.as_str(),
+                    e_suffix
+                )
             }
             MetaError::ContextCapabilityDenied { context, operation } => {
-                write!(f, "{}: Context '{}' denies operation: {}",
-                    code, context.as_str(), operation.as_str())
+                write!(
+                    f,
+                    "{}: Context '{}' denies operation: {}",
+                    code,
+                    context.as_str(),
+                    operation.as_str()
+                )
             }
             MetaError::ContextScopeViolation { context, message } => {
-                write!(f, "{}: Context '{}' scope violation: {}",
-                    code, context.as_str(), message.as_str())
+                write!(
+                    f,
+                    "{}: Context '{}' scope violation: {}",
+                    code,
+                    context.as_str(),
+                    message.as_str()
+                )
             }
             MetaError::DuplicateContext(name) => {
                 write!(f, "{}: Duplicate context: {}", code, name.as_str())
@@ -485,30 +581,63 @@ impl std::fmt::Display for MetaError {
 
             // M3XX - Sandbox errors
             MetaError::ForbiddenOperation { operation, reason } => {
-                write!(f, "{}: Forbidden '{}': {}{}",
-                    code, operation.as_str(), reason.as_str(), e_suffix)
+                write!(
+                    f,
+                    "{}: Forbidden '{}': {}{}",
+                    code,
+                    operation.as_str(),
+                    reason.as_str(),
+                    e_suffix
+                )
             }
             MetaError::MemoryLimitExceeded { allocated, limit } => {
-                write!(f, "{}: Memory limit exceeded: {} bytes (limit: {})",
-                    code, allocated, limit)
+                write!(
+                    f,
+                    "{}: Memory limit exceeded: {} bytes (limit: {})",
+                    code, allocated, limit
+                )
             }
             MetaError::RecursionLimitExceeded { depth, limit } => {
-                write!(f, "{}: Recursion limit exceeded: depth {} (limit: {})",
-                    code, depth, limit)
+                write!(
+                    f,
+                    "{}: Recursion limit exceeded: depth {} (limit: {})",
+                    code, depth, limit
+                )
             }
             MetaError::IterationLimitExceeded { count, limit } => {
-                write!(f, "{}: Iteration limit exceeded: {} (limit: {})",
-                    code, count, limit)
+                write!(
+                    f,
+                    "{}: Iteration limit exceeded: {} (limit: {})",
+                    code, count, limit
+                )
             }
-            MetaError::TimeoutExceeded { elapsed_ms, limit_ms } => {
-                write!(f, "{}: Timeout: {}ms (limit: {}ms)",
-                    code, elapsed_ms, limit_ms)
+            MetaError::TimeoutExceeded {
+                elapsed_ms,
+                limit_ms,
+            } => {
+                write!(
+                    f,
+                    "{}: Timeout: {}ms (limit: {}ms)",
+                    code, elapsed_ms, limit_ms
+                )
             }
             MetaError::IONotAllowed { operation } => {
-                write!(f, "{}: IO not allowed: {}{}", code, operation.as_str(), e_suffix)
+                write!(
+                    f,
+                    "{}: IO not allowed: {}{}",
+                    code,
+                    operation.as_str(),
+                    e_suffix
+                )
             }
             MetaError::UnsafeNotAllowed { construct } => {
-                write!(f, "{}: Unsafe not allowed: {}{}", code, construct.as_str(), e_suffix)
+                write!(
+                    f,
+                    "{}: Unsafe not allowed: {}{}",
+                    code,
+                    construct.as_str(),
+                    e_suffix
+                )
             }
             MetaError::PathTraversalBlocked { path, reason } => {
                 write!(
@@ -527,85 +656,174 @@ impl std::fmt::Display for MetaError {
             MetaError::UnquoteOutsideQuote => {
                 write!(f, "{}: Unquote ($) outside quote block", code)
             }
-            MetaError::HygieneViolation { identifier, message } => {
-                write!(f, "{}: Hygiene violation for '{}': {}",
-                    code, identifier.as_str(), message.as_str())
+            MetaError::HygieneViolation {
+                identifier,
+                message,
+            } => {
+                write!(
+                    f,
+                    "{}: Hygiene violation for '{}': {}",
+                    code,
+                    identifier.as_str(),
+                    message.as_str()
+                )
             }
             MetaError::GensymCollision { symbol } => {
                 write!(f, "{}: Gensym collision: {}", code, symbol.as_str())
             }
             MetaError::ScopeResolutionFailed { name, message } => {
-                write!(f, "{}: Cannot resolve '{}': {}",
-                    code, name.as_str(), message.as_str())
+                write!(
+                    f,
+                    "{}: Cannot resolve '{}': {}",
+                    code,
+                    name.as_str(),
+                    message.as_str()
+                )
             }
             MetaError::QuoteStageError { target, current } => {
-                write!(f, "{}: Quote stage {} >= current stage {}",
-                    code, target, current)
+                write!(
+                    f,
+                    "{}: Quote stage {} >= current stage {}",
+                    code, target, current
+                )
             }
             MetaError::LiftTypeMismatch { ty, reason } => {
-                write!(f, "{}: Cannot lift type '{}': {}",
-                    code, ty.as_str(), reason.as_str())
+                write!(
+                    f,
+                    "{}: Cannot lift type '{}': {}",
+                    code,
+                    ty.as_str(),
+                    reason.as_str()
+                )
             }
             MetaError::InvalidTokenTree { message } => {
                 write!(f, "{}: Invalid token tree: {}", code, message.as_str())
             }
             MetaError::CaptureNotDeclared { identifier, .. } => {
-                write!(f, "{}: Variable '{}' captured without explicit capture clause",
-                    code, identifier.as_str())
+                write!(
+                    f,
+                    "{}: Variable '{}' captured without explicit capture clause",
+                    code,
+                    identifier.as_str()
+                )
             }
-            MetaError::RepetitionMismatch { first_name, first_len, second_name, second_len } => {
-                write!(f, "{}: Repetition mismatch: '{}' has {} elements, '{}' has {}",
-                    code, first_name.as_str(), first_len, second_name.as_str(), second_len)
+            MetaError::RepetitionMismatch {
+                first_name,
+                first_len,
+                second_name,
+                second_len,
+            } => {
+                write!(
+                    f,
+                    "{}: Repetition mismatch: '{}' has {} elements, '{}' has {}",
+                    code,
+                    first_name.as_str(),
+                    first_len,
+                    second_name.as_str(),
+                    second_len
+                )
             }
 
             // M5XX - Type-level errors
             MetaError::TypeReductionFailed { ty, message } => {
-                write!(f, "{}: Type '{}' reduction failed: {}",
-                    code, ty.as_str(), message.as_str())
+                write!(
+                    f,
+                    "{}: Type '{}' reduction failed: {}",
+                    code,
+                    ty.as_str(),
+                    message.as_str()
+                )
             }
             MetaError::NormalizationDiverged { ty, iterations } => {
-                write!(f, "{}: Type '{}' normalization diverged after {} iterations",
-                    code, ty.as_str(), iterations)
+                write!(
+                    f,
+                    "{}: Type '{}' normalization diverged after {} iterations",
+                    code,
+                    ty.as_str(),
+                    iterations
+                )
             }
             MetaError::SMTVerificationFailed { constraint, reason } => {
-                write!(f, "{}: SMT verification failed for '{}': {}",
-                    code, constraint.as_str(), reason.as_str())
+                write!(
+                    f,
+                    "{}: SMT verification failed for '{}': {}",
+                    code,
+                    constraint.as_str(),
+                    reason.as_str()
+                )
             }
             MetaError::ProofConstructionFailed { goal, message } => {
-                write!(f, "{}: Proof construction failed for '{}': {}",
-                    code, goal.as_str(), message.as_str())
+                write!(
+                    f,
+                    "{}: Proof construction failed for '{}': {}",
+                    code,
+                    goal.as_str(),
+                    message.as_str()
+                )
             }
             MetaError::RefinementViolation { predicate, value } => {
-                write!(f, "{}: Refinement '{}' violated by: {}",
-                    code, predicate.as_str(), value.as_str())
+                write!(
+                    f,
+                    "{}: Refinement '{}' violated by: {}",
+                    code,
+                    predicate.as_str(),
+                    value.as_str()
+                )
             }
             MetaError::MetaWhereUnsatisfied { constraint } => {
-                write!(f, "{}: meta where not satisfied: {}", code, constraint.as_str())
+                write!(
+                    f,
+                    "{}: meta where not satisfied: {}",
+                    code,
+                    constraint.as_str()
+                )
             }
 
             // M6XX - Const evaluation errors
             MetaError::NonConstExpression { expr, reason } => {
-                write!(f, "{}: '{}' is not const: {}",
-                    code, expr.as_str(), reason.as_str())
+                write!(
+                    f,
+                    "{}: '{}' is not const: {}",
+                    code,
+                    expr.as_str(),
+                    reason.as_str()
+                )
             }
             MetaError::ConstOverflow { operation, value } => {
-                write!(f, "{}: Overflow in '{}': {}",
-                    code, operation.as_str(), value.as_str())
+                write!(
+                    f,
+                    "{}: Overflow in '{}': {}",
+                    code,
+                    operation.as_str(),
+                    value.as_str()
+                )
             }
             MetaError::DivisionByZero => {
                 write!(f, "{}: Division by zero", code)
             }
             MetaError::ConstTypeMismatch { expected, found } => {
-                write!(f, "{}: Const type mismatch: expected {}, found {}",
-                    code, expected.as_str(), found.as_str())
+                write!(
+                    f,
+                    "{}: Const type mismatch: expected {}, found {}",
+                    code,
+                    expected.as_str(),
+                    found.as_str()
+                )
             }
             MetaError::IndexOutOfBounds { index, length } => {
-                write!(f, "{}: Index {} out of bounds (length: {})",
-                    code, index, length)
+                write!(
+                    f,
+                    "{}: Index {} out of bounds (length: {})",
+                    code, index, length
+                )
             }
             MetaError::PatternNotExhaustive { missing } => {
-                write!(f, "{}: Non-exhaustive pattern, missing: {}",
-                    code, missing.as_str())
+                write!(
+                    f,
+                    "{}: Non-exhaustive pattern, missing: {}",
+                    code,
+                    missing.as_str()
+                )
             }
             MetaError::NoMatchingArm { value } => {
                 write!(f, "{}: No matching arm for value: {}", code, value.as_str())
@@ -682,26 +900,22 @@ impl MetaError {
             HygieneViolation::InvalidTokenTree { message, .. } => {
                 MetaError::InvalidTokenTree { message }
             }
-            HygieneViolation::CaptureNotDeclared { ident, span } => {
-                MetaError::CaptureNotDeclared {
-                    identifier: ident,
-                    span,
-                }
-            }
+            HygieneViolation::CaptureNotDeclared { ident, span } => MetaError::CaptureNotDeclared {
+                identifier: ident,
+                span,
+            },
             HygieneViolation::RepetitionMismatch {
                 first_name,
                 first_len,
                 second_name,
                 second_len,
                 ..
-            } => {
-                MetaError::RepetitionMismatch {
-                    first_name,
-                    first_len,
-                    second_name,
-                    second_len,
-                }
-            }
+            } => MetaError::RepetitionMismatch {
+                first_name,
+                first_len,
+                second_name,
+                second_len,
+            },
         }
     }
 
@@ -721,192 +935,501 @@ mod tests {
 
     #[test]
     fn test_error_codes_m0xx() {
-        assert_eq!(MetaError::MetaFunctionNotFound(Text::from("foo")).error_code(), "M001");
-        assert_eq!(MetaError::MetaArityMismatch {
-            function: Text::from("f"), expected: 2, got: 3
-        }.error_code(), "M002");
-        assert_eq!(MetaError::TypeMismatch {
-            expected: Text::from("Int"), found: Text::from("Text")
-        }.error_code(), "M003");
-        assert_eq!(MetaError::MetaEvaluationFailed {
-            message: Text::from("error")
-        }.error_code(), "M004");
-        assert_eq!(MetaError::CircularDependency {
-            path: Text::from("a -> b -> a")
-        }.error_code(), "M005");
-        assert_eq!(MetaError::InvalidMetaStage {
-            stage: 0, message: Text::from("must be >= 1")
-        }.error_code(), "M006");
-        assert_eq!(MetaError::MetaStageMismatch {
-            current: 1, target: 2, message: Text::from("invalid")
-        }.error_code(), "M007");
-        assert_eq!(MetaError::MetaFunctionNotPure {
-            function: Text::from("f"), reason: Text::from("IO")
-        }.error_code(), "M008");
+        assert_eq!(
+            MetaError::MetaFunctionNotFound(Text::from("foo")).error_code(),
+            "M001"
+        );
+        assert_eq!(
+            MetaError::MetaArityMismatch {
+                function: Text::from("f"),
+                expected: 2,
+                got: 3
+            }
+            .error_code(),
+            "M002"
+        );
+        assert_eq!(
+            MetaError::TypeMismatch {
+                expected: Text::from("Int"),
+                found: Text::from("Text")
+            }
+            .error_code(),
+            "M003"
+        );
+        assert_eq!(
+            MetaError::MetaEvaluationFailed {
+                message: Text::from("error")
+            }
+            .error_code(),
+            "M004"
+        );
+        assert_eq!(
+            MetaError::CircularDependency {
+                path: Text::from("a -> b -> a")
+            }
+            .error_code(),
+            "M005"
+        );
+        assert_eq!(
+            MetaError::InvalidMetaStage {
+                stage: 0,
+                message: Text::from("must be >= 1")
+            }
+            .error_code(),
+            "M006"
+        );
+        assert_eq!(
+            MetaError::MetaStageMismatch {
+                current: 1,
+                target: 2,
+                message: Text::from("invalid")
+            }
+            .error_code(),
+            "M007"
+        );
+        assert_eq!(
+            MetaError::MetaFunctionNotPure {
+                function: Text::from("f"),
+                reason: Text::from("IO")
+            }
+            .error_code(),
+            "M008"
+        );
     }
 
     #[test]
     fn test_error_codes_m1xx() {
-        assert_eq!(MetaError::UnknownBuiltin(Text::from("foo")).error_code(), "M101");
-        assert_eq!(MetaError::ArityMismatch { expected: 2, got: 3 }.error_code(), "M102");
-        assert_eq!(MetaError::TypeMismatchBuiltin {
-            function: Text::from("abs"), expected: Text::from("Int"), found: Text::from("Text")
-        }.error_code(), "M103");
-        assert_eq!(MetaError::BuiltinEvalError {
-            function: Text::from("abs"), message: Text::from("error")
-        }.error_code(), "M104");
-        assert_eq!(MetaError::BuiltinNotAvailable {
-            function: Text::from("f"), stage: 1
-        }.error_code(), "M105");
+        assert_eq!(
+            MetaError::UnknownBuiltin(Text::from("foo")).error_code(),
+            "M101"
+        );
+        assert_eq!(
+            MetaError::ArityMismatch {
+                expected: 2,
+                got: 3
+            }
+            .error_code(),
+            "M102"
+        );
+        assert_eq!(
+            MetaError::TypeMismatchBuiltin {
+                function: Text::from("abs"),
+                expected: Text::from("Int"),
+                found: Text::from("Text")
+            }
+            .error_code(),
+            "M103"
+        );
+        assert_eq!(
+            MetaError::BuiltinEvalError {
+                function: Text::from("abs"),
+                message: Text::from("error")
+            }
+            .error_code(),
+            "M104"
+        );
+        assert_eq!(
+            MetaError::BuiltinNotAvailable {
+                function: Text::from("f"),
+                stage: 1
+            }
+            .error_code(),
+            "M105"
+        );
     }
 
     #[test]
     fn test_error_codes_m2xx() {
-        assert_eq!(MetaError::MissingContext {
-            function: Text::from("type_name"), required: RequiredContext::MetaTypes
-        }.error_code(), "M201");
-        assert_eq!(MetaError::UnknownContext(Text::from("Unknown")).error_code(), "M202");
-        assert_eq!(MetaError::ContextCapabilityDenied {
-            context: Text::from("MetaTypes"), operation: Text::from("io")
-        }.error_code(), "M203");
-        assert_eq!(MetaError::ContextScopeViolation {
-            context: Text::from("MetaTypes"), message: Text::from("error")
-        }.error_code(), "M204");
-        assert_eq!(MetaError::DuplicateContext(Text::from("MetaTypes")).error_code(), "M205");
+        assert_eq!(
+            MetaError::MissingContext {
+                function: Text::from("type_name"),
+                required: RequiredContext::MetaTypes
+            }
+            .error_code(),
+            "M201"
+        );
+        assert_eq!(
+            MetaError::UnknownContext(Text::from("Unknown")).error_code(),
+            "M202"
+        );
+        assert_eq!(
+            MetaError::ContextCapabilityDenied {
+                context: Text::from("MetaTypes"),
+                operation: Text::from("io")
+            }
+            .error_code(),
+            "M203"
+        );
+        assert_eq!(
+            MetaError::ContextScopeViolation {
+                context: Text::from("MetaTypes"),
+                message: Text::from("error")
+            }
+            .error_code(),
+            "M204"
+        );
+        assert_eq!(
+            MetaError::DuplicateContext(Text::from("MetaTypes")).error_code(),
+            "M205"
+        );
     }
 
     #[test]
     fn test_error_codes_m3xx() {
-        assert_eq!(MetaError::ForbiddenOperation {
-            operation: Text::from("file_read"), reason: Text::from("sandbox")
-        }.error_code(), "M301");
-        assert_eq!(MetaError::MemoryLimitExceeded { allocated: 1000, limit: 100 }.error_code(), "M302");
-        assert_eq!(MetaError::RecursionLimitExceeded { depth: 100, limit: 50 }.error_code(), "M303");
-        assert_eq!(MetaError::IterationLimitExceeded { count: 1000, limit: 100 }.error_code(), "M304");
-        assert_eq!(MetaError::TimeoutExceeded { elapsed_ms: 1000, limit_ms: 100 }.error_code(), "M305");
-        assert_eq!(MetaError::IONotAllowed { operation: Text::from("read") }.error_code(), "M306");
-        assert_eq!(MetaError::UnsafeNotAllowed { construct: Text::from("ptr") }.error_code(), "M307");
+        assert_eq!(
+            MetaError::ForbiddenOperation {
+                operation: Text::from("file_read"),
+                reason: Text::from("sandbox")
+            }
+            .error_code(),
+            "M301"
+        );
+        assert_eq!(
+            MetaError::MemoryLimitExceeded {
+                allocated: 1000,
+                limit: 100
+            }
+            .error_code(),
+            "M302"
+        );
+        assert_eq!(
+            MetaError::RecursionLimitExceeded {
+                depth: 100,
+                limit: 50
+            }
+            .error_code(),
+            "M303"
+        );
+        assert_eq!(
+            MetaError::IterationLimitExceeded {
+                count: 1000,
+                limit: 100
+            }
+            .error_code(),
+            "M304"
+        );
+        assert_eq!(
+            MetaError::TimeoutExceeded {
+                elapsed_ms: 1000,
+                limit_ms: 100
+            }
+            .error_code(),
+            "M305"
+        );
+        assert_eq!(
+            MetaError::IONotAllowed {
+                operation: Text::from("read")
+            }
+            .error_code(),
+            "M306"
+        );
+        assert_eq!(
+            MetaError::UnsafeNotAllowed {
+                construct: Text::from("ptr")
+            }
+            .error_code(),
+            "M307"
+        );
     }
 
     #[test]
     fn test_error_codes_m4xx() {
-        assert_eq!(MetaError::InvalidQuoteSyntax { message: Text::from("error") }.error_code(), "M400");
+        assert_eq!(
+            MetaError::InvalidQuoteSyntax {
+                message: Text::from("error")
+            }
+            .error_code(),
+            "M400"
+        );
         assert_eq!(MetaError::UnquoteOutsideQuote.error_code(), "M401");
-        assert_eq!(MetaError::HygieneViolation {
-            identifier: Text::from("x"), message: Text::from("collision")
-        }.error_code(), "M402");
-        assert_eq!(MetaError::GensymCollision { symbol: Text::from("_g1") }.error_code(), "M403");
-        assert_eq!(MetaError::ScopeResolutionFailed {
-            name: Text::from("x"), message: Text::from("not found")
-        }.error_code(), "M404");
-        assert_eq!(MetaError::QuoteStageError { target: 1, current: 1 }.error_code(), "M405");
-        assert_eq!(MetaError::LiftTypeMismatch {
-            ty: Text::from("Fn"), reason: Text::from("not liftable")
-        }.error_code(), "M406");
-        assert_eq!(MetaError::InvalidTokenTree { message: Text::from("error") }.error_code(), "M407");
-        assert_eq!(MetaError::CaptureNotDeclared {
-            identifier: Text::from("x"), span: verum_common::Span::default()
-        }.error_code(), "M408");
-        assert_eq!(MetaError::RepetitionMismatch {
-            first_name: Text::from("a"), first_len: 2,
-            second_name: Text::from("b"), second_len: 3
-        }.error_code(), "M409");
+        assert_eq!(
+            MetaError::HygieneViolation {
+                identifier: Text::from("x"),
+                message: Text::from("collision")
+            }
+            .error_code(),
+            "M402"
+        );
+        assert_eq!(
+            MetaError::GensymCollision {
+                symbol: Text::from("_g1")
+            }
+            .error_code(),
+            "M403"
+        );
+        assert_eq!(
+            MetaError::ScopeResolutionFailed {
+                name: Text::from("x"),
+                message: Text::from("not found")
+            }
+            .error_code(),
+            "M404"
+        );
+        assert_eq!(
+            MetaError::QuoteStageError {
+                target: 1,
+                current: 1
+            }
+            .error_code(),
+            "M405"
+        );
+        assert_eq!(
+            MetaError::LiftTypeMismatch {
+                ty: Text::from("Fn"),
+                reason: Text::from("not liftable")
+            }
+            .error_code(),
+            "M406"
+        );
+        assert_eq!(
+            MetaError::InvalidTokenTree {
+                message: Text::from("error")
+            }
+            .error_code(),
+            "M407"
+        );
+        assert_eq!(
+            MetaError::CaptureNotDeclared {
+                identifier: Text::from("x"),
+                span: verum_common::Span::default()
+            }
+            .error_code(),
+            "M408"
+        );
+        assert_eq!(
+            MetaError::RepetitionMismatch {
+                first_name: Text::from("a"),
+                first_len: 2,
+                second_name: Text::from("b"),
+                second_len: 3
+            }
+            .error_code(),
+            "M409"
+        );
     }
 
     #[test]
     fn test_error_codes_m5xx() {
-        assert_eq!(MetaError::TypeReductionFailed {
-            ty: Text::from("T"), message: Text::from("error")
-        }.error_code(), "M501");
-        assert_eq!(MetaError::NormalizationDiverged {
-            ty: Text::from("T"), iterations: 1000
-        }.error_code(), "M502");
-        assert_eq!(MetaError::SMTVerificationFailed {
-            constraint: Text::from("x > 0"), reason: Text::from("unsat")
-        }.error_code(), "M503");
-        assert_eq!(MetaError::ProofConstructionFailed {
-            goal: Text::from("P"), message: Text::from("error")
-        }.error_code(), "M504");
-        assert_eq!(MetaError::RefinementViolation {
-            predicate: Text::from("x > 0"), value: Text::from("-1")
-        }.error_code(), "M505");
-        assert_eq!(MetaError::MetaWhereUnsatisfied {
-            constraint: Text::from("N > 0")
-        }.error_code(), "M506");
+        assert_eq!(
+            MetaError::TypeReductionFailed {
+                ty: Text::from("T"),
+                message: Text::from("error")
+            }
+            .error_code(),
+            "M501"
+        );
+        assert_eq!(
+            MetaError::NormalizationDiverged {
+                ty: Text::from("T"),
+                iterations: 1000
+            }
+            .error_code(),
+            "M502"
+        );
+        assert_eq!(
+            MetaError::SMTVerificationFailed {
+                constraint: Text::from("x > 0"),
+                reason: Text::from("unsat")
+            }
+            .error_code(),
+            "M503"
+        );
+        assert_eq!(
+            MetaError::ProofConstructionFailed {
+                goal: Text::from("P"),
+                message: Text::from("error")
+            }
+            .error_code(),
+            "M504"
+        );
+        assert_eq!(
+            MetaError::RefinementViolation {
+                predicate: Text::from("x > 0"),
+                value: Text::from("-1")
+            }
+            .error_code(),
+            "M505"
+        );
+        assert_eq!(
+            MetaError::MetaWhereUnsatisfied {
+                constraint: Text::from("N > 0")
+            }
+            .error_code(),
+            "M506"
+        );
     }
 
     #[test]
     fn test_error_codes_m6xx() {
-        assert_eq!(MetaError::NonConstExpression {
-            expr: Text::from("f()"), reason: Text::from("not const")
-        }.error_code(), "M601");
-        assert_eq!(MetaError::ConstOverflow {
-            operation: Text::from("+"), value: Text::from("MAX + 1")
-        }.error_code(), "M602");
+        assert_eq!(
+            MetaError::NonConstExpression {
+                expr: Text::from("f()"),
+                reason: Text::from("not const")
+            }
+            .error_code(),
+            "M601"
+        );
+        assert_eq!(
+            MetaError::ConstOverflow {
+                operation: Text::from("+"),
+                value: Text::from("MAX + 1")
+            }
+            .error_code(),
+            "M602"
+        );
         assert_eq!(MetaError::DivisionByZero.error_code(), "M603");
-        assert_eq!(MetaError::ConstTypeMismatch {
-            expected: Text::from("Int"), found: Text::from("Text")
-        }.error_code(), "M604");
-        assert_eq!(MetaError::IndexOutOfBounds { index: 10, length: 5 }.error_code(), "M605");
-        assert_eq!(MetaError::PatternNotExhaustive {
-            missing: Text::from("None")
-        }.error_code(), "M606");
-        assert_eq!(MetaError::NoMatchingArm {
-            value: Text::from("42")
-        }.error_code(), "M607");
+        assert_eq!(
+            MetaError::ConstTypeMismatch {
+                expected: Text::from("Int"),
+                found: Text::from("Text")
+            }
+            .error_code(),
+            "M604"
+        );
+        assert_eq!(
+            MetaError::IndexOutOfBounds {
+                index: 10,
+                length: 5
+            }
+            .error_code(),
+            "M605"
+        );
+        assert_eq!(
+            MetaError::PatternNotExhaustive {
+                missing: Text::from("None")
+            }
+            .error_code(),
+            "M606"
+        );
+        assert_eq!(
+            MetaError::NoMatchingArm {
+                value: Text::from("42")
+            }
+            .error_code(),
+            "M607"
+        );
     }
 
     #[test]
     fn test_error_categories() {
-        assert_eq!(MetaError::MetaFunctionNotFound(Text::from("f")).category(), "Core Meta");
-        assert_eq!(MetaError::UnknownBuiltin(Text::from("f")).category(), "Builtin");
-        assert_eq!(MetaError::UnknownContext(Text::from("X")).category(), "Context");
-        assert_eq!(MetaError::ForbiddenOperation {
-            operation: Text::from("io"), reason: Text::from("")
-        }.category(), "Sandbox");
+        assert_eq!(
+            MetaError::MetaFunctionNotFound(Text::from("f")).category(),
+            "Core Meta"
+        );
+        assert_eq!(
+            MetaError::UnknownBuiltin(Text::from("f")).category(),
+            "Builtin"
+        );
+        assert_eq!(
+            MetaError::UnknownContext(Text::from("X")).category(),
+            "Context"
+        );
+        assert_eq!(
+            MetaError::ForbiddenOperation {
+                operation: Text::from("io"),
+                reason: Text::from("")
+            }
+            .category(),
+            "Sandbox"
+        );
         assert_eq!(MetaError::UnquoteOutsideQuote.category(), "Quote/Hygiene");
-        assert_eq!(MetaError::TypeReductionFailed {
-            ty: Text::from("T"), message: Text::from("")
-        }.category(), "Type-Level");
+        assert_eq!(
+            MetaError::TypeReductionFailed {
+                ty: Text::from("T"),
+                message: Text::from("")
+            }
+            .category(),
+            "Type-Level"
+        );
         assert_eq!(MetaError::DivisionByZero.category(), "Const Eval");
     }
 
     #[test]
     fn test_error_phases() {
         // Parser phase (1)
-        assert_eq!(MetaError::InvalidQuoteSyntax { message: Text::from("") }.phase(), 1);
+        assert_eq!(
+            MetaError::InvalidQuoteSyntax {
+                message: Text::from("")
+            }
+            .phase(),
+            1
+        );
         assert_eq!(MetaError::UnquoteOutsideQuote.phase(), 1);
-        assert_eq!(MetaError::InvalidTokenTree { message: Text::from("") }.phase(), 1);
+        assert_eq!(
+            MetaError::InvalidTokenTree {
+                message: Text::from("")
+            }
+            .phase(),
+            1
+        );
 
         // Name resolution phase (2)
         assert_eq!(MetaError::MetaFunctionNotFound(Text::from("f")).phase(), 2);
         assert_eq!(MetaError::UnknownContext(Text::from("X")).phase(), 2);
 
         // Type checking phase (3)
-        assert_eq!(MetaError::TypeMismatch {
-            expected: Text::from("Int"), found: Text::from("Text")
-        }.phase(), 3);
-        assert_eq!(MetaError::TypeReductionFailed {
-            ty: Text::from("T"), message: Text::from("")
-        }.phase(), 3);
+        assert_eq!(
+            MetaError::TypeMismatch {
+                expected: Text::from("Int"),
+                found: Text::from("Text")
+            }
+            .phase(),
+            3
+        );
+        assert_eq!(
+            MetaError::TypeReductionFailed {
+                ty: Text::from("T"),
+                message: Text::from("")
+            }
+            .phase(),
+            3
+        );
 
         // Evaluation phase (4)
         assert_eq!(MetaError::DivisionByZero.phase(), 4);
-        assert_eq!(MetaError::RecursionLimitExceeded { depth: 100, limit: 50 }.phase(), 4);
+        assert_eq!(
+            MetaError::RecursionLimitExceeded {
+                depth: 100,
+                limit: 50
+            }
+            .phase(),
+            4
+        );
 
         // Hygiene phase (5)
-        assert_eq!(MetaError::HygieneViolation {
-            identifier: Text::from("x"), message: Text::from("")
-        }.phase(), 5);
-        assert_eq!(MetaError::ScopeResolutionFailed {
-            name: Text::from("x"), message: Text::from("")
-        }.phase(), 5);
-        assert_eq!(MetaError::CaptureNotDeclared {
-            identifier: Text::from("x"), span: verum_common::Span::default()
-        }.phase(), 5);
-        assert_eq!(MetaError::RepetitionMismatch {
-            first_name: Text::from("a"), first_len: 2,
-            second_name: Text::from("b"), second_len: 3
-        }.phase(), 5);
+        assert_eq!(
+            MetaError::HygieneViolation {
+                identifier: Text::from("x"),
+                message: Text::from("")
+            }
+            .phase(),
+            5
+        );
+        assert_eq!(
+            MetaError::ScopeResolutionFailed {
+                name: Text::from("x"),
+                message: Text::from("")
+            }
+            .phase(),
+            5
+        );
+        assert_eq!(
+            MetaError::CaptureNotDeclared {
+                identifier: Text::from("x"),
+                span: verum_common::Span::default()
+            }
+            .phase(),
+            5
+        );
+        assert_eq!(
+            MetaError::RepetitionMismatch {
+                first_name: Text::from("a"),
+                first_len: 2,
+                second_name: Text::from("b"),
+                second_len: 3
+            }
+            .phase(),
+            5
+        );
     }
 }

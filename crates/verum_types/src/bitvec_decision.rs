@@ -179,10 +179,7 @@ pub enum BvOp {
 impl BvOp {
     /// Evaluate under a variable assignment. Unbound variables
     /// yield `None`; type mismatches yield `Err`.
-    pub fn evaluate(
-        &self,
-        env: &impl BvEnv,
-    ) -> Result<Option<BitVec>, BvError> {
+    pub fn evaluate(&self, env: &impl BvEnv) -> Result<Option<BitVec>, BvError> {
         Ok(match self {
             BvOp::Const(bv) => Some(*bv),
             BvOp::Var(name) => env.lookup(name),
@@ -197,12 +194,7 @@ impl BvOp {
     }
 }
 
-fn binop<F>(
-    a: &BvOp,
-    b: &BvOp,
-    env: &impl BvEnv,
-    op: F,
-) -> Result<Option<BitVec>, BvError>
+fn binop<F>(a: &BvOp, b: &BvOp, env: &impl BvEnv, op: F) -> Result<Option<BitVec>, BvError>
 where
     F: FnOnce(&BitVec, &BitVec) -> Result<BitVec, BvError>,
 {
@@ -415,30 +407,21 @@ mod tests {
     #[test]
     fn decide_eq_satisfied() {
         let env: HashMap<Text, BitVec> = HashMap::new();
-        let f = BvFormula::Eq(
-            BvOp::Const(bv8(5)),
-            BvOp::Const(bv8(5)),
-        );
+        let f = BvFormula::Eq(BvOp::Const(bv8(5)), BvOp::Const(bv8(5)));
         assert_eq!(decide(&f, &env).unwrap(), BvDecision::Satisfied);
     }
 
     #[test]
     fn decide_eq_violated() {
         let env: HashMap<Text, BitVec> = HashMap::new();
-        let f = BvFormula::Eq(
-            BvOp::Const(bv8(5)),
-            BvOp::Const(bv8(6)),
-        );
+        let f = BvFormula::Eq(BvOp::Const(bv8(5)), BvOp::Const(bv8(6)));
         assert_eq!(decide(&f, &env).unwrap(), BvDecision::Violated);
     }
 
     #[test]
     fn decide_eq_undecided_with_unbound() {
         let env: HashMap<Text, BitVec> = HashMap::new();
-        let f = BvFormula::Eq(
-            BvOp::Var(Text::from("x")),
-            BvOp::Const(bv8(5)),
-        );
+        let f = BvFormula::Eq(BvOp::Var(Text::from("x")), BvOp::Const(bv8(5)));
         assert_eq!(decide(&f, &env).unwrap(), BvDecision::Undecided);
     }
 
@@ -466,10 +449,7 @@ mod tests {
         let f = BvFormula::Or(
             [
                 BvFormula::Eq(BvOp::Const(bv8(0)), BvOp::Const(bv8(0))),
-                BvFormula::Eq(
-                    BvOp::Var(Text::from("dontcare")),
-                    BvOp::Const(bv8(5)),
-                ),
+                BvFormula::Eq(BvOp::Var(Text::from("dontcare")), BvOp::Const(bv8(5))),
             ]
             .into_iter()
             .collect(),

@@ -398,9 +398,7 @@ impl TierAnalyzer {
         // here gives operators visibility now without rebuilding
         // the analyzer when that wiring lands.
         let defaults = TierAnalysisConfig::default();
-        if (self.config.confidence_threshold - defaults.confidence_threshold).abs()
-            > f64::EPSILON
-        {
+        if (self.config.confidence_threshold - defaults.confidence_threshold).abs() > f64::EPSILON {
             tracing::debug!(
                 target: "verum_cbgr::tier_analysis",
                 confidence_threshold = self.config.confidence_threshold,
@@ -450,9 +448,9 @@ impl TierAnalyzer {
 
         // Phase 4: Compute async boundary info if needed
         let async_info = if self.config.analyze_async_boundaries && !timed_out(start, timeout) {
-            self.effect_info.as_ref().map(|ei| {
-                crate::promotion_decision::AsyncBoundaryInfo::compute(&self.cfg, ei)
-            })
+            self.effect_info
+                .as_ref()
+                .map(|ei| crate::promotion_decision::AsyncBoundaryInfo::compute(&self.cfg, ei))
         } else {
             None
         };
@@ -467,23 +465,26 @@ impl TierAnalyzer {
         };
 
         // Phase 6: Run ownership analysis (double-free, use-after-free detection)
-        let ownership_result = if self.config.enable_ownership_analysis && !timed_out(start, timeout) {
-            let ownership_analyzer = OwnershipAnalyzer::new(self.cfg.clone());
-            Some(ownership_analyzer.analyze())
-        } else {
-            None
-        };
+        let ownership_result =
+            if self.config.enable_ownership_analysis && !timed_out(start, timeout) {
+                let ownership_analyzer = OwnershipAnalyzer::new(self.cfg.clone());
+                Some(ownership_analyzer.analyze())
+            } else {
+                None
+            };
 
         // Phase 7: Run concurrency analysis (data race detection)
-        let concurrency_result = if self.config.enable_concurrency_analysis && !timed_out(start, timeout) {
-            let concurrency_analyzer = ConcurrencyAnalyzer::new(self.cfg.clone());
-            Some(concurrency_analyzer.analyze())
-        } else {
-            None
-        };
+        let concurrency_result =
+            if self.config.enable_concurrency_analysis && !timed_out(start, timeout) {
+                let concurrency_analyzer = ConcurrencyAnalyzer::new(self.cfg.clone());
+                Some(concurrency_analyzer.analyze())
+            } else {
+                None
+            };
 
         // Phase 8: Run lifetime analysis (borrow checking, with propagated max_iterations)
-        let lifetime_result = if self.config.enable_lifetime_analysis && !timed_out(start, timeout) {
+        let lifetime_result = if self.config.enable_lifetime_analysis && !timed_out(start, timeout)
+        {
             let mut lt_config = crate::lifetime_analysis::LifetimeAnalysisConfig::default();
             lt_config.max_iterations = self.config.max_iterations;
             let lifetime_analyzer = LifetimeAnalyzer::new(self.cfg.clone()).with_config(lt_config);
@@ -693,9 +694,7 @@ impl TierAnalyzer {
         // Map dominance decision to tier
         match dom_decision {
             DomPromotionDecision::PromoteToChecked => ReferenceTier::tier1(),
-            DomPromotionDecision::KeepManagedEscape => {
-                ReferenceTier::tier0(Tier0Reason::Escapes)
-            }
+            DomPromotionDecision::KeepManagedEscape => ReferenceTier::tier0(Tier0Reason::Escapes),
             DomPromotionDecision::KeepManagedDominance => {
                 ReferenceTier::tier0(Tier0Reason::DominanceFailure)
             }
@@ -929,7 +928,9 @@ mod tests {
     fn test_tier_result_is_promoted() {
         let mut result = TierAnalysisResult::empty();
         result.decisions.insert(RefId(0), ReferenceTier::tier1());
-        result.decisions.insert(RefId(1), ReferenceTier::tier0(Tier0Reason::Escapes));
+        result
+            .decisions
+            .insert(RefId(1), ReferenceTier::tier0(Tier0Reason::Escapes));
 
         assert!(result.is_promoted(RefId(0)));
         assert!(!result.is_promoted(RefId(1)));

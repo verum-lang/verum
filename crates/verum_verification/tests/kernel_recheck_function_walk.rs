@@ -81,11 +81,7 @@ fn regular_param(ty: Type) -> FunctionParam {
 /// Build a minimal `FunctionDecl` with the supplied parameter types
 /// and return type. Many fields default to neutral values; the
 /// recheck walker only consults `params` + `return_type` + `name`.
-fn make_function(
-    name: &str,
-    params: Vec<Type>,
-    return_type: Maybe<Type>,
-) -> FunctionDecl {
+fn make_function(name: &str, params: Vec<Type>, return_type: Maybe<Type>) -> FunctionDecl {
     let mut p_list: List<FunctionParam> = List::new();
     for ty in params {
         p_list.push(regular_param(ty));
@@ -121,7 +117,11 @@ fn make_function(
 
 #[test]
 fn recheck_function_no_refinements_returns_empty() {
-    let func = make_function("plain", vec![Type::int(span())], Maybe::Some(Type::int(span())));
+    let func = make_function(
+        "plain",
+        vec![Type::int(span())],
+        Maybe::Some(Type::int(span())),
+    );
     let outcomes = KernelRecheck::recheck_function(&func);
     assert_eq!(outcomes.len(), 0);
 }
@@ -185,7 +185,12 @@ fn recheck_function_walks_into_tuple_types() {
     let tuple_ty = Type::new(TypeKind::Tuple(tuple_elems), span());
     let func = make_function("t", vec![tuple_ty], Maybe::Some(Type::int(span())));
     let outcomes = KernelRecheck::recheck_function(&func);
-    assert_eq!(outcomes.len(), 1, "expected one refinement found, got {:?}", outcomes);
+    assert_eq!(
+        outcomes.len(),
+        1,
+        "expected one refinement found, got {:?}",
+        outcomes
+    );
     let (label, outcome) = outcomes.get(0).unwrap();
     assert!(label.as_str().contains("t"));
     assert!(outcome.is_ok());
@@ -282,7 +287,11 @@ fn recheck_function_walks_into_body_let_binding() {
     // refinement IS visible.
     assert_eq!(outcomes.len(), 1, "let-binding refinement must be walked");
     let (label, outcome) = outcomes.get(0).unwrap();
-    assert!(label.as_str().contains("let"), "label should mention 'let' context: {}", label.as_str());
+    assert!(
+        label.as_str().contains("let"),
+        "label should mention 'let' context: {}",
+        label.as_str()
+    );
     assert!(outcome.is_ok(), "well-formed predicate accepted");
 }
 
@@ -299,7 +308,10 @@ fn recheck_function_let_binding_modal_overshoot_rejected() {
     let outcomes = KernelRecheck::recheck_function(&func);
     assert_eq!(outcomes.len(), 1);
     let (_, outcome) = outcomes.get(0).unwrap();
-    assert!(outcome.is_err(), "modal overshoot in let-binding must reject");
+    assert!(
+        outcome.is_err(),
+        "modal overshoot in let-binding must reject"
+    );
 }
 
 #[test]
@@ -317,13 +329,23 @@ fn recheck_function_walks_signature_and_body() {
         body,
     );
     let outcomes = KernelRecheck::recheck_function(&func);
-    assert_eq!(outcomes.len(), 2, "both signature and body refinements visible");
+    assert_eq!(
+        outcomes.len(),
+        2,
+        "both signature and body refinements visible"
+    );
     let labels: Vec<String> = outcomes
         .iter()
         .map(|(l, _)| l.as_str().to_string())
         .collect();
-    assert!(labels.iter().any(|l| l.contains("param")), "signature refinement labelled");
-    assert!(labels.iter().any(|l| l.contains("let")), "body refinement labelled");
+    assert!(
+        labels.iter().any(|l| l.contains("param")),
+        "signature refinement labelled"
+    );
+    assert!(
+        labels.iter().any(|l| l.contains("let")),
+        "body refinement labelled"
+    );
 }
 
 #[test]
@@ -355,9 +377,16 @@ fn recheck_function_walks_into_nested_if_body() {
     let body = verum_ast::decl::FunctionBody::Block(block_with_stmts(vec![if_stmt]));
     let func = make_function_with_body("k", vec![], Maybe::Some(Type::int(span())), body);
     let outcomes = KernelRecheck::recheck_function(&func);
-    assert_eq!(outcomes.len(), 1, "refinement inside if-then block must be walked");
+    assert_eq!(
+        outcomes.len(),
+        1,
+        "refinement inside if-then block must be walked"
+    );
     let (_, outcome) = outcomes.get(0).unwrap();
-    assert!(outcome.is_err(), "modal overshoot inside if must still reject");
+    assert!(
+        outcome.is_err(),
+        "modal overshoot inside if must still reject"
+    );
 }
 
 #[test]
@@ -371,19 +400,28 @@ fn recheck_function_walks_into_nested_fn_inside_body() {
     let bad = refined_int(boxed, Maybe::None);
     let inner_fn = make_function("inner", vec![bad], Maybe::Some(Type::int(span())));
     // Build a Stmt::Item wrapping the inner fn.
-    let inner_item = verum_ast::Item::new(
-        verum_ast::decl::ItemKind::Function(inner_fn),
-        span(),
-    );
+    let inner_item = verum_ast::Item::new(verum_ast::decl::ItemKind::Function(inner_fn), span());
     let inner_stmt = verum_ast::stmt::Stmt::item(inner_item);
     let outer_body = verum_ast::decl::FunctionBody::Block(block_with_stmts(vec![inner_stmt]));
     let outer = make_function_with_body("outer", vec![], Maybe::None, outer_body);
     let outcomes = KernelRecheck::recheck_function(&outer);
     assert_eq!(outcomes.len(), 1, "nested fn refinement must be visible");
     let (label, outcome) = outcomes.get(0).unwrap();
-    assert!(label.as_str().contains("outer"), "label rooted on outer: {}", label.as_str());
-    assert!(label.as_str().contains("nested"), "label marked nested: {}", label.as_str());
-    assert!(label.as_str().contains("inner"), "label mentions inner: {}", label.as_str());
+    assert!(
+        label.as_str().contains("outer"),
+        "label rooted on outer: {}",
+        label.as_str()
+    );
+    assert!(
+        label.as_str().contains("nested"),
+        "label marked nested: {}",
+        label.as_str()
+    );
+    assert!(
+        label.as_str().contains("inner"),
+        "label mentions inner: {}",
+        label.as_str()
+    );
     assert!(outcome.is_err(), "modal overshoot in nested fn must reject");
 }
 
@@ -393,10 +431,7 @@ fn recheck_function_walks_into_clean_nested_fn() {
     let pred = path_expr("p");
     let good = refined_int(pred, Maybe::None);
     let inner_fn = make_function("inner", vec![good], Maybe::Some(Type::int(span())));
-    let inner_item = verum_ast::Item::new(
-        verum_ast::decl::ItemKind::Function(inner_fn),
-        span(),
-    );
+    let inner_item = verum_ast::Item::new(verum_ast::decl::ItemKind::Function(inner_fn), span());
     let inner_stmt = verum_ast::stmt::Stmt::item(inner_item);
     let outer_body = verum_ast::decl::FunctionBody::Block(block_with_stmts(vec![inner_stmt]));
     let outer = make_function_with_body("outer", vec![], Maybe::None, outer_body);
@@ -511,7 +546,11 @@ fn b9_requires_clause_with_modal_overshoot_let_binding_rejected() {
     );
     let func = make_function_with_contract("f", vec![req_block_expr], vec![]);
     let outcomes = KernelRecheck::recheck_function(&func);
-    assert_eq!(outcomes.len(), 1, "refinement in requires-clause must be walked");
+    assert_eq!(
+        outcomes.len(),
+        1,
+        "refinement in requires-clause must be walked"
+    );
     let (_, outcome) = outcomes.get(0).unwrap();
     assert!(outcome.is_err(), "modal overshoot in requires must reject");
 }
@@ -528,7 +567,11 @@ fn b9_ensures_clause_with_modal_overshoot_let_binding_rejected() {
     );
     let func = make_function_with_contract("g", vec![], vec![ens_block_expr]);
     let outcomes = KernelRecheck::recheck_function(&func);
-    assert_eq!(outcomes.len(), 1, "refinement in ensures-clause must be walked");
+    assert_eq!(
+        outcomes.len(),
+        1,
+        "refinement in ensures-clause must be walked"
+    );
     let (_, outcome) = outcomes.get(0).unwrap();
     assert!(outcome.is_err(), "modal overshoot in ensures must reject");
 }
@@ -557,7 +600,10 @@ fn b9_well_formed_let_in_ensures_clause_accepted() {
     let outcomes = KernelRecheck::recheck_function(&func);
     assert_eq!(outcomes.len(), 1);
     let (_, outcome) = outcomes.get(0).unwrap();
-    assert!(outcome.is_ok(), "well-formed ensures-let refinement accepted");
+    assert!(
+        outcome.is_ok(),
+        "well-formed ensures-let refinement accepted"
+    );
 }
 
 #[test]

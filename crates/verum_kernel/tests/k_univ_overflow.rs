@@ -18,9 +18,7 @@
 //! `infer` entry point.
 
 use verum_common::{Heap, List, Maybe};
-use verum_kernel::{
-    AxiomRegistry, Context, CoreTerm, KernelError, UniverseLevel, infer,
-};
+use verum_kernel::{AxiomRegistry, Context, CoreTerm, KernelError, UniverseLevel, infer};
 
 fn empty_axioms() -> AxiomRegistry {
     AxiomRegistry::new()
@@ -71,10 +69,7 @@ fn b1_universe_concrete_max_overflow_rejected() {
         Err(KernelError::UniverseLevelOverflow { level }) => {
             assert_eq!(level, u32::MAX);
         }
-        other => panic!(
-            "expected UniverseLevelOverflow, got {:?}",
-            other,
-        ),
+        other => panic!("expected UniverseLevelOverflow, got {:?}", other,),
     }
 }
 
@@ -116,10 +111,7 @@ fn b1_pi_formation_with_max_universe_rejected() {
         Err(KernelError::UniverseLevelOverflow { level }) => {
             assert_eq!(level, u32::MAX);
         }
-        other => panic!(
-            "expected overflow propagation through Pi, got {:?}",
-            other,
-        ),
+        other => panic!("expected overflow propagation through Pi, got {:?}", other,),
     }
     // Suppress unused-imports lint when nothing else references these.
     let _ = (List::<Heap<CoreTerm>>::new(), Maybe::<u32>::None);

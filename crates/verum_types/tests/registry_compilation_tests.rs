@@ -36,8 +36,8 @@ use verum_ast::{
     span::Span,
     ty::{Ident, Path, PathSegment},
 };
-use verum_modules::{ModuleId, ModulePath, ModuleRegistry};
 use verum_common::{Heap, List, Map, Maybe, Shared, Text};
+use verum_modules::{ModuleId, ModulePath, ModuleRegistry};
 use verum_types::context::TypeScheme;
 use verum_types::infer::*;
 use verum_types::ty::Type;
@@ -257,11 +257,14 @@ fn test_variant_pattern_with_registry_maybe() {
     let pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::single(Ident::new("Some".to_string(), span)),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("x".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("x".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -294,11 +297,14 @@ fn test_variant_pattern_with_registry_result() {
     let pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::single(Ident::new("Ok".to_string(), span)),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("value".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("value".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -342,11 +348,14 @@ fn test_variant_pattern_match_expression_with_registry() {
     let some_pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::single(Ident::new("Some".to_string(), span)),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("n".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("n".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -518,18 +527,21 @@ fn test_registry_variant_nested_with_records() {
     let pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::single(Ident::new("Err".to_string(), span)),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::new(
-                PatternKind::Record {
-                    path: Path::single(Ident::new("Error".to_string(), span)),
-                    fields: vec![
-                        FieldPattern::shorthand(Ident::new("code".to_string(), span)),
-                        FieldPattern::shorthand(Ident::new("message".to_string(), span)),
-                    ]
-                    .into(),
-                    rest: false,
-                },
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::new(
+                    PatternKind::Record {
+                        path: Path::single(Ident::new("Error".to_string(), span)),
+                        fields: vec![
+                            FieldPattern::shorthand(Ident::new("code".to_string(), span)),
+                            FieldPattern::shorthand(Ident::new("message".to_string(), span)),
+                        ]
+                        .into(),
+                        rest: false,
+                    },
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -580,11 +592,14 @@ fn test_registry_multiple_variants_with_complex_payloads() {
     let processing = Pattern::new(
         PatternKind::Variant {
             path: Path::single(Ident::new("Processing".to_string(), span)),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("task".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("task".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -718,11 +733,14 @@ fn test_registry_variant_binding_correctness() {
     let pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::single(Ident::new("Some".to_string(), span)),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("msg".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("msg".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -762,11 +780,14 @@ fn test_registry_complex_nested_pattern_binding() {
     let nested = Pattern::new(
         PatternKind::Variant {
             path: Path::single(Ident::new("Some".to_string(), span)),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("value".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("value".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );

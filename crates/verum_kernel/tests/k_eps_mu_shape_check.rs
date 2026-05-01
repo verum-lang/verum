@@ -18,7 +18,7 @@
 //! tracked under the multi-week K-Eps-Mu naturality witness item.
 
 use verum_common::{Heap, Text};
-use verum_kernel::{check_eps_mu_coherence, CoreTerm, KernelError};
+use verum_kernel::{CoreTerm, KernelError, check_eps_mu_coherence};
 
 fn var(name: &str) -> CoreTerm {
     CoreTerm::Var(Text::from(name))
@@ -69,8 +69,7 @@ fn v3_non_identity_distinct_free_vars_rejected() {
     // correctly with a free-var-mismatch diagnostic.
     let lhs = epsilon_of(var("M_α"));
     let rhs = alpha_of(epsilon_of(var("α")));
-    let err = check_eps_mu_coherence(&lhs, &rhs, "non_identity_M_distinct_vars")
-        .unwrap_err();
+    let err = check_eps_mu_coherence(&lhs, &rhs, "non_identity_M_distinct_vars").unwrap_err();
     match err {
         KernelError::EpsMuNaturalityFailed { context } => {
             assert!(
@@ -112,8 +111,7 @@ fn malformed_alpha_of_inner_non_epsilon_rejected() {
     // shape. V1 must reject this; V0 incorrectly accepted it.
     let lhs = epsilon_of(var("M_α"));
     let rhs = alpha_of(var("α"));
-    let err = check_eps_mu_coherence(&lhs, &rhs, "malformed_inner")
-        .unwrap_err();
+    let err = check_eps_mu_coherence(&lhs, &rhs, "malformed_inner").unwrap_err();
     match err {
         KernelError::EpsMuNaturalityFailed { context } => {
             assert_eq!(context.as_str(), "malformed_inner");
@@ -126,8 +124,7 @@ fn malformed_alpha_of_inner_non_epsilon_rejected() {
 fn unrelated_term_pair_rejected() {
     let lhs = var("α");
     let rhs = var("β");
-    let err = check_eps_mu_coherence(&lhs, &rhs, "unrelated_pair")
-        .unwrap_err();
+    let err = check_eps_mu_coherence(&lhs, &rhs, "unrelated_pair").unwrap_err();
     assert!(matches!(err, KernelError::EpsMuNaturalityFailed { .. }));
 }
 
@@ -137,8 +134,7 @@ fn alpha_of_without_epsilon_of_lhs_rejected() {
     // so the canonical shape doesn't match.
     let lhs = var("α");
     let rhs = alpha_of(epsilon_of(var("α")));
-    let err = check_eps_mu_coherence(&lhs, &rhs, "missing_lhs_epsilon")
-        .unwrap_err();
+    let err = check_eps_mu_coherence(&lhs, &rhs, "missing_lhs_epsilon").unwrap_err();
     assert!(matches!(err, KernelError::EpsMuNaturalityFailed { .. }));
 }
 
@@ -173,8 +169,7 @@ fn v3_modal_box_distinct_inner_var_rejected() {
     // tightens by also requiring free-var preservation.
     let lhs = epsilon_of(modal_box(var("α_prime")));
     let rhs = alpha_of(epsilon_of(modal_box(var("α"))));
-    let err = check_eps_mu_coherence(&lhs, &rhs, "v3_modal_box_var_mismatch")
-        .unwrap_err();
+    let err = check_eps_mu_coherence(&lhs, &rhs, "v3_modal_box_var_mismatch").unwrap_err();
     match err {
         KernelError::EpsMuNaturalityFailed { context } => {
             assert!(
@@ -253,7 +248,7 @@ fn v3_depth_check_uses_omega_aware_ranks_with_var_preservation() {
     // match; V3 adds the free-vars half of the necessary-condition
     // tuple.
     let m_alpha = modal_box(modal_box(modal_box(var("α"))));
-    let alpha   = modal_box(modal_box(modal_box(var("α"))));
+    let alpha = modal_box(modal_box(modal_box(var("α"))));
     let lhs = epsilon_of(m_alpha);
     let rhs = alpha_of(epsilon_of(alpha));
     assert!(
@@ -267,11 +262,10 @@ fn v3_depth_match_but_distinct_vars_rejected() {
     // Same rank (3) but distinct inner Var names: depth gate (a)
     // passes, free-vars gate (b) fails ⇒ reject under V3-incremental.
     let m_alpha = modal_box(modal_box(modal_box(var("M_α"))));
-    let alpha   = modal_box(modal_box(modal_box(var("α"))));
+    let alpha = modal_box(modal_box(modal_box(var("α"))));
     let lhs = epsilon_of(m_alpha);
     let rhs = alpha_of(epsilon_of(alpha));
-    let err = check_eps_mu_coherence(&lhs, &rhs, "v3_depth_match_var_mismatch")
-        .unwrap_err();
+    let err = check_eps_mu_coherence(&lhs, &rhs, "v3_depth_match_var_mismatch").unwrap_err();
     match err {
         KernelError::EpsMuNaturalityFailed { context } => {
             assert!(

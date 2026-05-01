@@ -58,8 +58,8 @@
 //! ```
 
 use verum_ast::{Expr, ExprKind, Literal, LiteralKind};
-use verum_common::{Heap, List, Map, Maybe, Set, Text};
 use verum_common::ToText;
+use verum_common::{Heap, List, Map, Maybe, Set, Text};
 
 use crate::context::Context;
 use crate::proof_term_unified::ProofTerm;

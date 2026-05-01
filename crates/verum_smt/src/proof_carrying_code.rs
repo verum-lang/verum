@@ -155,16 +155,11 @@ impl ProofBundle {
     /// goal hash with a *different* proof, returns
     /// `Err(BundleError::Conflict)` — same goal can't have two
     /// distinct proofs in the same bundle.
-    pub fn add(
-        &mut self,
-        cert: ProofCertificate,
-    ) -> Result<(), BundleError> {
+    pub fn add(&mut self, cert: ProofCertificate) -> Result<(), BundleError> {
         let h = cert.goal_hash();
         if let Some(existing) = self.certificates.get(&h) {
             if existing != &cert {
-                return Err(BundleError::Conflict {
-                    goal_hash: h,
-                });
+                return Err(BundleError::Conflict { goal_hash: h });
             }
             return Ok(());
         }
@@ -380,32 +375,22 @@ mod tests {
     #[test]
     fn total_duration_sums_cert_durations() {
         let mut b = ProofBundle::new();
-        b.add(ProofCertificate::new(
-            "g1", "z3", "p1", 50, "t",
-        ))
-        .unwrap();
-        b.add(ProofCertificate::new(
-            "g2", "z3", "p2", 250, "t",
-        ))
-        .unwrap();
-        b.add(ProofCertificate::new(
-            "g3", "z3", "p3", 700, "t",
-        ))
-        .unwrap();
+        b.add(ProofCertificate::new("g1", "z3", "p1", 50, "t"))
+            .unwrap();
+        b.add(ProofCertificate::new("g2", "z3", "p2", 250, "t"))
+            .unwrap();
+        b.add(ProofCertificate::new("g3", "z3", "p3", 700, "t"))
+            .unwrap();
         assert_eq!(b.metadata().total_duration_ms, 1000);
     }
 
     #[test]
     fn duration_saturates_on_overflow() {
         let mut b = ProofBundle::new();
-        b.add(ProofCertificate::new(
-            "g1", "z3", "p1", u64::MAX, "t",
-        ))
-        .unwrap();
-        b.add(ProofCertificate::new(
-            "g2", "z3", "p2", 100, "t",
-        ))
-        .unwrap();
+        b.add(ProofCertificate::new("g1", "z3", "p1", u64::MAX, "t"))
+            .unwrap();
+        b.add(ProofCertificate::new("g2", "z3", "p2", 100, "t"))
+            .unwrap();
         assert_eq!(b.metadata().total_duration_ms, u64::MAX);
     }
 

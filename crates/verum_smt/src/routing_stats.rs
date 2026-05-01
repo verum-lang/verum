@@ -161,9 +161,7 @@ impl TheoryClass {
     /// Priority order (first match wins):
     ///  sequences > strings > NRA > NIA > arrays > BV > datatypes >
     ///  LRA > LIA > quantifiers > UF > propositional > mixed
-    pub fn classify(
-        chars: &crate::capability_router::ExtendedCharacteristics,
-    ) -> TheoryClass {
+    pub fn classify(chars: &crate::capability_router::ExtendedCharacteristics) -> TheoryClass {
         if chars.has_sequences {
             TheoryClass::Sequences
         } else if chars.has_strings || chars.has_regex {
@@ -271,11 +269,7 @@ impl RoutingStats {
     }
 
     /// Record a routing decision.
-    pub fn record_routing(
-        &self,
-        choice: &SolverChoice,
-        theory: TheoryClass,
-    ) {
+    pub fn record_routing(&self, choice: &SolverChoice, theory: TheoryClass) {
         self.total_queries.fetch_add(1, Ordering::Relaxed);
 
         let mut per_theory = self.per_theory.lock();
@@ -302,12 +296,7 @@ impl RoutingStats {
     }
 
     /// Record the outcome of a solve.
-    pub fn record_outcome(
-        &self,
-        theory: TheoryClass,
-        verdict: &SolverVerdict,
-        elapsed: Duration,
-    ) {
+    pub fn record_outcome(&self, theory: TheoryClass, verdict: &SolverVerdict, elapsed: Duration) {
         self.total_nanos
             .fetch_add(elapsed.as_nanos() as u64, Ordering::Relaxed);
 
@@ -393,17 +382,32 @@ impl RoutingStats {
         out.push_str("╭─────────────────────────────────────────────────────────╮\n");
         out.push_str("│         Verum SMT Router Statistics                      │\n");
         out.push_str("├─────────────────────────────────────────────────────────┤\n");
-        out.push_str(&format!("│  Total queries:        {:>10}                      │\n", total));
+        out.push_str(&format!(
+            "│  Total queries:        {:>10}                      │\n",
+            total
+        ));
 
         if total > 0 {
-            out.push_str(&format!("│  Routed to Z3 only:    {:>10}  ({:>5.1}%)              │\n",
-                z3_only, 100.0 * z3_only as f64 / total as f64));
-            out.push_str(&format!("│  Routed to CVC5 only:  {:>10}  ({:>5.1}%)              │\n",
-                cvc5_only, 100.0 * cvc5_only as f64 / total as f64));
-            out.push_str(&format!("│  Portfolio:            {:>10}  ({:>5.1}%)              │\n",
-                portfolio, 100.0 * portfolio as f64 / total as f64));
-            out.push_str(&format!("│  Cross-validate:       {:>10}  ({:>5.1}%)              │\n",
-                cross_validate, 100.0 * cross_validate as f64 / total as f64));
+            out.push_str(&format!(
+                "│  Routed to Z3 only:    {:>10}  ({:>5.1}%)              │\n",
+                z3_only,
+                100.0 * z3_only as f64 / total as f64
+            ));
+            out.push_str(&format!(
+                "│  Routed to CVC5 only:  {:>10}  ({:>5.1}%)              │\n",
+                cvc5_only,
+                100.0 * cvc5_only as f64 / total as f64
+            ));
+            out.push_str(&format!(
+                "│  Portfolio:            {:>10}  ({:>5.1}%)              │\n",
+                portfolio,
+                100.0 * portfolio as f64 / total as f64
+            ));
+            out.push_str(&format!(
+                "│  Cross-validate:       {:>10}  ({:>5.1}%)              │\n",
+                cross_validate,
+                100.0 * cross_validate as f64 / total as f64
+            ));
         }
 
         let z3_wins = self.z3_portfolio_wins.load(Ordering::Relaxed);
@@ -411,10 +415,16 @@ impl RoutingStats {
         let portfolio_total = z3_wins + cvc5_wins;
         if portfolio_total > 0 {
             out.push_str("├─────────────────────────────────────────────────────────┤\n");
-            out.push_str(&format!("│  Portfolio Z3 wins:    {:>10}  ({:>5.1}%)              │\n",
-                z3_wins, 100.0 * z3_wins as f64 / portfolio_total as f64));
-            out.push_str(&format!("│  Portfolio CVC5 wins:  {:>10}  ({:>5.1}%)              │\n",
-                cvc5_wins, 100.0 * cvc5_wins as f64 / portfolio_total as f64));
+            out.push_str(&format!(
+                "│  Portfolio Z3 wins:    {:>10}  ({:>5.1}%)              │\n",
+                z3_wins,
+                100.0 * z3_wins as f64 / portfolio_total as f64
+            ));
+            out.push_str(&format!(
+                "│  Portfolio CVC5 wins:  {:>10}  ({:>5.1}%)              │\n",
+                cvc5_wins,
+                100.0 * cvc5_wins as f64 / portfolio_total as f64
+            ));
         }
 
         let cv_agreed = self.cross_validate_agreed.load(Ordering::Relaxed);
@@ -422,11 +432,20 @@ impl RoutingStats {
         let cv_incomplete = self.cross_validate_incomplete.load(Ordering::Relaxed);
         if cv_agreed + cv_diverged + cv_incomplete > 0 {
             out.push_str("├─────────────────────────────────────────────────────────┤\n");
-            out.push_str(&format!("│  Cross-val agreed:     {:>10}                       │\n", cv_agreed));
+            out.push_str(&format!(
+                "│  Cross-val agreed:     {:>10}                       │\n",
+                cv_agreed
+            ));
             if cv_diverged > 0 {
-                out.push_str(&format!("│  Cross-val DIVERGED:   {:>10}  ⚠ CHECK LOG         │\n", cv_diverged));
+                out.push_str(&format!(
+                    "│  Cross-val DIVERGED:   {:>10}  ⚠ CHECK LOG         │\n",
+                    cv_diverged
+                ));
             }
-            out.push_str(&format!("│  Cross-val incomplete: {:>10}                       │\n", cv_incomplete));
+            out.push_str(&format!(
+                "│  Cross-val incomplete: {:>10}                       │\n",
+                cv_incomplete
+            ));
         }
 
         let sat = self.total_sat.load(Ordering::Relaxed);
@@ -434,15 +453,30 @@ impl RoutingStats {
         let unknown = self.total_unknown.load(Ordering::Relaxed);
         let errors = self.total_errors.load(Ordering::Relaxed);
         out.push_str("├─────────────────────────────────────────────────────────┤\n");
-        out.push_str(&format!("│  SAT:                  {:>10}                       │\n", sat));
-        out.push_str(&format!("│  UNSAT:                {:>10}                       │\n", unsat));
-        out.push_str(&format!("│  Unknown:              {:>10}                       │\n", unknown));
-        out.push_str(&format!("│  Errors/cancelled:     {:>10}                       │\n", errors));
+        out.push_str(&format!(
+            "│  SAT:                  {:>10}                       │\n",
+            sat
+        ));
+        out.push_str(&format!(
+            "│  UNSAT:                {:>10}                       │\n",
+            unsat
+        ));
+        out.push_str(&format!(
+            "│  Unknown:              {:>10}                       │\n",
+            unknown
+        ));
+        out.push_str(&format!(
+            "│  Errors/cancelled:     {:>10}                       │\n",
+            errors
+        ));
 
         let total_nanos = self.total_nanos.load(Ordering::Relaxed);
         if total > 0 {
             let avg_ms = (total_nanos as f64 / 1_000_000.0) / total as f64;
-            out.push_str(&format!("│  Avg time per query:   {:>10.2} ms                    │\n", avg_ms));
+            out.push_str(&format!(
+                "│  Avg time per query:   {:>10.2} ms                    │\n",
+                avg_ms
+            ));
         }
 
         out.push_str("├─────────────────────────────────────────────────────────┤\n");
@@ -569,7 +603,9 @@ mod tests {
         );
         stats.record_outcome(
             TheoryClass::BitVectors,
-            &SolverVerdict::Unknown { reason: "timeout".into() },
+            &SolverVerdict::Unknown {
+                reason: "timeout".into(),
+            },
             Duration::from_millis(10_000),
         );
 
@@ -612,12 +648,12 @@ mod tests {
     fn theory_classification_priority() {
         let mut chars = ExtendedCharacteristics::default();
         chars.has_nonlinear_real = true;
-        chars.base.is_qflia = true;  // Should NOT dominate
+        chars.base.is_qflia = true; // Should NOT dominate
         assert_eq!(TheoryClass::classify(&chars), TheoryClass::NonlinearReal);
 
         let mut chars = ExtendedCharacteristics::default();
         chars.has_sequences = true;
-        chars.has_strings = true;  // Should NOT dominate
+        chars.has_strings = true; // Should NOT dominate
         assert_eq!(TheoryClass::classify(&chars), TheoryClass::Sequences);
     }
 
@@ -625,7 +661,10 @@ mod tests {
     fn report_generates_readable_output() {
         let stats = RoutingStats::new();
         stats.record_routing(
-            &SolverChoice::Z3Only { confidence: 0.9, reason: "test".into() },
+            &SolverChoice::Z3Only {
+                confidence: 0.9,
+                reason: "test".into(),
+            },
             TheoryClass::LinearInt,
         );
         stats.record_outcome(
@@ -657,7 +696,10 @@ mod tests {
         let stats = RoutingStats::new();
         stats.total_queries.store(100, Ordering::Relaxed);
         stats.record_routing(
-            &SolverChoice::Z3Only { confidence: 0.9, reason: "t".into() },
+            &SolverChoice::Z3Only {
+                confidence: 0.9,
+                reason: "t".into(),
+            },
             TheoryClass::LinearInt,
         );
         stats.reset();

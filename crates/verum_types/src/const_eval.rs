@@ -180,10 +180,8 @@ impl MetaFunction {
         for param in &decl.params {
             match &param.kind {
                 FunctionParamKind::Regular { pattern, .. } => {
-                    {
-                        let name = Self::extract_pattern_name(pattern)?;
-                        param_names.push(name);
-                    }
+                    let name = Self::extract_pattern_name(pattern)?;
+                    param_names.push(name);
                 }
                 // Self parameters are not valid in meta functions
                 _ => return None,
@@ -532,13 +530,11 @@ impl ConstEvaluator {
         };
 
         // Look up the function
-        let meta_fn = self
-            .functions
-            .get(&func_name)
-            .cloned()
-            .ok_or_else(|| ConstEvalError::UndefinedFunction {
+        let meta_fn = self.functions.get(&func_name).cloned().ok_or_else(|| {
+            ConstEvalError::UndefinedFunction {
                 name: func_name.clone(),
-            })?;
+            }
+        })?;
 
         // Check if it's a meta function
         if !meta_fn.is_meta {
@@ -777,7 +773,8 @@ impl ConstEvaluator {
     fn try_bind_pattern(&mut self, pattern: &Pattern, value: &ConstValue) -> bool {
         match &pattern.kind {
             PatternKind::Ident { name, .. } => {
-                self.env.insert(Text::from(name.name.as_str()), value.clone());
+                self.env
+                    .insert(Text::from(name.name.as_str()), value.clone());
                 true
             }
 
@@ -844,10 +841,11 @@ impl ConstEvaluator {
             let result = match cond_kind {
                 ConditionKind::Expr(expr) => {
                     let val = self.eval(expr)?;
-                    val.as_bool_value().ok_or_else(|| ConstEvalError::TypeError {
-                        expected: Text::from("bool"),
-                        actual: format!("{}", val).into(),
-                    })?
+                    val.as_bool_value()
+                        .ok_or_else(|| ConstEvalError::TypeError {
+                            expected: Text::from("bool"),
+                            actual: format!("{}", val).into(),
+                        })?
                 }
 
                 ConditionKind::Let { pattern, value } => {
@@ -1197,7 +1195,7 @@ impl ConstEvaluator {
                 return Err(ConstEvalError::TypeError {
                     expected: Text::from("integer shift amount"),
                     actual: format!("{}", right).into(),
-                })
+                });
             }
         };
 
@@ -1249,7 +1247,7 @@ impl ConstEvaluator {
                 return Err(ConstEvalError::TypeError {
                     expected: Text::from("integer shift amount"),
                     actual: format!("{}", right).into(),
-                })
+                });
             }
         };
 
@@ -1583,10 +1581,7 @@ mod tests {
     /// Helper to create a path/variable expression
     fn var_expr(name: &str) -> Expr {
         let ident = Ident::new(Text::from(name), Span::dummy());
-        Expr::new(
-            ExprKind::Path(Path::single(ident)),
-            Span::dummy(),
-        )
+        Expr::new(ExprKind::Path(Path::single(ident)), Span::dummy())
     }
 
     /// Helper to create a binary expression
@@ -1940,7 +1935,11 @@ mod tests {
         let block = Block {
             stmts: List::from_iter([Stmt::new(
                 StmtKind::Let {
-                    pattern: Pattern::ident(Ident::new(Text::from("x"), Span::dummy()), false, Span::dummy()),
+                    pattern: Pattern::ident(
+                        Ident::new(Text::from("x"), Span::dummy()),
+                        false,
+                        Span::dummy(),
+                    ),
                     ty: Maybe::None,
                     value: Maybe::Some(int_lit(5)),
                 },
@@ -1965,7 +1964,11 @@ mod tests {
         let block = Block {
             stmts: List::from_iter([Stmt::new(
                 StmtKind::Let {
-                    pattern: Pattern::ident(Ident::new(Text::from("x"), Span::dummy()), false, Span::dummy()),
+                    pattern: Pattern::ident(
+                        Ident::new(Text::from("x"), Span::dummy()),
+                        false,
+                        Span::dummy(),
+                    ),
                     ty: Maybe::None,
                     value: Maybe::Some(int_lit(5)),
                 },
@@ -2060,11 +2063,7 @@ mod tests {
     /// MAX_RECURSION_DEPTH = 256 limit; post-#303 the limit is
     /// configurable via `with_max_depth`.
     fn build_recursive_eval(max_depth: usize) -> ConstEvaluator {
-        let recur_fn = meta_fn(
-            "recur",
-            &["n"],
-            call_expr("recur", vec![var_expr("n")]),
-        );
+        let recur_fn = meta_fn("recur", &["n"], call_expr("recur", vec![var_expr("n")]));
         let mut eval = ConstEvaluator::new().with_max_depth(max_depth);
         eval.register_meta_function(recur_fn);
         eval

@@ -36,13 +36,13 @@ use verum_ast::decl::{
     FunctionBody, FunctionDecl, ItemKind, ProtocolDecl, ProtocolItemKind, TypeDecl, TypeDeclBody,
 };
 use verum_ast::{Expr, ExprKind, Item, LiteralKind, Module, Type, TypeKind};
+use verum_common::{List, Text};
 use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
+use verum_smt::verify_strategy::extract_from_attributes;
 use verum_smt::{
     Context, ContextConfig, ContractSpec, CounterExample, CounterExampleCategorizer,
     FailureCategory, ProofResult, RslClause, RslClauseKind, RslParser, Translator, VerifyMode,
 };
-use verum_smt::verify_strategy::extract_from_attributes;
-use verum_common::{List, Text};
 
 use super::{
     CompilationPhase, PhaseData, PhaseInput, PhaseMetrics, PhaseOutput, VerifiedContractRegistry,
@@ -370,7 +370,8 @@ impl ContractVerificationPhase {
                     // rechecks — the SMT phase has nothing to add.
                     tracing::debug!(
                         "Skipping SMT for {} — strategy {:?} bypasses the SMT phase",
-                        func.name, s
+                        func.name,
+                        s
                     );
                     stats.functions_with_contracts += 1;
                     stats.functions_skipped_smt += 1;
@@ -378,9 +379,7 @@ impl ContractVerificationPhase {
                 }
                 VS::Fast => stats.functions_strategy_fast += 1,
                 VS::Formal => stats.functions_strategy_formal += 1,
-                VS::Thorough | VS::Reliable => {
-                    stats.functions_strategy_thorough += 1
-                }
+                VS::Thorough | VS::Reliable => stats.functions_strategy_thorough += 1,
                 VS::Certified => stats.functions_strategy_certified += 1,
                 VS::Synthesize => stats.functions_strategy_synthesize += 1,
                 // Newer VerifyStrategy variants added by parallel
@@ -1427,10 +1426,7 @@ mod tests {
 
         let mut assignments: verum_common::Map<Text, verum_smt::CounterExampleValue> =
             verum_common::Map::new();
-        assignments.insert(
-            Text::from("x"),
-            verum_smt::CounterExampleValue::Int(0),
-        );
+        assignments.insert(Text::from("x"), verum_smt::CounterExampleValue::Int(0));
         let ce = CounterExample::new(assignments, Text::from("x > 0"));
         let suggestions: List<Text> = List::from_iter(vec![Text::from("widen the precondition")]);
         let diag = phase.create_verification_failure_diagnostic_with_severity(
@@ -1513,11 +1509,7 @@ mod tests {
             let path_expr = Expr::ident(name);
             let mut args = List::new();
             args.push(path_expr);
-            Attribute::new(
-                Text::from("verify"),
-                Maybe::Some(args),
-                Span::dummy(),
-            )
+            Attribute::new(Text::from("verify"), Maybe::Some(args), Span::dummy())
         };
 
         for (name, expected) in [
@@ -1531,9 +1523,8 @@ mod tests {
         ] {
             let mut attrs = List::new();
             attrs.push(mk(name));
-            let got = extract_from_attributes(&attrs).unwrap_or_else(|| {
-                panic!("strategy '{}' should parse", name)
-            });
+            let got = extract_from_attributes(&attrs)
+                .unwrap_or_else(|| panic!("strategy '{}' should parse", name));
             assert!(
                 std::mem::discriminant(&got) == std::mem::discriminant(&expected),
                 "strategy '{}' mis-parsed (got {:?}, expected {:?})",
@@ -1548,8 +1539,8 @@ mod tests {
     /// phase fall back to its configured default strategy.
     #[test]
     fn test_extract_from_attributes_absent() {
-        use verum_common::List;
         use verum_ast::attr::Attribute;
+        use verum_common::List;
         let attrs: List<Attribute> = List::new();
         assert!(extract_from_attributes(&attrs).is_none());
     }

@@ -107,7 +107,7 @@ unsafe extern "C" {
     /// Creates a remark parser that can be used to parse the buffer located in
     /// Buf of size Size bytes.
     pub fn LLVMRemarkParserCreateYAML(Buf: *const ::libc::c_void, Size: u64)
-        -> LLVMRemarkParserRef;
+    -> LLVMRemarkParserRef;
 
     pub fn LLVMRemarkParserCreateBitstream(
         Buf: *const ::libc::c_void,

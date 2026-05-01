@@ -131,16 +131,20 @@ fn extract_prelude_paths(src: &str) -> Vec<String> {
 
     while cursor < bytes.len() {
         // Find the next `mount` keyword on a token boundary.
-        let Some(rel) = stripped[cursor..].find("mount") else { break; };
+        let Some(rel) = stripped[cursor..].find("mount") else {
+            break;
+        };
         let kw_pos = cursor + rel;
-        let preceded_ok = kw_pos == 0
-            || matches!(bytes[kw_pos - 1], b' ' | b'\t' | b'\n' | b'\r');
+        let preceded_ok = kw_pos == 0 || matches!(bytes[kw_pos - 1], b' ' | b'\t' | b'\n' | b'\r');
         let followed_ok = matches!(bytes.get(kw_pos + 5), Some(b' ' | b'\t' | b'\n'));
         if !preceded_ok || !followed_ok {
             cursor = kw_pos + 5;
             continue;
         }
-        let stmt_end = stripped[kw_pos..].find(';').map(|p| kw_pos + p).unwrap_or(stripped.len());
+        let stmt_end = stripped[kw_pos..]
+            .find(';')
+            .map(|p| kw_pos + p)
+            .unwrap_or(stripped.len());
         let body = stripped[kw_pos + 5..stmt_end].trim();
         cursor = stmt_end + 1;
 
@@ -162,7 +166,8 @@ fn accumulate_prelude_paths(body: &str, out: &mut Vec<String>) {
     let body = match body.find(" as ") {
         Some(p) => &body[..p],
         None => body,
-    }.trim();
+    }
+    .trim();
 
     if let Some(brace_open) = body.find('{') {
         let prefix = body[..brace_open].trim_end_matches('.').trim();
@@ -172,7 +177,9 @@ fn accumulate_prelude_paths(body: &str, out: &mut Vec<String>) {
         let leaves = &inner[..close];
         for leaf in leaves.split(',') {
             let leaf = leaf.trim();
-            if leaf.is_empty() { continue; }
+            if leaf.is_empty() {
+                continue;
+            }
             let leaf_head = leaf.split_whitespace().next().unwrap_or("");
             let leaf_head = leaf_head.split('{').next().unwrap_or(leaf_head);
             if leaf_head == "*" || leaf_head.is_empty() {
@@ -201,7 +208,10 @@ fn strip_comments(src: &str) -> String {
     while i < bytes.len() {
         let c = bytes[i];
         if in_line {
-            if c == b'\n' { in_line = false; out.push('\n'); }
+            if c == b'\n' {
+                in_line = false;
+                out.push('\n');
+            }
             i += 1;
             continue;
         }
@@ -211,22 +221,41 @@ fn strip_comments(src: &str) -> String {
                 i += 2;
                 continue;
             }
-            if c == b'\n' { out.push('\n'); }
+            if c == b'\n' {
+                out.push('\n');
+            }
             i += 1;
             continue;
         }
         if in_string {
             if c == b'\\' && i + 1 < bytes.len() {
-                out.push(c as char); out.push(bytes[i + 1] as char); i += 2; continue;
+                out.push(c as char);
+                out.push(bytes[i + 1] as char);
+                i += 2;
+                continue;
             }
-            if c == b'"' { in_string = false; }
-            out.push(c as char); i += 1; continue;
+            if c == b'"' {
+                in_string = false;
+            }
+            out.push(c as char);
+            i += 1;
+            continue;
         }
         if c == b'/' && i + 1 < bytes.len() {
-            if bytes[i + 1] == b'/' { in_line = true; i += 2; continue; }
-            if bytes[i + 1] == b'*' { in_block = true; i += 2; continue; }
+            if bytes[i + 1] == b'/' {
+                in_line = true;
+                i += 2;
+                continue;
+            }
+            if bytes[i + 1] == b'*' {
+                in_block = true;
+                i += 2;
+                continue;
+            }
         }
-        if c == b'"' { in_string = true; }
+        if c == b'"' {
+            in_string = true;
+        }
         out.push(c as char);
         i += 1;
     }
@@ -277,7 +306,10 @@ fn walk_tree(prefix: &str, tree: &MountTree, out: &mut Vec<String>) {
             // glob expander walks every submodule under it.
             push_with_parent(combine(prefix, p), out);
         }
-        MountTreeKind::Nested { prefix: inner_prefix, trees } => {
+        MountTreeKind::Nested {
+            prefix: inner_prefix,
+            trees,
+        } => {
             let new_prefix = combine(prefix, inner_prefix);
             // The prefix module itself is needed (its mod.vr re-exports
             // the leaves).
@@ -305,7 +337,9 @@ fn push_with_parent(path: String, out: &mut Vec<String>) {
         let parent = &current[..dot];
         // Stop one segment above `core`. The owning crate root is
         // implicitly available — no need to drag it into the BFS.
-        if parent.is_empty() || parent == "core" { break; }
+        if parent.is_empty() || parent == "core" {
+            break;
+        }
         out.push(parent.to_string());
         current = parent;
     }
@@ -354,14 +388,16 @@ fn expand_glob(index: &StdlibModuleIndex, prefix: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use verum_ast::{
-        Ident, MountDecl, MountTree, MountTreeKind, Path, PathSegment, Visibility,
-    };
     use verum_ast::span::Span;
+    use verum_ast::{Ident, MountDecl, MountTree, MountTreeKind, Path, PathSegment, Visibility};
     use verum_common::Maybe;
 
-    fn dummy_span() -> Span { Span::dummy() }
-    fn ident(s: &str) -> Ident { Ident::new(s, dummy_span()) }
+    fn dummy_span() -> Span {
+        Span::dummy()
+    }
+    fn ident(s: &str) -> Ident {
+        Ident::new(s, dummy_span())
+    }
     fn path(parts: &[&str]) -> Path {
         Path {
             segments: parts.iter().map(|p| PathSegment::Name(ident(p))).collect(),
@@ -400,9 +436,9 @@ mod tests {
     #[test]
     fn path_mount_pushes_parents() {
         // mount core.shell.exec
-        let m = user_module_with_mounts(vec![
-            mount_decl(MountTreeKind::Path(path(&["core", "shell", "exec"])))
-        ]);
+        let m = user_module_with_mounts(vec![mount_decl(MountTreeKind::Path(path(&[
+            "core", "shell", "exec",
+        ])))]);
         let seeds = collect_user_mount_seeds(&m);
         assert!(seeds.contains(&"core.shell.exec".to_string()));
         assert!(seeds.contains(&"core.shell".to_string()));
@@ -418,9 +454,18 @@ mod tests {
         let nested = MountTreeKind::Nested {
             prefix: path(&["core", "shell"]),
             trees: vec![
-                MountTree { kind: MountTreeKind::Path(path(&["exec"])), alias: Maybe::None, span: dummy_span() },
-                MountTree { kind: MountTreeKind::Path(path(&["jobs"])), alias: Maybe::None, span: dummy_span() },
-            ].into(),
+                MountTree {
+                    kind: MountTreeKind::Path(path(&["exec"])),
+                    alias: Maybe::None,
+                    span: dummy_span(),
+                },
+                MountTree {
+                    kind: MountTreeKind::Path(path(&["jobs"])),
+                    alias: Maybe::None,
+                    span: dummy_span(),
+                },
+            ]
+            .into(),
         };
         let m = user_module_with_mounts(vec![mount_decl(nested)]);
         let seeds = collect_user_mount_seeds(&m);
@@ -432,9 +477,9 @@ mod tests {
     #[test]
     fn glob_mount_records_prefix() {
         // mount core.shell.*
-        let m = user_module_with_mounts(vec![
-            mount_decl(MountTreeKind::Glob(path(&["core", "shell"])))
-        ]);
+        let m = user_module_with_mounts(vec![mount_decl(MountTreeKind::Glob(path(&[
+            "core", "shell",
+        ])))]);
         let seeds = collect_user_mount_seeds(&m);
         assert!(seeds.contains(&"core.shell".to_string()));
     }
@@ -442,20 +487,27 @@ mod tests {
     #[test]
     fn end_to_end_reachability_for_shell_exec() {
         // Skip if no embedded stdlib (minimal build).
-        let Some(_) = crate::stdlib_dep_graph::get_dep_graph() else { return; };
-        let m = user_module_with_mounts(vec![
-            mount_decl(MountTreeKind::Path(path(&["core", "shell", "exec"])))
-        ]);
+        let Some(_) = crate::stdlib_dep_graph::get_dep_graph() else {
+            return;
+        };
+        let m = user_module_with_mounts(vec![mount_decl(MountTreeKind::Path(path(&[
+            "core", "shell", "exec",
+        ])))]);
         let reachable = compute_reachable_stdlib_modules(&m).unwrap();
-        assert!(reachable.contains("core.shell.exec"),
-            "should include the directly-mounted module");
+        assert!(
+            reachable.contains("core.shell.exec"),
+            "should include the directly-mounted module"
+        );
         let index = crate::stdlib_index::get_module_index().unwrap();
         // Reachability should be a small fraction of the full stdlib —
         // the whole point of this pass. A regression that cascades to
         // every module (e.g. via an unsuppressed prelude glob) would
         // trip this assertion.
-        assert!(reachable.len() < index.len() / 2,
+        assert!(
+            reachable.len() < index.len() / 2,
             "reachable {} should be much smaller than total {}",
-            reachable.len(), index.len());
+            reachable.len(),
+            index.len()
+        );
     }
 }

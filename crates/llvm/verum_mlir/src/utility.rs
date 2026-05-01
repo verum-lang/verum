@@ -4,21 +4,20 @@ use crate::{
     Error, context::Context, dialect::DialectRegistry, ir::Module, logical_result::LogicalResult,
     pass, string_ref::StringRef,
 };
-use verum_mlir_sys::{
-    MlirStringRef, mlirDialectHandleInsertDialect, mlirGetDialectHandle__amdgpu__,
-    mlirGetDialectHandle__arith__, mlirGetDialectHandle__cf__, mlirGetDialectHandle__func__,
-    mlirGetDialectHandle__gpu__, mlirGetDialectHandle__linalg__, mlirGetDialectHandle__llvm__,
-    mlirGetDialectHandle__math__, mlirGetDialectHandle__memref__,
-    mlirGetDialectHandle__nvvm__, mlirGetDialectHandle__rocdl__, mlirGetDialectHandle__scf__,
-    mlirGetDialectHandle__spirv__, mlirGetDialectHandle__tensor__,
-    mlirGetDialectHandle__transform__, mlirGetDialectHandle__vector__, mlirLoadIRDLDialects,
-    mlirParsePassPipeline, mlirRegisterAllDialects, mlirRegisterAllLLVMTranslations,
-    mlirRegisterAllPasses,
-};
 use std::{
     ffi::c_void,
     fmt::{self, Formatter},
     sync::Once,
+};
+use verum_mlir_sys::{
+    MlirStringRef, mlirDialectHandleInsertDialect, mlirGetDialectHandle__amdgpu__,
+    mlirGetDialectHandle__arith__, mlirGetDialectHandle__cf__, mlirGetDialectHandle__func__,
+    mlirGetDialectHandle__gpu__, mlirGetDialectHandle__linalg__, mlirGetDialectHandle__llvm__,
+    mlirGetDialectHandle__math__, mlirGetDialectHandle__memref__, mlirGetDialectHandle__nvvm__,
+    mlirGetDialectHandle__rocdl__, mlirGetDialectHandle__scf__, mlirGetDialectHandle__spirv__,
+    mlirGetDialectHandle__tensor__, mlirGetDialectHandle__transform__,
+    mlirGetDialectHandle__vector__, mlirLoadIRDLDialects, mlirParsePassPipeline,
+    mlirRegisterAllDialects, mlirRegisterAllLLVMTranslations, mlirRegisterAllPasses,
 };
 
 /// Registers all dialects to a dialect registry.

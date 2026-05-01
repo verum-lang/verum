@@ -6,11 +6,11 @@ mod output;
 mod sidebar;
 
 pub use cell::{CellWidget, cell_height};
-pub use editor::{EditorWidget, EditorState, EditorDiagnostic, DiagnosticSeverity, Selection};
-pub use output::{OutputWidget, output_height, format_output_lines, format_output_brief, output_line_count};
-pub use sidebar::{
-    SidebarWidget, SidebarTab, VarInfo, FuncInfo, OutlineEntry, ExecStats,
+pub use editor::{DiagnosticSeverity, EditorDiagnostic, EditorState, EditorWidget, Selection};
+pub use output::{
+    OutputWidget, format_output_brief, format_output_lines, output_height, output_line_count,
 };
+pub use sidebar::{ExecStats, FuncInfo, OutlineEntry, SidebarTab, SidebarWidget, VarInfo};
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 
@@ -78,9 +78,9 @@ impl PlaybookLayout {
             let vertical = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Min(3),      // Editor (fullscreen)
-                    Constraint::Length(1),   // Status bar
-                    Constraint::Length(1),   // Help bar
+                    Constraint::Min(3),    // Editor (fullscreen)
+                    Constraint::Length(1), // Status bar
+                    Constraint::Length(1), // Help bar
                 ])
                 .split(area);
 
@@ -96,10 +96,10 @@ impl PlaybookLayout {
             let vertical = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Min(5),                           // Main content + sidebar
-                    Constraint::Length(config.editor_height),     // Editor panel
-                    Constraint::Length(1),                        // Status bar
-                    Constraint::Length(1),                        // Help bar
+                    Constraint::Min(5),                       // Main content + sidebar
+                    Constraint::Length(config.editor_height), // Editor panel
+                    Constraint::Length(1),                    // Status bar
+                    Constraint::Length(1),                    // Help bar
                 ])
                 .split(area);
 
@@ -123,7 +123,11 @@ impl PlaybookLayout {
 
             Self {
                 content: horizontal[0],
-                sidebar: if config.show_sidebar { horizontal[1] } else { Rect::new(0, 0, 0, 0) },
+                sidebar: if config.show_sidebar {
+                    horizontal[1]
+                } else {
+                    Rect::new(0, 0, 0, 0)
+                },
                 editor: vertical[1],
                 status: vertical[2],
                 help: vertical[3],

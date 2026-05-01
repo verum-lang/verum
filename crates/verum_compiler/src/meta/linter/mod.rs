@@ -296,8 +296,7 @@ impl MetaLinter {
                         .check_command_injection(&func_name, args, ctx, expr.span, result);
                     self.security
                         .check_dynamic_code_execution(&func_name, expr.span, result);
-                    self.security
-                        .check_hidden_io(&func_name, expr.span, result);
+                    self.security.check_hidden_io(&func_name, expr.span, result);
 
                     // Safety checks
                     self.safety

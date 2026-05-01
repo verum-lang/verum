@@ -412,7 +412,9 @@ mod stdlib_affine_tests {
     fn test_concurrency_types_registered_as_affine() {
         let mut tracker = AffineTracker::with_core();
 
-        for ty in &["Channel", "Sender", "Receiver", "Mutex", "RwLock", "Condvar"] {
+        for ty in &[
+            "Channel", "Sender", "Receiver", "Mutex", "RwLock", "Condvar",
+        ] {
             tracker.register_affine_type(*ty);
         }
 
@@ -479,10 +481,10 @@ mod stdlib_affine_tests {
 // ============================================================================
 
 mod linear_type_tests {
-    use verum_types::affine::{AffineTracker, ResourceKind};
     use verum_ast::span::Span;
     use verum_ast::ty::{Ident, Path};
     use verum_types::Type;
+    use verum_types::affine::{AffineTracker, ResourceKind};
 
     /// Helper to create a simple named type
     fn named_type(name: &str) -> Type {
@@ -556,7 +558,10 @@ mod linear_type_tests {
         tracker.bind("f", ty, span);
 
         assert!(tracker.is_binding_linear("f"));
-        assert_eq!(tracker.get_binding_resource_kind("f"), Some(ResourceKind::Linear));
+        assert_eq!(
+            tracker.get_binding_resource_kind("f"),
+            Some(ResourceKind::Linear)
+        );
     }
 
     #[test]

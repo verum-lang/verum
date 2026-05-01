@@ -43,11 +43,9 @@ fn test_lifetime_followed_by_gt() {
 
     println!("Lexing: {:?}", source);
     let result: Result<Vec<_>, _> = lexer
-        .inspect(|r| {
-            match r {
-                Ok(t) => println!("Token: {:?}", t.kind),
-                Err(e) => println!("Error: {:?}", e),
-            }
+        .inspect(|r| match r {
+            Ok(t) => println!("Token: {:?}", t.kind),
+            Err(e) => println!("Error: {:?}", e),
         })
         .collect();
 

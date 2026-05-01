@@ -18,10 +18,10 @@
 
 //! All operations are compile-time with 0ns runtime overhead.
 
+use crate::ty::Type;
 use verum_ast::span::Span;
 use verum_common::well_known_types::WellKnownType as WKT;
 use verum_common::{ConstValue, List};
-use crate::ty::Type;
 
 /// Error type for tensor shape checking
 #[derive(Debug, Clone)]

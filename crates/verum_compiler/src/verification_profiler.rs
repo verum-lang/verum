@@ -46,13 +46,13 @@
 //! profiler.print_report();
 //! ```
 
+use colored::Colorize;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use colored::Colorize;
+use verum_common::{List, Maybe, Text, ToText};
 use verum_smt::backend_trait::SmtLogic;
 use verum_smt::cost::VerificationCost;
 use verum_smt::{ProofResult, VerificationError, VerifyMode};
-use verum_common::{List, Maybe, Text, ToText};
 
 /// Default threshold for slow verification detection (5 seconds)
 const DEFAULT_SLOW_THRESHOLD: Duration = Duration::from_secs(5);
@@ -543,10 +543,7 @@ impl VerificationProfiler {
 
     /// Compute total verification time across all entries
     fn total_verification_time(&self) -> Duration {
-        self.entries
-            .iter()
-            .map(|e| e.verification_time)
-            .sum()
+        self.entries.iter().map(|e| e.verification_time).sum()
     }
 
     /// Generate global recommendations based on overall verification patterns.
@@ -607,15 +604,14 @@ impl VerificationProfiler {
 
         // Suggest parallel verification for large projects
         if self.entries.len() > 100 {
-            recs.push(
-                "Enable parallel verification: verum verify --jobs=auto".to_text(),
-            );
+            recs.push("Enable parallel verification: verum verify --jobs=auto".to_text());
         }
 
         // Warn about low cache efficiency when there are many entries
         if self.cache_stats.total_requests() > 50 && self.cache_stats.hit_rate() < 0.5 {
             recs.push(
-                "Very low cache hit rate — check if source changes invalidate too many entries".to_text(),
+                "Very low cache hit rate — check if source changes invalidate too many entries"
+                    .to_text(),
             );
         }
 
@@ -642,12 +638,9 @@ impl VerificationProfiler {
         if !report.slow_verifications.is_empty() {
             println!(
                 "\n{}\n",
-                format!(
-                    "\u{26a0} SLOW VERIFICATIONS (>{}s):",
-                    threshold_secs
-                )
-                .yellow()
-                .bold()
+                format!("\u{26a0} SLOW VERIFICATIONS (>{}s):", threshold_secs)
+                    .yellow()
+                    .bold()
             );
 
             for (idx, entry) in report.slow_verifications.iter().enumerate() {
@@ -696,10 +689,7 @@ impl VerificationProfiler {
                 }
 
                 if !entry.recommendations.is_empty() {
-                    println!(
-                        "   \u{2514}\u{2500} {}:",
-                        "Recommendations".green()
-                    );
+                    println!("   \u{2514}\u{2500} {}:", "Recommendations".green());
                     for rec in &entry.recommendations {
                         println!("      \u{2022} {}", rec.as_str());
                     }
@@ -761,11 +751,17 @@ impl VerificationProfiler {
         );
         println!(
             "Total time:       {}",
-            format!("{:.1}s", report.total_time.as_secs_f64()).white().bold()
+            format!("{:.1}s", report.total_time.as_secs_f64())
+                .white()
+                .bold()
         );
         println!(
             "Average:          {}",
-            format!("{:.2}s/function", report.avg_time_per_function.as_secs_f64()).white()
+            format!(
+                "{:.2}s/function",
+                report.avg_time_per_function.as_secs_f64()
+            )
+            .white()
         );
 
         let slow_pct = if report.function_count > 0 {
@@ -773,20 +769,13 @@ impl VerificationProfiler {
         } else {
             0.0
         };
-        let slow_str = format!(
-            "{} ({:.1}%)",
-            report.functions_above_threshold,
-            slow_pct
-        );
+        let slow_str = format!("{} ({:.1}%)", report.functions_above_threshold, slow_pct);
         let colored_slow = if report.functions_above_threshold == 0 {
             slow_str.green()
         } else {
             slow_str.yellow()
         };
-        println!(
-            "Slow (>{}s):      {}",
-            threshold_secs, colored_slow
-        );
+        println!("Slow (>{}s):      {}", threshold_secs, colored_slow);
 
         // Optimization potential
         if report.optimization_potential > Duration::ZERO {
@@ -1046,11 +1035,7 @@ mod tests {
         for (name, time, logic, queries) in entries {
             profiler.entries.push(ProfileEntry {
                 function_name: name.to_text(),
-                file_location: FileLocation::new(
-                    PathBuf::from(format!("{}.vr", name)),
-                    42,
-                    1,
-                ),
+                file_location: FileLocation::new(PathBuf::from(format!("{}.vr", name)), 42, 1),
                 verification_time: time,
                 smt_solver: SmtSolver::Z3,
                 logic,
@@ -1077,7 +1062,10 @@ mod tests {
         let report = profiler.generate_report();
         // Only slow_fn exceeds 5s threshold
         assert_eq!(report.slow_verifications.len(), 1);
-        assert_eq!(report.slow_verifications[0].function_name.as_str(), "slow_fn");
+        assert_eq!(
+            report.slow_verifications[0].function_name.as_str(),
+            "slow_fn"
+        );
     }
 
     #[test]
@@ -1153,18 +1141,23 @@ mod tests {
 
     #[test]
     fn test_export_json_returns_valid_json_string() {
-        let profiler = profiler_with_entries(vec![
-            ("test_fn", Duration::from_secs(7), SmtLogic::QF_NIA, 25),
-        ]);
+        let profiler = profiler_with_entries(vec![(
+            "test_fn",
+            Duration::from_secs(7),
+            SmtLogic::QF_NIA,
+            25,
+        )]);
 
         let json_str = profiler.export_json();
-        let parsed: serde_json::Value = serde_json::from_str(&json_str)
-            .expect("export_json should return valid JSON");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&json_str).expect("export_json should return valid JSON");
 
         assert!(parsed["slow_verifications"].is_array());
         assert_eq!(parsed["slow_verifications"].as_array().unwrap().len(), 1);
         assert_eq!(
-            parsed["slow_verifications"][0]["function"].as_str().unwrap(),
+            parsed["slow_verifications"][0]["function"]
+                .as_str()
+                .unwrap(),
             "test_fn"
         );
         assert_eq!(parsed["summary"]["total_functions"].as_u64().unwrap(), 1);
@@ -1175,9 +1168,8 @@ mod tests {
 
     #[test]
     fn test_export_json_value_matches_export_json() {
-        let profiler = profiler_with_entries(vec![
-            ("fn_x", Duration::from_secs(1), SmtLogic::QF_LIA, 3),
-        ]);
+        let profiler =
+            profiler_with_entries(vec![("fn_x", Duration::from_secs(1), SmtLogic::QF_LIA, 3)]);
 
         let json_str = profiler.export_json();
         let value = profiler.export_json_value();
@@ -1194,7 +1186,10 @@ mod tests {
         profiler.cache_stats.misses = 30;
 
         let recs = profiler.generate_global_recommendations();
-        assert!(recs.iter().any(|r| r.as_str().contains("distributed cache")));
+        assert!(
+            recs.iter()
+                .any(|r| r.as_str().contains("distributed cache"))
+        );
     }
 
     #[test]

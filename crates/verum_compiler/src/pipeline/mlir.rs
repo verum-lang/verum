@@ -30,7 +30,6 @@ use verum_vbc::codegen::{CodegenConfig, VbcCodegen};
 use super::{CompilationMode, CompilationPipeline};
 
 impl<'s> CompilationPipeline<'s> {
-
     // ==================== MLIR COMPILATION ====================
 
     /// Run MLIR-based JIT compilation (experimental)
@@ -74,18 +73,21 @@ impl<'s> CompilationPipeline<'s> {
             ..Default::default()
         };
         let mut vbc_codegen = VbcCodegen::with_config(codegen_config);
-        let vbc_module = vbc_codegen.compile_module(&module)
+        let vbc_module = vbc_codegen
+            .compile_module(&module)
             .with_context(|| "Failed to compile AST to VBC")?;
 
-        info!("  VBC bytecode generated: {} functions", vbc_module.functions.len());
+        info!(
+            "  VBC bytecode generated: {} functions",
+            vbc_module.functions.len()
+        );
 
         // Phase 5: Create MLIR context and GPU lowering
         // Note: MLIR JIT is specifically for GPU tensor operations
         info!("  Lowering VBC to MLIR for GPU");
-        use verum_codegen::mlir::{VbcToMlirGpuLowering, GpuLoweringConfig, GpuTarget};
+        use verum_codegen::mlir::{GpuLoweringConfig, GpuTarget, VbcToMlirGpuLowering};
 
-        let mlir_ctx = MlirContext::new()
-            .with_context(|| "Failed to create MLIR context")?;
+        let mlir_ctx = MlirContext::new().with_context(|| "Failed to create MLIR context")?;
 
         // Select GPU target: [codegen].gpu_backend overrides auto-detect.
         let gpu_backend = self
@@ -97,7 +99,7 @@ impl<'s> CompilationPipeline<'s> {
         let gpu_target = match gpu_backend {
             "metal" => GpuTarget::Metal,
             "cuda" => GpuTarget::Cuda,
-            "rocm" => GpuTarget::Cuda, // ROCm uses HIP → CUDA path
+            "rocm" => GpuTarget::Cuda,   // ROCm uses HIP → CUDA path
             "vulkan" => GpuTarget::Cuda, // Vulkan→SPIR-V → CUDA fallback
             _ => {
                 // "auto" or unknown → platform-based detection
@@ -112,14 +114,19 @@ impl<'s> CompilationPipeline<'s> {
             target: gpu_target,
             opt_level: self.session.options().optimization_level,
             enable_tensor_cores: !cfg!(target_os = "macos"), // Not for Metal
-            max_shared_memory: if cfg!(target_os = "macos") { 32 * 1024 } else { 48 * 1024 },
+            max_shared_memory: if cfg!(target_os = "macos") {
+                32 * 1024
+            } else {
+                48 * 1024
+            },
             default_block_size: [256, 1, 1],
             enable_async_copy: true,
             debug_info: self.session.options().verbose > 0,
         };
 
         let mut gpu_lowering = VbcToMlirGpuLowering::new(mlir_ctx.context(), gpu_config);
-        let mlir_module = gpu_lowering.lower_module(&vbc_module)
+        let mlir_module = gpu_lowering
+            .lower_module(&vbc_module)
             .with_context(|| "Failed to lower VBC to MLIR")?;
 
         // Phase 6: Execute via JIT
@@ -144,7 +151,10 @@ impl<'s> CompilationPipeline<'s> {
             }
             Err(e) => {
                 // JIT execution failed - fall back to interpreter
-                warn!("MLIR JIT execution failed: {} - falling back to interpreter", e);
+                warn!(
+                    "MLIR JIT execution failed: {} - falling back to interpreter",
+                    e
+                );
                 self.mode = CompilationMode::Interpret;
                 self.run_interpreter(args)
             }
@@ -153,7 +163,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Execute an MLIR module using the JIT engine.
     fn execute_mlir_jit(&self, module: &verum_codegen::verum_mlir::ir::Module<'_>) -> Result<i64> {
-        use verum_codegen::mlir::jit::{JitEngine, JitConfig};
+        use verum_codegen::mlir::jit::{JitConfig, JitEngine};
 
         // Create JIT configuration
         let jit_config = JitConfig::new()
@@ -161,11 +171,12 @@ impl<'s> CompilationPipeline<'s> {
             .with_verbose(self.session.options().verbose > 0);
 
         // Create JIT engine
-        let engine = JitEngine::new(module, jit_config)
-            .with_context(|| "Failed to create JIT engine")?;
+        let engine =
+            JitEngine::new(module, jit_config).with_context(|| "Failed to create JIT engine")?;
 
         // Register stdlib symbols
-        engine.register_stdlib()
+        engine
+            .register_stdlib()
             .with_context(|| "Failed to register stdlib symbols")?;
 
         // Look up and call main function
@@ -195,8 +206,8 @@ impl<'s> CompilationPipeline<'s> {
     /// Uses VBC → MLIR path for GPU tensor operations.
     pub fn run_mlir_aot(&mut self) -> Result<PathBuf> {
         use verum_codegen::mlir::{
-            MlirContext, MlirConfig, MlirCodegen,
-            VbcToMlirGpuLowering, GpuLoweringConfig, GpuTarget,
+            GpuLoweringConfig, GpuTarget, MlirCodegen, MlirConfig, MlirContext,
+            VbcToMlirGpuLowering,
         };
 
         let start = Instant::now();
@@ -238,44 +249,63 @@ impl<'s> CompilationPipeline<'s> {
         // Phase 6: Multi-module VBC codegen (resolves stdlib imports)
         info!("  Converting AST to VBC bytecode (multi-module)");
         let vbc_module = self.compile_ast_to_vbc(&module)?;
-        info!("  VBC bytecode generated: {} functions", vbc_module.functions.len());
+        info!(
+            "  VBC bytecode generated: {} functions",
+            vbc_module.functions.len()
+        );
 
         // Phase 5: Monomorphization (specialize generics)
         let vbc_module = {
             use crate::phases::vbc_mono::VbcMonomorphizationPhase;
             let mono = VbcMonomorphizationPhase::new();
-            let mono = if !self.session.language_features().codegen.monomorphization_cache {
+            let mono = if !self
+                .session
+                .language_features()
+                .codegen
+                .monomorphization_cache
+            {
                 mono.without_cache()
-            } else { mono };
+            } else {
+                mono
+            };
             let mut mono = mono;
             match mono.monomorphize(&vbc_module) {
                 Ok(specialized) => {
-                    info!("  Monomorphization complete: {} functions", specialized.functions.len());
+                    info!(
+                        "  Monomorphization complete: {} functions",
+                        specialized.functions.len()
+                    );
                     std::sync::Arc::new(specialized)
                 }
                 Err(diags) => {
-                    warn!("  Monomorphization had {} diagnostics, using unspecialized module", diags.len());
+                    warn!(
+                        "  Monomorphization had {} diagnostics, using unspecialized module",
+                        diags.len()
+                    );
                     vbc_module
                 }
             }
         };
 
         // Phase 6: Create MLIR context and GPU lowering
-        let mlir_ctx = MlirContext::new()
-            .with_context(|| "Failed to create MLIR context")?;
+        let mlir_ctx = MlirContext::new().with_context(|| "Failed to create MLIR context")?;
 
         // Auto-select GPU target based on platform
         let gpu_target = if cfg!(target_os = "macos") {
-            GpuTarget::Metal  // Apple Silicon (M1/M2/M3)
+            GpuTarget::Metal // Apple Silicon (M1/M2/M3)
         } else {
-            GpuTarget::Cuda   // Default to NVIDIA on Linux/Windows
+            GpuTarget::Cuda // Default to NVIDIA on Linux/Windows
         };
 
         let gpu_config = GpuLoweringConfig {
             target: gpu_target,
             opt_level: self.session.options().optimization_level,
             enable_tensor_cores: !cfg!(target_os = "macos"),
-            max_shared_memory: if cfg!(target_os = "macos") { 32 * 1024 } else { 48 * 1024 },
+            max_shared_memory: if cfg!(target_os = "macos") {
+                32 * 1024
+            } else {
+                48 * 1024
+            },
             default_block_size: [256, 1, 1],
             enable_async_copy: true,
             debug_info: self.session.options().verbose > 0,
@@ -283,11 +313,15 @@ impl<'s> CompilationPipeline<'s> {
 
         info!("  Lowering VBC to MLIR for GPU (target: {:?})", gpu_target);
         let mut gpu_lowering = VbcToMlirGpuLowering::new(mlir_ctx.context(), gpu_config);
-        let _mlir_module = gpu_lowering.lower_module(&vbc_module)
+        let _mlir_module = gpu_lowering
+            .lower_module(&vbc_module)
             .with_context(|| "Failed to lower VBC to MLIR")?;
 
-        info!("  GPU lowering stats: {} tensor ops, {} kernel launches",
-            gpu_lowering.stats().tensor_ops, gpu_lowering.stats().kernel_launches);
+        info!(
+            "  GPU lowering stats: {} tensor ops, {} kernel launches",
+            gpu_lowering.stats().tensor_ops,
+            gpu_lowering.stats().kernel_launches
+        );
 
         // Phase 7: Run GPU pass pipeline (tensor→linalg→scf→gpu→target)
         let mlir_config = MlirConfig::new("gpu_module")
@@ -297,13 +331,18 @@ impl<'s> CompilationPipeline<'s> {
         let mut codegen = MlirCodegen::new(&mlir_ctx, mlir_config)
             .map_err(|e| anyhow::anyhow!("MLIR codegen init failed: {:?}", e))?;
 
-        codegen.lower_vbc_module(&vbc_module, gpu_target)
+        codegen
+            .lower_vbc_module(&vbc_module, gpu_target)
             .map_err(|e| anyhow::anyhow!("MLIR VBC lowering failed: {:?}", e))?;
 
-        let gpu_result = codegen.optimize_gpu(gpu_target)
+        let gpu_result = codegen
+            .optimize_gpu(gpu_target)
             .map_err(|e| anyhow::anyhow!("GPU pass pipeline failed: {:?}", e))?;
 
-        info!("  GPU pass pipeline completed: {} phases run", gpu_result.completed_phases.len());
+        info!(
+            "  GPU pass pipeline completed: {} phases run",
+            gpu_result.completed_phases.len()
+        );
 
         // Phase 8: Print MLIR for debugging
         if self.session.options().verbose > 0 {
@@ -322,7 +361,8 @@ impl<'s> CompilationPipeline<'s> {
         use verum_codegen::mlir::gpu_binary::GpuBinaryEmitter;
 
         let emitter = GpuBinaryEmitter::new(gpu_target, self.session.options().verbose > 0);
-        let mlir_module = codegen.module()
+        let mlir_module = codegen
+            .module()
             .map_err(|e| anyhow::anyhow!("Failed to get MLIR module: {:?}", e))?;
 
         match emitter.emit(mlir_module) {
@@ -340,8 +380,9 @@ impl<'s> CompilationPipeline<'s> {
                 // Write the host LLVM IR to a temp file, then pass it to
                 // the native compilation pipeline which handles LLVM IR → object → link.
                 let build_dir = std::env::temp_dir().join("verum_gpu_build");
-                std::fs::create_dir_all(&build_dir)
-                    .with_context(|| format!("Failed to create build dir: {}", build_dir.display()))?;
+                std::fs::create_dir_all(&build_dir).with_context(|| {
+                    format!("Failed to create build dir: {}", build_dir.display())
+                })?;
 
                 let host_ir_path = build_dir.join("gpu_host.ll");
                 std::fs::write(&host_ir_path, &gpu_output.host_llvm_ir)
@@ -352,8 +393,12 @@ impl<'s> CompilationPipeline<'s> {
                     let kernel_path = build_dir.join(format!("gpu_kernel_{}.bin", i));
                     std::fs::write(&kernel_path, &kb.data)
                         .with_context(|| format!("Failed to write kernel binary {}", i))?;
-                    info!("  Kernel module '{}': {} bytes → {}",
-                        kb.module_name, kb.data.len(), kernel_path.display());
+                    info!(
+                        "  Kernel module '{}': {} bytes → {}",
+                        kb.module_name,
+                        kb.data.len(),
+                        kernel_path.display()
+                    );
                 }
 
                 // Fall through to native compilation for host code.

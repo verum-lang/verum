@@ -18,9 +18,9 @@
 // at compile time via the meta-system.
 
 use verum_ast::{FileId, Span};
+use verum_common::Text;
 use verum_compiler::literal_parsers::*;
 use verum_compiler::literal_registry::ParsedLiteral;
-use verum_common::Text;
 
 fn test_span() -> Span {
     Span::new(0, 10, FileId::new(0))

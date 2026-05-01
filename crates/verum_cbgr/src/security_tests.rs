@@ -17,12 +17,12 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::ConcurrencyLocationId as LocationId;
     use crate::analysis::{BasicBlock, BlockId, ControlFlowGraph, DefSite, RefId, UseeSite};
     use crate::concurrency_analysis::{
-        AccessKind, ConcurrencyAnalyzer, MemoryAccess, MemoryOrdering,
-        ThreadId, VectorClock, LockId,
+        AccessKind, ConcurrencyAnalyzer, LockId, MemoryAccess, MemoryOrdering, ThreadId,
+        VectorClock,
     };
-    use crate::ConcurrencyLocationId as LocationId;
     use crate::lifetime_analysis::{
         BorrowChecker, BorrowKind, BorrowRecord, LifetimeAnalyzer, LifetimeId,
     };
@@ -304,7 +304,11 @@ mod tests {
         access2 = access2.with_lock(lock);
 
         // Both protected by same lock - no race
-        let common: Set<_> = access1.locks_held.intersection(&access2.locks_held).copied().collect();
+        let common: Set<_> = access1
+            .locks_held
+            .intersection(&access2.locks_held)
+            .copied()
+            .collect();
         assert!(!common.is_empty());
     }
 
@@ -322,7 +326,11 @@ mod tests {
         access2 = access2.with_lock(lock2);
 
         // Different locks - potential race
-        let common: Set<_> = access1.locks_held.intersection(&access2.locks_held).copied().collect();
+        let common: Set<_> = access1
+            .locks_held
+            .intersection(&access2.locks_held)
+            .copied()
+            .collect();
         assert!(common.is_empty());
     }
 
@@ -459,18 +467,23 @@ mod tests {
         assert!(manager.allows_shared_access(RefId(1)));
 
         // After activation, shared access blocked
-        manager.activate(crate::nll_analysis::BorrowId(1), NllPoint::mid(BlockId(0), 1));
+        manager.activate(
+            crate::nll_analysis::BorrowId(1),
+            NllPoint::mid(BlockId(0), 1),
+        );
         assert!(!manager.allows_shared_access(RefId(1)));
     }
 
     #[test]
     fn test_nll_region_merging() {
         // Regions should merge correctly at join points
-        let mut region1 = NllRegion::new(NllRegionId(1), crate::nll_analysis::NllRegionKind::Inferred);
+        let mut region1 =
+            NllRegion::new(NllRegionId(1), crate::nll_analysis::NllRegionKind::Inferred);
         region1.add_point(NllPoint::start(BlockId(0), 0));
         region1.add_point(NllPoint::end(BlockId(0), 0));
 
-        let mut region2 = NllRegion::new(NllRegionId(2), crate::nll_analysis::NllRegionKind::Inferred);
+        let mut region2 =
+            NllRegion::new(NllRegionId(2), crate::nll_analysis::NllRegionKind::Inferred);
         region2.add_point(NllPoint::start(BlockId(1), 0));
 
         region1.merge(&region2);

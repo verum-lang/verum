@@ -69,8 +69,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use verum_common::Text;
 
 // ============================================================================
@@ -238,8 +238,8 @@ impl SymbolResolverStats {
 
     /// Get resolution success rate.
     pub fn success_rate(&self) -> f64 {
-        let total = self.resolutions.load(Ordering::Relaxed)
-            + self.failures.load(Ordering::Relaxed);
+        let total =
+            self.resolutions.load(Ordering::Relaxed) + self.failures.load(Ordering::Relaxed);
         if total == 0 {
             1.0
         } else {
@@ -249,8 +249,8 @@ impl SymbolResolverStats {
 
     /// Get cache hit rate.
     pub fn cache_hit_rate(&self) -> f64 {
-        let total = self.cache_hits.load(Ordering::Relaxed)
-            + self.cache_misses.load(Ordering::Relaxed);
+        let total =
+            self.cache_hits.load(Ordering::Relaxed) + self.cache_misses.load(Ordering::Relaxed);
         if total == 0 {
             0.0
         } else {
@@ -264,8 +264,7 @@ impl SymbolResolverStats {
         if resolutions == 0 {
             0.0
         } else {
-            self.total_resolution_time_us.load(Ordering::Relaxed) as f64
-                / resolutions as f64
+            self.total_resolution_time_us.load(Ordering::Relaxed) as f64 / resolutions as f64
         }
     }
 }
@@ -411,12 +410,11 @@ impl SymbolResolver {
 
         // Load the library
         // SAFETY: We trust the library path and handle errors properly
-        let library = unsafe { Library::new(&full_path) }.map_err(|e| {
-            MlirError::LibraryLoadError {
+        let library =
+            unsafe { Library::new(&full_path) }.map_err(|e| MlirError::LibraryLoadError {
                 path: Text::from(full_path.to_string_lossy().to_string()),
                 message: Text::from(e.to_string()),
-            }
-        })?;
+            })?;
 
         let loaded = LoadedLibrary {
             library,
@@ -429,11 +427,7 @@ impl SymbolResolver {
 
         if self.verbose {
             let elapsed = start.elapsed();
-            tracing::info!(
-                "Library loaded in {:?}: {}",
-                elapsed,
-                full_path.display()
-            );
+            tracing::info!("Library loaded in {:?}: {}", elapsed, full_path.display());
         }
 
         Ok(())
@@ -543,7 +537,9 @@ impl SymbolResolver {
 
         // Check registered symbols
         if let Some(addr) = self.registered.get(&name_text) {
-            let metadata = self.metadata.get(&name_text)
+            let metadata = self
+                .metadata
+                .get(&name_text)
                 .map(|m| m.clone())
                 .unwrap_or_else(|| SymbolMetadata {
                     name: name_text.clone(),
@@ -581,7 +577,9 @@ impl SymbolResolver {
                 let addr = *symbol;
 
                 // Get or create metadata
-                let metadata = self.metadata.get(&name_text)
+                let metadata = self
+                    .metadata
+                    .get(&name_text)
                     .map(|m| m.clone())
                     .unwrap_or_else(|| self.infer_metadata(name, &loaded.path));
 
@@ -595,10 +593,9 @@ impl SymbolResolver {
                 self.stats.resolutions.fetch_add(1, Ordering::Relaxed);
 
                 let elapsed = start.elapsed();
-                self.stats.total_resolution_time_us.fetch_add(
-                    elapsed.as_micros() as u64,
-                    Ordering::Relaxed,
-                );
+                self.stats
+                    .total_resolution_time_us
+                    .fetch_add(elapsed.as_micros() as u64, Ordering::Relaxed);
 
                 if self.verbose {
                     tracing::debug!("Resolved symbol '{}' at {:p} in {:?}", name, addr, elapsed);

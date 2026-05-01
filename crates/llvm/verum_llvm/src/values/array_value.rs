@@ -1,6 +1,8 @@
 // LLVMConstArray was removed in LLVM 17+, use LLVMConstArray2
 use verum_llvm_sys::core::LLVMConstArray2 as LLVMConstArray;
-use verum_llvm_sys::core::{LLVMGetAsString, LLVMIsAConstantArray, LLVMIsAConstantDataArray, LLVMIsConstantString};
+use verum_llvm_sys::core::{
+    LLVMGetAsString, LLVMIsAConstantArray, LLVMIsAConstantDataArray, LLVMIsConstantString,
+};
 use verum_llvm_sys::prelude::LLVMTypeRef;
 use verum_llvm_sys::prelude::LLVMValueRef;
 
@@ -53,7 +55,13 @@ impl<'ctx> ArrayValue<'ctx> {
 
     /// `values` must be of the same type as `ty`.
     pub unsafe fn new_raw_const_array(ty: LLVMTypeRef, values: &[LLVMValueRef]) -> Self {
-        unsafe { Self::new(LLVMConstArray(ty, values.as_ptr().cast_mut(), values.len() as _)) }
+        unsafe {
+            Self::new(LLVMConstArray(
+                ty,
+                values.as_ptr().cast_mut(),
+                values.len() as _,
+            ))
+        }
     }
 
     /// Get name of the `ArrayValue`. If the value is a constant, this will
@@ -225,7 +233,8 @@ impl fmt::Debug for ArrayValue<'_> {
         let is_const = self.is_const();
         let is_null = self.is_null();
         let is_const_array = unsafe { !LLVMIsAConstantArray(self.as_value_ref()).is_null() };
-        let is_const_data_array = unsafe { !LLVMIsAConstantDataArray(self.as_value_ref()).is_null() };
+        let is_const_data_array =
+            unsafe { !LLVMIsAConstantDataArray(self.as_value_ref()).is_null() };
 
         f.debug_struct("ArrayValue")
             .field("name", &name)

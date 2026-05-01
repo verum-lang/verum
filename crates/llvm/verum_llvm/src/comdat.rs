@@ -2,7 +2,9 @@
 // https://llvm.org/doxygen/IR_2Comdat_8h_source.html
 // https://stackoverflow.com/questions/1834597/what-is-the-comdat-section-used-for
 
-use verum_llvm_sys::comdat::{LLVMComdatSelectionKind, LLVMGetComdatSelectionKind, LLVMSetComdatSelectionKind};
+use verum_llvm_sys::comdat::{
+    LLVMComdatSelectionKind, LLVMGetComdatSelectionKind, LLVMSetComdatSelectionKind,
+};
 use verum_llvm_sys::prelude::LLVMComdatRef;
 
 #[llvm_enum(LLVMComdatSelectionKind)]

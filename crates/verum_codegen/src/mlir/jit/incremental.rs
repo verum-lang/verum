@@ -80,8 +80,8 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 use verum_common::Text;
 
@@ -420,7 +420,8 @@ impl DependencyTracker {
     /// Register dependencies for a module.
     pub fn register(&self, module: ContentHash, dependencies: Vec<ContentHash>) {
         // Store forward dependencies
-        self.depends_on.insert(module, dependencies.iter().cloned().collect());
+        self.depends_on
+            .insert(module, dependencies.iter().cloned().collect());
 
         // Store reverse dependencies
         for dep in dependencies {
@@ -580,7 +581,9 @@ impl IncrementalCache {
 
             entry.touch();
             self.stats.hits.fetch_add(1, Ordering::Relaxed);
-            self.stats.bytes_saved.fetch_add(entry.size, Ordering::Relaxed);
+            self.stats
+                .bytes_saved
+                .fetch_add(entry.size, Ordering::Relaxed);
             return Some(entry.clone());
         }
 
@@ -640,7 +643,9 @@ impl IncrementalCache {
         for h in to_invalidate {
             if let Some((_, entry)) = self.memory_cache.remove(&h) {
                 self.current_size.fetch_sub(entry.size, Ordering::Relaxed);
-                self.stats.entries_invalidated.fetch_add(1, Ordering::Relaxed);
+                self.stats
+                    .entries_invalidated
+                    .fetch_add(1, Ordering::Relaxed);
 
                 if self.config.persistent {
                     let _ = self.remove_from_disk(&h);
@@ -821,7 +826,8 @@ impl IncrementalCache {
                         if let Ok(cache_entry) = serde_json::from_slice::<CacheEntry>(&data) {
                             // Check if expired
                             if !cache_entry.is_expired(self.config.ttl_seconds) {
-                                self.memory_cache.insert(cache_entry.hash, cache_entry.clone());
+                                self.memory_cache
+                                    .insert(cache_entry.hash, cache_entry.clone());
                                 self.current_size
                                     .fetch_add(cache_entry.size, Ordering::Relaxed);
                             }
@@ -936,13 +942,7 @@ mod tests {
 
     #[test]
     fn test_cache_entry_expiry() {
-        let entry = CacheEntry::new(
-            [0u8; 32],
-            "test",
-            vec![],
-            vec![],
-            CacheOptions::default(),
-        );
+        let entry = CacheEntry::new([0u8; 32], "test", vec![], vec![], CacheOptions::default());
 
         // Should not be expired with 0 TTL
         assert!(!entry.is_expired(0));

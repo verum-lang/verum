@@ -85,11 +85,7 @@ fn run_verum(args: &[&str], cwd: Option<&PathBuf>) -> (i32, String, String) {
 #[test]
 fn bare_invocation_with_shebang_runs_as_script() {
     let d = fresh_dir("shebang_runs");
-    let p = write_source(
-        &d,
-        "hello.vr",
-        "#!/usr/bin/env verum\nprint(\"hello\");\n",
-    );
+    let p = write_source(&d, "hello.vr", "#!/usr/bin/env verum\nprint(\"hello\");\n");
     let (code, stdout, stderr) = run_verum(&[p.to_str().unwrap()], None);
     assert_eq!(
         code, 0,
@@ -112,7 +108,10 @@ fn bare_invocation_without_shebang_emits_advisory_and_fails() {
     // mode (which would obscure the contract).
     let p = write_source(&d, "main.vr", "fn main() { print(\"x\"); }\n");
     let (code, _stdout, stderr) = run_verum(&[p.to_str().unwrap()], None);
-    assert_ne!(code, 0, "non-script .vr file must NOT silently run via bare invocation");
+    assert_ne!(
+        code, 0,
+        "non-script .vr file must NOT silently run via bare invocation"
+    );
     assert!(
         stderr.contains("verum run"),
         "advisory must redirect to `verum run`. stderr={}",
@@ -156,7 +155,11 @@ fn explicit_run_works_for_shebang_script() {
         "#!/usr/bin/env verum\nprint(\"via run\");\n",
     );
     let (code, stdout, stderr) = run_verum(&["run", p.to_str().unwrap()], None);
-    assert_eq!(code, 0, "verum run on a script must succeed. stderr={}", stderr);
+    assert_eq!(
+        code, 0,
+        "verum run on a script must succeed. stderr={}",
+        stderr
+    );
     assert!(
         stdout.contains("via run"),
         "expected 'via run'. stdout={}",
@@ -221,11 +224,7 @@ fn tail_int_becomes_exit_code() {
 #[test]
 fn tail_int_zero_is_explicit_success() {
     let d = fresh_dir("tail_zero");
-    let p = write_source(
-        &d,
-        "exit0.vr",
-        "#!/usr/bin/env verum\nprint(\"ok\");\n0\n",
-    );
+    let p = write_source(&d, "exit0.vr", "#!/usr/bin/env verum\nprint(\"ok\");\n0\n");
     let (code, _stdout, _stderr) = run_verum(&[p.to_str().unwrap()], None);
     assert_eq!(code, 0, "explicit tail 0 must produce exit 0");
 }
@@ -233,11 +232,7 @@ fn tail_int_zero_is_explicit_success() {
 #[test]
 fn no_tail_value_returns_zero() {
     let d = fresh_dir("no_tail");
-    let p = write_source(
-        &d,
-        "void.vr",
-        "#!/usr/bin/env verum\nprint(\"void\");\n",
-    );
+    let p = write_source(&d, "void.vr", "#!/usr/bin/env verum\nprint(\"void\");\n");
     let (code, stdout, _stderr) = run_verum(&[p.to_str().unwrap()], None);
     assert_eq!(code, 0, "no tail expr must default to exit 0");
     assert!(stdout.contains("void"), "stdout={}", stdout);
@@ -255,7 +250,11 @@ fn fn_main_returning_int_propagates_exit_code() {
         "fn main() -> Int {\n    print(\"main\");\n    return 9;\n}\n",
     );
     let (code, stdout, stderr) = run_verum(&["run", p.to_str().unwrap()], None);
-    assert_eq!(code, 9, "main returning Int 9 must exit 9. stderr={}", stderr);
+    assert_eq!(
+        code, 9,
+        "main returning Int 9 must exit 9. stderr={}",
+        stderr
+    );
     assert!(stdout.contains("main"), "stdout={}", stdout);
 }
 

@@ -290,8 +290,14 @@ fn test_unify_named_types_with_different_spans() {
     let span1 = Span::new(0, 10, verum_ast::span::FileId::dummy());
     let span2 = Span::new(100, 110, verum_ast::span::FileId::dummy());
 
-    let path1 = Path::new(vec![PathSegment::Name(Ident::new("Point", span1))].into(), span1);
-    let path2 = Path::new(vec![PathSegment::Name(Ident::new("Point", span2))].into(), span2);
+    let path1 = Path::new(
+        vec![PathSegment::Name(Ident::new("Point", span1))].into(),
+        span1,
+    );
+    let path2 = Path::new(
+        vec![PathSegment::Name(Ident::new("Point", span2))].into(),
+        span2,
+    );
 
     let type1 = Type::Named {
         path: path1,
@@ -516,10 +522,7 @@ fn unifier_max_unify_depth_zero_rejects_first_call() {
                 msg.as_str()
             );
         }
-        other => panic!(
-            "expected recursion-limit error, got: {:?}",
-            other.is_ok()
-        ),
+        other => panic!("expected recursion-limit error, got: {:?}", other.is_ok()),
     }
 }
 

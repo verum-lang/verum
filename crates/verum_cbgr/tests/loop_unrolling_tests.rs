@@ -123,7 +123,7 @@ fn create_loop_cfg() -> ControlFlowGraph {
                 block: header,
                 reference: RefId(1),
                 is_stack_allocated: true,
-            span: None,
+                span: None,
             });
             defs
         },
@@ -155,7 +155,7 @@ fn create_loop_cfg() -> ControlFlowGraph {
                 block: body,
                 reference: RefId(1),
                 is_mutable: false,
-            span: None,
+                span: None,
             });
             uses
         },

@@ -582,8 +582,7 @@ impl SmtExpr {
                 if args.is_empty() {
                     name.clone()
                 } else {
-                    let args_str: List<Text> =
-                        args.iter().map(|a| a.to_smtlib()).collect();
+                    let args_str: List<Text> = args.iter().map(|a| a.to_smtlib()).collect();
                     Text::from(format!("({} {})", name, args_str.join(" ")))
                 }
             }
@@ -980,8 +979,7 @@ impl Formula {
                 if args.is_empty() {
                     name.clone()
                 } else {
-                    let args_str: List<Text> =
-                        args.iter().map(|a| a.to_smtlib()).collect();
+                    let args_str: List<Text> = args.iter().map(|a| a.to_smtlib()).collect();
                     Text::from(format!("({} {})", name, args_str.join(" ")))
                 }
             }
@@ -1443,7 +1441,6 @@ impl VCGenerator {
         }
     }
 
-
     /// Create with a source file name
     pub fn with_source_file(mut self, file: impl Into<Text>) -> Self {
         self.source_file = file.into();
@@ -1778,7 +1775,9 @@ impl VCGenerator {
                                 .iter()
                                 .map(|inv_expr| self.translate_contract(inv_expr))
                                 .collect();
-                            formulas.into_iter().fold(Formula::True, |acc, f| Formula::and(vec![acc, f]))
+                            formulas
+                                .into_iter()
+                                .fold(Formula::True, |acc, f| Formula::and(vec![acc, f]))
                         }
                     }
                 };
@@ -2454,17 +2453,24 @@ impl VCGenerator {
                     .collect::<List<_>>()
                     .join(".");
                 {
-                let n = name.as_str();
-                match n {
-                    _ if verum_common::well_known_types::type_names::is_signed_integer_type(n) => VarType::Int,
-                    "Bool" | "bool" => VarType::Bool,
-                    _ if verum_common::well_known_types::type_names::is_float_type(n) => VarType::Real,
-                    "u8" => VarType::BitVec(8),
-                    "u16" => VarType::BitVec(16),
-                    "u32" => VarType::BitVec(32),
-                    "u64" => VarType::BitVec(64),
-                    _ => VarType::Sort(name),
-                }
+                    let n = name.as_str();
+                    match n {
+                        _ if verum_common::well_known_types::type_names::is_signed_integer_type(
+                            n,
+                        ) =>
+                        {
+                            VarType::Int
+                        }
+                        "Bool" | "bool" => VarType::Bool,
+                        _ if verum_common::well_known_types::type_names::is_float_type(n) => {
+                            VarType::Real
+                        }
+                        "u8" => VarType::BitVec(8),
+                        "u16" => VarType::BitVec(16),
+                        "u32" => VarType::BitVec(32),
+                        "u64" => VarType::BitVec(64),
+                        _ => VarType::Sort(name),
+                    }
                 }
             }
             TypeKind::Array { element, .. } => VarType::Array(
@@ -3019,9 +3025,15 @@ impl VCGenerator {
                             .join(".");
                         let n = type_name.as_str();
                         let var_type = match n {
-                            _ if verum_common::well_known_types::type_names::is_integer_type(n) => VarType::Int,
+                            _ if verum_common::well_known_types::type_names::is_integer_type(n) => {
+                                VarType::Int
+                            }
                             "Bool" => VarType::Bool,
-                            _ if verum_common::well_known_types::type_names::is_float_type(n) || n == "Real" => VarType::Real,
+                            _ if verum_common::well_known_types::type_names::is_float_type(n)
+                                || n == "Real" =>
+                            {
+                                VarType::Real
+                            }
                             _ => VarType::Sort(Text::from(type_name)),
                         };
                         // Extract variable names from arguments
@@ -3120,9 +3132,15 @@ impl VCGenerator {
             {
                 let n = name.as_str();
                 match n {
-                    _ if verum_common::well_known_types::type_names::is_integer_type(n) => VarType::Int,
+                    _ if verum_common::well_known_types::type_names::is_integer_type(n) => {
+                        VarType::Int
+                    }
                     "Bool" => VarType::Bool,
-                    _ if verum_common::well_known_types::type_names::is_float_type(n) || n == "Real" => VarType::Real,
+                    _ if verum_common::well_known_types::type_names::is_float_type(n)
+                        || n == "Real" =>
+                    {
+                        VarType::Real
+                    }
                     _ => VarType::Sort(Text::from(name)),
                 }
             }
@@ -3148,9 +3166,15 @@ impl VCGenerator {
                 {
                     let n = name.as_str();
                     match n {
-                        _ if verum_common::well_known_types::type_names::is_integer_type(n) => VarType::Int,
+                        _ if verum_common::well_known_types::type_names::is_integer_type(n) => {
+                            VarType::Int
+                        }
                         "Bool" => VarType::Bool,
-                        _ if verum_common::well_known_types::type_names::is_float_type(n) || n == "Real" => VarType::Real,
+                        _ if verum_common::well_known_types::type_names::is_float_type(n)
+                            || n == "Real" =>
+                        {
+                            VarType::Real
+                        }
                         _ => VarType::Sort(Text::from(name)),
                     }
                 }
@@ -3468,9 +3492,15 @@ impl VCGenerator {
     fn parse_var_type_string(&self, ty_str: &str) -> VarType {
         let s = ty_str.trim();
         match s {
-            _ if verum_common::well_known_types::type_names::is_integer_type(s) && !verum_common::well_known_types::type_names::is_unsigned_integer_type(s) => VarType::Int,
+            _ if verum_common::well_known_types::type_names::is_integer_type(s)
+                && !verum_common::well_known_types::type_names::is_unsigned_integer_type(s) =>
+            {
+                VarType::Int
+            }
             "Bool" | "bool" => VarType::Bool,
-            _ if verum_common::well_known_types::type_names::is_float_type(s) || s == "Real" => VarType::Real,
+            _ if verum_common::well_known_types::type_names::is_float_type(s) || s == "Real" => {
+                VarType::Real
+            }
             "u8" => VarType::BitVec(8),
             "u16" => VarType::BitVec(16),
             "u32" => VarType::BitVec(32),

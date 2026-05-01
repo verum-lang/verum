@@ -8,28 +8,24 @@
 
 //! Run with: cargo bench -p verum_vbc --features metal
 
-use criterion::{criterion_group, criterion_main, Criterion, BenchmarkId, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
-use verum_vbc::interpreter::tensor::{
-    DType, TensorHandle, tensor_binop, tensor_unop, tensor_matmul, tensor_reduce,
-    tensor_transpose, tensor_reshape, tensor_softmax, tensor_concat, tensor_slice,
-    tensor_stack, tensor_arange, tensor_linspace, tensor_rand, tensor_clone,
-    tensor_identity, tensor_squeeze, tensor_argmax, tensor_layer_norm,
-    tensor_conv2d, tensor_pool2d, PoolOp,
+use verum_vbc::instruction::{TensorBinaryOp, TensorReduceOp, TensorUnaryOp};
+#[cfg(target_arch = "aarch64")]
+use verum_vbc::interpreter::kernel::cpu::{binop_f32_neon, reduce_f32_neon, unop_f32_neon};
+use verum_vbc::interpreter::kernel::cpu::{
+    binop_f32_scalar, matmul_f32_scalar, matmul_f32_tiled, reduce_f32_scalar, unop_f32_scalar,
 };
 use verum_vbc::interpreter::kernel::{
-    dispatch_binop, dispatch_unop, dispatch_reduce, dispatch_matmul,
-    broadcast_shapes, broadcast_to, get_capabilities,
+    broadcast_shapes, broadcast_to, dispatch_binop, dispatch_matmul, dispatch_reduce,
+    dispatch_unop, get_capabilities,
 };
-use verum_vbc::interpreter::kernel::cpu::{
-    binop_f32_scalar, unop_f32_scalar,
-    reduce_f32_scalar, matmul_f32_scalar, matmul_f32_tiled,
+use verum_vbc::interpreter::tensor::{
+    DType, PoolOp, TensorHandle, tensor_arange, tensor_argmax, tensor_binop, tensor_clone,
+    tensor_concat, tensor_conv2d, tensor_identity, tensor_layer_norm, tensor_linspace,
+    tensor_matmul, tensor_pool2d, tensor_rand, tensor_reduce, tensor_reshape, tensor_slice,
+    tensor_softmax, tensor_squeeze, tensor_stack, tensor_transpose, tensor_unop,
 };
-#[cfg(target_arch = "aarch64")]
-use verum_vbc::interpreter::kernel::cpu::{
-    binop_f32_neon, unop_f32_neon, reduce_f32_neon,
-};
-use verum_vbc::instruction::{TensorBinaryOp, TensorUnaryOp, TensorReduceOp};
 
 // ============================================================================
 // Test Sizes Configuration
@@ -93,13 +89,7 @@ fn bench_tensor_creation(c: &mut Criterion) {
 fn bench_tensor_2d_creation(c: &mut Criterion) {
     let mut group = c.benchmark_group("tensor_2d_creation");
 
-    let shapes = [
-        (64, 64),
-        (128, 128),
-        (256, 256),
-        (512, 512),
-        (1024, 1024),
-    ];
+    let shapes = [(64, 64), (128, 128), (256, 256), (512, 512), (1024, 1024)];
 
     for (rows, cols) in shapes.iter() {
         let numel = rows * cols;
@@ -143,9 +133,7 @@ fn bench_binop_all_ops(c: &mut Criterion) {
             group.bench_with_input(BenchmarkId::new("dispatch", size), size, |b, &size| {
                 let a = TensorHandle::full(&[size], DType::F32, 2.0).unwrap();
                 let b_tensor = TensorHandle::full(&[size], DType::F32, 3.0).unwrap();
-                b.iter(|| {
-                    black_box(dispatch_binop(&a, &b_tensor, *op))
-                });
+                b.iter(|| black_box(dispatch_binop(&a, &b_tensor, *op)));
             });
         }
         group.finish();
@@ -163,18 +151,14 @@ fn bench_binop_scalar_vs_simd(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("scalar", size), size, |b, &size| {
             let a = TensorHandle::full(&[size], DType::F32, 2.0).unwrap();
             let b_tensor = TensorHandle::full(&[size], DType::F32, 3.0).unwrap();
-            b.iter(|| {
-                black_box(binop_f32_scalar(&a, &b_tensor, TensorBinaryOp::Add))
-            });
+            b.iter(|| black_box(binop_f32_scalar(&a, &b_tensor, TensorBinaryOp::Add)));
         });
 
         // NEON version
         group.bench_with_input(BenchmarkId::new("neon", size), size, |b, &size| {
             let a = TensorHandle::full(&[size], DType::F32, 2.0).unwrap();
             let b_tensor = TensorHandle::full(&[size], DType::F32, 3.0).unwrap();
-            b.iter(|| {
-                black_box(binop_f32_neon(&a, &b_tensor, TensorBinaryOp::Add))
-            });
+            b.iter(|| black_box(binop_f32_neon(&a, &b_tensor, TensorBinaryOp::Add)));
         });
     }
     group.finish();
@@ -190,9 +174,7 @@ fn bench_binop_scalar_vs_simd(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("scalar", size), size, |b, &size| {
             let a = TensorHandle::full(&[size], DType::F32, 2.0).unwrap();
             let b_tensor = TensorHandle::full(&[size], DType::F32, 3.0).unwrap();
-            b.iter(|| {
-                black_box(binop_f32_scalar(&a, &b_tensor, TensorBinaryOp::Add))
-            });
+            b.iter(|| black_box(binop_f32_scalar(&a, &b_tensor, TensorBinaryOp::Add)));
         });
     }
     group.finish();
@@ -290,9 +272,7 @@ fn bench_unop_all_ops(c: &mut Criterion) {
             group.throughput(Throughput::Elements(*size as u64));
             group.bench_with_input(BenchmarkId::new("f32", size), size, |b, &size| {
                 let a = TensorHandle::full(&[size], DType::F32, 1.5).unwrap();
-                b.iter(|| {
-                    black_box(dispatch_unop(&a, *op))
-                });
+                b.iter(|| black_box(dispatch_unop(&a, *op)));
             });
         }
         group.finish();
@@ -413,9 +393,7 @@ fn bench_reduce_all_ops(c: &mut Criterion) {
             group.throughput(Throughput::Elements(*size as u64));
             group.bench_with_input(BenchmarkId::new("f32", size), size, |b, &size| {
                 let a = TensorHandle::full(&[size], DType::F32, 1.0).unwrap();
-                b.iter(|| {
-                    black_box(dispatch_reduce(&a, *op, None))
-                });
+                b.iter(|| black_box(dispatch_reduce(&a, *op, None)));
             });
         }
         group.finish();
@@ -463,12 +441,7 @@ fn bench_reduce_axis(c: &mut Criterion) {
     let mut group = c.benchmark_group("reduce_axis");
 
     // 2D tensor reduction along different axes
-    let shapes = [
-        (128, 128),
-        (256, 256),
-        (512, 512),
-        (1024, 1024),
-    ];
+    let shapes = [(128, 128), (256, 256), (512, 512), (1024, 1024)];
 
     for (rows, cols) in shapes.iter() {
         let label = format!("{}x{}", rows, cols);
@@ -522,9 +495,7 @@ fn bench_matmul_square(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("f32", size), size, |b, &size| {
             let a = TensorHandle::full(&[size, size], DType::F32, 0.1).unwrap();
             let b_tensor = TensorHandle::full(&[size, size], DType::F32, 0.1).unwrap();
-            b.iter(|| {
-                black_box(dispatch_matmul(&a, &b_tensor))
-            });
+            b.iter(|| black_box(dispatch_matmul(&a, &b_tensor)));
         });
     }
     group.finish();
@@ -571,11 +542,15 @@ fn bench_matmul_rectangular(c: &mut Criterion) {
         let flops = 2 * (*m as u64) * (*k as u64) * (*n as u64);
         let label = format!("{}x{}x{}", m, k, n);
         group.throughput(Throughput::Elements(flops));
-        group.bench_with_input(BenchmarkId::new("f32", &label), &(*m, *k, *n), |b, &(m, k, n)| {
-            let a = TensorHandle::full(&[m, k], DType::F32, 0.1).unwrap();
-            let b_tensor = TensorHandle::full(&[k, n], DType::F32, 0.1).unwrap();
-            b.iter(|| black_box(dispatch_matmul(&a, &b_tensor)));
-        });
+        group.bench_with_input(
+            BenchmarkId::new("f32", &label),
+            &(*m, *k, *n),
+            |b, &(m, k, n)| {
+                let a = TensorHandle::full(&[m, k], DType::F32, 0.1).unwrap();
+                let b_tensor = TensorHandle::full(&[k, n], DType::F32, 0.1).unwrap();
+                b.iter(|| black_box(dispatch_matmul(&a, &b_tensor)));
+            },
+        );
     }
     group.finish();
 }
@@ -593,8 +568,10 @@ fn bench_matmul_batch(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("batch", batch), batch, |b, &batch| {
             let matrices: Vec<_> = (0..batch)
                 .map(|_| {
-                    let a = TensorHandle::full(&[matrix_size, matrix_size], DType::F32, 0.1).unwrap();
-                    let b = TensorHandle::full(&[matrix_size, matrix_size], DType::F32, 0.1).unwrap();
+                    let a =
+                        TensorHandle::full(&[matrix_size, matrix_size], DType::F32, 0.1).unwrap();
+                    let b =
+                        TensorHandle::full(&[matrix_size, matrix_size], DType::F32, 0.1).unwrap();
                     (a, b)
                 })
                 .collect();
@@ -621,7 +598,7 @@ fn bench_transpose(c: &mut Criterion) {
         (256, 256),
         (512, 512),
         (1024, 1024),
-        (128, 512),  // Non-square
+        (128, 512), // Non-square
         (512, 128),
     ];
 
@@ -699,11 +676,7 @@ fn bench_slice(c: &mut Criterion) {
     });
 
     // 2D slice
-    let shapes = [
-        (256, 256),
-        (512, 512),
-        (1024, 1024),
-    ];
+    let shapes = [(256, 256), (512, 512), (1024, 1024)];
 
     for (rows, cols) in shapes.iter() {
         let label = format!("{}x{}", rows, cols);
@@ -711,7 +684,12 @@ fn bench_slice(c: &mut Criterion) {
             let a = TensorHandle::full(&[*rows, *cols], DType::F32, 1.0).unwrap();
             let half_r = rows / 4;
             let half_c = cols / 4;
-            b.iter(|| black_box(tensor_slice(&a, &[(half_r, rows - half_r), (half_c, cols - half_c)])));
+            b.iter(|| {
+                black_box(tensor_slice(
+                    &a,
+                    &[(half_r, rows - half_r), (half_c, cols - half_c)],
+                ))
+            });
         });
     }
 
@@ -811,12 +789,7 @@ fn bench_softmax(c: &mut Criterion) {
     }
 
     // 2D softmax (common in attention)
-    let shapes = [
-        (32, 32),
-        (64, 64),
-        (128, 128),
-        (256, 256),
-    ];
+    let shapes = [(32, 32), (64, 64), (128, 128), (256, 256)];
 
     for (rows, cols) in shapes.iter() {
         let label = format!("{}x{}", rows, cols);
@@ -852,11 +825,11 @@ fn bench_layer_norm(c: &mut Criterion) {
 
     // Typical transformer dimensions
     let shapes = [
-        (32, 512),    // batch=32, hidden=512
-        (32, 768),    // batch=32, hidden=768 (BERT-base)
-        (32, 1024),   // batch=32, hidden=1024 (BERT-large)
-        (16, 2048),   // batch=16, hidden=2048
-        (8, 4096),    // batch=8, hidden=4096
+        (32, 512),  // batch=32, hidden=512
+        (32, 768),  // batch=32, hidden=768 (BERT-base)
+        (32, 1024), // batch=32, hidden=1024 (BERT-large)
+        (16, 2048), // batch=16, hidden=2048
+        (8, 4096),  // batch=8, hidden=4096
     ];
 
     for (batch, hidden) in shapes.iter() {
@@ -882,11 +855,11 @@ fn bench_conv2d(c: &mut Criterion) {
     // Kernel: (out_channels, in_channels, kH, kW)
     let configs = [
         // (batch, in_c, h, w, out_c, kh, kw)
-        (1, 3, 32, 32, 16, 3, 3),      // Small image
-        (1, 3, 64, 64, 32, 3, 3),      // Medium image
-        (1, 32, 32, 32, 64, 3, 3),     // Deeper network
-        (1, 64, 16, 16, 128, 3, 3),    // Even deeper
-        (8, 3, 32, 32, 16, 3, 3),      // Batched
+        (1, 3, 32, 32, 16, 3, 3),   // Small image
+        (1, 3, 64, 64, 32, 3, 3),   // Medium image
+        (1, 32, 32, 32, 64, 3, 3),  // Deeper network
+        (1, 64, 16, 16, 128, 3, 3), // Even deeper
+        (8, 3, 32, 32, 16, 3, 3),   // Batched
     ];
 
     for (batch, in_c, h, w, out_c, kh, kw) in configs.iter() {
@@ -896,7 +869,17 @@ fn bench_conv2d(c: &mut Criterion) {
             let input = TensorHandle::full(&[*batch, *in_c, *h, *w], DType::F32, 0.5).unwrap();
             let kernel = TensorHandle::full(&[*out_c, *in_c, *kh, *kw], DType::F32, 0.1).unwrap();
             let bias = TensorHandle::full(&[*out_c], DType::F32, 0.0).unwrap();
-            b.iter(|| black_box(tensor_conv2d(&input, &kernel, Some(&bias), (1, 1), (1, 1), (1, 1), 1)));
+            b.iter(|| {
+                black_box(tensor_conv2d(
+                    &input,
+                    &kernel,
+                    Some(&bias),
+                    (1, 1),
+                    (1, 1),
+                    (1, 1),
+                    1,
+                ))
+            });
         });
     }
 
@@ -920,13 +903,29 @@ fn bench_pool2d(c: &mut Criterion) {
         // Max pooling
         group.bench_function(BenchmarkId::new("max", &label), |b| {
             let input = TensorHandle::full(&[*batch, *ch, *h, *w], DType::F32, 0.5).unwrap();
-            b.iter(|| black_box(tensor_pool2d(&input, PoolOp::Max, (*pool, *pool), (*pool, *pool), (0, 0))));
+            b.iter(|| {
+                black_box(tensor_pool2d(
+                    &input,
+                    PoolOp::Max,
+                    (*pool, *pool),
+                    (*pool, *pool),
+                    (0, 0),
+                ))
+            });
         });
 
         // Average pooling
         group.bench_function(BenchmarkId::new("avg", &label), |b| {
             let input = TensorHandle::full(&[*batch, *ch, *h, *w], DType::F32, 0.5).unwrap();
-            b.iter(|| black_box(tensor_pool2d(&input, PoolOp::Avg, (*pool, *pool), (*pool, *pool), (0, 0))));
+            b.iter(|| {
+                black_box(tensor_pool2d(
+                    &input,
+                    PoolOp::Avg,
+                    (*pool, *pool),
+                    (*pool, *pool),
+                    (0, 0),
+                ))
+            });
         });
     }
 
@@ -1020,7 +1019,7 @@ fn bench_memory_bandwidth(c: &mut Criterion) {
 
     // Simple copy operation (measures memory bandwidth)
     for size in HUGE_SIZES.iter() {
-        let bytes = (*size * 4) as u64;  // F32 = 4 bytes
+        let bytes = (*size * 4) as u64; // F32 = 4 bytes
         group.throughput(Throughput::Bytes(bytes));
         group.bench_with_input(BenchmarkId::new("copy_via_add0", size), size, |b, &size| {
             let a = TensorHandle::full(&[size], DType::F32, 1.0).unwrap();
@@ -1194,13 +1193,18 @@ fn bench_metal_vectorization(c: &mut Criterion) {
 
     // Large tensors to measure peak GPU throughput
     for size in [1048576, 4194304, 16777216].iter() {
-        let bytes = (*size * 4) as u64;  // F32 = 4 bytes
-        group.throughput(Throughput::Bytes(bytes * 3));  // Read 2, write 1
-        group.bench_with_input(BenchmarkId::new("add_throughput", size), size, |b, &size| {
-            let a = TensorHandle::full(&[size], DType::F32, std::f64::consts::PI).unwrap();
-            let b_tensor = TensorHandle::full(&[size], DType::F32, std::f64::consts::E).unwrap();
-            b.iter(|| black_box(backend.binop_gpu(&a, &b_tensor, TensorBinaryOp::Add)));
-        });
+        let bytes = (*size * 4) as u64; // F32 = 4 bytes
+        group.throughput(Throughput::Bytes(bytes * 3)); // Read 2, write 1
+        group.bench_with_input(
+            BenchmarkId::new("add_throughput", size),
+            size,
+            |b, &size| {
+                let a = TensorHandle::full(&[size], DType::F32, std::f64::consts::PI).unwrap();
+                let b_tensor =
+                    TensorHandle::full(&[size], DType::F32, std::f64::consts::E).unwrap();
+                b.iter(|| black_box(backend.binop_gpu(&a, &b_tensor, TensorBinaryOp::Add)));
+            },
+        );
     }
     group.finish();
 }
@@ -1230,13 +1234,7 @@ fn bench_metal_softmax(c: &mut Criterion) {
     }
 
     // 2D batch softmax (typical attention pattern)
-    let batch_configs = [
-        (8, 64),
-        (16, 128),
-        (32, 256),
-        (64, 512),
-        (128, 1024),
-    ];
+    let batch_configs = [(8, 64), (16, 128), (32, 256), (64, 512), (128, 1024)];
 
     for (batch, dim) in batch_configs.iter() {
         let label = format!("{}x{}", batch, dim);
@@ -1270,8 +1268,8 @@ fn bench_metal_layer_norm(c: &mut Criterion) {
     let configs = [
         (8, 256),
         (16, 512),
-        (32, 768),    // BERT-base hidden size
-        (32, 1024),   // BERT-large hidden size
+        (32, 768),  // BERT-base hidden size
+        (32, 1024), // BERT-large hidden size
         (64, 512),
         (128, 256),
     ];
@@ -1297,10 +1295,7 @@ fn bench_metal_layer_norm(c: &mut Criterion) {
     }
 
     // Large hidden sizes (triggers multi-pass)
-    let large_configs = [
-        (8, 2048),
-        (16, 4096),
-    ];
+    let large_configs = [(8, 2048), (16, 4096)];
 
     for (batch, hidden) in large_configs.iter() {
         let label = format!("{}x{}_large", batch, hidden);
@@ -1364,11 +1359,7 @@ fn bench_metal_layer_norm_vs_cpu(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("layer_norm_gpu_vs_cpu");
 
-    let configs = [
-        (16, 512),
-        (32, 768),
-        (64, 1024),
-    ];
+    let configs = [(16, 512), (32, 768), (64, 1024)];
 
     for (batch, hidden) in configs.iter() {
         let label = format!("{}x{}", batch, hidden);
@@ -1397,8 +1388,8 @@ fn bench_metal_layer_norm_vs_cpu(c: &mut Criterion) {
 
 #[cfg(all(target_os = "macos", feature = "metal"))]
 fn bench_metal_reduce(c: &mut Criterion) {
-    use verum_vbc::interpreter::kernel::metal::{MetalBackend, is_metal_available};
     use verum_vbc::instruction::TensorReduceOp as MetalReduceOp;
+    use verum_vbc::interpreter::kernel::metal::{MetalBackend, is_metal_available};
 
     if !is_metal_available() {
         return;
@@ -1439,8 +1430,8 @@ fn bench_metal_reduce(c: &mut Criterion) {
 
 #[cfg(all(target_os = "macos", feature = "metal"))]
 fn bench_metal_reduce_vs_cpu(c: &mut Criterion) {
-    use verum_vbc::interpreter::kernel::metal::{MetalBackend, is_metal_available};
     use verum_vbc::instruction::TensorReduceOp as MetalReduceOp;
+    use verum_vbc::interpreter::kernel::metal::{MetalBackend, is_metal_available};
 
     if !is_metal_available() {
         return;
@@ -1600,10 +1591,7 @@ criterion_group!(
     bench_binop_with_broadcast,
 );
 
-criterion_group!(
-    memory_benches,
-    bench_memory_bandwidth,
-);
+criterion_group!(memory_benches, bench_memory_bandwidth,);
 
 criterion_group!(
     misc_benches,

@@ -13,8 +13,8 @@
     unused_assignments
 )]
 use verum_ast::FileId;
-use verum_lexer::Lexer;
 use verum_fast_parser::RecursiveParser;
+use verum_lexer::Lexer;
 
 #[test]
 #[ignore = "Semicolon insertion not yet implemented - requires language design decision"]

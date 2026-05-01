@@ -62,9 +62,7 @@ pub fn run_proof_repair(
     format: &str,
 ) -> Result<()> {
     if max_results == 0 {
-        return Err(CliError::InvalidArgument(
-            "--max must be > 0".into(),
-        ));
+        return Err(CliError::InvalidArgument("--max must be > 0".into()));
     }
     if format != "plain" && format != "json" {
         return Err(CliError::InvalidArgument(format!(
@@ -106,10 +104,7 @@ pub fn run_proof_repair(
             let mut out = String::from("{\n");
             out.push_str("  \"schema_version\": 1,\n");
             out.push_str(&format!("  \"kind\": \"{}\",\n", json_escape(kind)));
-            out.push_str(&format!(
-                "  \"suggestion_count\": {},\n",
-                suggestions.len()
-            ));
+            out.push_str(&format!("  \"suggestion_count\": {},\n", suggestions.len()));
             out.push_str("  \"suggestions\": [\n");
             for (i, s) in suggestions.iter().enumerate() {
                 let doc_link_field = match &s.doc_link {
@@ -160,20 +155,10 @@ fn parse_fields(flags: &[String]) -> Result<HashMap<String, String>> {
 /// Project the kind name + field map onto a typed [`ProofFailureKind`].
 /// Required fields per kind are validated up-front so the error message
 /// names the missing field instead of producing an empty suggestion list.
-fn build_failure(
-    kind: &str,
-    fields: &HashMap<String, String>,
-) -> Result<ProofFailureKind> {
-    fn require<'a>(
-        kind: &str,
-        fields: &'a HashMap<String, String>,
-        key: &str,
-    ) -> Result<&'a str> {
+fn build_failure(kind: &str, fields: &HashMap<String, String>) -> Result<ProofFailureKind> {
+    fn require<'a>(kind: &str, fields: &'a HashMap<String, String>, key: &str) -> Result<&'a str> {
         fields.get(key).map(String::as_str).ok_or_else(|| {
-            CliError::InvalidArgument(format!(
-                "--kind {} requires --field {}=<value>",
-                kind, key
-            ))
+            CliError::InvalidArgument(format!("--kind {} requires --field {}=<value>", kind, key))
         })
     }
 
@@ -373,12 +358,7 @@ mod tests {
 
     #[test]
     fn run_proof_repair_unbound_name_smoke() {
-        let r = run_proof_repair(
-            "unbound-name",
-            &["name=foo_lemma".to_string()],
-            5,
-            "plain",
-        );
+        let r = run_proof_repair("unbound-name", &["name=foo_lemma".to_string()], 5, "plain");
         assert!(r.is_ok());
     }
 
@@ -399,12 +379,7 @@ mod tests {
     #[test]
     fn run_proof_repair_missing_required_field_errors() {
         // `refine-depth` requires both refined_type and predicate_depth.
-        let r = run_proof_repair(
-            "refine-depth",
-            &["refined_type=X".to_string()],
-            5,
-            "plain",
-        );
+        let r = run_proof_repair("refine-depth", &["refined_type=X".to_string()], 5, "plain");
         assert!(matches!(r, Err(CliError::InvalidArgument(_))));
     }
 
@@ -418,7 +393,10 @@ mod tests {
         // fast at the handler level rather than emitting a
         // misleading "no suggestions" line to LSP consumers.
         let cases: &[(&str, &[(&str, &str)])] = &[
-            ("refine-depth", &[("refined_type", "X"), ("predicate_depth", "ω")]),
+            (
+                "refine-depth",
+                &[("refined_type", "X"), ("predicate_depth", "ω")],
+            ),
             (
                 "positivity",
                 &[
@@ -429,7 +407,10 @@ mod tests {
             ),
             (
                 "universe",
-                &[("source_universe", "Type_1"), ("expected_universe", "Type_0")],
+                &[
+                    ("source_universe", "Type_1"),
+                    ("expected_universe", "Type_0"),
+                ],
             ),
             (
                 "fwax-not-prop",
@@ -446,7 +427,10 @@ mod tests {
                     ("goal", "B"),
                 ],
             ),
-            ("tactic-open", &[("tactic", "lia"), ("reason", "non-trivial")]),
+            (
+                "tactic-open",
+                &[("tactic", "lia"), ("reason", "non-trivial")],
+            ),
         ];
 
         let engine = DefaultRepairEngine::new();

@@ -13,10 +13,10 @@
 //! The result is a self-contained LLVM module that can be compiled to
 //! a native executable with embedded GPU kernels.
 
-use verum_mlir::translation::{LlvmContextRef, LlvmModule};
-use verum_mlir::ir::Module as MlirModule;
-use verum_common::Text;
 use std::path::PathBuf;
+use verum_common::Text;
+use verum_mlir::ir::Module as MlirModule;
+use verum_mlir::translation::{LlvmContextRef, LlvmModule};
 
 use super::error::{MlirError, Result};
 use super::vbc_lowering::GpuTarget;
@@ -93,18 +93,22 @@ impl GpuBinaryEmitter {
     pub fn emit(&self, mlir_module: &MlirModule) -> Result<GpuBinaryOutput> {
         // Step 1: Translate MLIR (LLVM dialect) → LLVM IR
         let llvm_ctx = LlvmContextRef::new();
-        let llvm_module = LlvmModule::from_mlir(mlir_module, &llvm_ctx)
-            .ok_or_else(|| MlirError::aot(
+        let llvm_module = LlvmModule::from_mlir(mlir_module, &llvm_ctx).ok_or_else(|| {
+            MlirError::aot(
                 "Failed to translate MLIR to LLVM IR. \
-                 Ensure all operations are lowered to the LLVM dialect."
-            ))?;
+                 Ensure all operations are lowered to the LLVM dialect.",
+            )
+        })?;
 
         // Set target triple based on GPU target
         let host_triple = self.host_triple();
         llvm_module.set_target_triple(&host_triple);
 
         if self.verbose {
-            tracing::info!("Translated MLIR to LLVM IR ({} bytes)", llvm_module.print_to_string().len());
+            tracing::info!(
+                "Translated MLIR to LLVM IR ({} bytes)",
+                llvm_module.print_to_string().len()
+            );
         }
 
         // Step 2: Get the LLVM IR as text
@@ -123,9 +127,7 @@ impl GpuBinaryEmitter {
         // if the target toolchain is available (ptxas, metal compiler).
         let kernel_binaries = self.extract_kernel_binaries(mlir_module);
 
-        let total_binary_size: usize = kernel_binaries.iter()
-            .map(|kb| kb.data.len())
-            .sum();
+        let total_binary_size: usize = kernel_binaries.iter().map(|kb| kb.data.len()).sum();
 
         if self.verbose {
             tracing::info!(
@@ -166,12 +168,14 @@ impl GpuBinaryEmitter {
             };
             let bin_path = output_dir.join(format!("kernel_{}.{}", i, ext));
             std::fs::write(&bin_path, &kb.data)
-                .map_err(|e| MlirError::aot(format!(
-                    "Failed to write kernel binary: {}", e
-                )))?;
+                .map_err(|e| MlirError::aot(format!("Failed to write kernel binary: {}", e)))?;
 
             if self.verbose {
-                tracing::info!("Wrote kernel binary: {} ({} bytes)", bin_path.display(), kb.data.len());
+                tracing::info!(
+                    "Wrote kernel binary: {} ({} bytes)",
+                    bin_path.display(),
+                    kb.data.len()
+                );
             }
         }
 
@@ -259,18 +263,24 @@ impl GpuBinaryEmitter {
                 // For CUDA, we'd need to generate PTX. Without ptxas
                 // on the system, we can't produce binaries. Return None
                 // to signal the runtime should fall back to CPU.
-                tracing::warn!("CUDA PTX compilation requires ptxas (CUDA toolkit). \
-                                GPU kernels will fall back to CPU execution.");
+                tracing::warn!(
+                    "CUDA PTX compilation requires ptxas (CUDA toolkit). \
+                                GPU kernels will fall back to CPU execution."
+                );
                 None
             }
             GpuTarget::Rocm => {
-                tracing::warn!("ROCm compilation requires rocm-clang. \
-                                GPU kernels will fall back to CPU execution.");
+                tracing::warn!(
+                    "ROCm compilation requires rocm-clang. \
+                                GPU kernels will fall back to CPU execution."
+                );
                 None
             }
             GpuTarget::Vulkan => {
-                tracing::warn!("Vulkan SPIR-V compilation requires spirv-tools. \
-                                GPU kernels will fall back to CPU execution.");
+                tracing::warn!(
+                    "Vulkan SPIR-V compilation requires spirv-tools. \
+                                GPU kernels will fall back to CPU execution."
+                );
                 None
             }
         }

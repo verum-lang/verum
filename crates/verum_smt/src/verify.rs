@@ -14,8 +14,8 @@ use std::sync::OnceLock;
 use std::time::Duration;
 use verum_ast::ty::GenericArg;
 use verum_ast::{Expr, ExprKind, Type, TypeKind};
-use verum_common::{List, Text};
 use verum_common::ToText;
+use verum_common::{List, Text};
 
 // Global verification cache (lazy-initialized, thread-safe)
 static VERIFICATION_CACHE: OnceLock<VerificationCache> = OnceLock::new();
@@ -196,7 +196,8 @@ impl ProofResult {
 
         // Convert proof_extraction::ProofTerm → proof_extraction_bridge::ProofTerm,
         // then invoke the certificate pipeline.
-        let bridge_proof = crate::proof_extraction::ProofExtractor::to_bridge_term(extraction_proof);
+        let bridge_proof =
+            crate::proof_extraction::ProofExtractor::to_bridge_term(extraction_proof);
         Some(crate::proof_extraction_bridge::proof_to_certificate(
             &bridge_proof,
             theorem_name,

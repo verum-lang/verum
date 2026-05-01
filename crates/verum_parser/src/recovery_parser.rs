@@ -37,14 +37,14 @@
 
 use verum_ast::FileId;
 use verum_common::List;
-use verum_lexer::lossless::{LosslessLexer, RichToken, TriviaKind as LexerTriviaKind};
 use verum_lexer::TokenKind;
+use verum_lexer::lossless::{LosslessLexer, RichToken, TriviaKind as LexerTriviaKind};
+use verum_syntax::event::process;
 use verum_syntax::{
     EventBuilder, GreenNode, GreenTreeSink, SyntaxKind, SyntaxNode, TokenSource, TriviaSource,
 };
-use verum_syntax::event::process;
 
-use crate::recovery::{recovery_sets, EventRecovery};
+use crate::recovery::{EventRecovery, recovery_sets};
 
 /// Event-based parser with comprehensive error recovery.
 #[derive(Debug)]
@@ -1007,9 +1007,7 @@ fn convert_tokens_to_sources(source: &str, tokens: &List<RichToken>) -> Vec<Toke
             .collect();
 
         let span = &rich_token.token.span;
-        let text = if (span.start as usize) < source.len()
-            && (span.end as usize) <= source.len()
-        {
+        let text = if (span.start as usize) < source.len() && (span.end as usize) <= source.len() {
             source[span.start as usize..span.end as usize].to_string()
         } else {
             String::new()
@@ -1043,7 +1041,10 @@ mod tests {
         let result = parser.parse(source, file_id);
 
         assert!(result.ok(), "Valid code should parse without errors");
-        assert!(!result.had_recovery(), "Valid code should not need recovery");
+        assert!(
+            !result.had_recovery(),
+            "Valid code should not need recovery"
+        );
         assert_eq!(result.text(), source, "Should reconstruct source exactly");
     }
 

@@ -140,7 +140,10 @@ fn publish_immutable_release_conflict() {
         "--root",
         dir.path().to_str().unwrap(),
     ]);
-    assert!(!out.status.success(), "immutable release must fail conflict");
+    assert!(
+        !out.status.success(),
+        "immutable release must fail conflict"
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("version conflict") || stdout.contains("VersionConflict"));
 }
@@ -166,7 +169,10 @@ fn publish_idempotent_for_same_content() {
         dir.path().to_str().unwrap(),
     ]);
     assert!(r1.status.success());
-    assert!(r2.status.success(), "republishing same chain hash must be idempotent");
+    assert!(
+        r2.status.success(),
+        "republishing same chain hash must be idempotent"
+    );
 }
 
 #[test]
@@ -380,7 +386,10 @@ fn consensus_breaks_on_mirror_disagreement() {
         "--mirror",
         d2.path().to_str().unwrap(),
     ]);
-    assert!(!out.status.success(), "mirror disagreement must break consensus");
+    assert!(
+        !out.status.success(),
+        "mirror disagreement must break consensus"
+    );
 }
 
 #[test]

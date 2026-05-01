@@ -141,7 +141,9 @@ pub struct Context {
 impl Context {
     /// An empty context.
     pub fn new() -> Self {
-        Self { bindings: List::new() }
+        Self {
+            bindings: List::new(),
+        }
     }
 
     /// Extend the context with a new typed binding. Shadowing is

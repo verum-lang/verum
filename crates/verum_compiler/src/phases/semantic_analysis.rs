@@ -17,10 +17,10 @@
 use anyhow::Result;
 use std::sync::Arc;
 use std::time::Instant;
-use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
 use verum_common::List;
-use verum_types::core_metadata::CoreMetadata;
+use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
 use verum_types::TypeChecker;
+use verum_types::core_metadata::CoreMetadata;
 
 use super::{
     CompilationPhase, PhaseData, PhaseInput, PhaseMetrics, PhaseOutput, VerifiedContractRegistry,
@@ -144,10 +144,7 @@ impl SemanticAnalysisPhase {
     /// to `ProtocolChecker.coherence_mode` at
     /// `phase_checker.set_protocol_coherence_mode(...)`. Closes the
     /// inert-defense pattern around the field.
-    pub fn with_protocol_coherence_mode(
-        mut self,
-        mode: impl Into<verum_common::Text>,
-    ) -> Self {
+    pub fn with_protocol_coherence_mode(mut self, mode: impl Into<verum_common::Text>) -> Self {
         self.protocol_coherence_mode = mode.into();
         self
     }
@@ -357,21 +354,15 @@ impl CompilationPhase for SemanticAnalysisPhase {
         // strategy` and `[protocols].blanket_impls` settings into
         // the production `find_impl` path so they actually drive
         // resolution behaviour.
-        phase_checker.set_protocol_resolution_strategy(
-            self.protocol_resolution_strategy.clone(),
-        );
+        phase_checker.set_protocol_resolution_strategy(self.protocol_resolution_strategy.clone());
         phase_checker.set_protocol_blanket_impls(self.protocol_blanket_impls);
         phase_checker.set_protocol_coherence_mode(
             verum_types::protocol::CoherenceMode::from_manifest_str(
                 self.protocol_coherence_mode.as_str(),
             ),
         );
-        phase_checker.set_higher_kinded_protocols_enabled(
-            self.protocol_higher_kinded_protocols,
-        );
-        phase_checker.set_generic_associated_types_enabled(
-            self.protocol_generic_associated_types,
-        );
+        phase_checker.set_higher_kinded_protocols_enabled(self.protocol_higher_kinded_protocols);
+        phase_checker.set_generic_associated_types_enabled(self.protocol_generic_associated_types);
 
         // If contracts are available, enable contract-aware type checking
         // This allows the type checker to leverage verified preconditions/postconditions
@@ -443,7 +434,10 @@ impl CompilationPhase for SemanticAnalysisPhase {
                 if let verum_ast::ItemKind::Function(func) = &item.kind {
                     if let Err(e) = phase_checker.register_function_signature(func) {
                         if is_stdlib {
-                            tracing::debug!("Stdlib function registration error (non-fatal): {:?}", e);
+                            tracing::debug!(
+                                "Stdlib function registration error (non-fatal): {:?}",
+                                e
+                            );
                         } else {
                             let diag = e.to_diagnostic();
                             return Err(List::from(vec![diag]));
@@ -460,7 +454,10 @@ impl CompilationPhase for SemanticAnalysisPhase {
                 if let verum_ast::ItemKind::Protocol(protocol_decl) = &item.kind {
                     if let Err(e) = phase_checker.register_protocol(protocol_decl) {
                         if is_stdlib {
-                            tracing::debug!("Stdlib protocol registration error (non-fatal): {:?}", e);
+                            tracing::debug!(
+                                "Stdlib protocol registration error (non-fatal): {:?}",
+                                e
+                            );
                         } else {
                             let diag = e.to_diagnostic();
                             return Err(List::from(vec![diag]));

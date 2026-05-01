@@ -34,8 +34,8 @@ use verum_ast::Module;
 use verum_common::List;
 
 use crate::linker_config::ProjectConfig;
-use crate::phases::linking::{FinalLinker, LinkingConfig, ObjectFile};
 use crate::phases::ExecutionTier;
+use crate::phases::linking::{FinalLinker, LinkingConfig, ObjectFile};
 
 use super::CompilationPipeline;
 
@@ -73,7 +73,14 @@ impl<'s> CompilationPipeline<'s> {
         })?;
 
         // Determine output path
-        let output_path = if self.session.options().output.to_str().unwrap_or("").is_empty() {
+        let output_path = if self
+            .session
+            .options()
+            .output
+            .to_str()
+            .unwrap_or("")
+            .is_empty()
+        {
             // Default: use input filename without extension in target/<profile>/
             let exe_name = input_path
                 .file_stem()
@@ -104,7 +111,11 @@ impl<'s> CompilationPipeline<'s> {
         let module = if !self.project_modules.is_empty() {
             let mut merged = module.clone();
             for (path, proj_module) in &self.project_modules {
-                info!("  Merging project module '{}' ({} items)", path.as_str(), proj_module.items.len());
+                info!(
+                    "  Merging project module '{}' ({} items)",
+                    path.as_str(),
+                    proj_module.items.len()
+                );
                 for item in &proj_module.items {
                     // Skip mount statements from project modules (they reference
                     // sibling modules that are already merged)
@@ -122,13 +133,23 @@ impl<'s> CompilationPipeline<'s> {
         // Phase 1: Convert AST to VBC bytecode with full multi-module resolution
         // This uses the same path as the interpreter, collecting stdlib imports
         // and resolving cross-module dependencies before compilation.
-        let vbc_module = self.compile_ast_to_vbc(&module)
+        let vbc_module = self
+            .compile_ast_to_vbc(&module)
             .map_err(|e| anyhow::anyhow!("Failed to compile AST to VBC: {:?}", e))?;
 
-        info!("  VBC bytecode: {} functions ({} with instructions)",
+        info!(
+            "  VBC bytecode: {} functions ({} with instructions)",
             vbc_module.functions.len(),
-            vbc_module.functions.iter().filter(|f| f.instructions.is_some()).count());
-        info!("  VBC bytecode generated: {} functions", vbc_module.functions.len());
+            vbc_module
+                .functions
+                .iter()
+                .filter(|f| f.instructions.is_some())
+                .count()
+        );
+        info!(
+            "  VBC bytecode generated: {} functions",
+            vbc_module.functions.len()
+        );
 
         // Phase 1.5: Monomorphize generic functions
         // Specializes generic VBC functions with concrete type arguments before LLVM lowering.
@@ -136,13 +157,23 @@ impl<'s> CompilationPipeline<'s> {
         info!("  Monomorphizing generic functions");
         let vbc_module = {
             let mono = crate::phases::VbcMonomorphizationPhase::new();
-            let mono = if !self.session.language_features().codegen.monomorphization_cache {
+            let mono = if !self
+                .session
+                .language_features()
+                .codegen
+                .monomorphization_cache
+            {
                 mono.without_cache()
-            } else { mono };
+            } else {
+                mono
+            };
             let mut mono = mono;
             match mono.monomorphize(&vbc_module) {
                 Ok(mono_module) => {
-                    info!("  Monomorphization complete: {} functions", mono_module.functions.len());
+                    info!(
+                        "  Monomorphization complete: {} functions",
+                        mono_module.functions.len()
+                    );
                     std::sync::Arc::new(mono_module)
                 }
                 Err(diagnostics) => {
@@ -162,18 +193,22 @@ impl<'s> CompilationPipeline<'s> {
         let escape_result = {
             use verum_vbc::cbgr_analysis::VbcEscapeAnalyzer;
             let analyzer = VbcEscapeAnalyzer::new();
-            let functions: Vec<verum_vbc::VbcFunction> = vbc_module.functions.iter()
+            let functions: Vec<verum_vbc::VbcFunction> = vbc_module
+                .functions
+                .iter()
                 .filter_map(|f| {
-                    f.instructions.as_ref().map(|instrs| {
-                        verum_vbc::VbcFunction::new(f.clone(), instrs.clone())
-                    })
+                    f.instructions
+                        .as_ref()
+                        .map(|instrs| verum_vbc::VbcFunction::new(f.clone(), instrs.clone()))
                 })
                 .collect();
             let result = analyzer.analyze(&functions);
-            info!("  CBGR escape analysis: {} refs analyzed, {} promoted to tier1 ({:.1}%)",
+            info!(
+                "  CBGR escape analysis: {} refs analyzed, {} promoted to tier1 ({:.1}%)",
                 result.stats.total_refs,
                 result.stats.promoted_to_tier1,
-                result.stats.promotion_rate());
+                result.stats.promotion_rate()
+            );
             result
         };
 
@@ -184,7 +219,11 @@ impl<'s> CompilationPipeline<'s> {
             if let Err(e) = std::fs::write(&vbc_path, &dump) {
                 warn!("Failed to write VBC dump: {}", e);
             } else {
-                info!("Wrote VBC dump: {} ({} bytes)", vbc_path.display(), dump.len());
+                info!(
+                    "Wrote VBC dump: {} ({} bytes)",
+                    vbc_path.display(),
+                    dump.len()
+                );
             }
         }
 
@@ -203,7 +242,12 @@ impl<'s> CompilationPipeline<'s> {
         // session.rs:390 and the panic body always took the abort
         // path regardless.
         let panic_strategy = verum_codegen::llvm::PanicStrategy::from_manifest_text(
-            self.session.options().language_features.runtime.panic.as_str(),
+            self.session
+                .options()
+                .language_features
+                .runtime
+                .panic
+                .as_str(),
         );
 
         // Resolve `[codegen].tail_call_optimization` from
@@ -224,12 +268,7 @@ impl<'s> CompilationPipeline<'s> {
         // + `no-slp-vectorize` so LLVM's autovectorizer skips
         // those functions regardless of opt level. Sibling wire
         // to tail_call_optimization above; same pattern.
-        let vectorize = self
-            .session
-            .options()
-            .language_features
-            .codegen
-            .vectorize;
+        let vectorize = self.session.options().language_features.codegen.vectorize;
 
         // Resolve `[codegen].inline_depth` from Verum.toml. Maps
         // to per-function `"inline-threshold"` LLVM string
@@ -253,11 +292,10 @@ impl<'s> CompilationPipeline<'s> {
         // the historical stdlib defaults (auto-detect via
         // num_cpus, platform stack size).
         let rt = &self.session.options().language_features.runtime;
-        let runtime_bridge =
-            verum_codegen::llvm::platform_ir::RuntimeBridgeValues {
-                async_worker_threads: rt.async_worker_threads,
-                task_stack_size: rt.task_stack_size,
-            };
+        let runtime_bridge = verum_codegen::llvm::platform_ir::RuntimeBridgeValues {
+            async_worker_threads: rt.async_worker_threads,
+            task_stack_size: rt.task_stack_size,
+        };
 
         let lowering_config = verum_codegen::llvm::LoweringConfig::new(module_name)
             .with_opt_level(self.session.options().optimization_level)
@@ -272,25 +310,29 @@ impl<'s> CompilationPipeline<'s> {
             .with_futures_enabled(rt.futures)
             .with_nurseries_enabled(rt.nurseries);
 
-        let mut lowering = verum_codegen::llvm::VbcToLlvmLowering::new(
-            &llvm_ctx,
-            lowering_config,
-        );
+        let mut lowering = verum_codegen::llvm::VbcToLlvmLowering::new(&llvm_ctx, lowering_config);
 
         // Apply CBGR escape analysis results to LLVM lowering.
         // This enables tier promotion: non-escaping references skip runtime
         // generation checks (Tier 0 → Tier 1), saving ~15ns per reference.
         lowering.set_escape_analysis(escape_result);
 
-        lowering.lower_module(&vbc_module)
+        lowering
+            .lower_module(&vbc_module)
             .map_err(|e| anyhow::anyhow!("Failed to lower VBC to LLVM IR: {:?}", e))?;
 
         // Report CBGR statistics
         let stats = lowering.cbgr_stats();
         if stats.refs_created > 0 {
-            info!("  CBGR: {} refs ({} tier0/{} tier1/{} tier2), {} runtime checks, {} eliminated",
-                stats.refs_created, stats.tier0_refs, stats.tier1_refs, stats.tier2_refs,
-                stats.runtime_checks, stats.checks_eliminated);
+            info!(
+                "  CBGR: {} refs ({} tier0/{} tier1/{} tier2), {} runtime checks, {} eliminated",
+                stats.refs_created,
+                stats.tier0_refs,
+                stats.tier1_refs,
+                stats.tier2_refs,
+                stats.runtime_checks,
+                stats.checks_eliminated
+            );
         }
 
         // Phase 3: Write intermediate files
@@ -306,8 +348,7 @@ impl<'s> CompilationPipeline<'s> {
         // null Type references (use-after-free from arity collision
         // fixups). Disabled by default to prevent non-deterministic
         // SIGSEGV during normal builds.
-        let emit_ir = self.session.options().emit_ir
-            || std::env::var("VERUM_DUMP_IR").is_ok();
+        let emit_ir = self.session.options().emit_ir || std::env::var("VERUM_DUMP_IR").is_ok();
         if emit_ir && !lowering.has_arity_collisions() && lowering.skip_body_count() == 0 {
             let llvm_ir = lowering.get_ir();
             std::fs::write(&ir_path, llvm_ir.as_str().as_bytes())
@@ -318,8 +359,7 @@ impl<'s> CompilationPipeline<'s> {
         // Compile to object file using LLVM TargetMachine
         info!("  Writing object file to {}", obj_path.display());
         use verum_codegen::llvm::verum_llvm::targets::{
-            Target, TargetMachine, RelocMode, CodeModel, FileType,
-            InitializationConfig,
+            CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
         };
 
         // Initialize native target ONCE per process.
@@ -365,20 +405,28 @@ impl<'s> CompilationPipeline<'s> {
             let cpu = TargetMachine::get_host_cpu_name();
             let features = TargetMachine::get_host_cpu_features();
             // Leak to static — called once per compilation, acceptable
-            let cpu_s: &'static str = Box::leak(cpu.to_str().unwrap_or("generic").to_string().into_boxed_str());
-            let feat_s: &'static str = Box::leak(features.to_str().unwrap_or("").to_string().into_boxed_str());
+            let cpu_s: &'static str = Box::leak(
+                cpu.to_str()
+                    .unwrap_or("generic")
+                    .to_string()
+                    .into_boxed_str(),
+            );
+            let feat_s: &'static str =
+                Box::leak(features.to_str().unwrap_or("").to_string().into_boxed_str());
             (cpu_s, feat_s)
         };
         debug!("LLVM target: cpu={}, features={}", cpu_str, features_str);
 
-        let target_machine = target.create_target_machine(
-            &triple,
-            cpu_str,
-            features_str,
-            llvm_opt_level,
-            RelocMode::Default,
-            CodeModel::Default,
-        ).ok_or_else(|| anyhow::anyhow!("Failed to create target machine"))?;
+        let target_machine = target
+            .create_target_machine(
+                &triple,
+                cpu_str,
+                features_str,
+                llvm_opt_level,
+                RelocMode::Default,
+                CodeModel::Default,
+            )
+            .ok_or_else(|| anyhow::anyhow!("Failed to create target machine"))?;
 
         // Run LLVM optimization pass pipeline.
         // This is CRITICAL for performance — without it, all variables use
@@ -436,8 +484,7 @@ impl<'s> CompilationPipeline<'s> {
             // elimination) which is safe — it only removes
             // unreachable functions without traversing instruction
             // operands.
-            let has_ir_issues =
-                lowering.has_arity_collisions() || lowering.skip_body_count() > 0;
+            let has_ir_issues = lowering.has_arity_collisions() || lowering.skip_body_count() > 0;
 
             let passes = if has_ir_issues {
                 // Arity collisions / skip-body stubs contain redirect IR
@@ -459,11 +506,21 @@ impl<'s> CompilationPipeline<'s> {
             };
 
             info!("  Running LLVM passes: {}", passes);
-            if let Err(e) = lowering.module().run_passes(&passes, &target_machine, pass_options) {
+            if let Err(e) = lowering
+                .module()
+                .run_passes(&passes, &target_machine, pass_options)
+            {
                 // Fall back to just globaldce if full pipeline fails
-                tracing::warn!("Full LLVM pass pipeline failed: {} — falling back to globaldce", e);
+                tracing::warn!(
+                    "Full LLVM pass pipeline failed: {} — falling back to globaldce",
+                    e
+                );
                 let fallback_options = PassBuilderOptions::create();
-                if let Err(e2) = lowering.module().run_passes("globaldce", &target_machine, fallback_options) {
+                if let Err(e2) =
+                    lowering
+                        .module()
+                        .run_passes("globaldce", &target_machine, fallback_options)
+                {
                     tracing::warn!("GlobalDCE pass also failed: {}", e2);
                 }
             }
@@ -488,21 +545,28 @@ impl<'s> CompilationPipeline<'s> {
         if let Err(e) = lowering.verify() {
             let err_str = format!("{:?}", e);
             if err_str.contains("!dbg location") || err_str.contains("debug info") {
-                tracing::warn!("LLVM module has debug info inconsistency (non-fatal): {}",
-                    err_str.chars().take(200).collect::<String>());
+                tracing::warn!(
+                    "LLVM module has debug info inconsistency (non-fatal): {}",
+                    err_str.chars().take(200).collect::<String>()
+                );
                 // Continue compilation — the actual code is correct
             } else {
                 let ir_path = build_dir.join(format!("{}_debug.ll", module_name));
                 if !lowering.has_arity_collisions() {
                     let _ = lowering.write_ir_to_file(&ir_path);
-                    return Err(anyhow::anyhow!("LLVM module verification failed (IR dumped to {}): {:?}", ir_path.display(), e));
+                    return Err(anyhow::anyhow!(
+                        "LLVM module verification failed (IR dumped to {}): {:?}",
+                        ir_path.display(),
+                        e
+                    ));
                 } else {
                     return Err(anyhow::anyhow!("LLVM module verification failed: {:?}", e));
                 }
             }
         }
 
-        target_machine.write_to_file(lowering.module(), FileType::Object, &obj_path)
+        target_machine
+            .write_to_file(lowering.module(), FileType::Object, &obj_path)
             .map_err(|e| anyhow::anyhow!("Failed to write object file: {}", e))?;
 
         // Emit LLVM bitcode when LTO is enabled for cross-module optimization
@@ -556,16 +620,18 @@ impl<'s> CompilationPipeline<'s> {
                     .options()
                     .target_triple
                     .as_ref()
-                    .map(|t| t.as_str().contains("windows")
-                        || t.as_str().contains("msvc")
-                        || t.as_str().contains("mingw"))
+                    .map(|t| {
+                        t.as_str().contains("windows")
+                            || t.as_str().contains("msvc")
+                            || t.as_str().contains("mingw")
+                    })
                     .unwrap_or(false),
             };
             if is_windows_target {
                 use verum_codegen::link::NoLibcConfig;
-                linker_config.no_libc_config = Some(
-                    NoLibcConfig::windows_with_subsystem(subsystem_flag.as_str()),
-                );
+                linker_config.no_libc_config = Some(NoLibcConfig::windows_with_subsystem(
+                    subsystem_flag.as_str(),
+                ));
             }
         }
 
@@ -573,7 +639,9 @@ impl<'s> CompilationPipeline<'s> {
         #[cfg(target_os = "macos")]
         {
             linker_config.extra_flags.push("-framework Metal".into());
-            linker_config.extra_flags.push("-framework Foundation".into());
+            linker_config
+                .extra_flags
+                .push("-framework Foundation".into());
             linker_config.libraries.push("objc".into());
         }
 
@@ -671,7 +739,11 @@ impl<'s> CompilationPipeline<'s> {
 
         // Compile C file to object file with architecture-specific SIMD flags
         let mut cmd = std::process::Command::new(&cc);
-        let c_opt = if self.session.options().optimization_level >= 3 { "-O3" } else { "-O2" };
+        let c_opt = if self.session.options().optimization_level >= 3 {
+            "-O3"
+        } else {
+            "-O2"
+        };
         cmd.arg("-c")
             .arg(source_path)
             .arg("-o")
@@ -728,7 +800,11 @@ impl<'s> CompilationPipeline<'s> {
     }
 
     /// Link object files into executable
-    pub(super) fn link_executable(&self, object_files: &[PathBuf], output_path: &PathBuf) -> Result<()> {
+    pub(super) fn link_executable(
+        &self,
+        object_files: &[PathBuf],
+        output_path: &PathBuf,
+    ) -> Result<()> {
         let linker = self.detect_c_compiler()?;
 
         debug!("Linking with {}: {}", linker, output_path.display());
@@ -813,7 +889,11 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Reads the [linker] section from Verum.toml and merges with profile-specific
     /// settings. Falls back to defaults if no Verum.toml is found.
-    pub(super) fn load_linker_config(&self, project_root: &Path, profile: &str) -> Result<LinkingConfig> {
+    pub(super) fn load_linker_config(
+        &self,
+        project_root: &Path,
+        profile: &str,
+    ) -> Result<LinkingConfig> {
         let verum_toml = project_root.join("Verum.toml");
 
         if verum_toml.exists() {
@@ -883,7 +963,11 @@ impl<'s> CompilationPipeline<'s> {
     /// - LTO support (Thin/Full)
     /// - CBGR runtime integration
     /// - Multi-platform support (ELF, MachO, COFF, Wasm)
-    pub(super) fn link_with_lld(&self, object_files: &[PathBuf], config: &LinkingConfig) -> Result<()> {
+    pub(super) fn link_with_lld(
+        &self,
+        object_files: &[PathBuf],
+        config: &LinkingConfig,
+    ) -> Result<()> {
         // Convert PathBuf array to ObjectFile list
         let obj_files: List<ObjectFile> = object_files
             .iter()

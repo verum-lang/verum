@@ -72,45 +72,70 @@ pub mod output;
 // Re-export script parsing types from verum_lsp
 // This provides a stable API for interactive features while the implementation lives in verum_lsp
 pub use verum_lsp::{
-    // Script parsing
-    ParseMode, ScriptContext, ScriptParseResult, ScriptParser,
-    needs_continuation, suggest_completion,
     // Incremental parsing
-    CachedLine, IncrementalScriptParser, IncrementalStats,
-    DependencyGraph, detect_dependencies,
+    CachedLine,
+    DependencyGraph,
+    IncrementalScriptParser,
+    IncrementalStats,
+    // Script parsing
+    ParseMode,
     // Error recovery
-    RecoveryResult, ScriptRecovery, explain_error, suggest_autocompletion,
+    RecoveryResult,
+    ScriptContext,
+    ScriptParseResult,
+    ScriptParser,
+    ScriptRecovery,
+    detect_dependencies,
+    explain_error,
+    needs_continuation,
+    suggest_autocompletion,
+    suggest_completion,
 };
 
 #[cfg(feature = "playbook")]
 pub use playbook::{
-    PlaybookApp, Cell, CellId, CellKind, CellOutput, SessionState,
+    Cell, CellId, CellKind, CellOutput, PlaybookApp, SessionState,
     TensorStats as PlaybookTensorStats,
 };
 
 // Re-export execution types
 pub use execution::{
-    ExecutionPipeline, ExecutionContext, ExecutionError, ExecutionResult,
-    CompiledCell, BindingInfo,
-    AsyncExecutor, ExecutionHandle, ExecutionMessage, ExecutionStatus,
-    StreamingOutput, OutputLine, ProgressDisplay, ProgressStyle,
+    AsyncExecutor, BindingInfo, CompiledCell, ExecutionContext, ExecutionError, ExecutionHandle,
+    ExecutionMessage, ExecutionPipeline, ExecutionResult, ExecutionStatus, OutputLine,
+    ProgressDisplay, ProgressStyle, StreamingOutput,
 };
 
 // Re-export output types
 pub use output::{
-    OutputRenderer, OutputFormat, RenderedOutput,
-    TensorStats, TensorPreview, render_tensor,
-    render_struct, render_variant, render_collection,
+    OutputFormat, OutputRenderer, RenderedOutput, TensorPreview, TensorStats, render_collection,
+    render_struct, render_tensor, render_variant,
 };
 
 // Re-export discovery types
 pub use discovery::{
-    DiscoveryIndex, DocEntry, DocKind, Example, ExampleCategory,
-    ModuleInfo, ModuleTree, SearchQuery, SearchResult,
-    CompletionContext, CompletionItem, CompletionKind, CompletionProvider,
-    InlineHelp, get_inline_help,
+    Challenge,
+    CompletionContext,
+    CompletionItem,
+    CompletionKind,
+    CompletionProvider,
+    DiscoveryIndex,
+    DocEntry,
+    DocKind,
+    Example,
+    ExampleCategory,
+    InlineHelp,
+    ModuleInfo,
+    ModuleTree,
+    PlaybookTemplate,
+    SearchQuery,
+    SearchResult,
+    TemplateCell,
+    TestCase,
     // Tutorials and templates
-    Tutorial, TutorialStep, Challenge, TestCase,
-    PlaybookTemplate, TemplateCell,
-    builtin_tutorials, builtin_challenges, builtin_templates,
+    Tutorial,
+    TutorialStep,
+    builtin_challenges,
+    builtin_templates,
+    builtin_tutorials,
+    get_inline_help,
 };

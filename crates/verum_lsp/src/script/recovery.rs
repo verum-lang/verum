@@ -24,9 +24,9 @@ use verum_ast::Expr;
 use verum_common::{List, Text};
 use verum_lexer::TokenKind;
 
-use verum_parser::error::ParseErrorKind;
-use verum_parser::ParseError;
 use super::context::ScriptContext;
+use verum_parser::ParseError;
+use verum_parser::error::ParseErrorKind;
 
 /// Result of attempting error recovery in script mode
 #[derive(Debug, Clone)]

@@ -26,12 +26,12 @@
 //!  }
 //!  ```
 
+use super::error::{BuildExt, OptionExt, Result};
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
 use verum_llvm::types::FunctionType;
 use verum_llvm::values::FunctionValue;
 use verum_llvm::{AddressSpace, FloatPredicate, IntPredicate};
-use super::error::{BuildExt, OptionExt, Result};
 
 // ============================================================================
 // Tensor header layout constants (must match VerumTensor in verum_tensor.c)
@@ -151,10 +151,15 @@ impl<'ctx> TensorIR<'ctx> {
             Ok(param.into_int_value())
         } else if param.is_pointer_value() {
             let i64_type = self.context.i64_type();
-            Ok(builder.build_ptr_to_int(param.into_pointer_value(), i64_type, name).or_llvm_err()?)
+            Ok(builder
+                .build_ptr_to_int(param.into_pointer_value(), i64_type, name)
+                .or_llvm_err()?)
         } else if param.is_float_value() {
             let i64_type = self.context.i64_type();
-            Ok(builder.build_bit_cast(param.into_float_value(), i64_type, name).or_llvm_err()?.into_int_value())
+            Ok(builder
+                .build_bit_cast(param.into_float_value(), i64_type, name)
+                .or_llvm_err()?
+                .into_int_value())
         } else {
             Ok(self.context.i64_type().const_zero())
         }
@@ -162,15 +167,23 @@ impl<'ctx> TensorIR<'ctx> {
 
     /// Get or declare a function in the module.
     fn get_or_declare(
-        &self, module: &Module<'ctx>, name: &str, fn_type: FunctionType<'ctx>,
+        &self,
+        module: &Module<'ctx>,
+        name: &str,
+        fn_type: FunctionType<'ctx>,
     ) -> FunctionValue<'ctx> {
-        module.get_function(name).unwrap_or_else(|| module.add_function(name, fn_type, None))
+        module
+            .get_function(name)
+            .unwrap_or_else(|| module.add_function(name, fn_type, None))
     }
 
     /// Get or declare a function, returning early if it already has a body.
     /// Returns None if the function already has basic blocks (already defined).
     fn get_or_declare_new(
-        &self, module: &Module<'ctx>, name: &str, fn_type: FunctionType<'ctx>,
+        &self,
+        module: &Module<'ctx>,
+        name: &str,
+        fn_type: FunctionType<'ctx>,
     ) -> Option<FunctionValue<'ctx>> {
         let func = self.get_or_declare(module, name, fn_type);
         if func.count_basic_blocks() > 0 {
@@ -232,7 +245,10 @@ impl<'ctx> TensorIR<'ctx> {
     ) -> Result<verum_llvm::values::IntValue<'ctx>> {
         let i64_type = self.context.i64_type();
         let field_ptr = self.header_field_ptr_in_bounds(builder, base_ptr, byte_offset, name)?;
-        Ok(builder.build_load(i64_type, field_ptr, name).or_llvm_err()?.into_int_value())
+        Ok(builder
+            .build_load(i64_type, field_ptr, name)
+            .or_llvm_err()?
+            .into_int_value())
     }
 
     /// Load a pointer field from the tensor header at the given byte offset.
@@ -245,7 +261,10 @@ impl<'ctx> TensorIR<'ctx> {
     ) -> Result<verum_llvm::values::PointerValue<'ctx>> {
         let ptr_type = self.context.ptr_type(AddressSpace::default());
         let field_ptr = self.header_field_ptr_in_bounds(builder, base_ptr, byte_offset, name)?;
-        Ok(builder.build_load(ptr_type, field_ptr, name).or_llvm_err()?.into_pointer_value())
+        Ok(builder
+            .build_load(ptr_type, field_ptr, name)
+            .or_llvm_err()?
+            .into_pointer_value())
     }
 
     /// Store an i64 value to a field in the tensor header.
@@ -316,9 +335,14 @@ impl<'ctx> TensorIR<'ctx> {
         let i64_type = self.context.i64_type();
         let offset = i64_type.const_int(byte_offset, false);
         let field_ptr = unsafe {
-            builder.build_in_bounds_gep(i8_type, base_ptr, &[offset], &format!("{}_ptr", name)).or_llvm_err()?
+            builder
+                .build_in_bounds_gep(i8_type, base_ptr, &[offset], &format!("{}_ptr", name))
+                .or_llvm_err()?
         };
-        Ok(builder.build_load(i8_type, field_ptr, name).or_llvm_err()?.into_int_value())
+        Ok(builder
+            .build_load(i8_type, field_ptr, name)
+            .or_llvm_err()?
+            .into_int_value())
     }
 
     /// Load a u32 value from a field in the tensor header.
@@ -334,9 +358,14 @@ impl<'ctx> TensorIR<'ctx> {
         let i64_type = self.context.i64_type();
         let offset = i64_type.const_int(byte_offset, false);
         let field_ptr = unsafe {
-            builder.build_in_bounds_gep(i8_type, base_ptr, &[offset], &format!("{}_ptr", name)).or_llvm_err()?
+            builder
+                .build_in_bounds_gep(i8_type, base_ptr, &[offset], &format!("{}_ptr", name))
+                .or_llvm_err()?
         };
-        Ok(builder.build_load(i32_type, field_ptr, name).or_llvm_err()?.into_int_value())
+        Ok(builder
+            .build_load(i32_type, field_ptr, name)
+            .or_llvm_err()?
+            .into_int_value())
     }
 
     /// Convert an i64 handle to a pointer (inttoptr).
@@ -347,7 +376,9 @@ impl<'ctx> TensorIR<'ctx> {
         name: &str,
     ) -> Result<verum_llvm::values::PointerValue<'ctx>> {
         let ptr_type = self.context.ptr_type(AddressSpace::default());
-        Ok(builder.build_int_to_ptr(handle, ptr_type, name).or_llvm_err()?)
+        Ok(builder
+            .build_int_to_ptr(handle, ptr_type, name)
+            .or_llvm_err()?)
     }
 
     /// Convert a pointer to an i64 handle (ptrtoint).
@@ -358,7 +389,9 @@ impl<'ctx> TensorIR<'ctx> {
         name: &str,
     ) -> Result<verum_llvm::values::IntValue<'ctx>> {
         let i64_type = self.context.i64_type();
-        Ok(builder.build_ptr_to_int(ptr, i64_type, name).or_llvm_err()?)
+        Ok(builder
+            .build_ptr_to_int(ptr, i64_type, name)
+            .or_llvm_err()?)
     }
 
     // ========================================================================
@@ -371,10 +404,17 @@ impl<'ctx> TensorIR<'ctx> {
         // f64 -> f64 intrinsics
         let f64_f64 = f64_type.fn_type(&[f64_type.into()], false);
         let intrinsics_1arg = [
-            "llvm.sqrt.f64", "llvm.sin.f64", "llvm.cos.f64",
-            "llvm.exp.f64", "llvm.log.f64", "llvm.fabs.f64",
-            "llvm.floor.f64", "llvm.ceil.f64", "llvm.round.f64",
-            "llvm.log2.f64", "llvm.exp2.f64",
+            "llvm.sqrt.f64",
+            "llvm.sin.f64",
+            "llvm.cos.f64",
+            "llvm.exp.f64",
+            "llvm.log.f64",
+            "llvm.fabs.f64",
+            "llvm.floor.f64",
+            "llvm.ceil.f64",
+            "llvm.round.f64",
+            "llvm.log2.f64",
+            "llvm.exp2.f64",
         ];
         for name in &intrinsics_1arg {
             self.get_or_declare(module, name, f64_f64);
@@ -383,16 +423,18 @@ impl<'ctx> TensorIR<'ctx> {
         // (f64, f64) -> f64 intrinsics
         let f64_f64_f64 = f64_type.fn_type(&[f64_type.into(), f64_type.into()], false);
         let intrinsics_2arg = [
-            "llvm.pow.f64", "llvm.copysign.f64", "llvm.minnum.f64", "llvm.maxnum.f64",
+            "llvm.pow.f64",
+            "llvm.copysign.f64",
+            "llvm.minnum.f64",
+            "llvm.maxnum.f64",
         ];
         for name in &intrinsics_2arg {
             self.get_or_declare(module, name, f64_f64_f64);
         }
 
         // (f64, f64, f64) -> f64 intrinsics
-        let f64_f64_f64_f64 = f64_type.fn_type(
-            &[f64_type.into(), f64_type.into(), f64_type.into()], false,
-        );
+        let f64_f64_f64_f64 =
+            f64_type.fn_type(&[f64_type.into(), f64_type.into(), f64_type.into()], false);
         self.get_or_declare(module, "llvm.fma.f64", f64_f64_f64_f64);
 
         // llvm.memset.p0.i64
@@ -402,13 +444,25 @@ impl<'ctx> TensorIR<'ctx> {
         let i64_type = self.context.i64_type();
         let i1_type = self.context.bool_type();
         let memset_type = void_type.fn_type(
-            &[ptr_type.into(), i8_type.into(), i64_type.into(), i1_type.into()], false,
+            &[
+                ptr_type.into(),
+                i8_type.into(),
+                i64_type.into(),
+                i1_type.into(),
+            ],
+            false,
         );
         self.get_or_declare(module, "llvm.memset.p0.i64", memset_type);
 
         // llvm.memcpy.p0.p0.i64
         let memcpy_type = void_type.fn_type(
-            &[ptr_type.into(), ptr_type.into(), i64_type.into(), i1_type.into()], false,
+            &[
+                ptr_type.into(),
+                ptr_type.into(),
+                i64_type.into(),
+                i1_type.into(),
+            ],
+            false,
         );
         self.get_or_declare(module, "llvm.memcpy.p0.p0.i64", memcpy_type);
     }
@@ -444,10 +498,24 @@ impl<'ctx> TensorIR<'ctx> {
 
             let entry = ctx.append_basic_block(func, "entry");
             builder.position_at_end(entry);
-            let x = func.get_first_param().or_internal("missing first param")?.into_float_value();
-            let intrinsic = module.get_function(intrinsic_name).or_missing_fn(intrinsic_name)?;
-            let result = builder.build_call(intrinsic, &[x.into()], "result").or_llvm_err()?;
-            builder.build_return(Some(&result.try_as_basic_value().basic().or_internal("expected basic value")?)).or_llvm_err()?;
+            let x = func
+                .get_first_param()
+                .or_internal("missing first param")?
+                .into_float_value();
+            let intrinsic = module
+                .get_function(intrinsic_name)
+                .or_missing_fn(intrinsic_name)?;
+            let result = builder
+                .build_call(intrinsic, &[x.into()], "result")
+                .or_llvm_err()?;
+            builder
+                .build_return(Some(
+                    &result
+                        .try_as_basic_value()
+                        .basic()
+                        .or_internal("expected basic value")?,
+                ))
+                .or_llvm_err()?;
         }
 
         // verum_pow_approx(base, exp) -> @llvm.pow.f64(base, exp)
@@ -456,11 +524,28 @@ impl<'ctx> TensorIR<'ctx> {
             if let Some(func) = self.get_or_declare_new(module, "verum_pow_approx", f64_f64_f64) {
                 let entry = ctx.append_basic_block(func, "entry");
                 builder.position_at_end(entry);
-                let base = func.get_nth_param(0).or_internal("missing param")?.into_float_value();
-                let exp = func.get_nth_param(1).or_internal("missing param")?.into_float_value();
-                let intrinsic = module.get_function("llvm.pow.f64").or_missing_fn("llvm.pow.f64")?;
-                let result = builder.build_call(intrinsic, &[base.into(), exp.into()], "result").or_llvm_err()?;
-                builder.build_return(Some(&result.try_as_basic_value().basic().or_internal("expected basic value")?)).or_llvm_err()?;
+                let base = func
+                    .get_nth_param(0)
+                    .or_internal("missing param")?
+                    .into_float_value();
+                let exp = func
+                    .get_nth_param(1)
+                    .or_internal("missing param")?
+                    .into_float_value();
+                let intrinsic = module
+                    .get_function("llvm.pow.f64")
+                    .or_missing_fn("llvm.pow.f64")?;
+                let result = builder
+                    .build_call(intrinsic, &[base.into(), exp.into()], "result")
+                    .or_llvm_err()?;
+                builder
+                    .build_return(Some(
+                        &result
+                            .try_as_basic_value()
+                            .basic()
+                            .or_internal("expected basic value")?,
+                    ))
+                    .or_llvm_err()?;
             }
         }
 
@@ -468,13 +553,30 @@ impl<'ctx> TensorIR<'ctx> {
         if let Some(func) = self.get_or_declare_new(module, "verum_tan_approx", f64_f64) {
             let entry = ctx.append_basic_block(func, "entry");
             builder.position_at_end(entry);
-            let x = func.get_first_param().or_internal("missing first param")?.into_float_value();
-            let sin_fn = module.get_function("llvm.sin.f64").or_missing_fn("llvm.sin.f64")?;
-            let cos_fn = module.get_function("llvm.cos.f64").or_missing_fn("llvm.cos.f64")?;
-            let s = builder.build_call(sin_fn, &[x.into()], "s").or_llvm_err()?
-                .try_as_basic_value().basic().or_internal("expected basic value")?.into_float_value();
-            let c = builder.build_call(cos_fn, &[x.into()], "c").or_llvm_err()?
-                .try_as_basic_value().basic().or_internal("expected basic value")?.into_float_value();
+            let x = func
+                .get_first_param()
+                .or_internal("missing first param")?
+                .into_float_value();
+            let sin_fn = module
+                .get_function("llvm.sin.f64")
+                .or_missing_fn("llvm.sin.f64")?;
+            let cos_fn = module
+                .get_function("llvm.cos.f64")
+                .or_missing_fn("llvm.cos.f64")?;
+            let s = builder
+                .build_call(sin_fn, &[x.into()], "s")
+                .or_llvm_err()?
+                .try_as_basic_value()
+                .basic()
+                .or_internal("expected basic value")?
+                .into_float_value();
+            let c = builder
+                .build_call(cos_fn, &[x.into()], "c")
+                .or_llvm_err()?
+                .try_as_basic_value()
+                .basic()
+                .or_internal("expected basic value")?
+                .into_float_value();
             let result = builder.build_float_div(s, c, "tan").or_llvm_err()?;
             builder.build_return(Some(&result)).or_llvm_err()?;
         }
@@ -483,13 +585,28 @@ impl<'ctx> TensorIR<'ctx> {
         if let Some(func) = self.get_or_declare_new(module, "verum_tanh_approx", f64_f64) {
             let entry = ctx.append_basic_block(func, "entry");
             builder.position_at_end(entry);
-            let x = func.get_first_param().or_internal("missing first param")?.into_float_value();
-            let exp_fn = module.get_function("llvm.exp.f64").or_missing_fn("llvm.exp.f64")?;
+            let x = func
+                .get_first_param()
+                .or_internal("missing first param")?
+                .into_float_value();
+            let exp_fn = module
+                .get_function("llvm.exp.f64")
+                .or_missing_fn("llvm.exp.f64")?;
             let neg_x = builder.build_float_neg(x, "neg_x").or_llvm_err()?;
-            let ep = builder.build_call(exp_fn, &[x.into()], "ep").or_llvm_err()?
-                .try_as_basic_value().basic().or_internal("expected basic value")?.into_float_value();
-            let em = builder.build_call(exp_fn, &[neg_x.into()], "em").or_llvm_err()?
-                .try_as_basic_value().basic().or_internal("expected basic value")?.into_float_value();
+            let ep = builder
+                .build_call(exp_fn, &[x.into()], "ep")
+                .or_llvm_err()?
+                .try_as_basic_value()
+                .basic()
+                .or_internal("expected basic value")?
+                .into_float_value();
+            let em = builder
+                .build_call(exp_fn, &[neg_x.into()], "em")
+                .or_llvm_err()?
+                .try_as_basic_value()
+                .basic()
+                .or_internal("expected basic value")?
+                .into_float_value();
             let num = builder.build_float_sub(ep, em, "num").or_llvm_err()?;
             let den = builder.build_float_add(ep, em, "den").or_llvm_err()?;
             let result = builder.build_float_div(num, den, "tanh").or_llvm_err()?;
@@ -500,14 +617,28 @@ impl<'ctx> TensorIR<'ctx> {
         if let Some(func) = self.get_or_declare_new(module, "verum_sigmoid_approx", f64_f64) {
             let entry = ctx.append_basic_block(func, "entry");
             builder.position_at_end(entry);
-            let x = func.get_first_param().or_internal("missing first param")?.into_float_value();
-            let exp_fn = module.get_function("llvm.exp.f64").or_missing_fn("llvm.exp.f64")?;
+            let x = func
+                .get_first_param()
+                .or_internal("missing first param")?
+                .into_float_value();
+            let exp_fn = module
+                .get_function("llvm.exp.f64")
+                .or_missing_fn("llvm.exp.f64")?;
             let neg_x = builder.build_float_neg(x, "neg_x").or_llvm_err()?;
-            let exp_neg = builder.build_call(exp_fn, &[neg_x.into()], "exp_neg").or_llvm_err()?
-                .try_as_basic_value().basic().or_internal("expected basic value")?.into_float_value();
+            let exp_neg = builder
+                .build_call(exp_fn, &[neg_x.into()], "exp_neg")
+                .or_llvm_err()?
+                .try_as_basic_value()
+                .basic()
+                .or_internal("expected basic value")?
+                .into_float_value();
             let one = f64_type.const_float(1.0);
-            let denom = builder.build_float_add(one, exp_neg, "denom").or_llvm_err()?;
-            let result = builder.build_float_div(one, denom, "sigmoid").or_llvm_err()?;
+            let denom = builder
+                .build_float_add(one, exp_neg, "denom")
+                .or_llvm_err()?;
+            let result = builder
+                .build_float_div(one, denom, "sigmoid")
+                .or_llvm_err()?;
             builder.build_return(Some(&result)).or_llvm_err()?;
         }
 
@@ -516,7 +647,10 @@ impl<'ctx> TensorIR<'ctx> {
         if let Some(func) = self.get_or_declare_new(module, "verum_gelu_approx", f64_f64) {
             let entry = ctx.append_basic_block(func, "entry");
             builder.position_at_end(entry);
-            let x = func.get_first_param().or_internal("missing first param")?.into_float_value();
+            let x = func
+                .get_first_param()
+                .or_internal("missing first param")?
+                .into_float_value();
             // GELU approximation: 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
             let half = f64_type.const_float(0.5);
             let one = f64_type.const_float(1.0);
@@ -526,14 +660,23 @@ impl<'ctx> TensorIR<'ctx> {
             let x3 = builder.build_float_mul(x3, x, "x3").or_llvm_err()?;
             let cx3 = builder.build_float_mul(coeff, x3, "cx3").or_llvm_err()?;
             let inner = builder.build_float_add(x, cx3, "inner").or_llvm_err()?;
-            let scaled = builder.build_float_mul(sqrt_2_pi, inner, "scaled").or_llvm_err()?;
+            let scaled = builder
+                .build_float_mul(sqrt_2_pi, inner, "scaled")
+                .or_llvm_err()?;
             // Call our tanh wrapper
             let tanh_fn = self.get_or_declare(module, "verum_tanh_approx", f64_f64);
-            let th = builder.build_call(tanh_fn, &[scaled.into()], "th").or_llvm_err()?
-                .try_as_basic_value().basic().or_internal("expected basic value")?.into_float_value();
+            let th = builder
+                .build_call(tanh_fn, &[scaled.into()], "th")
+                .or_llvm_err()?
+                .try_as_basic_value()
+                .basic()
+                .or_internal("expected basic value")?
+                .into_float_value();
             let one_plus = builder.build_float_add(one, th, "one_plus").or_llvm_err()?;
             let half_x = builder.build_float_mul(half, x, "half_x").or_llvm_err()?;
-            let result = builder.build_float_mul(half_x, one_plus, "gelu").or_llvm_err()?;
+            let result = builder
+                .build_float_mul(half_x, one_plus, "gelu")
+                .or_llvm_err()?;
             builder.build_return(Some(&result)).or_llvm_err()?;
         }
 
@@ -541,10 +684,18 @@ impl<'ctx> TensorIR<'ctx> {
         if let Some(func) = self.get_or_declare_new(module, "verum_silu_approx", f64_f64) {
             let entry = ctx.append_basic_block(func, "entry");
             builder.position_at_end(entry);
-            let x = func.get_first_param().or_internal("missing first param")?.into_float_value();
+            let x = func
+                .get_first_param()
+                .or_internal("missing first param")?
+                .into_float_value();
             let sig_fn = self.get_or_declare(module, "verum_sigmoid_approx", f64_f64);
-            let sig = builder.build_call(sig_fn, &[x.into()], "sig").or_llvm_err()?
-                .try_as_basic_value().basic().or_internal("expected basic value")?.into_float_value();
+            let sig = builder
+                .build_call(sig_fn, &[x.into()], "sig")
+                .or_llvm_err()?
+                .try_as_basic_value()
+                .basic()
+                .or_internal("expected basic value")?
+                .into_float_value();
             let result = builder.build_float_mul(x, sig, "silu").or_llvm_err()?;
             builder.build_return(Some(&result)).or_llvm_err()?;
         }
@@ -553,12 +704,24 @@ impl<'ctx> TensorIR<'ctx> {
         if let Some(func) = self.get_or_declare_new(module, "verum_erf_approx", f64_f64) {
             let entry = ctx.append_basic_block(func, "entry");
             builder.position_at_end(entry);
-            let x = func.get_first_param().or_internal("missing first param")?.into_float_value();
-            let fabs_fn = module.get_function("llvm.fabs.f64").or_missing_fn("llvm.fabs.f64")?;
-            let exp_fn = module.get_function("llvm.exp.f64").or_missing_fn("llvm.exp.f64")?;
+            let x = func
+                .get_first_param()
+                .or_internal("missing first param")?
+                .into_float_value();
+            let fabs_fn = module
+                .get_function("llvm.fabs.f64")
+                .or_missing_fn("llvm.fabs.f64")?;
+            let exp_fn = module
+                .get_function("llvm.exp.f64")
+                .or_missing_fn("llvm.exp.f64")?;
 
-            let ax = builder.build_call(fabs_fn, &[x.into()], "ax").or_llvm_err()?
-                .try_as_basic_value().basic().or_internal("expected basic value")?.into_float_value();
+            let ax = builder
+                .build_call(fabs_fn, &[x.into()], "ax")
+                .or_llvm_err()?
+                .try_as_basic_value()
+                .basic()
+                .or_internal("expected basic value")?
+                .into_float_value();
             // t = 1 / (1 + 0.3275911 * ax)
             let p = f64_type.const_float(0.3275911);
             let one = f64_type.const_float(1.0);
@@ -584,15 +747,35 @@ impl<'ctx> TensorIR<'ctx> {
             // exp(-ax*ax)
             let neg_ax2 = builder.build_float_mul(ax, ax, "ax2").or_llvm_err()?;
             let neg_ax2 = builder.build_float_neg(neg_ax2, "neg_ax2").or_llvm_err()?;
-            let exp_val = builder.build_call(exp_fn, &[neg_ax2.into()], "exp_negax2").or_llvm_err()?
-                .try_as_basic_value().basic().or_internal("expected basic value")?.into_float_value();
+            let exp_val = builder
+                .build_call(exp_fn, &[neg_ax2.into()], "exp_negax2")
+                .or_llvm_err()?
+                .try_as_basic_value()
+                .basic()
+                .or_internal("expected basic value")?
+                .into_float_value();
             // result = 1 - poly * exp(-ax^2)
-            let poly_exp = builder.build_float_mul(r, exp_val, "poly_exp").or_llvm_err()?;
-            let abs_result = builder.build_float_sub(one, poly_exp, "abs_erf").or_llvm_err()?;
+            let poly_exp = builder
+                .build_float_mul(r, exp_val, "poly_exp")
+                .or_llvm_err()?;
+            let abs_result = builder
+                .build_float_sub(one, poly_exp, "abs_erf")
+                .or_llvm_err()?;
             // Restore sign: copysign(abs_result, x)
-            let copysign_fn = module.get_function("llvm.copysign.f64").or_missing_fn("llvm.copysign.f64")?;
-            let result = builder.build_call(copysign_fn, &[abs_result.into(), x.into()], "erf").or_llvm_err()?;
-            builder.build_return(Some(&result.try_as_basic_value().basic().or_internal("expected basic value")?)).or_llvm_err()?;
+            let copysign_fn = module
+                .get_function("llvm.copysign.f64")
+                .or_missing_fn("llvm.copysign.f64")?;
+            let result = builder
+                .build_call(copysign_fn, &[abs_result.into(), x.into()], "erf")
+                .or_llvm_err()?;
+            builder
+                .build_return(Some(
+                    &result
+                        .try_as_basic_value()
+                        .basic()
+                        .or_internal("expected basic value")?,
+                ))
+                .or_llvm_err()?;
         }
 
         // verum_softplus_approx(x) = log(1 + exp(x)), stable for large x
@@ -604,48 +787,90 @@ impl<'ctx> TensorIR<'ctx> {
             let bb_ret = ctx.append_basic_block(func, "ret");
 
             builder.position_at_end(entry);
-            let x = func.get_first_param().or_internal("missing first param")?.into_float_value();
+            let x = func
+                .get_first_param()
+                .or_internal("missing first param")?
+                .into_float_value();
             let twenty = f64_type.const_float(20.0);
             let neg_twenty = f64_type.const_float(-20.0);
-            let is_large = builder.build_float_compare(FloatPredicate::OGT, x, twenty, "is_large").or_llvm_err()?;
-            builder.build_conditional_branch(is_large, bb_large, bb_small).or_llvm_err()?;
+            let is_large = builder
+                .build_float_compare(FloatPredicate::OGT, x, twenty, "is_large")
+                .or_llvm_err()?;
+            builder
+                .build_conditional_branch(is_large, bb_large, bb_small)
+                .or_llvm_err()?;
 
             builder.position_at_end(bb_large);
             builder.build_unconditional_branch(bb_ret).or_llvm_err()?;
 
             builder.position_at_end(bb_small);
-            let is_neg = builder.build_float_compare(FloatPredicate::OLT, x, neg_twenty, "is_neg").or_llvm_err()?;
-            builder.build_conditional_branch(is_neg, bb_ret, bb_normal).or_llvm_err()?;
+            let is_neg = builder
+                .build_float_compare(FloatPredicate::OLT, x, neg_twenty, "is_neg")
+                .or_llvm_err()?;
+            builder
+                .build_conditional_branch(is_neg, bb_ret, bb_normal)
+                .or_llvm_err()?;
 
             builder.position_at_end(bb_normal);
-            let exp_fn = module.get_function("llvm.exp.f64").or_missing_fn("llvm.exp.f64")?;
-            let log_fn = module.get_function("llvm.log.f64").or_missing_fn("llvm.log.f64")?;
+            let exp_fn = module
+                .get_function("llvm.exp.f64")
+                .or_missing_fn("llvm.exp.f64")?;
+            let log_fn = module
+                .get_function("llvm.log.f64")
+                .or_missing_fn("llvm.log.f64")?;
             let one = f64_type.const_float(1.0);
-            let exp_x = builder.build_call(exp_fn, &[x.into()], "exp_x").or_llvm_err()?
-                .try_as_basic_value().basic().or_internal("expected basic value")?.into_float_value();
-            let one_plus = builder.build_float_add(one, exp_x, "one_plus").or_llvm_err()?;
-            let log_val = builder.build_call(log_fn, &[one_plus.into()], "log_val").or_llvm_err()?
-                .try_as_basic_value().basic().or_internal("expected basic value")?.into_float_value();
+            let exp_x = builder
+                .build_call(exp_fn, &[x.into()], "exp_x")
+                .or_llvm_err()?
+                .try_as_basic_value()
+                .basic()
+                .or_internal("expected basic value")?
+                .into_float_value();
+            let one_plus = builder
+                .build_float_add(one, exp_x, "one_plus")
+                .or_llvm_err()?;
+            let log_val = builder
+                .build_call(log_fn, &[one_plus.into()], "log_val")
+                .or_llvm_err()?
+                .try_as_basic_value()
+                .basic()
+                .or_internal("expected basic value")?
+                .into_float_value();
             builder.build_unconditional_branch(bb_ret).or_llvm_err()?;
 
             builder.position_at_end(bb_ret);
             let phi = builder.build_phi(f64_type, "softplus").or_llvm_err()?;
             let zero = f64_type.const_float(0.0);
             phi.add_incoming(&[(&x, bb_large), (&zero, bb_small), (&log_val, bb_normal)]);
-            builder.build_return(Some(&phi.as_basic_value())).or_llvm_err()?;
+            builder
+                .build_return(Some(&phi.as_basic_value()))
+                .or_llvm_err()?;
         }
 
         // verum_mish_approx(x) = x * tanh(softplus(x))
         if let Some(func) = self.get_or_declare_new(module, "verum_mish_approx", f64_f64) {
             let entry = ctx.append_basic_block(func, "entry");
             builder.position_at_end(entry);
-            let x = func.get_first_param().or_internal("missing first param")?.into_float_value();
+            let x = func
+                .get_first_param()
+                .or_internal("missing first param")?
+                .into_float_value();
             let sp_fn = self.get_or_declare(module, "verum_softplus_approx", f64_f64);
             let th_fn = self.get_or_declare(module, "verum_tanh_approx", f64_f64);
-            let sp = builder.build_call(sp_fn, &[x.into()], "sp").or_llvm_err()?
-                .try_as_basic_value().basic().or_internal("expected basic value")?.into_float_value();
-            let th = builder.build_call(th_fn, &[sp.into()], "th").or_llvm_err()?
-                .try_as_basic_value().basic().or_internal("expected basic value")?.into_float_value();
+            let sp = builder
+                .build_call(sp_fn, &[x.into()], "sp")
+                .or_llvm_err()?
+                .try_as_basic_value()
+                .basic()
+                .or_internal("expected basic value")?
+                .into_float_value();
+            let th = builder
+                .build_call(th_fn, &[sp.into()], "th")
+                .or_llvm_err()?
+                .try_as_basic_value()
+                .basic()
+                .or_internal("expected basic value")?
+                .into_float_value();
             let result = builder.build_float_mul(x, th, "mish").or_llvm_err()?;
             builder.build_return(Some(&result)).or_llvm_err()?;
         }
@@ -687,71 +912,135 @@ impl<'ctx> TensorIR<'ctx> {
         let bb_ret = ctx.append_basic_block(func, "ret");
 
         builder.position_at_end(entry);
-        let ndim_param = self.param_as_i64(&builder, func.get_nth_param(0).or_internal("missing param")?, "p0_i64")?;
-        let shape_param = self.param_as_i64(&builder, func.get_nth_param(1).or_internal("missing param")?, "p1_i64")?;
-        let dtype_param = self.param_as_i64(&builder, func.get_nth_param(2).or_internal("missing param")?, "p2_i64")?;
+        let ndim_param = self.param_as_i64(
+            &builder,
+            func.get_nth_param(0).or_internal("missing param")?,
+            "p0_i64",
+        )?;
+        let shape_param = self.param_as_i64(
+            &builder,
+            func.get_nth_param(1).or_internal("missing param")?,
+            "p1_i64",
+        )?;
+        let dtype_param = self.param_as_i64(
+            &builder,
+            func.get_nth_param(2).or_internal("missing param")?,
+            "p2_i64",
+        )?;
         // Allocate header
         let alloc_fn = self.get_or_declare(
-            module, "verum_alloc",
+            module,
+            "verum_alloc",
             ptr_type.fn_type(&[i64_type.into()], false),
         );
         let header_size = i64_type.const_int(TENSOR_HEADER_SIZE, false);
-        let header_ptr_val = builder.build_call(alloc_fn, &[header_size.into()], "hdr").or_llvm_err()?;
-        let header_ptr = header_ptr_val.try_as_basic_value().basic().or_internal("expected basic value")?.into_pointer_value();
+        let header_ptr_val = builder
+            .build_call(alloc_fn, &[header_size.into()], "hdr")
+            .or_llvm_err()?;
+        let header_ptr = header_ptr_val
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_pointer_value();
         // Check null
         let hdr_i64 = self.ptr_to_handle(&builder, header_ptr, "hdr_i64")?;
-        let is_null = builder.build_int_compare(IntPredicate::EQ, hdr_i64, i64_type.const_zero(), "is_null").or_llvm_err()?;
-        builder.build_conditional_branch(is_null, bb_fail, bb_ok).or_llvm_err()?;
+        let is_null = builder
+            .build_int_compare(IntPredicate::EQ, hdr_i64, i64_type.const_zero(), "is_null")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_null, bb_fail, bb_ok)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_fail);
-        builder.build_return(Some(&i64_type.const_zero())).or_llvm_err()?;
+        builder
+            .build_return(Some(&i64_type.const_zero()))
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_ok);
         // Zero out the header
-        builder.build_memset(header_ptr, 1, i8_type.const_zero(), header_size).or_llvm_err()?;
+        builder
+            .build_memset(header_ptr, 1, i8_type.const_zero(), header_size)
+            .or_llvm_err()?;
         // Store refcount = 1
-        self.store_header_i32(&builder, header_ptr, OFF_REFCOUNT, i32_type.const_int(1, false), "refcount")?;
+        self.store_header_i32(
+            &builder,
+            header_ptr,
+            OFF_REFCOUNT,
+            i32_type.const_int(1, false),
+            "refcount",
+        )?;
         // Store dtype (u8)
-        let dtype_u8 = builder.build_int_truncate(dtype_param, i8_type, "dtype_u8").or_llvm_err()?;
+        let dtype_u8 = builder
+            .build_int_truncate(dtype_param, i8_type, "dtype_u8")
+            .or_llvm_err()?;
         self.store_header_i8(&builder, header_ptr, OFF_DTYPE, dtype_u8, "dtype")?;
         // Clamp ndim to MAX_DIMS
         let max_dims = i64_type.const_int(TENSOR_MAX_DIMS, false);
-        let ndim_clamped = builder.build_select(
-            builder.build_int_compare(IntPredicate::UGT, ndim_param, max_dims, "ndim_gt").or_llvm_err()?,
-            max_dims, ndim_param, "ndim_clamped",
-        ).or_llvm_err()?.into_int_value();
-        let ndim_u8 = builder.build_int_truncate(ndim_clamped, i8_type, "ndim_u8").or_llvm_err()?;
+        let ndim_clamped = builder
+            .build_select(
+                builder
+                    .build_int_compare(IntPredicate::UGT, ndim_param, max_dims, "ndim_gt")
+                    .or_llvm_err()?,
+                max_dims,
+                ndim_param,
+                "ndim_clamped",
+            )
+            .or_llvm_err()?
+            .into_int_value();
+        let ndim_u8 = builder
+            .build_int_truncate(ndim_clamped, i8_type, "ndim_u8")
+            .or_llvm_err()?;
         self.store_header_i8(&builder, header_ptr, OFF_NDIM, ndim_u8, "ndim")?;
 
         // Copy shape from input pointer
         let shape_ptr = self.handle_to_ptr(&builder, shape_param, "shape_ptr")?;
-        builder.build_unconditional_branch(bb_shape_loop).or_llvm_err()?;
+        builder
+            .build_unconditional_branch(bb_shape_loop)
+            .or_llvm_err()?;
 
         // Shape copy loop
         builder.position_at_end(bb_shape_loop);
         let phi_i = builder.build_phi(i64_type, "i").or_llvm_err()?;
         phi_i.add_incoming(&[(&i64_type.const_zero(), bb_ok)]);
         let i_val = phi_i.as_basic_value().into_int_value();
-        let cmp = builder.build_int_compare(IntPredicate::ULT, i_val, ndim_clamped, "cmp").or_llvm_err()?;
-        builder.build_conditional_branch(cmp, bb_shape_done, bb_numel_loop).or_llvm_err()?;
+        let cmp = builder
+            .build_int_compare(IntPredicate::ULT, i_val, ndim_clamped, "cmp")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(cmp, bb_shape_done, bb_numel_loop)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_shape_done);
         // Load shape[i] from input
         let src_elem = unsafe {
-            builder.build_in_bounds_gep(i64_type, shape_ptr, &[i_val], "src_elem").or_llvm_err()?
+            builder
+                .build_in_bounds_gep(i64_type, shape_ptr, &[i_val], "src_elem")
+                .or_llvm_err()?
         };
-        let shape_val = builder.build_load(i64_type, src_elem, "shape_val").or_llvm_err()?;
+        let shape_val = builder
+            .build_load(i64_type, src_elem, "shape_val")
+            .or_llvm_err()?;
         // Store to header shape field
         let shape_base_offset = i64_type.const_int(OFF_SHAPE, false);
-        let elem_byte_off = builder.build_int_mul(i_val, i64_type.const_int(8, false), "ebo").or_llvm_err()?;
-        let total_off = builder.build_int_add(shape_base_offset, elem_byte_off, "toff").or_llvm_err()?;
+        let elem_byte_off = builder
+            .build_int_mul(i_val, i64_type.const_int(8, false), "ebo")
+            .or_llvm_err()?;
+        let total_off = builder
+            .build_int_add(shape_base_offset, elem_byte_off, "toff")
+            .or_llvm_err()?;
         let dst_elem = unsafe {
-            builder.build_in_bounds_gep(i8_type, header_ptr, &[total_off], "dst_elem").or_llvm_err()?
+            builder
+                .build_in_bounds_gep(i8_type, header_ptr, &[total_off], "dst_elem")
+                .or_llvm_err()?
         };
         builder.build_store(dst_elem, shape_val).or_llvm_err()?;
-        let next_i = builder.build_int_add(i_val, i64_type.const_int(1, false), "next_i").or_llvm_err()?;
+        let next_i = builder
+            .build_int_add(i_val, i64_type.const_int(1, false), "next_i")
+            .or_llvm_err()?;
         phi_i.add_incoming(&[(&next_i, bb_shape_done)]);
-        builder.build_unconditional_branch(bb_shape_loop).or_llvm_err()?;
+        builder
+            .build_unconditional_branch(bb_shape_loop)
+            .or_llvm_err()?;
 
         // Compute numel = product of shape dims
         builder.position_at_end(bb_numel_loop);
@@ -763,25 +1052,44 @@ impl<'ctx> TensorIR<'ctx> {
         numel_phi_prod.add_incoming(&[(&i64_type.const_int(1, false), bb_shape_loop)]);
         let j_val = numel_phi_j.as_basic_value().into_int_value();
         let prod_val = numel_phi_prod.as_basic_value().into_int_value();
-        let j_cmp = builder.build_int_compare(IntPredicate::ULT, j_val, ndim_clamped, "j_cmp").or_llvm_err()?;
-        builder.build_conditional_branch(j_cmp, bb_numel_done, bb_compute_strides).or_llvm_err()?;
+        let j_cmp = builder
+            .build_int_compare(IntPredicate::ULT, j_val, ndim_clamped, "j_cmp")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(j_cmp, bb_numel_done, bb_compute_strides)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_numel_done);
         // Load shape[j] from header
-        let shape_off = builder.build_int_add(
-            i64_type.const_int(OFF_SHAPE, false),
-            builder.build_int_mul(j_val, i64_type.const_int(8, false), "j8").or_llvm_err()?,
-            "shape_off",
-        ).or_llvm_err()?;
+        let shape_off = builder
+            .build_int_add(
+                i64_type.const_int(OFF_SHAPE, false),
+                builder
+                    .build_int_mul(j_val, i64_type.const_int(8, false), "j8")
+                    .or_llvm_err()?,
+                "shape_off",
+            )
+            .or_llvm_err()?;
         let shape_elem_ptr = unsafe {
-            builder.build_in_bounds_gep(i8_type, header_ptr, &[shape_off], "se_ptr").or_llvm_err()?
+            builder
+                .build_in_bounds_gep(i8_type, header_ptr, &[shape_off], "se_ptr")
+                .or_llvm_err()?
         };
-        let dim_val = builder.build_load(i64_type, shape_elem_ptr, "dim").or_llvm_err()?.into_int_value();
-        let new_prod = builder.build_int_mul(prod_val, dim_val, "new_prod").or_llvm_err()?;
-        let next_j = builder.build_int_add(j_val, i64_type.const_int(1, false), "next_j").or_llvm_err()?;
+        let dim_val = builder
+            .build_load(i64_type, shape_elem_ptr, "dim")
+            .or_llvm_err()?
+            .into_int_value();
+        let new_prod = builder
+            .build_int_mul(prod_val, dim_val, "new_prod")
+            .or_llvm_err()?;
+        let next_j = builder
+            .build_int_add(j_val, i64_type.const_int(1, false), "next_j")
+            .or_llvm_err()?;
         numel_phi_j.add_incoming(&[(&next_j, bb_numel_done)]);
         numel_phi_prod.add_incoming(&[(&new_prod, bb_numel_done)]);
-        builder.build_unconditional_branch(bb_numel_loop).or_llvm_err()?;
+        builder
+            .build_unconditional_branch(bb_numel_loop)
+            .or_llvm_err()?;
 
         // Compute strides (reverse order: strides[ndim-1] = 1, strides[i] = strides[i+1] * shape[i+1])
         builder.position_at_end(bb_compute_strides);
@@ -790,22 +1098,43 @@ impl<'ctx> TensorIR<'ctx> {
 
         // Check ndim > 0 for stride computation
         let bb_stride_init = ctx.append_basic_block(func, "stride_init");
-        let ndim_gt0 = builder.build_int_compare(IntPredicate::UGT, ndim_clamped, i64_type.const_zero(), "ndim_gt0").or_llvm_err()?;
-        builder.build_conditional_branch(ndim_gt0, bb_stride_init, bb_data_ok).or_llvm_err()?;
+        let ndim_gt0 = builder
+            .build_int_compare(
+                IntPredicate::UGT,
+                ndim_clamped,
+                i64_type.const_zero(),
+                "ndim_gt0",
+            )
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(ndim_gt0, bb_stride_init, bb_data_ok)
+            .or_llvm_err()?;
 
         // stride_init: set strides[ndim-1] = 1, then jump to stride_loop
         builder.position_at_end(bb_stride_init);
-        let last_idx = builder.build_int_sub(ndim_clamped, i64_type.const_int(1, false), "last_idx").or_llvm_err()?;
-        let stride_off_last = builder.build_int_add(
-            i64_type.const_int(OFF_STRIDES, false),
-            builder.build_int_mul(last_idx, i64_type.const_int(8, false), "li8").or_llvm_err()?,
-            "stride_off_last",
-        ).or_llvm_err()?;
+        let last_idx = builder
+            .build_int_sub(ndim_clamped, i64_type.const_int(1, false), "last_idx")
+            .or_llvm_err()?;
+        let stride_off_last = builder
+            .build_int_add(
+                i64_type.const_int(OFF_STRIDES, false),
+                builder
+                    .build_int_mul(last_idx, i64_type.const_int(8, false), "li8")
+                    .or_llvm_err()?,
+                "stride_off_last",
+            )
+            .or_llvm_err()?;
         let stride_ptr_last = unsafe {
-            builder.build_in_bounds_gep(i8_type, header_ptr, &[stride_off_last], "sl_ptr").or_llvm_err()?
+            builder
+                .build_in_bounds_gep(i8_type, header_ptr, &[stride_off_last], "sl_ptr")
+                .or_llvm_err()?
         };
-        builder.build_store(stride_ptr_last, i64_type.const_int(1, false)).or_llvm_err()?;
-        builder.build_unconditional_branch(bb_stride_loop).or_llvm_err()?;
+        builder
+            .build_store(stride_ptr_last, i64_type.const_int(1, false))
+            .or_llvm_err()?;
+        builder
+            .build_unconditional_branch(bb_stride_loop)
+            .or_llvm_err()?;
 
         // Stride loop: PHI nodes at the top of the block
         builder.position_at_end(bb_stride_loop);
@@ -813,64 +1142,117 @@ impl<'ctx> TensorIR<'ctx> {
         let phi_k = builder.build_phi(i64_type, "k_idx").or_llvm_err()?;
         phi_k.add_incoming(&[(&i64_type.const_zero(), bb_stride_init)]);
         let k_idx = phi_k.as_basic_value().into_int_value();
-        let k_cmp = builder.build_int_compare(IntPredicate::ULT, k_idx, stride_count, "k_cmp").or_llvm_err()?;
-        builder.build_conditional_branch(k_cmp, bb_stride_done, bb_data_ok).or_llvm_err()?;
+        let k_cmp = builder
+            .build_int_compare(IntPredicate::ULT, k_idx, stride_count, "k_cmp")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(k_cmp, bb_stride_done, bb_data_ok)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_stride_done);
         // actual dimension index = ndim - 2 - k_idx
-        let dim_idx = builder.build_int_sub(
-            builder.build_int_sub(ndim_clamped, i64_type.const_int(2, false), "nm2").or_llvm_err()?,
-            k_idx, "dim_idx",
-        ).or_llvm_err()?;
-        let next_dim_idx = builder.build_int_add(dim_idx, i64_type.const_int(1, false), "ndi").or_llvm_err()?;
+        let dim_idx = builder
+            .build_int_sub(
+                builder
+                    .build_int_sub(ndim_clamped, i64_type.const_int(2, false), "nm2")
+                    .or_llvm_err()?,
+                k_idx,
+                "dim_idx",
+            )
+            .or_llvm_err()?;
+        let next_dim_idx = builder
+            .build_int_add(dim_idx, i64_type.const_int(1, false), "ndi")
+            .or_llvm_err()?;
 
         // Load strides[dim_idx + 1]
-        let stride_next_off = builder.build_int_add(
-            i64_type.const_int(OFF_STRIDES, false),
-            builder.build_int_mul(next_dim_idx, i64_type.const_int(8, false), "ndi8").or_llvm_err()?,
-            "sno",
-        ).or_llvm_err()?;
+        let stride_next_off = builder
+            .build_int_add(
+                i64_type.const_int(OFF_STRIDES, false),
+                builder
+                    .build_int_mul(next_dim_idx, i64_type.const_int(8, false), "ndi8")
+                    .or_llvm_err()?,
+                "sno",
+            )
+            .or_llvm_err()?;
         let stride_next_ptr = unsafe {
-            builder.build_in_bounds_gep(i8_type, header_ptr, &[stride_next_off], "snp").or_llvm_err()?
+            builder
+                .build_in_bounds_gep(i8_type, header_ptr, &[stride_next_off], "snp")
+                .or_llvm_err()?
         };
-        let stride_next = builder.build_load(i64_type, stride_next_ptr, "stride_next").or_llvm_err()?.into_int_value();
+        let stride_next = builder
+            .build_load(i64_type, stride_next_ptr, "stride_next")
+            .or_llvm_err()?
+            .into_int_value();
 
         // Load shape[dim_idx + 1]
-        let shape_next_off = builder.build_int_add(
-            i64_type.const_int(OFF_SHAPE, false),
-            builder.build_int_mul(next_dim_idx, i64_type.const_int(8, false), "ndi8s").or_llvm_err()?,
-            "shno",
-        ).or_llvm_err()?;
+        let shape_next_off = builder
+            .build_int_add(
+                i64_type.const_int(OFF_SHAPE, false),
+                builder
+                    .build_int_mul(next_dim_idx, i64_type.const_int(8, false), "ndi8s")
+                    .or_llvm_err()?,
+                "shno",
+            )
+            .or_llvm_err()?;
         let shape_next_ptr = unsafe {
-            builder.build_in_bounds_gep(i8_type, header_ptr, &[shape_next_off], "shnp").or_llvm_err()?
+            builder
+                .build_in_bounds_gep(i8_type, header_ptr, &[shape_next_off], "shnp")
+                .or_llvm_err()?
         };
-        let shape_next = builder.build_load(i64_type, shape_next_ptr, "shape_next").or_llvm_err()?.into_int_value();
+        let shape_next = builder
+            .build_load(i64_type, shape_next_ptr, "shape_next")
+            .or_llvm_err()?
+            .into_int_value();
 
         // strides[dim_idx] = stride_next * shape_next
-        let new_stride = builder.build_int_mul(stride_next, shape_next, "new_stride").or_llvm_err()?;
-        let stride_cur_off = builder.build_int_add(
-            i64_type.const_int(OFF_STRIDES, false),
-            builder.build_int_mul(dim_idx, i64_type.const_int(8, false), "di8").or_llvm_err()?,
-            "sco",
-        ).or_llvm_err()?;
+        let new_stride = builder
+            .build_int_mul(stride_next, shape_next, "new_stride")
+            .or_llvm_err()?;
+        let stride_cur_off = builder
+            .build_int_add(
+                i64_type.const_int(OFF_STRIDES, false),
+                builder
+                    .build_int_mul(dim_idx, i64_type.const_int(8, false), "di8")
+                    .or_llvm_err()?,
+                "sco",
+            )
+            .or_llvm_err()?;
         let stride_cur_ptr = unsafe {
-            builder.build_in_bounds_gep(i8_type, header_ptr, &[stride_cur_off], "scp").or_llvm_err()?
+            builder
+                .build_in_bounds_gep(i8_type, header_ptr, &[stride_cur_off], "scp")
+                .or_llvm_err()?
         };
-        builder.build_store(stride_cur_ptr, new_stride).or_llvm_err()?;
+        builder
+            .build_store(stride_cur_ptr, new_stride)
+            .or_llvm_err()?;
 
-        let next_k = builder.build_int_add(k_idx, i64_type.const_int(1, false), "next_k").or_llvm_err()?;
+        let next_k = builder
+            .build_int_add(k_idx, i64_type.const_int(1, false), "next_k")
+            .or_llvm_err()?;
         phi_k.add_incoming(&[(&next_k, bb_stride_done)]);
-        builder.build_unconditional_branch(bb_stride_loop).or_llvm_err()?;
+        builder
+            .build_unconditional_branch(bb_stride_loop)
+            .or_llvm_err()?;
 
         // Allocate data array
         builder.position_at_end(bb_data_ok);
-        let data_size = builder.build_int_mul(numel, i64_type.const_int(8, false), "data_size").or_llvm_err()?;
-        let data_ptr_val = builder.build_call(alloc_fn, &[data_size.into()], "data").or_llvm_err()?;
-        let data_ptr = data_ptr_val.try_as_basic_value().basic().or_internal("expected basic value")?.into_pointer_value();
+        let data_size = builder
+            .build_int_mul(numel, i64_type.const_int(8, false), "data_size")
+            .or_llvm_err()?;
+        let data_ptr_val = builder
+            .build_call(alloc_fn, &[data_size.into()], "data")
+            .or_llvm_err()?;
+        let data_ptr = data_ptr_val
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_pointer_value();
         self.store_header_ptr(&builder, header_ptr, OFF_DATA, data_ptr, "data")?;
 
         // Zero data
-        builder.build_memset(data_ptr, 1, i8_type.const_zero(), data_size).or_llvm_err()?;
+        builder
+            .build_memset(data_ptr, 1, i8_type.const_zero(), data_size)
+            .or_llvm_err()?;
 
         builder.build_unconditional_branch(bb_ret).or_llvm_err()?;
 
@@ -890,7 +1272,13 @@ impl<'ctx> TensorIR<'ctx> {
         let i64_type = ctx.i64_type();
         let f64_type = ctx.f64_type();
         let fn_type = i64_type.fn_type(
-            &[i64_type.into(), i64_type.into(), f64_type.into(), i64_type.into()], false,
+            &[
+                i64_type.into(),
+                i64_type.into(),
+                f64_type.into(),
+                i64_type.into(),
+            ],
+            false,
         );
 
         let func = match self.get_or_declare_new(module, "verum_tensor_fill", fn_type) {
@@ -905,16 +1293,39 @@ impl<'ctx> TensorIR<'ctx> {
         let bb_done = ctx.append_basic_block(func, "done");
 
         builder.position_at_end(entry);
-        let ndim = self.param_as_i64(&builder, func.get_nth_param(0).or_internal("missing param")?, "p0_i64")?;
-        let shape = self.param_as_i64(&builder, func.get_nth_param(1).or_internal("missing param")?, "shape_p2i")?;
-        let value = func.get_nth_param(2).or_internal("missing param")?.into_float_value();
-        let dtype = self.param_as_i64(&builder, func.get_nth_param(3).or_internal("missing param")?, "p3_i64")?;
+        let ndim = self.param_as_i64(
+            &builder,
+            func.get_nth_param(0).or_internal("missing param")?,
+            "p0_i64",
+        )?;
+        let shape = self.param_as_i64(
+            &builder,
+            func.get_nth_param(1).or_internal("missing param")?,
+            "shape_p2i",
+        )?;
+        let value = func
+            .get_nth_param(2)
+            .or_internal("missing param")?
+            .into_float_value();
+        let dtype = self.param_as_i64(
+            &builder,
+            func.get_nth_param(3).or_internal("missing param")?,
+            "p3_i64",
+        )?;
 
         // Call tensor_new to allocate
-        let new_fn = self.get_or_declare(module, "verum_tensor_new",
-            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false));
-        let handle = builder.build_call(new_fn, &[ndim.into(), shape.into(), dtype.into()], "handle").or_llvm_err()?
-            .try_as_basic_value().basic().or_internal("expected basic value")?.into_int_value();
+        let new_fn = self.get_or_declare(
+            module,
+            "verum_tensor_new",
+            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false),
+        );
+        let handle = builder
+            .build_call(new_fn, &[ndim.into(), shape.into(), dtype.into()], "handle")
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_int_value();
 
         // Get data pointer and numel
         let ptr = self.handle_to_ptr(&builder, handle, "hdr_ptr")?;
@@ -927,15 +1338,23 @@ impl<'ctx> TensorIR<'ctx> {
         let phi_i = builder.build_phi(i64_type, "i").or_llvm_err()?;
         phi_i.add_incoming(&[(&i64_type.const_zero(), entry)]);
         let i_val = phi_i.as_basic_value().into_int_value();
-        let cmp = builder.build_int_compare(IntPredicate::ULT, i_val, numel, "cmp").or_llvm_err()?;
-        builder.build_conditional_branch(cmp, bb_body, bb_done).or_llvm_err()?;
+        let cmp = builder
+            .build_int_compare(IntPredicate::ULT, i_val, numel, "cmp")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(cmp, bb_body, bb_done)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_body);
         let elem_ptr = unsafe {
-            builder.build_in_bounds_gep(f64_type, data_ptr, &[i_val], "elem").or_llvm_err()?
+            builder
+                .build_in_bounds_gep(f64_type, data_ptr, &[i_val], "elem")
+                .or_llvm_err()?
         };
         builder.build_store(elem_ptr, value).or_llvm_err()?;
-        let next = builder.build_int_add(i_val, i64_type.const_int(1, false), "next").or_llvm_err()?;
+        let next = builder
+            .build_int_add(i_val, i64_type.const_int(1, false), "next")
+            .or_llvm_err()?;
         phi_i.add_incoming(&[(&next, bb_body)]);
         builder.build_unconditional_branch(bb_loop).or_llvm_err()?;
 
@@ -950,7 +1369,13 @@ impl<'ctx> TensorIR<'ctx> {
         let i64_type = ctx.i64_type();
         let i1_type = ctx.bool_type();
         let fn_type = i64_type.fn_type(
-            &[i64_type.into(), i64_type.into(), i64_type.into(), i64_type.into()], false,
+            &[
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
+            false,
         );
 
         let func = match self.get_or_declare_new(module, "verum_tensor_from_data", fn_type) {
@@ -962,31 +1387,74 @@ impl<'ctx> TensorIR<'ctx> {
         let entry = ctx.append_basic_block(func, "entry");
 
         builder.position_at_end(entry);
-        let ndim = self.param_as_i64(&builder, func.get_nth_param(0).or_internal("missing param")?, "p0_i64")?;
-        let shape = self.param_as_i64(&builder, func.get_nth_param(1).or_internal("missing param")?, "shape_p2i")?;
-        let data_param = self.param_as_i64(&builder, func.get_nth_param(2).or_internal("missing param")?, "p2_i64")?;
-        let dtype = self.param_as_i64(&builder, func.get_nth_param(3).or_internal("missing param")?, "p3_i64")?;
+        let ndim = self.param_as_i64(
+            &builder,
+            func.get_nth_param(0).or_internal("missing param")?,
+            "p0_i64",
+        )?;
+        let shape = self.param_as_i64(
+            &builder,
+            func.get_nth_param(1).or_internal("missing param")?,
+            "shape_p2i",
+        )?;
+        let data_param = self.param_as_i64(
+            &builder,
+            func.get_nth_param(2).or_internal("missing param")?,
+            "p2_i64",
+        )?;
+        let dtype = self.param_as_i64(
+            &builder,
+            func.get_nth_param(3).or_internal("missing param")?,
+            "p3_i64",
+        )?;
 
-        let new_fn = self.get_or_declare(module, "verum_tensor_new",
-            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false));
-        let handle = builder.build_call(new_fn, &[ndim.into(), shape.into(), dtype.into()], "handle").or_llvm_err()?
-            .try_as_basic_value().basic().or_internal("expected basic value")?.into_int_value();
+        let new_fn = self.get_or_declare(
+            module,
+            "verum_tensor_new",
+            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false),
+        );
+        let handle = builder
+            .build_call(new_fn, &[ndim.into(), shape.into(), dtype.into()], "handle")
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_int_value();
 
         // Copy data: memcpy(tensor->data, data_param, numel * 8)
         let ptr = self.handle_to_ptr(&builder, handle, "hdr_ptr")?;
         let numel = self.load_header_i64(&builder, ptr, OFF_NUMEL, "numel")?;
         let data_ptr = self.load_header_ptr(&builder, ptr, OFF_DATA, "data_ptr")?;
         let src_ptr = self.handle_to_ptr(&builder, data_param, "src_ptr")?;
-        let byte_count = builder.build_int_mul(numel, i64_type.const_int(8, false), "bytes").or_llvm_err()?;
+        let byte_count = builder
+            .build_int_mul(numel, i64_type.const_int(8, false), "bytes")
+            .or_llvm_err()?;
 
-        let memcpy_fn = self.get_or_declare(module, "llvm.memcpy.p0.p0.i64",
+        let memcpy_fn = self.get_or_declare(
+            module,
+            "llvm.memcpy.p0.p0.i64",
             ctx.void_type().fn_type(
-                &[ctx.ptr_type(AddressSpace::default()).into(),
-                  ctx.ptr_type(AddressSpace::default()).into(),
-                  i64_type.into(), i1_type.into()], false));
-        builder.build_call(memcpy_fn,
-            &[data_ptr.into(), src_ptr.into(), byte_count.into(), i1_type.const_zero().into()],
-            "").or_llvm_err()?;
+                &[
+                    ctx.ptr_type(AddressSpace::default()).into(),
+                    ctx.ptr_type(AddressSpace::default()).into(),
+                    i64_type.into(),
+                    i1_type.into(),
+                ],
+                false,
+            ),
+        );
+        builder
+            .build_call(
+                memcpy_fn,
+                &[
+                    data_ptr.into(),
+                    src_ptr.into(),
+                    byte_count.into(),
+                    i1_type.const_zero().into(),
+                ],
+                "",
+            )
+            .or_llvm_err()?;
 
         builder.build_return(Some(&handle)).or_llvm_err()?;
         Ok(())
@@ -1011,15 +1479,24 @@ impl<'ctx> TensorIR<'ctx> {
         let bb_ret = ctx.append_basic_block(func, "ret");
 
         builder.position_at_end(entry);
-        let handle = func.get_first_param().or_internal("missing first param")?.into_int_value();
-        let is_null = builder.build_int_compare(IntPredicate::EQ, handle, i64_type.const_zero(), "is_null").or_llvm_err()?;
-        builder.build_conditional_branch(is_null, bb_ret, bb_not_null).or_llvm_err()?;
+        let handle = func
+            .get_first_param()
+            .or_internal("missing first param")?
+            .into_int_value();
+        let is_null = builder
+            .build_int_compare(IntPredicate::EQ, handle, i64_type.const_zero(), "is_null")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_null, bb_ret, bb_not_null)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_not_null);
         let ptr = self.handle_to_ptr(&builder, handle, "hdr")?;
         // Decrement refcount
         let rc = self.load_header_i32(&builder, ptr, OFF_REFCOUNT, "rc")?;
-        let new_rc = builder.build_int_sub(rc, i32_type.const_int(1, false), "new_rc").or_llvm_err()?;
+        let new_rc = builder
+            .build_int_sub(rc, i32_type.const_int(1, false), "new_rc")
+            .or_llvm_err()?;
         self.store_header_i32(&builder, ptr, OFF_REFCOUNT, new_rc, "rc")?;
         // No actual deallocation (arena allocator - freed with arena)
         builder.build_unconditional_branch(bb_ret).or_llvm_err()?;
@@ -1046,34 +1523,72 @@ impl<'ctx> TensorIR<'ctx> {
         let bb_null = ctx.append_basic_block(func, "null");
 
         builder.position_at_end(entry);
-        let handle = func.get_first_param().or_internal("missing first param")?.into_int_value();
-        let is_null = builder.build_int_compare(IntPredicate::EQ, handle, i64_type.const_zero(), "is_null").or_llvm_err()?;
-        builder.build_conditional_branch(is_null, bb_null, bb_not_null).or_llvm_err()?;
+        let handle = func
+            .get_first_param()
+            .or_internal("missing first param")?
+            .into_int_value();
+        let is_null = builder
+            .build_int_compare(IntPredicate::EQ, handle, i64_type.const_zero(), "is_null")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_null, bb_null, bb_not_null)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_null);
-        builder.build_return(Some(&i64_type.const_zero())).or_llvm_err()?;
+        builder
+            .build_return(Some(&i64_type.const_zero()))
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_not_null);
         let ptr = self.handle_to_ptr(&builder, handle, "hdr")?;
         let ndim = self.load_header_i8(&builder, ptr, OFF_NDIM, "ndim")?;
-        let ndim_i64 = builder.build_int_z_extend(ndim, i64_type, "ndim_i64").or_llvm_err()?;
+        let ndim_i64 = builder
+            .build_int_z_extend(ndim, i64_type, "ndim_i64")
+            .or_llvm_err()?;
         let dtype = self.load_header_i8(&builder, ptr, OFF_DTYPE, "dtype")?;
-        let dtype_i64 = builder.build_int_z_extend(dtype, i64_type, "dtype_i64").or_llvm_err()?;
+        let dtype_i64 = builder
+            .build_int_z_extend(dtype, i64_type, "dtype_i64")
+            .or_llvm_err()?;
         let data_ptr = self.load_header_ptr(&builder, ptr, OFF_DATA, "data_ptr")?;
         let data_i64 = self.ptr_to_handle(&builder, data_ptr, "data_i64")?;
 
         // Get pointer to shape array in header
         let shape_off = i64_type.const_int(OFF_SHAPE, false);
         let shape_ptr = unsafe {
-            builder.build_in_bounds_gep(ctx.i8_type(), ptr, &[shape_off], "shape_ptr").or_llvm_err()?
+            builder
+                .build_in_bounds_gep(ctx.i8_type(), ptr, &[shape_off], "shape_ptr")
+                .or_llvm_err()?
         };
         let shape_i64 = self.ptr_to_handle(&builder, shape_ptr, "shape_i64")?;
 
-        let from_data_fn = self.get_or_declare(module, "verum_tensor_from_data",
-            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into(), i64_type.into()], false));
-        let result = builder.build_call(from_data_fn,
-            &[ndim_i64.into(), shape_i64.into(), data_i64.into(), dtype_i64.into()], "clone").or_llvm_err()?
-            .try_as_basic_value().basic().or_internal("expected basic value")?;
+        let from_data_fn = self.get_or_declare(
+            module,
+            "verum_tensor_from_data",
+            i64_type.fn_type(
+                &[
+                    i64_type.into(),
+                    i64_type.into(),
+                    i64_type.into(),
+                    i64_type.into(),
+                ],
+                false,
+            ),
+        );
+        let result = builder
+            .build_call(
+                from_data_fn,
+                &[
+                    ndim_i64.into(),
+                    shape_i64.into(),
+                    data_i64.into(),
+                    dtype_i64.into(),
+                ],
+                "clone",
+            )
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
         Ok(())
     }
@@ -1096,21 +1611,39 @@ impl<'ctx> TensorIR<'ctx> {
         let bb_fail = ctx.append_basic_block(func, "fail");
 
         builder.position_at_end(entry);
-        let handle = self.param_as_i64(&builder, func.get_nth_param(0).or_internal("missing param")?, "p0_i64")?;
-        let idx = self.param_as_i64(&builder, func.get_nth_param(1).or_internal("missing param")?, "p1_i64")?;
-        let is_null = builder.build_int_compare(IntPredicate::EQ, handle, i64_type.const_zero(), "is_null").or_llvm_err()?;
-        builder.build_conditional_branch(is_null, bb_fail, bb_ok).or_llvm_err()?;
+        let handle = self.param_as_i64(
+            &builder,
+            func.get_nth_param(0).or_internal("missing param")?,
+            "p0_i64",
+        )?;
+        let idx = self.param_as_i64(
+            &builder,
+            func.get_nth_param(1).or_internal("missing param")?,
+            "p1_i64",
+        )?;
+        let is_null = builder
+            .build_int_compare(IntPredicate::EQ, handle, i64_type.const_zero(), "is_null")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_null, bb_fail, bb_ok)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_fail);
-        builder.build_return(Some(&f64_type.const_float(0.0))).or_llvm_err()?;
+        builder
+            .build_return(Some(&f64_type.const_float(0.0)))
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_ok);
         let ptr = self.handle_to_ptr(&builder, handle, "hdr")?;
         let data_ptr = self.load_header_ptr(&builder, ptr, OFF_DATA, "data_ptr")?;
         let elem_ptr = unsafe {
-            builder.build_in_bounds_gep(f64_type, data_ptr, &[idx], "elem").or_llvm_err()?
+            builder
+                .build_in_bounds_gep(f64_type, data_ptr, &[idx], "elem")
+                .or_llvm_err()?
         };
-        let val = builder.build_load(f64_type, elem_ptr, "val").or_llvm_err()?;
+        let val = builder
+            .build_load(f64_type, elem_ptr, "val")
+            .or_llvm_err()?;
         builder.build_return(Some(&val)).or_llvm_err()?;
         Ok(())
     }
@@ -1121,7 +1654,8 @@ impl<'ctx> TensorIR<'ctx> {
         let i64_type = ctx.i64_type();
         let f64_type = ctx.f64_type();
         let void_type = ctx.void_type();
-        let fn_type = void_type.fn_type(&[i64_type.into(), i64_type.into(), f64_type.into()], false);
+        let fn_type =
+            void_type.fn_type(&[i64_type.into(), i64_type.into(), f64_type.into()], false);
 
         let func = match self.get_or_declare_new(module, "verum_tensor_set_scalar", fn_type) {
             Some(f) => f,
@@ -1134,17 +1668,34 @@ impl<'ctx> TensorIR<'ctx> {
         let bb_ret = ctx.append_basic_block(func, "ret");
 
         builder.position_at_end(entry);
-        let handle = self.param_as_i64(&builder, func.get_nth_param(0).or_internal("missing param")?, "p0_i64")?;
-        let idx = self.param_as_i64(&builder, func.get_nth_param(1).or_internal("missing param")?, "p1_i64")?;
-        let value = func.get_nth_param(2).or_internal("missing param")?.into_float_value();
-        let is_null = builder.build_int_compare(IntPredicate::EQ, handle, i64_type.const_zero(), "is_null").or_llvm_err()?;
-        builder.build_conditional_branch(is_null, bb_ret, bb_ok).or_llvm_err()?;
+        let handle = self.param_as_i64(
+            &builder,
+            func.get_nth_param(0).or_internal("missing param")?,
+            "p0_i64",
+        )?;
+        let idx = self.param_as_i64(
+            &builder,
+            func.get_nth_param(1).or_internal("missing param")?,
+            "p1_i64",
+        )?;
+        let value = func
+            .get_nth_param(2)
+            .or_internal("missing param")?
+            .into_float_value();
+        let is_null = builder
+            .build_int_compare(IntPredicate::EQ, handle, i64_type.const_zero(), "is_null")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_null, bb_ret, bb_ok)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_ok);
         let ptr = self.handle_to_ptr(&builder, handle, "hdr")?;
         let data_ptr = self.load_header_ptr(&builder, ptr, OFF_DATA, "data_ptr")?;
         let elem_ptr = unsafe {
-            builder.build_in_bounds_gep(f64_type, data_ptr, &[idx], "elem").or_llvm_err()?
+            builder
+                .build_in_bounds_gep(f64_type, data_ptr, &[idx], "elem")
+                .or_llvm_err()?
         };
         builder.build_store(elem_ptr, value).or_llvm_err()?;
         builder.build_unconditional_branch(bb_ret).or_llvm_err()?;
@@ -1196,34 +1747,66 @@ impl<'ctx> TensorIR<'ctx> {
         let bb_store = ctx.append_basic_block(func, "store");
 
         builder.position_at_end(entry);
-        let handle = self.param_as_i64(&builder, func.get_nth_param(0).or_internal("missing param")?, "p0_i64")?;
-        let op = self.param_as_i64(&builder, func.get_nth_param(1).or_internal("missing param")?, "p1_i64")?;
-        let is_null = builder.build_int_compare(IntPredicate::EQ, handle, i64_type.const_zero(), "is_null").or_llvm_err()?;
-        builder.build_conditional_branch(is_null, bb_null, bb_alloc).or_llvm_err()?;
+        let handle = self.param_as_i64(
+            &builder,
+            func.get_nth_param(0).or_internal("missing param")?,
+            "p0_i64",
+        )?;
+        let op = self.param_as_i64(
+            &builder,
+            func.get_nth_param(1).or_internal("missing param")?,
+            "p1_i64",
+        )?;
+        let is_null = builder
+            .build_int_compare(IntPredicate::EQ, handle, i64_type.const_zero(), "is_null")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_null, bb_null, bb_alloc)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_null);
-        builder.build_return(Some(&i64_type.const_zero())).or_llvm_err()?;
+        builder
+            .build_return(Some(&i64_type.const_zero()))
+            .or_llvm_err()?;
 
         // Allocate result tensor (same shape)
         builder.position_at_end(bb_alloc);
         let src_ptr = self.handle_to_ptr(&builder, handle, "src")?;
         let ndim = self.load_header_i8(&builder, src_ptr, OFF_NDIM, "ndim")?;
-        let ndim_i64 = builder.build_int_z_extend(ndim, i64_type, "ndim64").or_llvm_err()?;
+        let ndim_i64 = builder
+            .build_int_z_extend(ndim, i64_type, "ndim64")
+            .or_llvm_err()?;
         let dtype = self.load_header_i8(&builder, src_ptr, OFF_DTYPE, "dtype")?;
-        let dtype_i64 = builder.build_int_z_extend(dtype, i64_type, "dtype64").or_llvm_err()?;
+        let dtype_i64 = builder
+            .build_int_z_extend(dtype, i64_type, "dtype64")
+            .or_llvm_err()?;
         let numel = self.load_header_i64(&builder, src_ptr, OFF_NUMEL, "numel")?;
         let src_data = self.load_header_ptr(&builder, src_ptr, OFF_DATA, "src_data")?;
 
         let shape_off = i64_type.const_int(OFF_SHAPE, false);
         let shape_ptr = unsafe {
-            builder.build_in_bounds_gep(ctx.i8_type(), src_ptr, &[shape_off], "shape_ptr").or_llvm_err()?
+            builder
+                .build_in_bounds_gep(ctx.i8_type(), src_ptr, &[shape_off], "shape_ptr")
+                .or_llvm_err()?
         };
         let shape_i64 = self.ptr_to_handle(&builder, shape_ptr, "shape_i64")?;
 
-        let new_fn = self.get_or_declare(module, "verum_tensor_new",
-            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false));
-        let result_handle = builder.build_call(new_fn, &[ndim_i64.into(), shape_i64.into(), dtype_i64.into()], "result").or_llvm_err()?
-            .try_as_basic_value().basic().or_internal("expected basic value")?.into_int_value();
+        let new_fn = self.get_or_declare(
+            module,
+            "verum_tensor_new",
+            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false),
+        );
+        let result_handle = builder
+            .build_call(
+                new_fn,
+                &[ndim_i64.into(), shape_i64.into(), dtype_i64.into()],
+                "result",
+            )
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_int_value();
         let result_ptr = self.handle_to_ptr(&builder, result_handle, "res_ptr")?;
         let result_data = self.load_header_ptr(&builder, result_ptr, OFF_DATA, "res_data")?;
         builder.build_unconditional_branch(bb_loop).or_llvm_err()?;
@@ -1233,39 +1816,63 @@ impl<'ctx> TensorIR<'ctx> {
         let phi_i = builder.build_phi(i64_type, "i").or_llvm_err()?;
         phi_i.add_incoming(&[(&i64_type.const_zero(), bb_alloc)]);
         let i_val = phi_i.as_basic_value().into_int_value();
-        let cmp = builder.build_int_compare(IntPredicate::ULT, i_val, numel, "cmp").or_llvm_err()?;
-        builder.build_conditional_branch(cmp, bb_body, bb_done).or_llvm_err()?;
+        let cmp = builder
+            .build_int_compare(IntPredicate::ULT, i_val, numel, "cmp")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(cmp, bb_body, bb_done)
+            .or_llvm_err()?;
 
         // Load element
         builder.position_at_end(bb_body);
         let elem_ptr = unsafe {
-            builder.build_in_bounds_gep(f64_type, src_data, &[i_val], "elem").or_llvm_err()?
+            builder
+                .build_in_bounds_gep(f64_type, src_data, &[i_val], "elem")
+                .or_llvm_err()?
         };
-        let x = builder.build_load(f64_type, elem_ptr, "x").or_llvm_err()?.into_float_value();
+        let x = builder
+            .build_load(f64_type, elem_ptr, "x")
+            .or_llvm_err()?
+            .into_float_value();
 
         // Switch on op code
-        builder.build_switch(op, bb_default, &[
-            (i64_type.const_int(TENSOR_UNOP_NEG, false), bb_neg),
-            (i64_type.const_int(TENSOR_UNOP_ABS, false), bb_abs),
-            (i64_type.const_int(TENSOR_UNOP_SQRT, false), bb_sqrt),
-            (i64_type.const_int(TENSOR_UNOP_EXP, false), bb_exp),
-            (i64_type.const_int(TENSOR_UNOP_LOG, false), bb_log),
-            (i64_type.const_int(TENSOR_UNOP_SIN, false), bb_sin),
-            (i64_type.const_int(TENSOR_UNOP_COS, false), bb_cos),
-            (i64_type.const_int(TENSOR_UNOP_TANH, false), bb_tanh),
-            (i64_type.const_int(TENSOR_UNOP_SIGMOID, false), bb_sigmoid),
-            (i64_type.const_int(TENSOR_UNOP_RELU, false), bb_relu),
-            (i64_type.const_int(TENSOR_UNOP_FLOOR, false), bb_floor),
-            (i64_type.const_int(TENSOR_UNOP_CEIL, false), bb_ceil),
-            (i64_type.const_int(TENSOR_UNOP_ROUND, false), bb_round),
-        ]).or_llvm_err()?;
+        builder
+            .build_switch(
+                op,
+                bb_default,
+                &[
+                    (i64_type.const_int(TENSOR_UNOP_NEG, false), bb_neg),
+                    (i64_type.const_int(TENSOR_UNOP_ABS, false), bb_abs),
+                    (i64_type.const_int(TENSOR_UNOP_SQRT, false), bb_sqrt),
+                    (i64_type.const_int(TENSOR_UNOP_EXP, false), bb_exp),
+                    (i64_type.const_int(TENSOR_UNOP_LOG, false), bb_log),
+                    (i64_type.const_int(TENSOR_UNOP_SIN, false), bb_sin),
+                    (i64_type.const_int(TENSOR_UNOP_COS, false), bb_cos),
+                    (i64_type.const_int(TENSOR_UNOP_TANH, false), bb_tanh),
+                    (i64_type.const_int(TENSOR_UNOP_SIGMOID, false), bb_sigmoid),
+                    (i64_type.const_int(TENSOR_UNOP_RELU, false), bb_relu),
+                    (i64_type.const_int(TENSOR_UNOP_FLOOR, false), bb_floor),
+                    (i64_type.const_int(TENSOR_UNOP_CEIL, false), bb_ceil),
+                    (i64_type.const_int(TENSOR_UNOP_ROUND, false), bb_round),
+                ],
+            )
+            .or_llvm_err()?;
 
         // Helper to emit intrinsic-based unop cases
-        let call_intrinsic_1 = |bb: verum_llvm::basic_block::BasicBlock<'ctx>, intrinsic_name: &str| -> Result<verum_llvm::values::FloatValue<'ctx>> {
+        let call_intrinsic_1 = |bb: verum_llvm::basic_block::BasicBlock<'ctx>,
+                                intrinsic_name: &str|
+         -> Result<verum_llvm::values::FloatValue<'ctx>> {
             builder.position_at_end(bb);
-            let intr = module.get_function(intrinsic_name).or_missing_fn(intrinsic_name)?;
-            let r = builder.build_call(intr, &[x.into()], "r").or_llvm_err()?
-                .try_as_basic_value().basic().or_internal("expected basic value")?.into_float_value();
+            let intr = module
+                .get_function(intrinsic_name)
+                .or_missing_fn(intrinsic_name)?;
+            let r = builder
+                .build_call(intr, &[x.into()], "r")
+                .or_llvm_err()?
+                .try_as_basic_value()
+                .basic()
+                .or_internal("expected basic value")?
+                .into_float_value();
             builder.build_unconditional_branch(bb_store).or_llvm_err()?;
             Ok(r)
         };
@@ -1288,25 +1895,46 @@ impl<'ctx> TensorIR<'ctx> {
 
         // TANH: call our wrapper
         builder.position_at_end(bb_tanh);
-        let tanh_fn = self.get_or_declare(module, "verum_tanh_approx",
-            f64_type.fn_type(&[f64_type.into()], false));
-        let tanh_r = builder.build_call(tanh_fn, &[x.into()], "r").or_llvm_err()?
-            .try_as_basic_value().basic().or_internal("expected basic value")?.into_float_value();
+        let tanh_fn = self.get_or_declare(
+            module,
+            "verum_tanh_approx",
+            f64_type.fn_type(&[f64_type.into()], false),
+        );
+        let tanh_r = builder
+            .build_call(tanh_fn, &[x.into()], "r")
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_float_value();
         builder.build_unconditional_branch(bb_store).or_llvm_err()?;
 
         // SIGMOID: call our wrapper
         builder.position_at_end(bb_sigmoid);
-        let sigmoid_fn = self.get_or_declare(module, "verum_sigmoid_approx",
-            f64_type.fn_type(&[f64_type.into()], false));
-        let sigmoid_r = builder.build_call(sigmoid_fn, &[x.into()], "r").or_llvm_err()?
-            .try_as_basic_value().basic().or_internal("expected basic value")?.into_float_value();
+        let sigmoid_fn = self.get_or_declare(
+            module,
+            "verum_sigmoid_approx",
+            f64_type.fn_type(&[f64_type.into()], false),
+        );
+        let sigmoid_r = builder
+            .build_call(sigmoid_fn, &[x.into()], "r")
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_float_value();
         builder.build_unconditional_branch(bb_store).or_llvm_err()?;
 
         // RELU: max(x, 0)
         builder.position_at_end(bb_relu);
         let zero = f64_type.const_float(0.0);
-        let is_pos = builder.build_float_compare(FloatPredicate::OGT, x, zero, "is_pos").or_llvm_err()?;
-        let relu_r = builder.build_select(is_pos, x, zero, "relu").or_llvm_err()?.into_float_value();
+        let is_pos = builder
+            .build_float_compare(FloatPredicate::OGT, x, zero, "is_pos")
+            .or_llvm_err()?;
+        let relu_r = builder
+            .build_select(is_pos, x, zero, "relu")
+            .or_llvm_err()?
+            .into_float_value();
         builder.build_unconditional_branch(bb_store).or_llvm_err()?;
 
         // DEFAULT: identity
@@ -1317,17 +1945,32 @@ impl<'ctx> TensorIR<'ctx> {
         builder.position_at_end(bb_store);
         let phi_result = builder.build_phi(f64_type, "result_val").or_llvm_err()?;
         phi_result.add_incoming(&[
-            (&neg_r, bb_neg), (&abs_r, bb_abs), (&sqrt_r, bb_sqrt),
-            (&exp_r, bb_exp), (&log_r, bb_log), (&sin_r, bb_sin),
-            (&cos_r, bb_cos), (&tanh_r, bb_tanh), (&sigmoid_r, bb_sigmoid),
-            (&relu_r, bb_relu), (&floor_r, bb_floor), (&ceil_r, bb_ceil),
-            (&round_r, bb_round), (&x, bb_default),
+            (&neg_r, bb_neg),
+            (&abs_r, bb_abs),
+            (&sqrt_r, bb_sqrt),
+            (&exp_r, bb_exp),
+            (&log_r, bb_log),
+            (&sin_r, bb_sin),
+            (&cos_r, bb_cos),
+            (&tanh_r, bb_tanh),
+            (&sigmoid_r, bb_sigmoid),
+            (&relu_r, bb_relu),
+            (&floor_r, bb_floor),
+            (&ceil_r, bb_ceil),
+            (&round_r, bb_round),
+            (&x, bb_default),
         ]);
         let out_elem = unsafe {
-            builder.build_in_bounds_gep(f64_type, result_data, &[i_val], "out_elem").or_llvm_err()?
+            builder
+                .build_in_bounds_gep(f64_type, result_data, &[i_val], "out_elem")
+                .or_llvm_err()?
         };
-        builder.build_store(out_elem, phi_result.as_basic_value()).or_llvm_err()?;
-        let next = builder.build_int_add(i_val, i64_type.const_int(1, false), "next").or_llvm_err()?;
+        builder
+            .build_store(out_elem, phi_result.as_basic_value())
+            .or_llvm_err()?;
+        let next = builder
+            .build_int_add(i_val, i64_type.const_int(1, false), "next")
+            .or_llvm_err()?;
         phi_i.add_incoming(&[(&next, bb_store)]);
         builder.build_unconditional_branch(bb_loop).or_llvm_err()?;
 
@@ -1368,16 +2011,38 @@ impl<'ctx> TensorIR<'ctx> {
         let bb_store = ctx.append_basic_block(func, "store");
 
         builder.position_at_end(entry);
-        let a_handle = self.param_as_i64(&builder, func.get_nth_param(0).or_internal("missing param")?, "p0_i64")?;
-        let b_handle = self.param_as_i64(&builder, func.get_nth_param(1).or_internal("missing param")?, "p1_i64")?;
-        let op = self.param_as_i64(&builder, func.get_nth_param(2).or_internal("missing param")?, "p2_i64")?;
-        let a_null = builder.build_int_compare(IntPredicate::EQ, a_handle, i64_type.const_zero(), "a_null").or_llvm_err()?;
-        let b_null = builder.build_int_compare(IntPredicate::EQ, b_handle, i64_type.const_zero(), "b_null").or_llvm_err()?;
-        let either_null = builder.build_or(a_null, b_null, "either_null").or_llvm_err()?;
-        builder.build_conditional_branch(either_null, bb_null, bb_ok).or_llvm_err()?;
+        let a_handle = self.param_as_i64(
+            &builder,
+            func.get_nth_param(0).or_internal("missing param")?,
+            "p0_i64",
+        )?;
+        let b_handle = self.param_as_i64(
+            &builder,
+            func.get_nth_param(1).or_internal("missing param")?,
+            "p1_i64",
+        )?;
+        let op = self.param_as_i64(
+            &builder,
+            func.get_nth_param(2).or_internal("missing param")?,
+            "p2_i64",
+        )?;
+        let a_null = builder
+            .build_int_compare(IntPredicate::EQ, a_handle, i64_type.const_zero(), "a_null")
+            .or_llvm_err()?;
+        let b_null = builder
+            .build_int_compare(IntPredicate::EQ, b_handle, i64_type.const_zero(), "b_null")
+            .or_llvm_err()?;
+        let either_null = builder
+            .build_or(a_null, b_null, "either_null")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(either_null, bb_null, bb_ok)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_null);
-        builder.build_return(Some(&i64_type.const_zero())).or_llvm_err()?;
+        builder
+            .build_return(Some(&i64_type.const_zero()))
+            .or_llvm_err()?;
 
         // Allocate result with a's shape (assumes same shape for fast path)
         builder.position_at_end(bb_ok);
@@ -1387,19 +2052,37 @@ impl<'ctx> TensorIR<'ctx> {
         let a_data = self.load_header_ptr(&builder, a_ptr, OFF_DATA, "a_data")?;
         let b_data = self.load_header_ptr(&builder, b_ptr, OFF_DATA, "b_data")?;
         let ndim = self.load_header_i8(&builder, a_ptr, OFF_NDIM, "ndim")?;
-        let ndim_i64 = builder.build_int_z_extend(ndim, i64_type, "ndim64").or_llvm_err()?;
+        let ndim_i64 = builder
+            .build_int_z_extend(ndim, i64_type, "ndim64")
+            .or_llvm_err()?;
         let dtype = self.load_header_i8(&builder, a_ptr, OFF_DTYPE, "dtype")?;
-        let dtype_i64 = builder.build_int_z_extend(dtype, i64_type, "dtype64").or_llvm_err()?;
+        let dtype_i64 = builder
+            .build_int_z_extend(dtype, i64_type, "dtype64")
+            .or_llvm_err()?;
         let shape_off = i64_type.const_int(OFF_SHAPE, false);
         let shape_ptr = unsafe {
-            builder.build_in_bounds_gep(ctx.i8_type(), a_ptr, &[shape_off], "shape_ptr").or_llvm_err()?
+            builder
+                .build_in_bounds_gep(ctx.i8_type(), a_ptr, &[shape_off], "shape_ptr")
+                .or_llvm_err()?
         };
         let shape_i64 = self.ptr_to_handle(&builder, shape_ptr, "shape_i64")?;
 
-        let new_fn = self.get_or_declare(module, "verum_tensor_new",
-            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false));
-        let result_handle = builder.build_call(new_fn, &[ndim_i64.into(), shape_i64.into(), dtype_i64.into()], "result").or_llvm_err()?
-            .try_as_basic_value().basic().or_internal("expected basic value")?.into_int_value();
+        let new_fn = self.get_or_declare(
+            module,
+            "verum_tensor_new",
+            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false),
+        );
+        let result_handle = builder
+            .build_call(
+                new_fn,
+                &[ndim_i64.into(), shape_i64.into(), dtype_i64.into()],
+                "result",
+            )
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_int_value();
         let result_ptr = self.handle_to_ptr(&builder, result_handle, "res_ptr")?;
         let result_data = self.load_header_ptr(&builder, result_ptr, OFF_DATA, "res_data")?;
         builder.build_unconditional_branch(bb_loop).or_llvm_err()?;
@@ -1409,24 +2092,48 @@ impl<'ctx> TensorIR<'ctx> {
         let phi_i = builder.build_phi(i64_type, "i").or_llvm_err()?;
         phi_i.add_incoming(&[(&i64_type.const_zero(), bb_ok)]);
         let i_val = phi_i.as_basic_value().into_int_value();
-        let cmp = builder.build_int_compare(IntPredicate::ULT, i_val, a_numel, "cmp").or_llvm_err()?;
-        builder.build_conditional_branch(cmp, bb_body, bb_done).or_llvm_err()?;
+        let cmp = builder
+            .build_int_compare(IntPredicate::ULT, i_val, a_numel, "cmp")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(cmp, bb_body, bb_done)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_body);
-        let a_elem = unsafe { builder.build_in_bounds_gep(f64_type, a_data, &[i_val], "ae").or_llvm_err()? };
-        let b_elem = unsafe { builder.build_in_bounds_gep(f64_type, b_data, &[i_val], "be").or_llvm_err()? };
-        let av = builder.build_load(f64_type, a_elem, "av").or_llvm_err()?.into_float_value();
-        let bv = builder.build_load(f64_type, b_elem, "bv").or_llvm_err()?.into_float_value();
+        let a_elem = unsafe {
+            builder
+                .build_in_bounds_gep(f64_type, a_data, &[i_val], "ae")
+                .or_llvm_err()?
+        };
+        let b_elem = unsafe {
+            builder
+                .build_in_bounds_gep(f64_type, b_data, &[i_val], "be")
+                .or_llvm_err()?
+        };
+        let av = builder
+            .build_load(f64_type, a_elem, "av")
+            .or_llvm_err()?
+            .into_float_value();
+        let bv = builder
+            .build_load(f64_type, b_elem, "bv")
+            .or_llvm_err()?
+            .into_float_value();
 
-        builder.build_switch(op, bb_default, &[
-            (i64_type.const_int(TENSOR_BINOP_ADD, false), bb_add),
-            (i64_type.const_int(TENSOR_BINOP_SUB, false), bb_sub),
-            (i64_type.const_int(TENSOR_BINOP_MUL, false), bb_mul),
-            (i64_type.const_int(TENSOR_BINOP_DIV, false), bb_div),
-            (i64_type.const_int(TENSOR_BINOP_POW, false), bb_pow),
-            (i64_type.const_int(TENSOR_BINOP_MIN, false), bb_min),
-            (i64_type.const_int(TENSOR_BINOP_MAX, false), bb_max),
-        ]).or_llvm_err()?;
+        builder
+            .build_switch(
+                op,
+                bb_default,
+                &[
+                    (i64_type.const_int(TENSOR_BINOP_ADD, false), bb_add),
+                    (i64_type.const_int(TENSOR_BINOP_SUB, false), bb_sub),
+                    (i64_type.const_int(TENSOR_BINOP_MUL, false), bb_mul),
+                    (i64_type.const_int(TENSOR_BINOP_DIV, false), bb_div),
+                    (i64_type.const_int(TENSOR_BINOP_POW, false), bb_pow),
+                    (i64_type.const_int(TENSOR_BINOP_MIN, false), bb_min),
+                    (i64_type.const_int(TENSOR_BINOP_MAX, false), bb_max),
+                ],
+            )
+            .or_llvm_err()?;
 
         // ADD
         builder.position_at_end(bb_add);
@@ -1450,23 +2157,44 @@ impl<'ctx> TensorIR<'ctx> {
 
         // POW
         builder.position_at_end(bb_pow);
-        let pow_fn = module.get_function("llvm.pow.f64").or_missing_fn("llvm.pow.f64")?;
-        let pow_r = builder.build_call(pow_fn, &[av.into(), bv.into()], "pow").or_llvm_err()?
-            .try_as_basic_value().basic().or_internal("expected basic value")?.into_float_value();
+        let pow_fn = module
+            .get_function("llvm.pow.f64")
+            .or_missing_fn("llvm.pow.f64")?;
+        let pow_r = builder
+            .build_call(pow_fn, &[av.into(), bv.into()], "pow")
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_float_value();
         builder.build_unconditional_branch(bb_store).or_llvm_err()?;
 
         // MIN
         builder.position_at_end(bb_min);
-        let minnum_fn = module.get_function("llvm.minnum.f64").or_missing_fn("llvm.minnum.f64")?;
-        let min_r = builder.build_call(minnum_fn, &[av.into(), bv.into()], "min").or_llvm_err()?
-            .try_as_basic_value().basic().or_internal("expected basic value")?.into_float_value();
+        let minnum_fn = module
+            .get_function("llvm.minnum.f64")
+            .or_missing_fn("llvm.minnum.f64")?;
+        let min_r = builder
+            .build_call(minnum_fn, &[av.into(), bv.into()], "min")
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_float_value();
         builder.build_unconditional_branch(bb_store).or_llvm_err()?;
 
         // MAX
         builder.position_at_end(bb_max);
-        let maxnum_fn = module.get_function("llvm.maxnum.f64").or_missing_fn("llvm.maxnum.f64")?;
-        let max_r = builder.build_call(maxnum_fn, &[av.into(), bv.into()], "max").or_llvm_err()?
-            .try_as_basic_value().basic().or_internal("expected basic value")?.into_float_value();
+        let maxnum_fn = module
+            .get_function("llvm.maxnum.f64")
+            .or_missing_fn("llvm.maxnum.f64")?;
+        let max_r = builder
+            .build_call(maxnum_fn, &[av.into(), bv.into()], "max")
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_float_value();
         builder.build_unconditional_branch(bb_store).or_llvm_err()?;
 
         // DEFAULT
@@ -1478,15 +2206,26 @@ impl<'ctx> TensorIR<'ctx> {
         builder.position_at_end(bb_store);
         let phi_r = builder.build_phi(f64_type, "result_val").or_llvm_err()?;
         phi_r.add_incoming(&[
-            (&add_r, bb_add), (&sub_r, bb_sub), (&mul_r, bb_mul),
-            (&div_r, bb_div), (&pow_r, bb_pow), (&min_r, bb_min),
-            (&max_r, bb_max), (&zero, bb_default),
+            (&add_r, bb_add),
+            (&sub_r, bb_sub),
+            (&mul_r, bb_mul),
+            (&div_r, bb_div),
+            (&pow_r, bb_pow),
+            (&min_r, bb_min),
+            (&max_r, bb_max),
+            (&zero, bb_default),
         ]);
         let out_elem = unsafe {
-            builder.build_in_bounds_gep(f64_type, result_data, &[i_val], "out").or_llvm_err()?
+            builder
+                .build_in_bounds_gep(f64_type, result_data, &[i_val], "out")
+                .or_llvm_err()?
         };
-        builder.build_store(out_elem, phi_r.as_basic_value()).or_llvm_err()?;
-        let next = builder.build_int_add(i_val, i64_type.const_int(1, false), "next").or_llvm_err()?;
+        builder
+            .build_store(out_elem, phi_r.as_basic_value())
+            .or_llvm_err()?;
+        let next = builder
+            .build_int_add(i_val, i64_type.const_int(1, false), "next")
+            .or_llvm_err()?;
         phi_i.add_incoming(&[(&next, bb_store)]);
         builder.build_unconditional_branch(bb_loop).or_llvm_err()?;
 
@@ -1516,13 +2255,27 @@ impl<'ctx> TensorIR<'ctx> {
         let bb_done = ctx.append_basic_block(func, "done");
 
         builder.position_at_end(entry);
-        let handle = self.param_as_i64(&builder, func.get_nth_param(0).or_internal("missing param")?, "p0_i64")?;
-        let op = self.param_as_i64(&builder, func.get_nth_param(1).or_internal("missing param")?, "p1_i64")?;
-        let is_null = builder.build_int_compare(IntPredicate::EQ, handle, i64_type.const_zero(), "is_null").or_llvm_err()?;
-        builder.build_conditional_branch(is_null, bb_null, bb_init).or_llvm_err()?;
+        let handle = self.param_as_i64(
+            &builder,
+            func.get_nth_param(0).or_internal("missing param")?,
+            "p0_i64",
+        )?;
+        let op = self.param_as_i64(
+            &builder,
+            func.get_nth_param(1).or_internal("missing param")?,
+            "p1_i64",
+        )?;
+        let is_null = builder
+            .build_int_compare(IntPredicate::EQ, handle, i64_type.const_zero(), "is_null")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_null, bb_null, bb_init)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_null);
-        builder.build_return(Some(&f64_type.const_float(0.0))).or_llvm_err()?;
+        builder
+            .build_return(Some(&f64_type.const_float(0.0)))
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_init);
         let ptr = self.handle_to_ptr(&builder, handle, "hdr")?;
@@ -1530,19 +2283,53 @@ impl<'ctx> TensorIR<'ctx> {
         let data_ptr = self.load_header_ptr(&builder, ptr, OFF_DATA, "data_ptr")?;
 
         // Initialize accumulator based on op
-        let is_sum = builder.build_int_compare(IntPredicate::EQ, op, i64_type.const_int(TENSOR_REDUCE_SUM, false), "is_sum").or_llvm_err()?;
-        let is_mean = builder.build_int_compare(IntPredicate::EQ, op, i64_type.const_int(TENSOR_REDUCE_MEAN, false), "is_mean").or_llvm_err()?;
-        let is_prod = builder.build_int_compare(IntPredicate::EQ, op, i64_type.const_int(TENSOR_REDUCE_PROD, false), "is_prod").or_llvm_err()?;
-        let is_sum_or_mean = builder.build_or(is_sum, is_mean, "sum_or_mean").or_llvm_err()?;
+        let is_sum = builder
+            .build_int_compare(
+                IntPredicate::EQ,
+                op,
+                i64_type.const_int(TENSOR_REDUCE_SUM, false),
+                "is_sum",
+            )
+            .or_llvm_err()?;
+        let is_mean = builder
+            .build_int_compare(
+                IntPredicate::EQ,
+                op,
+                i64_type.const_int(TENSOR_REDUCE_MEAN, false),
+                "is_mean",
+            )
+            .or_llvm_err()?;
+        let is_prod = builder
+            .build_int_compare(
+                IntPredicate::EQ,
+                op,
+                i64_type.const_int(TENSOR_REDUCE_PROD, false),
+                "is_prod",
+            )
+            .or_llvm_err()?;
+        let is_sum_or_mean = builder
+            .build_or(is_sum, is_mean, "sum_or_mean")
+            .or_llvm_err()?;
         // For sum/mean: init=0, for prod: init=1, for max/min: init=data[0]
         let zero = f64_type.const_float(0.0);
         let one = f64_type.const_float(1.0);
         let first_elem_ptr = unsafe {
-            builder.build_in_bounds_gep(f64_type, data_ptr, &[i64_type.const_zero()], "first").or_llvm_err()?
+            builder
+                .build_in_bounds_gep(f64_type, data_ptr, &[i64_type.const_zero()], "first")
+                .or_llvm_err()?
         };
-        let first = builder.build_load(f64_type, first_elem_ptr, "first_val").or_llvm_err()?.into_float_value();
-        let prod_or_first = builder.build_select(is_prod, one, first, "prod_or_first").or_llvm_err()?.into_float_value();
-        let init_val = builder.build_select(is_sum_or_mean, zero, prod_or_first, "init").or_llvm_err()?.into_float_value();
+        let first = builder
+            .build_load(f64_type, first_elem_ptr, "first_val")
+            .or_llvm_err()?
+            .into_float_value();
+        let prod_or_first = builder
+            .build_select(is_prod, one, first, "prod_or_first")
+            .or_llvm_err()?
+            .into_float_value();
+        let init_val = builder
+            .build_select(is_sum_or_mean, zero, prod_or_first, "init")
+            .or_llvm_err()?
+            .into_float_value();
         builder.build_unconditional_branch(bb_loop).or_llvm_err()?;
 
         // Loop
@@ -1553,38 +2340,92 @@ impl<'ctx> TensorIR<'ctx> {
         phi_acc.add_incoming(&[(&init_val, bb_init)]);
         let i_val = phi_i.as_basic_value().into_int_value();
         let acc = phi_acc.as_basic_value().into_float_value();
-        let cmp = builder.build_int_compare(IntPredicate::ULT, i_val, numel, "cmp").or_llvm_err()?;
-        builder.build_conditional_branch(cmp, bb_body, bb_done).or_llvm_err()?;
+        let cmp = builder
+            .build_int_compare(IntPredicate::ULT, i_val, numel, "cmp")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(cmp, bb_body, bb_done)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_body);
-        let elem = unsafe { builder.build_in_bounds_gep(f64_type, data_ptr, &[i_val], "elem").or_llvm_err()? };
-        let val = builder.build_load(f64_type, elem, "val").or_llvm_err()?.into_float_value();
+        let elem = unsafe {
+            builder
+                .build_in_bounds_gep(f64_type, data_ptr, &[i_val], "elem")
+                .or_llvm_err()?
+        };
+        let val = builder
+            .build_load(f64_type, elem, "val")
+            .or_llvm_err()?
+            .into_float_value();
 
         // Dispatch based on op using select chains (cheaper than switch for 5 ops)
         let sum_acc = builder.build_float_add(acc, val, "sum_acc").or_llvm_err()?;
-        let prod_acc = builder.build_float_mul(acc, val, "prod_acc").or_llvm_err()?;
-        let is_gt = builder.build_float_compare(FloatPredicate::OGT, val, acc, "is_gt").or_llvm_err()?;
-        let max_acc = builder.build_select(is_gt, val, acc, "max_acc").or_llvm_err()?.into_float_value();
-        let is_lt = builder.build_float_compare(FloatPredicate::OLT, val, acc, "is_lt").or_llvm_err()?;
-        let min_acc = builder.build_select(is_lt, val, acc, "min_acc").or_llvm_err()?.into_float_value();
+        let prod_acc = builder
+            .build_float_mul(acc, val, "prod_acc")
+            .or_llvm_err()?;
+        let is_gt = builder
+            .build_float_compare(FloatPredicate::OGT, val, acc, "is_gt")
+            .or_llvm_err()?;
+        let max_acc = builder
+            .build_select(is_gt, val, acc, "max_acc")
+            .or_llvm_err()?
+            .into_float_value();
+        let is_lt = builder
+            .build_float_compare(FloatPredicate::OLT, val, acc, "is_lt")
+            .or_llvm_err()?;
+        let min_acc = builder
+            .build_select(is_lt, val, acc, "min_acc")
+            .or_llvm_err()?
+            .into_float_value();
 
-        let is_max = builder.build_int_compare(IntPredicate::EQ, op, i64_type.const_int(TENSOR_REDUCE_MAX, false), "is_max").or_llvm_err()?;
-        let is_min = builder.build_int_compare(IntPredicate::EQ, op, i64_type.const_int(TENSOR_REDUCE_MIN, false), "is_min").or_llvm_err()?;
+        let is_max = builder
+            .build_int_compare(
+                IntPredicate::EQ,
+                op,
+                i64_type.const_int(TENSOR_REDUCE_MAX, false),
+                "is_max",
+            )
+            .or_llvm_err()?;
+        let is_min = builder
+            .build_int_compare(
+                IntPredicate::EQ,
+                op,
+                i64_type.const_int(TENSOR_REDUCE_MIN, false),
+                "is_min",
+            )
+            .or_llvm_err()?;
 
-        let mx_mn = builder.build_select(is_max, max_acc, min_acc, "mx_mn").or_llvm_err()?.into_float_value();
-        let p_mx = builder.build_select(is_prod, prod_acc, mx_mn, "p_mx").or_llvm_err()?.into_float_value();
-        let new_acc = builder.build_select(is_sum_or_mean, sum_acc, p_mx, "new_acc").or_llvm_err()?.into_float_value();
+        let mx_mn = builder
+            .build_select(is_max, max_acc, min_acc, "mx_mn")
+            .or_llvm_err()?
+            .into_float_value();
+        let p_mx = builder
+            .build_select(is_prod, prod_acc, mx_mn, "p_mx")
+            .or_llvm_err()?
+            .into_float_value();
+        let new_acc = builder
+            .build_select(is_sum_or_mean, sum_acc, p_mx, "new_acc")
+            .or_llvm_err()?
+            .into_float_value();
 
-        let next = builder.build_int_add(i_val, i64_type.const_int(1, false), "next").or_llvm_err()?;
+        let next = builder
+            .build_int_add(i_val, i64_type.const_int(1, false), "next")
+            .or_llvm_err()?;
         phi_i.add_incoming(&[(&next, bb_body)]);
         phi_acc.add_incoming(&[(&new_acc, bb_body)]);
         builder.build_unconditional_branch(bb_loop).or_llvm_err()?;
 
         // Done: if mean, divide by numel
         builder.position_at_end(bb_done);
-        let numel_f = builder.build_signed_int_to_float(numel, f64_type, "numel_f").or_llvm_err()?;
-        let mean_result = builder.build_float_div(acc, numel_f, "mean").or_llvm_err()?;
-        let final_result = builder.build_select(is_mean, mean_result, acc, "final").or_llvm_err()?;
+        let numel_f = builder
+            .build_signed_int_to_float(numel, f64_type, "numel_f")
+            .or_llvm_err()?;
+        let mean_result = builder
+            .build_float_div(acc, numel_f, "mean")
+            .or_llvm_err()?;
+        let final_result = builder
+            .build_select(is_mean, mean_result, acc, "final")
+            .or_llvm_err()?;
         builder.build_return(Some(&final_result)).or_llvm_err()?;
         Ok(())
     }
@@ -1598,8 +2439,7 @@ impl<'ctx> TensorIR<'ctx> {
         let f64_type = ctx.f64_type();
         let i8_type = ctx.i8_type();
         let ptr_type = ctx.ptr_type(AddressSpace::default());
-        let fn_type = i64_type.fn_type(
-            &[i64_type.into(), i64_type.into(), i64_type.into()], false);
+        let fn_type = i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
 
         let func = match self.get_or_declare_new(module, "verum_tensor_reduce", fn_type) {
             Some(f) => f,
@@ -1613,38 +2453,92 @@ impl<'ctx> TensorIR<'ctx> {
         let bb_ret = ctx.append_basic_block(func, "ret");
 
         builder.position_at_end(entry);
-        let handle = self.param_as_i64(&builder, func.get_nth_param(0).or_internal("missing param")?, "p0_i64")?;
-        let op = self.param_as_i64(&builder, func.get_nth_param(1).or_internal("missing param")?, "p1_i64")?;
-        let _axis = self.param_as_i64(&builder, func.get_nth_param(2).or_internal("missing param")?, "p2_i64")?;
+        let handle = self.param_as_i64(
+            &builder,
+            func.get_nth_param(0).or_internal("missing param")?,
+            "p0_i64",
+        )?;
+        let op = self.param_as_i64(
+            &builder,
+            func.get_nth_param(1).or_internal("missing param")?,
+            "p1_i64",
+        )?;
+        let _axis = self.param_as_i64(
+            &builder,
+            func.get_nth_param(2).or_internal("missing param")?,
+            "p2_i64",
+        )?;
 
-        let is_null = builder.build_int_compare(IntPredicate::EQ, handle, i64_type.const_zero(), "is_null").or_llvm_err()?;
-        builder.build_conditional_branch(is_null, bb_null, bb_ok).or_llvm_err()?;
+        let is_null = builder
+            .build_int_compare(IntPredicate::EQ, handle, i64_type.const_zero(), "is_null")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_null, bb_null, bb_ok)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_null);
-        builder.build_return(Some(&i64_type.const_zero())).or_llvm_err()?;
+        builder
+            .build_return(Some(&i64_type.const_zero()))
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_ok);
         // Call reduce_all to get the scalar result
-        let reduce_all_fn = self.get_or_declare(module, "verum_tensor_reduce_all",
-            f64_type.fn_type(&[i64_type.into(), i64_type.into()], false));
-        let scalar = builder.build_call(reduce_all_fn, &[handle.into(), op.into()], "scalar").or_llvm_err()?
-            .try_as_basic_value().basic().or_internal("expected basic value")?.into_float_value();
+        let reduce_all_fn = self.get_or_declare(
+            module,
+            "verum_tensor_reduce_all",
+            f64_type.fn_type(&[i64_type.into(), i64_type.into()], false),
+        );
+        let scalar = builder
+            .build_call(reduce_all_fn, &[handle.into(), op.into()], "scalar")
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_float_value();
 
         // Create a 1-element result tensor via tensor_fill
-        let fill_fn = self.get_or_declare(module, "verum_tensor_fill",
-            i64_type.fn_type(&[i64_type.into(), i64_type.into(), f64_type.into(), i64_type.into()], false));
+        let fill_fn = self.get_or_declare(
+            module,
+            "verum_tensor_fill",
+            i64_type.fn_type(
+                &[
+                    i64_type.into(),
+                    i64_type.into(),
+                    f64_type.into(),
+                    i64_type.into(),
+                ],
+                false,
+            ),
+        );
         let ndim_1 = i64_type.const_int(1, false);
         // Build shape [1] on stack
         let shape_alloca = builder.build_alloca(i64_type, "shape").or_llvm_err()?;
         builder.build_store(shape_alloca, ndim_1).or_llvm_err()?;
-        let shape_i64 = builder.build_ptr_to_int(shape_alloca, i64_type, "shape_i64").or_llvm_err()?;
+        let shape_i64 = builder
+            .build_ptr_to_int(shape_alloca, i64_type, "shape_i64")
+            .or_llvm_err()?;
         // Read dtype from source tensor
         let src_ptr = self.handle_to_ptr(&builder, handle, "src_hdr")?;
         let dtype = self.load_header_i8(&builder, src_ptr, OFF_DTYPE, "dtype")?;
-        let dtype_i64 = builder.build_int_z_extend(dtype, i64_type, "dtype_i64").or_llvm_err()?;
-        let result = builder.build_call(fill_fn,
-            &[ndim_1.into(), shape_i64.into(), scalar.into(), dtype_i64.into()], "result_tensor").or_llvm_err()?
-            .try_as_basic_value().basic().or_internal("expected basic value")?.into_int_value();
+        let dtype_i64 = builder
+            .build_int_z_extend(dtype, i64_type, "dtype_i64")
+            .or_llvm_err()?;
+        let result = builder
+            .build_call(
+                fill_fn,
+                &[
+                    ndim_1.into(),
+                    shape_i64.into(),
+                    scalar.into(),
+                    dtype_i64.into(),
+                ],
+                "result_tensor",
+            )
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_int_value();
         builder.build_unconditional_branch(bb_ret).or_llvm_err()?;
 
         builder.position_at_end(bb_ret);
@@ -1678,15 +2572,31 @@ impl<'ctx> TensorIR<'ctx> {
         let bb_i_done = ctx.append_basic_block(func, "i_done");
 
         builder.position_at_end(entry);
-        let a_h = self.param_as_i64(&builder, func.get_nth_param(0).or_internal("missing param")?, "p0_i64")?;
-        let b_h = self.param_as_i64(&builder, func.get_nth_param(1).or_internal("missing param")?, "p1_i64")?;
-        let a_null = builder.build_int_compare(IntPredicate::EQ, a_h, i64_type.const_zero(), "a_null").or_llvm_err()?;
-        let b_null = builder.build_int_compare(IntPredicate::EQ, b_h, i64_type.const_zero(), "b_null").or_llvm_err()?;
+        let a_h = self.param_as_i64(
+            &builder,
+            func.get_nth_param(0).or_internal("missing param")?,
+            "p0_i64",
+        )?;
+        let b_h = self.param_as_i64(
+            &builder,
+            func.get_nth_param(1).or_internal("missing param")?,
+            "p1_i64",
+        )?;
+        let a_null = builder
+            .build_int_compare(IntPredicate::EQ, a_h, i64_type.const_zero(), "a_null")
+            .or_llvm_err()?;
+        let b_null = builder
+            .build_int_compare(IntPredicate::EQ, b_h, i64_type.const_zero(), "b_null")
+            .or_llvm_err()?;
         let either = builder.build_or(a_null, b_null, "either").or_llvm_err()?;
-        builder.build_conditional_branch(either, bb_null, bb_ok).or_llvm_err()?;
+        builder
+            .build_conditional_branch(either, bb_null, bb_ok)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_null);
-        builder.build_return(Some(&i64_type.const_zero())).or_llvm_err()?;
+        builder
+            .build_return(Some(&i64_type.const_zero()))
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_ok);
         let a_ptr = self.handle_to_ptr(&builder, a_h, "a_ptr")?;
@@ -1698,54 +2608,112 @@ impl<'ctx> TensorIR<'ctx> {
         let i8_type = ctx.i8_type();
         let m = {
             let off = i64_type.const_int(OFF_SHAPE, false);
-            let p = unsafe { builder.build_in_bounds_gep(i8_type, a_ptr, &[off], "m_ptr").or_llvm_err()? };
-            builder.build_load(i64_type, p, "m").or_llvm_err()?.into_int_value()
+            let p = unsafe {
+                builder
+                    .build_in_bounds_gep(i8_type, a_ptr, &[off], "m_ptr")
+                    .or_llvm_err()?
+            };
+            builder
+                .build_load(i64_type, p, "m")
+                .or_llvm_err()?
+                .into_int_value()
         };
         let k_dim = {
             let off = i64_type.const_int(OFF_SHAPE + 8, false);
-            let p = unsafe { builder.build_in_bounds_gep(i8_type, a_ptr, &[off], "k_ptr").or_llvm_err()? };
-            builder.build_load(i64_type, p, "k").or_llvm_err()?.into_int_value()
+            let p = unsafe {
+                builder
+                    .build_in_bounds_gep(i8_type, a_ptr, &[off], "k_ptr")
+                    .or_llvm_err()?
+            };
+            builder
+                .build_load(i64_type, p, "k")
+                .or_llvm_err()?
+                .into_int_value()
         };
         let n = {
             let off = i64_type.const_int(OFF_SHAPE + 8, false);
-            let p = unsafe { builder.build_in_bounds_gep(i8_type, b_ptr, &[off], "n_ptr").or_llvm_err()? };
-            builder.build_load(i64_type, p, "n").or_llvm_err()?.into_int_value()
+            let p = unsafe {
+                builder
+                    .build_in_bounds_gep(i8_type, b_ptr, &[off], "n_ptr")
+                    .or_llvm_err()?
+            };
+            builder
+                .build_load(i64_type, p, "n")
+                .or_llvm_err()?
+                .into_int_value()
         };
 
         // Create output shape on stack [m, n]
-        let out_shape = builder.build_array_alloca(i64_type, i64_type.const_int(2, false), "out_shape").or_llvm_err()?;
-        let s0 = unsafe { builder.build_in_bounds_gep(i64_type, out_shape, &[i64_type.const_zero()], "s0").or_llvm_err()? };
+        let out_shape = builder
+            .build_array_alloca(i64_type, i64_type.const_int(2, false), "out_shape")
+            .or_llvm_err()?;
+        let s0 = unsafe {
+            builder
+                .build_in_bounds_gep(i64_type, out_shape, &[i64_type.const_zero()], "s0")
+                .or_llvm_err()?
+        };
         builder.build_store(s0, m).or_llvm_err()?;
-        let s1 = unsafe { builder.build_in_bounds_gep(i64_type, out_shape, &[i64_type.const_int(1, false)], "s1").or_llvm_err()? };
+        let s1 = unsafe {
+            builder
+                .build_in_bounds_gep(i64_type, out_shape, &[i64_type.const_int(1, false)], "s1")
+                .or_llvm_err()?
+        };
         builder.build_store(s1, n).or_llvm_err()?;
 
         let shape_as_i64 = self.ptr_to_handle(&builder, out_shape, "shape_i64")?;
         let dtype = self.load_header_i8(&builder, a_ptr, OFF_DTYPE, "dtype")?;
-        let dtype_i64 = builder.build_int_z_extend(dtype, i64_type, "dtype64").or_llvm_err()?;
+        let dtype_i64 = builder
+            .build_int_z_extend(dtype, i64_type, "dtype64")
+            .or_llvm_err()?;
 
-        let new_fn = self.get_or_declare(module, "verum_tensor_new",
-            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false));
-        let result_handle = builder.build_call(new_fn,
-            &[i64_type.const_int(2, false).into(), shape_as_i64.into(), dtype_i64.into()], "result").or_llvm_err()?
-            .try_as_basic_value().basic().or_internal("expected basic value")?.into_int_value();
+        let new_fn = self.get_or_declare(
+            module,
+            "verum_tensor_new",
+            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false),
+        );
+        let result_handle = builder
+            .build_call(
+                new_fn,
+                &[
+                    i64_type.const_int(2, false).into(),
+                    shape_as_i64.into(),
+                    dtype_i64.into(),
+                ],
+                "result",
+            )
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_int_value();
         let result_ptr = self.handle_to_ptr(&builder, result_handle, "res_ptr")?;
         let result_data = self.load_header_ptr(&builder, result_ptr, OFF_DATA, "res_data")?;
-        builder.build_unconditional_branch(bb_i_loop).or_llvm_err()?;
+        builder
+            .build_unconditional_branch(bb_i_loop)
+            .or_llvm_err()?;
 
         // Triple nested loop: i over m, j over n, k over k_dim
         builder.position_at_end(bb_i_loop);
         let phi_i = builder.build_phi(i64_type, "i").or_llvm_err()?;
         phi_i.add_incoming(&[(&i64_type.const_zero(), bb_ok)]);
         let i_val = phi_i.as_basic_value().into_int_value();
-        let i_cmp = builder.build_int_compare(IntPredicate::ULT, i_val, m, "i_cmp").or_llvm_err()?;
-        builder.build_conditional_branch(i_cmp, bb_j_loop, bb_i_done).or_llvm_err()?;
+        let i_cmp = builder
+            .build_int_compare(IntPredicate::ULT, i_val, m, "i_cmp")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(i_cmp, bb_j_loop, bb_i_done)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_j_loop);
         let phi_j = builder.build_phi(i64_type, "j").or_llvm_err()?;
         phi_j.add_incoming(&[(&i64_type.const_zero(), bb_i_loop)]);
         let j_val = phi_j.as_basic_value().into_int_value();
-        let j_cmp = builder.build_int_compare(IntPredicate::ULT, j_val, n, "j_cmp").or_llvm_err()?;
-        builder.build_conditional_branch(j_cmp, bb_k_loop, bb_j_done).or_llvm_err()?;
+        let j_cmp = builder
+            .build_int_compare(IntPredicate::ULT, j_val, n, "j_cmp")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(j_cmp, bb_k_loop, bb_j_done)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_k_loop);
         let phi_k = builder.build_phi(i64_type, "k").or_llvm_err()?;
@@ -1754,41 +2722,92 @@ impl<'ctx> TensorIR<'ctx> {
         phi_sum.add_incoming(&[(&f64_type.const_float(0.0), bb_j_loop)]);
         let k_val = phi_k.as_basic_value().into_int_value();
         let sum_val = phi_sum.as_basic_value().into_float_value();
-        let k_cmp = builder.build_int_compare(IntPredicate::ULT, k_val, k_dim, "k_cmp").or_llvm_err()?;
-        builder.build_conditional_branch(k_cmp, bb_k_body, bb_k_done).or_llvm_err()?;
+        let k_cmp = builder
+            .build_int_compare(IntPredicate::ULT, k_val, k_dim, "k_cmp")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(k_cmp, bb_k_body, bb_k_done)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_k_body);
         // a[i*k + k_idx]
-        let a_idx = builder.build_int_add(
-            builder.build_int_mul(i_val, k_dim, "ik").or_llvm_err()?, k_val, "a_idx").or_llvm_err()?;
-        let a_elem = unsafe { builder.build_in_bounds_gep(f64_type, a_data, &[a_idx], "a_e").or_llvm_err()? };
-        let av = builder.build_load(f64_type, a_elem, "av").or_llvm_err()?.into_float_value();
+        let a_idx = builder
+            .build_int_add(
+                builder.build_int_mul(i_val, k_dim, "ik").or_llvm_err()?,
+                k_val,
+                "a_idx",
+            )
+            .or_llvm_err()?;
+        let a_elem = unsafe {
+            builder
+                .build_in_bounds_gep(f64_type, a_data, &[a_idx], "a_e")
+                .or_llvm_err()?
+        };
+        let av = builder
+            .build_load(f64_type, a_elem, "av")
+            .or_llvm_err()?
+            .into_float_value();
         // b[k_idx*n + j]
-        let b_idx = builder.build_int_add(
-            builder.build_int_mul(k_val, n, "kn").or_llvm_err()?, j_val, "b_idx").or_llvm_err()?;
-        let b_elem = unsafe { builder.build_in_bounds_gep(f64_type, b_data, &[b_idx], "b_e").or_llvm_err()? };
-        let bv = builder.build_load(f64_type, b_elem, "bv").or_llvm_err()?.into_float_value();
+        let b_idx = builder
+            .build_int_add(
+                builder.build_int_mul(k_val, n, "kn").or_llvm_err()?,
+                j_val,
+                "b_idx",
+            )
+            .or_llvm_err()?;
+        let b_elem = unsafe {
+            builder
+                .build_in_bounds_gep(f64_type, b_data, &[b_idx], "b_e")
+                .or_llvm_err()?
+        };
+        let bv = builder
+            .build_load(f64_type, b_elem, "bv")
+            .or_llvm_err()?
+            .into_float_value();
         let prod = builder.build_float_mul(av, bv, "prod").or_llvm_err()?;
-        let new_sum = builder.build_float_add(sum_val, prod, "new_sum").or_llvm_err()?;
-        let next_k = builder.build_int_add(k_val, i64_type.const_int(1, false), "next_k").or_llvm_err()?;
+        let new_sum = builder
+            .build_float_add(sum_val, prod, "new_sum")
+            .or_llvm_err()?;
+        let next_k = builder
+            .build_int_add(k_val, i64_type.const_int(1, false), "next_k")
+            .or_llvm_err()?;
         phi_k.add_incoming(&[(&next_k, bb_k_body)]);
         phi_sum.add_incoming(&[(&new_sum, bb_k_body)]);
-        builder.build_unconditional_branch(bb_k_loop).or_llvm_err()?;
+        builder
+            .build_unconditional_branch(bb_k_loop)
+            .or_llvm_err()?;
 
         // Store result[i*n + j] = sum
         builder.position_at_end(bb_k_done);
-        let r_idx = builder.build_int_add(
-            builder.build_int_mul(i_val, n, "in_r").or_llvm_err()?, j_val, "r_idx").or_llvm_err()?;
-        let r_elem = unsafe { builder.build_in_bounds_gep(f64_type, result_data, &[r_idx], "r_e").or_llvm_err()? };
+        let r_idx = builder
+            .build_int_add(
+                builder.build_int_mul(i_val, n, "in_r").or_llvm_err()?,
+                j_val,
+                "r_idx",
+            )
+            .or_llvm_err()?;
+        let r_elem = unsafe {
+            builder
+                .build_in_bounds_gep(f64_type, result_data, &[r_idx], "r_e")
+                .or_llvm_err()?
+        };
         builder.build_store(r_elem, sum_val).or_llvm_err()?;
-        let next_j = builder.build_int_add(j_val, i64_type.const_int(1, false), "next_j").or_llvm_err()?;
+        let next_j = builder
+            .build_int_add(j_val, i64_type.const_int(1, false), "next_j")
+            .or_llvm_err()?;
         phi_j.add_incoming(&[(&next_j, bb_k_done)]);
-        builder.build_unconditional_branch(bb_j_loop).or_llvm_err()?;
+        builder
+            .build_unconditional_branch(bb_j_loop)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_j_done);
-        let next_i = builder.build_int_add(i_val, i64_type.const_int(1, false), "next_i").or_llvm_err()?;
+        let next_i = builder
+            .build_int_add(i_val, i64_type.const_int(1, false), "next_i")
+            .or_llvm_err()?;
         phi_i.add_incoming(&[(&next_i, bb_j_done)]);
-        builder.build_unconditional_branch(bb_i_loop).or_llvm_err()?;
+        builder
+            .build_unconditional_branch(bb_i_loop)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_i_done);
         builder.build_return(Some(&result_handle)).or_llvm_err()?;
@@ -1810,22 +2829,59 @@ impl<'ctx> TensorIR<'ctx> {
         let entry = ctx.append_basic_block(func, "entry");
 
         builder.position_at_end(entry);
-        let handle = self.param_as_i64(&builder, func.get_nth_param(0).or_internal("missing param")?, "p0_i64")?;
-        let new_ndim = self.param_as_i64(&builder, func.get_nth_param(1).or_internal("missing param")?, "p1_i64")?;
-        let new_shape = self.param_as_i64(&builder, func.get_nth_param(2).or_internal("missing param")?, "p2_i64")?;
+        let handle = self.param_as_i64(
+            &builder,
+            func.get_nth_param(0).or_internal("missing param")?,
+            "p0_i64",
+        )?;
+        let new_ndim = self.param_as_i64(
+            &builder,
+            func.get_nth_param(1).or_internal("missing param")?,
+            "p1_i64",
+        )?;
+        let new_shape = self.param_as_i64(
+            &builder,
+            func.get_nth_param(2).or_internal("missing param")?,
+            "p2_i64",
+        )?;
 
         // Get src data pointer
         let src_ptr = self.handle_to_ptr(&builder, handle, "src")?;
         let data_ptr = self.load_header_ptr(&builder, src_ptr, OFF_DATA, "data")?;
         let data_i64 = self.ptr_to_handle(&builder, data_ptr, "data_i64")?;
         let dtype = self.load_header_i8(&builder, src_ptr, OFF_DTYPE, "dtype")?;
-        let dtype_i64 = builder.build_int_z_extend(dtype, i64_type, "dtype64").or_llvm_err()?;
+        let dtype_i64 = builder
+            .build_int_z_extend(dtype, i64_type, "dtype64")
+            .or_llvm_err()?;
 
-        let from_data_fn = self.get_or_declare(module, "verum_tensor_from_data",
-            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into(), i64_type.into()], false));
-        let result = builder.build_call(from_data_fn,
-            &[new_ndim.into(), new_shape.into(), data_i64.into(), dtype_i64.into()], "reshape").or_llvm_err()?
-            .try_as_basic_value().basic().or_internal("expected basic value")?;
+        let from_data_fn = self.get_or_declare(
+            module,
+            "verum_tensor_from_data",
+            i64_type.fn_type(
+                &[
+                    i64_type.into(),
+                    i64_type.into(),
+                    i64_type.into(),
+                    i64_type.into(),
+                ],
+                false,
+            ),
+        );
+        let result = builder
+            .build_call(
+                from_data_fn,
+                &[
+                    new_ndim.into(),
+                    new_shape.into(),
+                    data_i64.into(),
+                    dtype_i64.into(),
+                ],
+                "reshape",
+            )
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
         Ok(())
     }
@@ -1854,31 +2910,59 @@ impl<'ctx> TensorIR<'ctx> {
         let bb_i_done = ctx.append_basic_block(func, "i_done");
 
         builder.position_at_end(entry);
-        let handle = func.get_first_param().or_internal("missing first param")?.into_int_value();
-        let is_null = builder.build_int_compare(IntPredicate::EQ, handle, i64_type.const_zero(), "is_null").or_llvm_err()?;
-        builder.build_conditional_branch(is_null, bb_null, bb_ok).or_llvm_err()?;
+        let handle = func
+            .get_first_param()
+            .or_internal("missing first param")?
+            .into_int_value();
+        let is_null = builder
+            .build_int_compare(IntPredicate::EQ, handle, i64_type.const_zero(), "is_null")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_null, bb_null, bb_ok)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_null);
-        builder.build_return(Some(&i64_type.const_zero())).or_llvm_err()?;
+        builder
+            .build_return(Some(&i64_type.const_zero()))
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_ok);
         let src_ptr = self.handle_to_ptr(&builder, handle, "src")?;
         let src_data = self.load_header_ptr(&builder, src_ptr, OFF_DATA, "src_data")?;
         let ndim = self.load_header_i8(&builder, src_ptr, OFF_NDIM, "ndim")?;
-        let ndim_i64 = builder.build_int_z_extend(ndim, i64_type, "ndim64").or_llvm_err()?;
+        let ndim_i64 = builder
+            .build_int_z_extend(ndim, i64_type, "ndim64")
+            .or_llvm_err()?;
 
         // For 1D tensors, transpose is identity — clone the tensor
         let bb_1d = ctx.append_basic_block(func, "is_1d");
         let bb_2d = ctx.append_basic_block(func, "is_2d");
-        let is_1d = builder.build_int_compare(IntPredicate::ULT, ndim_i64, i64_type.const_int(2, false), "is_1d").or_llvm_err()?;
-        builder.build_conditional_branch(is_1d, bb_1d, bb_2d).or_llvm_err()?;
+        let is_1d = builder
+            .build_int_compare(
+                IntPredicate::ULT,
+                ndim_i64,
+                i64_type.const_int(2, false),
+                "is_1d",
+            )
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_1d, bb_1d, bb_2d)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_1d);
         // Clone: create new tensor with same shape, copy data
-        let clone_fn = self.get_or_declare(module, "verum_tensor_clone",
-            i64_type.fn_type(&[i64_type.into()], false));
-        let cloned = builder.build_call(clone_fn, &[handle.into()], "cloned").or_llvm_err()?
-            .try_as_basic_value().basic().or_internal("expected basic value")?.into_int_value();
+        let clone_fn = self.get_or_declare(
+            module,
+            "verum_tensor_clone",
+            i64_type.fn_type(&[i64_type.into()], false),
+        );
+        let cloned = builder
+            .build_call(clone_fn, &[handle.into()], "cloned")
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_int_value();
         builder.build_return(Some(&cloned)).or_llvm_err()?;
 
         // 2D+ transpose
@@ -1886,66 +2970,145 @@ impl<'ctx> TensorIR<'ctx> {
         // Load rows = shape[0], cols = shape[1]
         let rows = {
             let off = i64_type.const_int(OFF_SHAPE, false);
-            let p = unsafe { builder.build_in_bounds_gep(i8_type, src_ptr, &[off], "r_ptr").or_llvm_err()? };
-            builder.build_load(i64_type, p, "rows").or_llvm_err()?.into_int_value()
+            let p = unsafe {
+                builder
+                    .build_in_bounds_gep(i8_type, src_ptr, &[off], "r_ptr")
+                    .or_llvm_err()?
+            };
+            builder
+                .build_load(i64_type, p, "rows")
+                .or_llvm_err()?
+                .into_int_value()
         };
         let cols = {
             let off = i64_type.const_int(OFF_SHAPE + 8, false);
-            let p = unsafe { builder.build_in_bounds_gep(i8_type, src_ptr, &[off], "c_ptr").or_llvm_err()? };
-            builder.build_load(i64_type, p, "cols").or_llvm_err()?.into_int_value()
+            let p = unsafe {
+                builder
+                    .build_in_bounds_gep(i8_type, src_ptr, &[off], "c_ptr")
+                    .or_llvm_err()?
+            };
+            builder
+                .build_load(i64_type, p, "cols")
+                .or_llvm_err()?
+                .into_int_value()
         };
 
         // Allocate result [cols, rows]
-        let out_shape = builder.build_array_alloca(i64_type, i64_type.const_int(2, false), "out_shape").or_llvm_err()?;
-        let s0 = unsafe { builder.build_in_bounds_gep(i64_type, out_shape, &[i64_type.const_zero()], "s0").or_llvm_err()? };
+        let out_shape = builder
+            .build_array_alloca(i64_type, i64_type.const_int(2, false), "out_shape")
+            .or_llvm_err()?;
+        let s0 = unsafe {
+            builder
+                .build_in_bounds_gep(i64_type, out_shape, &[i64_type.const_zero()], "s0")
+                .or_llvm_err()?
+        };
         builder.build_store(s0, cols).or_llvm_err()?;
-        let s1 = unsafe { builder.build_in_bounds_gep(i64_type, out_shape, &[i64_type.const_int(1, false)], "s1").or_llvm_err()? };
+        let s1 = unsafe {
+            builder
+                .build_in_bounds_gep(i64_type, out_shape, &[i64_type.const_int(1, false)], "s1")
+                .or_llvm_err()?
+        };
         builder.build_store(s1, rows).or_llvm_err()?;
         let shape_i64 = self.ptr_to_handle(&builder, out_shape, "shape_i64")?;
         let dtype = self.load_header_i8(&builder, src_ptr, OFF_DTYPE, "dtype")?;
-        let dtype_i64 = builder.build_int_z_extend(dtype, i64_type, "dtype64").or_llvm_err()?;
+        let dtype_i64 = builder
+            .build_int_z_extend(dtype, i64_type, "dtype64")
+            .or_llvm_err()?;
 
-        let new_fn = self.get_or_declare(module, "verum_tensor_new",
-            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false));
-        let result_handle = builder.build_call(new_fn,
-            &[i64_type.const_int(2, false).into(), shape_i64.into(), dtype_i64.into()], "result").or_llvm_err()?
-            .try_as_basic_value().basic().or_internal("expected basic value")?.into_int_value();
+        let new_fn = self.get_or_declare(
+            module,
+            "verum_tensor_new",
+            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false),
+        );
+        let result_handle = builder
+            .build_call(
+                new_fn,
+                &[
+                    i64_type.const_int(2, false).into(),
+                    shape_i64.into(),
+                    dtype_i64.into(),
+                ],
+                "result",
+            )
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_int_value();
         let result_ptr = self.handle_to_ptr(&builder, result_handle, "res_ptr")?;
         let result_data = self.load_header_ptr(&builder, result_ptr, OFF_DATA, "res_data")?;
-        builder.build_unconditional_branch(bb_i_loop).or_llvm_err()?;
+        builder
+            .build_unconditional_branch(bb_i_loop)
+            .or_llvm_err()?;
 
         // dst[j*rows + i] = src[i*cols + j]
         builder.position_at_end(bb_i_loop);
         let phi_i = builder.build_phi(i64_type, "i").or_llvm_err()?;
         phi_i.add_incoming(&[(&i64_type.const_zero(), bb_2d)]);
         let i_val = phi_i.as_basic_value().into_int_value();
-        let i_cmp = builder.build_int_compare(IntPredicate::ULT, i_val, rows, "i_cmp").or_llvm_err()?;
-        builder.build_conditional_branch(i_cmp, bb_j_loop, bb_i_done).or_llvm_err()?;
+        let i_cmp = builder
+            .build_int_compare(IntPredicate::ULT, i_val, rows, "i_cmp")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(i_cmp, bb_j_loop, bb_i_done)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_j_loop);
         let phi_j = builder.build_phi(i64_type, "j").or_llvm_err()?;
         phi_j.add_incoming(&[(&i64_type.const_zero(), bb_i_loop)]);
         let j_val = phi_j.as_basic_value().into_int_value();
-        let j_cmp = builder.build_int_compare(IntPredicate::ULT, j_val, cols, "j_cmp").or_llvm_err()?;
-        builder.build_conditional_branch(j_cmp, bb_j_body, bb_j_done).or_llvm_err()?;
+        let j_cmp = builder
+            .build_int_compare(IntPredicate::ULT, j_val, cols, "j_cmp")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(j_cmp, bb_j_body, bb_j_done)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_j_body);
-        let src_idx = builder.build_int_add(
-            builder.build_int_mul(i_val, cols, "ic").or_llvm_err()?, j_val, "src_idx").or_llvm_err()?;
-        let src_elem = unsafe { builder.build_in_bounds_gep(f64_type, src_data, &[src_idx], "se").or_llvm_err()? };
-        let val = builder.build_load(f64_type, src_elem, "val").or_llvm_err()?;
-        let dst_idx = builder.build_int_add(
-            builder.build_int_mul(j_val, rows, "jr").or_llvm_err()?, i_val, "dst_idx").or_llvm_err()?;
-        let dst_elem = unsafe { builder.build_in_bounds_gep(f64_type, result_data, &[dst_idx], "de").or_llvm_err()? };
+        let src_idx = builder
+            .build_int_add(
+                builder.build_int_mul(i_val, cols, "ic").or_llvm_err()?,
+                j_val,
+                "src_idx",
+            )
+            .or_llvm_err()?;
+        let src_elem = unsafe {
+            builder
+                .build_in_bounds_gep(f64_type, src_data, &[src_idx], "se")
+                .or_llvm_err()?
+        };
+        let val = builder
+            .build_load(f64_type, src_elem, "val")
+            .or_llvm_err()?;
+        let dst_idx = builder
+            .build_int_add(
+                builder.build_int_mul(j_val, rows, "jr").or_llvm_err()?,
+                i_val,
+                "dst_idx",
+            )
+            .or_llvm_err()?;
+        let dst_elem = unsafe {
+            builder
+                .build_in_bounds_gep(f64_type, result_data, &[dst_idx], "de")
+                .or_llvm_err()?
+        };
         builder.build_store(dst_elem, val).or_llvm_err()?;
-        let next_j = builder.build_int_add(j_val, i64_type.const_int(1, false), "next_j").or_llvm_err()?;
+        let next_j = builder
+            .build_int_add(j_val, i64_type.const_int(1, false), "next_j")
+            .or_llvm_err()?;
         phi_j.add_incoming(&[(&next_j, bb_j_body)]);
-        builder.build_unconditional_branch(bb_j_loop).or_llvm_err()?;
+        builder
+            .build_unconditional_branch(bb_j_loop)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_j_done);
-        let next_i = builder.build_int_add(i_val, i64_type.const_int(1, false), "next_i").or_llvm_err()?;
+        let next_i = builder
+            .build_int_add(i_val, i64_type.const_int(1, false), "next_i")
+            .or_llvm_err()?;
         phi_i.add_incoming(&[(&next_i, bb_j_done)]);
-        builder.build_unconditional_branch(bb_i_loop).or_llvm_err()?;
+        builder
+            .build_unconditional_branch(bb_i_loop)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_i_done);
         builder.build_return(Some(&result_handle)).or_llvm_err()?;
@@ -1980,26 +3143,50 @@ impl<'ctx> TensorIR<'ctx> {
         let bb_norm_done = ctx.append_basic_block(func, "norm_done");
 
         builder.position_at_end(entry);
-        let handle = self.param_as_i64(&builder, func.get_nth_param(0).or_internal("missing param")?, "p0_i64")?;
-        let _axis = self.param_as_i64(&builder, func.get_nth_param(1).or_internal("missing param")?, "p1_i64")?;
-        let is_null = builder.build_int_compare(IntPredicate::EQ, handle, i64_type.const_zero(), "is_null").or_llvm_err()?;
-        builder.build_conditional_branch(is_null, bb_null, bb_ok).or_llvm_err()?;
+        let handle = self.param_as_i64(
+            &builder,
+            func.get_nth_param(0).or_internal("missing param")?,
+            "p0_i64",
+        )?;
+        let _axis = self.param_as_i64(
+            &builder,
+            func.get_nth_param(1).or_internal("missing param")?,
+            "p1_i64",
+        )?;
+        let is_null = builder
+            .build_int_compare(IntPredicate::EQ, handle, i64_type.const_zero(), "is_null")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(is_null, bb_null, bb_ok)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_null);
-        builder.build_return(Some(&i64_type.const_zero())).or_llvm_err()?;
+        builder
+            .build_return(Some(&i64_type.const_zero()))
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_ok);
         // Clone tensor for result
-        let clone_fn = self.get_or_declare(module, "verum_tensor_clone",
-            i64_type.fn_type(&[i64_type.into()], false));
-        let result_handle = builder.build_call(clone_fn, &[handle.into()], "clone").or_llvm_err()?
-            .try_as_basic_value().basic().or_internal("expected basic value")?.into_int_value();
+        let clone_fn = self.get_or_declare(
+            module,
+            "verum_tensor_clone",
+            i64_type.fn_type(&[i64_type.into()], false),
+        );
+        let result_handle = builder
+            .build_call(clone_fn, &[handle.into()], "clone")
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_int_value();
         let result_ptr = self.handle_to_ptr(&builder, result_handle, "res_ptr")?;
         let result_data = self.load_header_ptr(&builder, result_ptr, OFF_DATA, "res_data")?;
         let src_ptr = self.handle_to_ptr(&builder, handle, "src")?;
         let src_data = self.load_header_ptr(&builder, src_ptr, OFF_DATA, "src_data")?;
         let numel = self.load_header_i64(&builder, src_ptr, OFF_NUMEL, "numel")?;
-        builder.build_unconditional_branch(bb_max_loop).or_llvm_err()?;
+        builder
+            .build_unconditional_branch(bb_max_loop)
+            .or_llvm_err()?;
 
         // Pass 1: find max
         builder.position_at_end(bb_max_loop);
@@ -2009,22 +3196,44 @@ impl<'ctx> TensorIR<'ctx> {
         phi_max.add_incoming(&[(&f64_type.const_float(-1.0e308), bb_ok)]);
         let i_val = phi_i.as_basic_value().into_int_value();
         let max_val = phi_max.as_basic_value().into_float_value();
-        let cmp = builder.build_int_compare(IntPredicate::ULT, i_val, numel, "cmp").or_llvm_err()?;
-        builder.build_conditional_branch(cmp, bb_max_body, bb_max_done).or_llvm_err()?;
+        let cmp = builder
+            .build_int_compare(IntPredicate::ULT, i_val, numel, "cmp")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(cmp, bb_max_body, bb_max_done)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_max_body);
-        let elem = unsafe { builder.build_in_bounds_gep(f64_type, src_data, &[i_val], "e").or_llvm_err()? };
-        let val = builder.build_load(f64_type, elem, "v").or_llvm_err()?.into_float_value();
-        let is_gt = builder.build_float_compare(FloatPredicate::OGT, val, max_val, "gt").or_llvm_err()?;
-        let new_max = builder.build_select(is_gt, val, max_val, "new_max").or_llvm_err()?.into_float_value();
-        let next = builder.build_int_add(i_val, i64_type.const_int(1, false), "next").or_llvm_err()?;
+        let elem = unsafe {
+            builder
+                .build_in_bounds_gep(f64_type, src_data, &[i_val], "e")
+                .or_llvm_err()?
+        };
+        let val = builder
+            .build_load(f64_type, elem, "v")
+            .or_llvm_err()?
+            .into_float_value();
+        let is_gt = builder
+            .build_float_compare(FloatPredicate::OGT, val, max_val, "gt")
+            .or_llvm_err()?;
+        let new_max = builder
+            .build_select(is_gt, val, max_val, "new_max")
+            .or_llvm_err()?
+            .into_float_value();
+        let next = builder
+            .build_int_add(i_val, i64_type.const_int(1, false), "next")
+            .or_llvm_err()?;
         phi_i.add_incoming(&[(&next, bb_max_body)]);
         phi_max.add_incoming(&[(&new_max, bb_max_body)]);
-        builder.build_unconditional_branch(bb_max_loop).or_llvm_err()?;
+        builder
+            .build_unconditional_branch(bb_max_loop)
+            .or_llvm_err()?;
 
         // Pass 2: exp(x - max) and sum
         builder.position_at_end(bb_max_done);
-        builder.build_unconditional_branch(bb_exp_loop).or_llvm_err()?;
+        builder
+            .build_unconditional_branch(bb_exp_loop)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_exp_loop);
         let phi_j = builder.build_phi(i64_type, "j").or_llvm_err()?;
@@ -2033,43 +3242,90 @@ impl<'ctx> TensorIR<'ctx> {
         phi_sum.add_incoming(&[(&f64_type.const_float(0.0), bb_max_done)]);
         let j_val = phi_j.as_basic_value().into_int_value();
         let sum_val = phi_sum.as_basic_value().into_float_value();
-        let j_cmp = builder.build_int_compare(IntPredicate::ULT, j_val, numel, "j_cmp").or_llvm_err()?;
-        builder.build_conditional_branch(j_cmp, bb_exp_body, bb_exp_done).or_llvm_err()?;
+        let j_cmp = builder
+            .build_int_compare(IntPredicate::ULT, j_val, numel, "j_cmp")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(j_cmp, bb_exp_body, bb_exp_done)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_exp_body);
-        let src_elem = unsafe { builder.build_in_bounds_gep(f64_type, src_data, &[j_val], "se").or_llvm_err()? };
-        let sv = builder.build_load(f64_type, src_elem, "sv").or_llvm_err()?.into_float_value();
-        let shifted = builder.build_float_sub(sv, max_val, "shifted").or_llvm_err()?;
-        let exp_fn = module.get_function("llvm.exp.f64").or_missing_fn("llvm.exp.f64")?;
-        let exp_val = builder.build_call(exp_fn, &[shifted.into()], "exp").or_llvm_err()?
-            .try_as_basic_value().basic().or_internal("expected basic value")?.into_float_value();
-        let dst_elem = unsafe { builder.build_in_bounds_gep(f64_type, result_data, &[j_val], "de").or_llvm_err()? };
+        let src_elem = unsafe {
+            builder
+                .build_in_bounds_gep(f64_type, src_data, &[j_val], "se")
+                .or_llvm_err()?
+        };
+        let sv = builder
+            .build_load(f64_type, src_elem, "sv")
+            .or_llvm_err()?
+            .into_float_value();
+        let shifted = builder
+            .build_float_sub(sv, max_val, "shifted")
+            .or_llvm_err()?;
+        let exp_fn = module
+            .get_function("llvm.exp.f64")
+            .or_missing_fn("llvm.exp.f64")?;
+        let exp_val = builder
+            .build_call(exp_fn, &[shifted.into()], "exp")
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?
+            .into_float_value();
+        let dst_elem = unsafe {
+            builder
+                .build_in_bounds_gep(f64_type, result_data, &[j_val], "de")
+                .or_llvm_err()?
+        };
         builder.build_store(dst_elem, exp_val).or_llvm_err()?;
-        let new_sum = builder.build_float_add(sum_val, exp_val, "new_sum").or_llvm_err()?;
-        let next_j = builder.build_int_add(j_val, i64_type.const_int(1, false), "next_j").or_llvm_err()?;
+        let new_sum = builder
+            .build_float_add(sum_val, exp_val, "new_sum")
+            .or_llvm_err()?;
+        let next_j = builder
+            .build_int_add(j_val, i64_type.const_int(1, false), "next_j")
+            .or_llvm_err()?;
         phi_j.add_incoming(&[(&next_j, bb_exp_body)]);
         phi_sum.add_incoming(&[(&new_sum, bb_exp_body)]);
-        builder.build_unconditional_branch(bb_exp_loop).or_llvm_err()?;
+        builder
+            .build_unconditional_branch(bb_exp_loop)
+            .or_llvm_err()?;
 
         // Pass 3: normalize
         builder.position_at_end(bb_exp_done);
-        builder.build_unconditional_branch(bb_norm_loop).or_llvm_err()?;
+        builder
+            .build_unconditional_branch(bb_norm_loop)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_norm_loop);
         let phi_k = builder.build_phi(i64_type, "k").or_llvm_err()?;
         phi_k.add_incoming(&[(&i64_type.const_zero(), bb_exp_done)]);
         let k_val = phi_k.as_basic_value().into_int_value();
-        let k_cmp = builder.build_int_compare(IntPredicate::ULT, k_val, numel, "k_cmp").or_llvm_err()?;
-        builder.build_conditional_branch(k_cmp, bb_norm_body, bb_norm_done).or_llvm_err()?;
+        let k_cmp = builder
+            .build_int_compare(IntPredicate::ULT, k_val, numel, "k_cmp")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(k_cmp, bb_norm_body, bb_norm_done)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_norm_body);
-        let ne = unsafe { builder.build_in_bounds_gep(f64_type, result_data, &[k_val], "ne").or_llvm_err()? };
-        let nv = builder.build_load(f64_type, ne, "nv").or_llvm_err()?.into_float_value();
+        let ne = unsafe {
+            builder
+                .build_in_bounds_gep(f64_type, result_data, &[k_val], "ne")
+                .or_llvm_err()?
+        };
+        let nv = builder
+            .build_load(f64_type, ne, "nv")
+            .or_llvm_err()?
+            .into_float_value();
         let normalized = builder.build_float_div(nv, sum_val, "norm").or_llvm_err()?;
         builder.build_store(ne, normalized).or_llvm_err()?;
-        let next_k = builder.build_int_add(k_val, i64_type.const_int(1, false), "next_k").or_llvm_err()?;
+        let next_k = builder
+            .build_int_add(k_val, i64_type.const_int(1, false), "next_k")
+            .or_llvm_err()?;
         phi_k.add_incoming(&[(&next_k, bb_norm_body)]);
-        builder.build_unconditional_branch(bb_norm_loop).or_llvm_err()?;
+        builder
+            .build_unconditional_branch(bb_norm_loop)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_norm_done);
         builder.build_return(Some(&result_handle)).or_llvm_err()?;
@@ -2110,15 +3366,25 @@ impl<'ctx> TensorIR<'ctx> {
         // Various grad ops: verum_grad_add/sub/mul/div etc.
         let fn_binop = i32_type.fn_type(&[i32_type.into(), i32_type.into()], false);
         for name in &[
-            "verum_grad_add", "verum_grad_sub", "verum_grad_mul", "verum_grad_div", "verum_grad_pow",
+            "verum_grad_add",
+            "verum_grad_sub",
+            "verum_grad_mul",
+            "verum_grad_div",
+            "verum_grad_pow",
         ] {
             self.get_or_declare(module, name, fn_binop);
         }
 
         let fn_unop = i32_type.fn_type(&[i32_type.into()], false);
         for name in &[
-            "verum_grad_neg", "verum_grad_sin", "verum_grad_cos", "verum_grad_exp",
-            "verum_grad_log", "verum_grad_sqrt", "verum_grad_tanh", "verum_grad_relu",
+            "verum_grad_neg",
+            "verum_grad_sin",
+            "verum_grad_cos",
+            "verum_grad_exp",
+            "verum_grad_log",
+            "verum_grad_sqrt",
+            "verum_grad_tanh",
+            "verum_grad_relu",
             "verum_grad_sigmoid",
         ] {
             self.get_or_declare(module, name, fn_unop);
@@ -2149,10 +3415,21 @@ impl<'ctx> TensorIR<'ctx> {
         let bb_done = ctx.append_basic_block(func, "done");
 
         builder.position_at_end(entry);
-        let handle = self.param_as_i64(&builder, func.get_nth_param(0).or_internal("missing param")?, "p0_i64")?;
-        let value_bits = self.param_as_i64(&builder, func.get_nth_param(1).or_internal("missing param")?, "p1_i64")?;
+        let handle = self.param_as_i64(
+            &builder,
+            func.get_nth_param(0).or_internal("missing param")?,
+            "p0_i64",
+        )?;
+        let value_bits = self.param_as_i64(
+            &builder,
+            func.get_nth_param(1).or_internal("missing param")?,
+            "p1_i64",
+        )?;
         // Bitcast i64 to f64
-        let value = builder.build_bit_cast(value_bits, f64_type, "value").or_llvm_err()?.into_float_value();
+        let value = builder
+            .build_bit_cast(value_bits, f64_type, "value")
+            .or_llvm_err()?
+            .into_float_value();
         let ptr = self.handle_to_ptr(&builder, handle, "hdr")?;
         let numel = self.load_header_i64(&builder, ptr, OFF_NUMEL, "numel")?;
         let data_ptr = self.load_header_ptr(&builder, ptr, OFF_DATA, "data_ptr")?;
@@ -2162,13 +3439,23 @@ impl<'ctx> TensorIR<'ctx> {
         let phi_i = builder.build_phi(i64_type, "i").or_llvm_err()?;
         phi_i.add_incoming(&[(&i64_type.const_zero(), entry)]);
         let i_val = phi_i.as_basic_value().into_int_value();
-        let cmp = builder.build_int_compare(IntPredicate::ULT, i_val, numel, "cmp").or_llvm_err()?;
-        builder.build_conditional_branch(cmp, bb_body, bb_done).or_llvm_err()?;
+        let cmp = builder
+            .build_int_compare(IntPredicate::ULT, i_val, numel, "cmp")
+            .or_llvm_err()?;
+        builder
+            .build_conditional_branch(cmp, bb_body, bb_done)
+            .or_llvm_err()?;
 
         builder.position_at_end(bb_body);
-        let elem = unsafe { builder.build_in_bounds_gep(f64_type, data_ptr, &[i_val], "elem").or_llvm_err()? };
+        let elem = unsafe {
+            builder
+                .build_in_bounds_gep(f64_type, data_ptr, &[i_val], "elem")
+                .or_llvm_err()?
+        };
         builder.build_store(elem, value).or_llvm_err()?;
-        let next = builder.build_int_add(i_val, i64_type.const_int(1, false), "next").or_llvm_err()?;
+        let next = builder
+            .build_int_add(i_val, i64_type.const_int(1, false), "next")
+            .or_llvm_err()?;
         phi_i.add_incoming(&[(&next, bb_body)]);
         builder.build_unconditional_branch(bb_loop).or_llvm_err()?;
 
@@ -2192,8 +3479,16 @@ impl<'ctx> TensorIR<'ctx> {
         let entry = ctx.append_basic_block(func, "entry");
 
         builder.position_at_end(entry);
-        let handle = self.param_as_i64(&builder, func.get_nth_param(0).or_internal("missing param")?, "p0_i64")?;
-        let shape_handle = self.param_as_i64(&builder, func.get_nth_param(1).or_internal("missing param")?, "p1_i64")?;
+        let handle = self.param_as_i64(
+            &builder,
+            func.get_nth_param(0).or_internal("missing param")?,
+            "p0_i64",
+        )?;
+        let shape_handle = self.param_as_i64(
+            &builder,
+            func.get_nth_param(1).or_internal("missing param")?,
+            "p1_i64",
+        )?;
 
         // shape_handle is a List<Int> (tensor of shape). Read its numel as new_ndim.
         let shape_ptr = self.handle_to_ptr(&builder, shape_handle, "shape_tensor")?;
@@ -2201,11 +3496,21 @@ impl<'ctx> TensorIR<'ctx> {
         let shape_data = self.load_header_ptr(&builder, shape_ptr, OFF_DATA, "shape_data")?;
         let shape_data_i64 = self.ptr_to_handle(&builder, shape_data, "shape_data_i64")?;
 
-        let reshape_fn = self.get_or_declare(module, "verum_tensor_reshape",
-            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false));
-        let result = builder.build_call(reshape_fn,
-            &[handle.into(), new_ndim.into(), shape_data_i64.into()], "result").or_llvm_err()?
-            .try_as_basic_value().basic().or_internal("expected basic value")?;
+        let reshape_fn = self.get_or_declare(
+            module,
+            "verum_tensor_reshape",
+            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false),
+        );
+        let result = builder
+            .build_call(
+                reshape_fn,
+                &[handle.into(), new_ndim.into(), shape_data_i64.into()],
+                "result",
+            )
+            .or_llvm_err()?
+            .try_as_basic_value()
+            .basic()
+            .or_internal("expected basic value")?;
         builder.build_return(Some(&result)).or_llvm_err()?;
         Ok(())
     }
@@ -2304,7 +3609,14 @@ impl<'ctx> TensorIR<'ctx> {
 
         // i64(i64, i64, i64, i64)
         let i64_4 = i64_type.fn_type(
-            &[i64_type.into(), i64_type.into(), i64_type.into(), i64_type.into()], false);
+            &[
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
+            false,
+        );
         let stubs_i64_4: &[&str] = &[
             "verum_tensor_layer_norm",
             "verum_tensor_pool2d",
@@ -2353,9 +3665,18 @@ impl<'ctx> TensorIR<'ctx> {
 
         // Batch norm: i64(i64, i64, i64, i64, i64, f64, f64, i32)
         let fn_bn = i64_type.fn_type(
-            &[i64_type.into(), i64_type.into(), i64_type.into(),
-              i64_type.into(), i64_type.into(), f64_type.into(),
-              f64_type.into(), i32_type.into()], false);
+            &[
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                f64_type.into(),
+                f64_type.into(),
+                i32_type.into(),
+            ],
+            false,
+        );
         self.get_or_declare(module, "verum_tensor_batch_norm", fn_bn);
 
         // RMS norm
@@ -2364,13 +3685,28 @@ impl<'ctx> TensorIR<'ctx> {
 
         // Flash attention
         let fn_fa = i64_type.fn_type(
-            &[i64_type.into(), i64_type.into(), i64_type.into(),
-              i64_type.into(), f64_type.into(), i64_type.into()], false);
+            &[
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                f64_type.into(),
+                i64_type.into(),
+            ],
+            false,
+        );
         self.get_or_declare(module, "verum_tensor_flash_attention", fn_fa);
 
         // Scatter
         let fn_scatter = i64_type.fn_type(
-            &[i64_type.into(), i64_type.into(), i64_type.into(), i64_type.into()], false);
+            &[
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
+            false,
+        );
         self.get_or_declare(module, "verum_tensor_scatter", fn_scatter);
 
         // ML stubs
@@ -2389,7 +3725,8 @@ impl<'ctx> TensorIR<'ctx> {
         ] {
             self.get_or_declare(module, name, fn_regex_2);
         }
-        let fn_regex_3 = i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
+        let fn_regex_3 =
+            i64_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
         self.get_or_declare(module, "verum_regex_replace_all", fn_regex_3);
 
         // GPU runtime stubs
@@ -2399,9 +3736,17 @@ impl<'ctx> TensorIR<'ctx> {
 
     /// Emit a GPU stub with a body that returns the given default value.
     /// When no GPU runtime is available, these stubs prevent crashes by returning 0.
-    fn emit_gpu_stub_body(&self, module: &Module<'ctx>, name: &str, fn_type: FunctionType<'ctx>, returns_void: bool) -> Result<()> {
+    fn emit_gpu_stub_body(
+        &self,
+        module: &Module<'ctx>,
+        name: &str,
+        fn_type: FunctionType<'ctx>,
+        returns_void: bool,
+    ) -> Result<()> {
         let func = self.get_or_declare(module, name, fn_type);
-        if func.count_basic_blocks() > 0 { return Ok(()); }
+        if func.count_basic_blocks() > 0 {
+            return Ok(());
+        }
         let builder = self.context.create_builder();
         let entry = self.context.append_basic_block(func, "entry");
         builder.position_at_end(entry);
@@ -2411,11 +3756,17 @@ impl<'ctx> TensorIR<'ctx> {
             let ret_type = fn_type.get_return_type();
             if let Some(basic_ty) = ret_type {
                 if basic_ty.is_int_type() {
-                    builder.build_return(Some(&self.context.i64_type().const_zero())).or_llvm_err()?;
+                    builder
+                        .build_return(Some(&self.context.i64_type().const_zero()))
+                        .or_llvm_err()?;
                 } else if basic_ty.is_float_type() {
-                    builder.build_return(Some(&self.context.f64_type().const_float(0.0))).or_llvm_err()?;
+                    builder
+                        .build_return(Some(&self.context.f64_type().const_float(0.0)))
+                        .or_llvm_err()?;
                 } else {
-                    builder.build_return(Some(&self.context.i64_type().const_zero())).or_llvm_err()?;
+                    builder
+                        .build_return(Some(&self.context.i64_type().const_zero()))
+                        .or_llvm_err()?;
                 }
             } else {
                 builder.build_return(None).or_llvm_err()?;
@@ -2433,14 +3784,26 @@ impl<'ctx> TensorIR<'ctx> {
         // i64() -> i64
         let i64_void = i64_type.fn_type(&[], false);
         for name in &[
-            "verum_gpu_thread_id_x", "verum_gpu_thread_id_y", "verum_gpu_thread_id_z",
-            "verum_gpu_block_id_x", "verum_gpu_block_id_y", "verum_gpu_block_id_z",
-            "verum_gpu_block_dim_x", "verum_gpu_block_dim_y", "verum_gpu_block_dim_z",
-            "verum_gpu_grid_dim_x", "verum_gpu_grid_dim_y", "verum_gpu_grid_dim_z",
-            "verum_gpu_warp_size", "verum_gpu_linear_thread_id",
-            "verum_gpu_get_device", "verum_gpu_get_device_count",
-            "verum_gpu_stream_create", "verum_gpu_stream_create_nonblocking",
-            "verum_gpu_event_create", "verum_gpu_graph_create",
+            "verum_gpu_thread_id_x",
+            "verum_gpu_thread_id_y",
+            "verum_gpu_thread_id_z",
+            "verum_gpu_block_id_x",
+            "verum_gpu_block_id_y",
+            "verum_gpu_block_id_z",
+            "verum_gpu_block_dim_x",
+            "verum_gpu_block_dim_y",
+            "verum_gpu_block_dim_z",
+            "verum_gpu_grid_dim_x",
+            "verum_gpu_grid_dim_y",
+            "verum_gpu_grid_dim_z",
+            "verum_gpu_warp_size",
+            "verum_gpu_linear_thread_id",
+            "verum_gpu_get_device",
+            "verum_gpu_get_device_count",
+            "verum_gpu_stream_create",
+            "verum_gpu_stream_create_nonblocking",
+            "verum_gpu_event_create",
+            "verum_gpu_graph_create",
         ] {
             self.emit_gpu_stub_body(module, name, i64_void, false)?;
         }
@@ -2448,8 +3811,10 @@ impl<'ctx> TensorIR<'ctx> {
         // void()
         let void_void = void_type.fn_type(&[], false);
         for name in &[
-            "verum_gpu_sync_threads", "verum_gpu_sync_device",
-            "verum_gpu_device_reset", "verum_gpu_profile_marker_pop",
+            "verum_gpu_sync_threads",
+            "verum_gpu_sync_device",
+            "verum_gpu_device_reset",
+            "verum_gpu_profile_marker_pop",
         ] {
             self.emit_gpu_stub_body(module, name, void_void, true)?;
         }
@@ -2457,12 +3822,19 @@ impl<'ctx> TensorIR<'ctx> {
         // void(i64)
         let void_i64 = void_type.fn_type(&[i64_type.into()], false);
         for name in &[
-            "verum_gpu_sync_warp", "verum_gpu_free", "verum_gpu_stream_destroy",
-            "verum_gpu_event_destroy", "verum_gpu_event_sync",
-            "verum_gpu_set_device", "verum_gpu_set_device_flags",
-            "verum_gpu_enable_peer_access", "verum_gpu_disable_peer_access",
-            "verum_gpu_unpin_memory", "verum_gpu_graph_destroy",
-            "verum_gpu_graph_exec_destroy", "verum_gpu_profile_range_end",
+            "verum_gpu_sync_warp",
+            "verum_gpu_free",
+            "verum_gpu_stream_destroy",
+            "verum_gpu_event_destroy",
+            "verum_gpu_event_sync",
+            "verum_gpu_set_device",
+            "verum_gpu_set_device_flags",
+            "verum_gpu_enable_peer_access",
+            "verum_gpu_disable_peer_access",
+            "verum_gpu_unpin_memory",
+            "verum_gpu_graph_destroy",
+            "verum_gpu_graph_exec_destroy",
+            "verum_gpu_profile_range_end",
             "verum_gpu_profile_marker_push",
         ] {
             self.emit_gpu_stub_body(module, name, void_i64, true)?;
@@ -2471,11 +3843,16 @@ impl<'ctx> TensorIR<'ctx> {
         // i64(i64)
         let i64_1 = i64_type.fn_type(&[i64_type.into()], false);
         for name in &[
-            "verum_gpu_shared_mem_alloc", "verum_gpu_shared_mem_load_i64",
-            "verum_gpu_shared_mem_load_u32", "verum_gpu_stream_query",
-            "verum_gpu_event_query", "verum_gpu_stream_get_priority",
-            "verum_gpu_stream_create_prio", "verum_gpu_profile_range_start",
-            "verum_gpu_graph_instantiate", "verum_gpu_event_create_with_flags",
+            "verum_gpu_shared_mem_alloc",
+            "verum_gpu_shared_mem_load_i64",
+            "verum_gpu_shared_mem_load_u32",
+            "verum_gpu_stream_query",
+            "verum_gpu_event_query",
+            "verum_gpu_stream_get_priority",
+            "verum_gpu_stream_create_prio",
+            "verum_gpu_profile_range_start",
+            "verum_gpu_graph_instantiate",
+            "verum_gpu_event_create_with_flags",
             "verum_gpu_malloc_managed",
         ] {
             self.emit_gpu_stub_body(module, name, i64_1, false)?;
@@ -2484,10 +3861,14 @@ impl<'ctx> TensorIR<'ctx> {
         // i64(i64, i64)
         let i64_2 = i64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
         for name in &[
-            "verum_gpu_shared_mem_atomic_add_i64", "verum_gpu_shared_mem_atomic_max_i64",
-            "verum_gpu_shared_mem_atomic_min_i64", "verum_gpu_malloc",
-            "verum_gpu_can_access_peer", "verum_gpu_get_device_property",
-            "verum_gpu_get_memory_info", "verum_gpu_graph_exec_update",
+            "verum_gpu_shared_mem_atomic_add_i64",
+            "verum_gpu_shared_mem_atomic_max_i64",
+            "verum_gpu_shared_mem_atomic_min_i64",
+            "verum_gpu_malloc",
+            "verum_gpu_can_access_peer",
+            "verum_gpu_get_device_property",
+            "verum_gpu_get_memory_info",
+            "verum_gpu_graph_exec_update",
         ] {
             self.emit_gpu_stub_body(module, name, i64_2, false)?;
         }
@@ -2499,10 +3880,14 @@ impl<'ctx> TensorIR<'ctx> {
         // void(i64, i64)
         let void_2 = void_type.fn_type(&[i64_type.into(), i64_type.into()], false);
         for name in &[
-            "verum_gpu_shared_mem_store_i64", "verum_gpu_shared_mem_store_u32",
-            "verum_gpu_event_record", "verum_gpu_stream_wait_event",
-            "verum_gpu_pin_memory", "verum_gpu_stream_add_callback",
-            "verum_gpu_graph_begin_capture", "verum_gpu_graph_end_capture",
+            "verum_gpu_shared_mem_store_i64",
+            "verum_gpu_shared_mem_store_u32",
+            "verum_gpu_event_record",
+            "verum_gpu_stream_wait_event",
+            "verum_gpu_pin_memory",
+            "verum_gpu_stream_add_callback",
+            "verum_gpu_graph_begin_capture",
+            "verum_gpu_graph_end_capture",
             "verum_gpu_graph_launch",
         ] {
             self.emit_gpu_stub_body(module, name, void_2, true)?;
@@ -2511,8 +3896,12 @@ impl<'ctx> TensorIR<'ctx> {
         // void(i64, i64, i64)
         let void_3 = void_type.fn_type(&[i64_type.into(), i64_type.into(), i64_type.into()], false);
         for name in &[
-            "verum_gpu_memcpy", "verum_gpu_memset", "verum_gpu_prefetch",
-            "verum_gpu_memcpy_h2d", "verum_gpu_memcpy_d2h", "verum_gpu_memcpy_d2d",
+            "verum_gpu_memcpy",
+            "verum_gpu_memset",
+            "verum_gpu_prefetch",
+            "verum_gpu_memcpy_h2d",
+            "verum_gpu_memcpy_d2h",
+            "verum_gpu_memcpy_d2d",
             "verum_gpu_event_record_with_flags",
         ] {
             self.emit_gpu_stub_body(module, name, void_3, true)?;
@@ -2520,40 +3909,72 @@ impl<'ctx> TensorIR<'ctx> {
 
         // void(i64, i64, i64, i64)
         let void_4 = void_type.fn_type(
-            &[i64_type.into(), i64_type.into(), i64_type.into(), i64_type.into()], false);
+            &[
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
+            false,
+        );
         for name in &[
-            "verum_gpu_memcpy_async", "verum_gpu_memcpy_async_h2d",
-            "verum_gpu_memcpy_async_d2h", "verum_gpu_memset_async",
-            "verum_gpu_mem_advise", "verum_gpu_prefetch_async",
+            "verum_gpu_memcpy_async",
+            "verum_gpu_memcpy_async_h2d",
+            "verum_gpu_memcpy_async_d2h",
+            "verum_gpu_memset_async",
+            "verum_gpu_mem_advise",
+            "verum_gpu_prefetch_async",
         ] {
             self.emit_gpu_stub_body(module, name, void_4, true)?;
         }
 
         // void(i64, i64, i64, i64, i64)
         let void_5 = void_type.fn_type(
-            &[i64_type.into(), i64_type.into(), i64_type.into(),
-              i64_type.into(), i64_type.into()], false);
+            &[
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
+            false,
+        );
         for name in &[
-            "verum_gpu_launch_cooperative", "verum_gpu_launch_multi_device",
+            "verum_gpu_launch_cooperative",
+            "verum_gpu_launch_multi_device",
         ] {
             self.emit_gpu_stub_body(module, name, void_5, true)?;
         }
 
         // void(i64, i64, i64, i64, i64, i64)
         let void_6 = void_type.fn_type(
-            &[i64_type.into(), i64_type.into(), i64_type.into(),
-              i64_type.into(), i64_type.into(), i64_type.into()], false);
-        for name in &[
-            "verum_gpu_memcpy_2d", "verum_gpu_launch",
-        ] {
+            &[
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
+            false,
+        );
+        for name in &["verum_gpu_memcpy_2d", "verum_gpu_launch"] {
             self.emit_gpu_stub_body(module, name, void_6, true)?;
         }
 
         // void(i64, i64, i64, i64, i64, i64, i64)
         let void_7 = void_type.fn_type(
-            &[i64_type.into(), i64_type.into(), i64_type.into(),
-              i64_type.into(), i64_type.into(), i64_type.into(),
-              i64_type.into()], false);
+            &[
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
+            false,
+        );
         self.emit_gpu_stub_body(module, "verum_gpu_memcpy_2d_async", void_7, true)?;
 
         // f64(i64)
@@ -2566,7 +3987,12 @@ impl<'ctx> TensorIR<'ctx> {
 
         // f64(i64, f64)
         let f64_i64_f64 = f64_type.fn_type(&[i64_type.into(), f64_type.into()], false);
-        self.emit_gpu_stub_body(module, "verum_gpu_shared_mem_atomic_add_f64", f64_i64_f64, false)?;
+        self.emit_gpu_stub_body(
+            module,
+            "verum_gpu_shared_mem_atomic_add_f64",
+            f64_i64_f64,
+            false,
+        )?;
 
         // f64(i64, i64) — event elapsed
         let f64_2 = f64_type.fn_type(&[i64_type.into(), i64_type.into()], false);
@@ -2578,8 +4004,10 @@ impl<'ctx> TensorIR<'ctx> {
         // GPU enumerate stubs
         let i64_void2 = i64_type.fn_type(&[], false);
         for name in &[
-            "verum_gpu_enumerate_cuda", "verum_gpu_enumerate_metal",
-            "verum_gpu_enumerate_rocm", "verum_gpu_enumerate_vulkan",
+            "verum_gpu_enumerate_cuda",
+            "verum_gpu_enumerate_metal",
+            "verum_gpu_enumerate_rocm",
+            "verum_gpu_enumerate_vulkan",
         ] {
             self.emit_gpu_stub_body(module, name, i64_void2, false)?;
         }
@@ -2587,9 +4015,19 @@ impl<'ctx> TensorIR<'ctx> {
         // verum_gpu_launch_with_fn(fn_ptr, gx, gy, gz, bx, by, bz, shmem, stream)
         let ptr_type = ctx.ptr_type(AddressSpace::default());
         let fn_launch = void_type.fn_type(
-            &[ptr_type.into(), i64_type.into(), i64_type.into(), i64_type.into(),
-              i64_type.into(), i64_type.into(), i64_type.into(),
-              i64_type.into(), i64_type.into()], false);
+            &[
+                ptr_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+                i64_type.into(),
+            ],
+            false,
+        );
         self.emit_gpu_stub_body(module, "verum_gpu_launch_with_fn", fn_launch, true)?;
 
         // verum_sort_f64 (used internally)

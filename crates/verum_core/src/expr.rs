@@ -14,8 +14,8 @@
 //! not a radical transformation.
 
 use serde::{Deserialize, Serialize};
-use verum_common::{Heap, List, Text};
 use verum_common::span::Span;
+use verum_common::{Heap, List, Text};
 
 use crate::ty::IrType;
 
@@ -209,7 +209,10 @@ impl IrExpr {
     #[must_use]
     pub fn as_ctor(&self) -> Option<(&Text, &Text)> {
         match &self.kind {
-            IrExprKind::Ctor { type_name, ctor_name } => Some((type_name, ctor_name)),
+            IrExprKind::Ctor {
+                type_name,
+                ctor_name,
+            } => Some((type_name, ctor_name)),
             _ => None,
         }
     }
@@ -247,11 +250,7 @@ mod tests {
 
     #[test]
     fn var_accessor_returns_name() {
-        let e = IrExpr::new(
-            IrExprKind::Var(Text::from("x")),
-            None,
-            sp(),
-        );
+        let e = IrExpr::new(IrExprKind::Var(Text::from("x")), None, sp());
         assert_eq!(e.as_var().unwrap().as_str(), "x");
     }
 }

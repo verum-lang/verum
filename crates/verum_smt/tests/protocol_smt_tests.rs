@@ -25,12 +25,12 @@
 
 use verum_ast::span::Span;
 use verum_ast::ty::{Ident, Path, PathSegment, Type};
+use verum_common::{List, Map, Maybe, Text};
 use verum_protocol_types::protocol_base::{AssociatedType, Protocol, ProtocolBound, ProtocolImpl};
 use verum_protocol_types::specialization::SpecializationInfo;
 use verum_smt::protocol_smt::{
     ProtocolEncoder, ProtocolError, check_implements, verify_coherence, verify_hierarchy,
 };
-use verum_common::{List, Map, Maybe, Text};
 
 fn create_simple_protocol(name: &str) -> Protocol {
     Protocol {

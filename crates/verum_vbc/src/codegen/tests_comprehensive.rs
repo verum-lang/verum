@@ -160,9 +160,27 @@ mod context_tests {
     fn test_defer_stack_fifo_order() {
         let mut ctx = CodegenContext::new();
 
-        ctx.add_defer(vec![Instruction::LoadI { dst: Reg(0), value: 1 }], false);
-        ctx.add_defer(vec![Instruction::LoadI { dst: Reg(1), value: 2 }], false);
-        ctx.add_defer(vec![Instruction::LoadI { dst: Reg(2), value: 3 }], true); // errdefer
+        ctx.add_defer(
+            vec![Instruction::LoadI {
+                dst: Reg(0),
+                value: 1,
+            }],
+            false,
+        );
+        ctx.add_defer(
+            vec![Instruction::LoadI {
+                dst: Reg(1),
+                value: 2,
+            }],
+            false,
+        );
+        ctx.add_defer(
+            vec![Instruction::LoadI {
+                dst: Reg(2),
+                value: 3,
+            }],
+            true,
+        ); // errdefer
 
         // Normal path: only regular defers, in reverse order
         let defers = ctx.pending_defers(false);
@@ -187,7 +205,11 @@ mod register_tests {
     #[test]
     fn test_parameter_allocation() {
         let mut alloc = RegisterAllocator::new();
-        let regs = alloc.alloc_parameters(&[("a".to_string(), false), ("b".to_string(), false), ("c".to_string(), false)]);
+        let regs = alloc.alloc_parameters(&[
+            ("a".to_string(), false),
+            ("b".to_string(), false),
+            ("c".to_string(), false),
+        ]);
 
         assert_eq!(regs.len(), 3);
         assert_eq!(regs[0], Reg(0));
@@ -356,7 +378,10 @@ mod instruction_tests {
         ctx.begin_function("test", &[], None);
 
         // Load instructions
-        ctx.emit(Instruction::LoadI { dst: Reg(0), value: 42 });
+        ctx.emit(Instruction::LoadI {
+            dst: Reg(0),
+            value: 42,
+        });
         ctx.emit(Instruction::LoadTrue { dst: Reg(1) });
         ctx.emit(Instruction::LoadFalse { dst: Reg(2) });
         ctx.emit(Instruction::LoadUnit { dst: Reg(3) });
@@ -690,16 +715,16 @@ mod security_tests {
         // Test with various string patterns
         let long_string = "very_long_".repeat(1000);
         let strings = vec![
-            "",                                    // Empty
-            "normal",                              // Normal
-            "with spaces",                         // Spaces
-            "with\nnewline",                       // Newlines
-            "with\ttab",                           // Tabs
-            "unicode: こんにちは",                 // Unicode
-            "emoji: 🚀💻🔥",                       // Emoji
-            &long_string,                          // Long string
-            "\0null\0byte",                        // Null bytes
-            "\\escape\\sequences",                 // Backslashes
+            "",                    // Empty
+            "normal",              // Normal
+            "with spaces",         // Spaces
+            "with\nnewline",       // Newlines
+            "with\ttab",           // Tabs
+            "unicode: こんにちは", // Unicode
+            "emoji: 🚀💻🔥",       // Emoji
+            &long_string,          // Long string
+            "\0null\0byte",        // Null bytes
+            "\\escape\\sequences", // Backslashes
         ];
 
         for s in &strings {
@@ -790,7 +815,8 @@ mod security_tests {
             param_names: vec!["a".into(), "b".into(), "c".into()],
             is_async: true,
             contexts: vec!["Database".into()],
-            return_type: None, ..Default::default()
+            return_type: None,
+            ..Default::default()
         };
 
         ctx.register_function("test_fn".into(), info.clone());
@@ -816,7 +842,11 @@ mod integration_tests {
         let mut ctx = CodegenContext::new();
 
         // Begin function
-        ctx.begin_function("add", &[("x".to_string(), false), ("y".to_string(), false)], None);
+        ctx.begin_function(
+            "add",
+            &[("x".to_string(), false), ("y".to_string(), false)],
+            None,
+        );
         assert!(ctx.in_function);
         assert_eq!(ctx.current_function, Some("add".to_string()));
 
@@ -959,7 +989,11 @@ mod integration_tests {
     #[test]
     fn test_short_circuit_and_pattern() {
         let mut ctx = CodegenContext::new();
-        ctx.begin_function("test", &[("a".to_string(), false), ("b".to_string(), false)], None);
+        ctx.begin_function(
+            "test",
+            &[("a".to_string(), false), ("b".to_string(), false)],
+            None,
+        );
 
         let a = ctx.get_var_reg("a").unwrap();
         let b = ctx.get_var_reg("b").unwrap();
@@ -1222,7 +1256,10 @@ mod edge_case_tests {
         ctx.begin_function("test", &[], None);
 
         let counter = ctx.alloc_temp();
-        ctx.emit(Instruction::LoadI { dst: counter, value: 1 });
+        ctx.emit(Instruction::LoadI {
+            dst: counter,
+            value: 1,
+        });
 
         let loop_ctx = ctx.enter_loop(None, None);
         ctx.define_label(&loop_ctx.continue_label);
@@ -1248,8 +1285,10 @@ mod edge_case_tests {
         });
 
         // Continue
-        ctx.emit_backward_jump(&loop_ctx.continue_label, |offset| Instruction::Jmp { offset })
-            .unwrap();
+        ctx.emit_backward_jump(&loop_ctx.continue_label, |offset| Instruction::Jmp {
+            offset,
+        })
+        .unwrap();
 
         ctx.define_label(&loop_ctx.break_label);
         ctx.exit_loop();
@@ -1335,7 +1374,9 @@ mod edge_case_tests {
         let mut ctx = CodegenContext::new();
 
         // Various prefix patterns
-        let prefixes = vec!["if", "else", "while", "for", "break", "continue", "return", ""];
+        let prefixes = vec![
+            "if", "else", "while", "for", "break", "continue", "return", "",
+        ];
 
         for prefix in prefixes {
             let label = ctx.new_label(prefix);
@@ -1370,7 +1411,8 @@ mod edge_case_tests {
         ctx.emit(Instruction::Nop);
         ctx.emit(Instruction::Nop);
         ctx.emit(Instruction::Nop);
-        ctx.emit_backward_jump("start", |offset| Instruction::Jmp { offset }).unwrap();
+        ctx.emit_backward_jump("start", |offset| Instruction::Jmp { offset })
+            .unwrap();
 
         // Offset should be negative
         match &ctx.instructions[3] {
@@ -1555,7 +1597,8 @@ mod stress_tests {
                 param_names: vec![],
                 is_async: i % 2 == 0,
                 contexts: vec![],
-                return_type: None, ..Default::default()
+                return_type: None,
+                ..Default::default()
             };
             ctx.register_function(format!("fn_{}", i), info);
         }
@@ -1675,12 +1718,30 @@ mod encoding_tests {
 
     #[test]
     fn test_load_roundtrips() {
-        roundtrip(Instruction::LoadI { dst: Reg(0), value: 0 });
-        roundtrip(Instruction::LoadI { dst: Reg(100), value: i64::MAX });
-        roundtrip(Instruction::LoadI { dst: Reg(255), value: i64::MIN });
-        roundtrip(Instruction::LoadF { dst: Reg(0), value: 0.0 });
-        roundtrip(Instruction::LoadF { dst: Reg(1), value: std::f64::consts::PI });
-        roundtrip(Instruction::LoadF { dst: Reg(2), value: f64::INFINITY });
+        roundtrip(Instruction::LoadI {
+            dst: Reg(0),
+            value: 0,
+        });
+        roundtrip(Instruction::LoadI {
+            dst: Reg(100),
+            value: i64::MAX,
+        });
+        roundtrip(Instruction::LoadI {
+            dst: Reg(255),
+            value: i64::MIN,
+        });
+        roundtrip(Instruction::LoadF {
+            dst: Reg(0),
+            value: 0.0,
+        });
+        roundtrip(Instruction::LoadF {
+            dst: Reg(1),
+            value: std::f64::consts::PI,
+        });
+        roundtrip(Instruction::LoadF {
+            dst: Reg(2),
+            value: f64::INFINITY,
+        });
         roundtrip(Instruction::LoadTrue { dst: Reg(0) });
         roundtrip(Instruction::LoadFalse { dst: Reg(0) });
         roundtrip(Instruction::LoadUnit { dst: Reg(0) });
@@ -1746,8 +1807,14 @@ mod encoding_tests {
         roundtrip(Instruction::Jmp { offset: 0 });
         roundtrip(Instruction::Jmp { offset: 100 });
         roundtrip(Instruction::Jmp { offset: -100 });
-        roundtrip(Instruction::JmpIf { cond: Reg(0), offset: 50 });
-        roundtrip(Instruction::JmpNot { cond: Reg(0), offset: -50 });
+        roundtrip(Instruction::JmpIf {
+            cond: Reg(0),
+            offset: 50,
+        });
+        roundtrip(Instruction::JmpNot {
+            cond: Reg(0),
+            offset: -50,
+        });
     }
 
     #[test]
@@ -1759,28 +1826,73 @@ mod encoding_tests {
 
     #[test]
     fn test_memory_roundtrips() {
-        roundtrip(Instruction::New { dst: Reg(0), type_id: 0, field_count: 2 });
-        roundtrip(Instruction::New { dst: Reg(10), type_id: 1000, field_count: 4 });
-        roundtrip(Instruction::GetF { dst: Reg(0), obj: Reg(1), field_idx: 0 });
-        roundtrip(Instruction::SetF { obj: Reg(0), field_idx: 5, value: Reg(2) });
-        roundtrip(Instruction::GetE { dst: Reg(0), arr: Reg(1), idx: Reg(2) });
-        roundtrip(Instruction::SetE { arr: Reg(0), idx: Reg(1), value: Reg(2) });
+        roundtrip(Instruction::New {
+            dst: Reg(0),
+            type_id: 0,
+            field_count: 2,
+        });
+        roundtrip(Instruction::New {
+            dst: Reg(10),
+            type_id: 1000,
+            field_count: 4,
+        });
+        roundtrip(Instruction::GetF {
+            dst: Reg(0),
+            obj: Reg(1),
+            field_idx: 0,
+        });
+        roundtrip(Instruction::SetF {
+            obj: Reg(0),
+            field_idx: 5,
+            value: Reg(2),
+        });
+        roundtrip(Instruction::GetE {
+            dst: Reg(0),
+            arr: Reg(1),
+            idx: Reg(2),
+        });
+        roundtrip(Instruction::SetE {
+            arr: Reg(0),
+            idx: Reg(1),
+            value: Reg(2),
+        });
     }
 
     #[test]
     fn test_collection_roundtrips() {
         roundtrip(Instruction::NewList { dst: Reg(0) });
-        roundtrip(Instruction::ListPush { list: Reg(0), val: Reg(1) });
-        roundtrip(Instruction::ListPop { dst: Reg(0), list: Reg(1) });
+        roundtrip(Instruction::ListPush {
+            list: Reg(0),
+            val: Reg(1),
+        });
+        roundtrip(Instruction::ListPop {
+            dst: Reg(0),
+            list: Reg(1),
+        });
         roundtrip(Instruction::NewMap { dst: Reg(0) });
-        roundtrip(Instruction::MapGet { dst: Reg(0), map: Reg(1), key: Reg(2) });
-        roundtrip(Instruction::MapSet { map: Reg(0), key: Reg(1), val: Reg(2) });
-        roundtrip(Instruction::MapContains { dst: Reg(0), map: Reg(1), key: Reg(2) });
+        roundtrip(Instruction::MapGet {
+            dst: Reg(0),
+            map: Reg(1),
+            key: Reg(2),
+        });
+        roundtrip(Instruction::MapSet {
+            map: Reg(0),
+            key: Reg(1),
+            val: Reg(2),
+        });
+        roundtrip(Instruction::MapContains {
+            dst: Reg(0),
+            map: Reg(1),
+            key: Reg(2),
+        });
     }
 
     #[test]
     fn test_iterator_roundtrips() {
-        roundtrip(Instruction::IterNew { dst: Reg(0), iterable: Reg(1) });
+        roundtrip(Instruction::IterNew {
+            dst: Reg(0),
+            iterable: Reg(1),
+        });
         roundtrip(Instruction::IterNext {
             dst: Reg(0),
             has_next: Reg(1),
@@ -1790,24 +1902,45 @@ mod encoding_tests {
 
     #[test]
     fn test_reference_roundtrips() {
-        roundtrip(Instruction::Ref { dst: Reg(0), src: Reg(1) });
-        roundtrip(Instruction::RefMut { dst: Reg(0), src: Reg(1) });
-        roundtrip(Instruction::Deref { dst: Reg(0), ref_reg: Reg(1) });
-        roundtrip(Instruction::Clone { dst: Reg(0), src: Reg(1) });
+        roundtrip(Instruction::Ref {
+            dst: Reg(0),
+            src: Reg(1),
+        });
+        roundtrip(Instruction::RefMut {
+            dst: Reg(0),
+            src: Reg(1),
+        });
+        roundtrip(Instruction::Deref {
+            dst: Reg(0),
+            ref_reg: Reg(1),
+        });
+        roundtrip(Instruction::Clone {
+            dst: Reg(0),
+            src: Reg(1),
+        });
     }
 
     #[test]
     fn test_misc_roundtrips() {
         roundtrip(Instruction::Nop);
-        roundtrip(Instruction::Mov { dst: Reg(0), src: Reg(1) });
-        roundtrip(Instruction::Not { dst: Reg(0), src: Reg(1) });
+        roundtrip(Instruction::Mov {
+            dst: Reg(0),
+            src: Reg(1),
+        });
+        roundtrip(Instruction::Not {
+            dst: Reg(0),
+            src: Reg(1),
+        });
         roundtrip(Instruction::DebugPrint { value: Reg(0) });
     }
 
     #[test]
     fn test_large_register_indices() {
         // Test with larger register indices
-        roundtrip(Instruction::Mov { dst: Reg(1000), src: Reg(2000) });
+        roundtrip(Instruction::Mov {
+            dst: Reg(1000),
+            src: Reg(2000),
+        });
         roundtrip(Instruction::BinaryI {
             op: BinaryIntOp::Add,
             dst: Reg(5000),
@@ -1818,10 +1951,22 @@ mod encoding_tests {
 
     #[test]
     fn test_extreme_values() {
-        roundtrip(Instruction::LoadI { dst: Reg(0), value: i64::MAX });
-        roundtrip(Instruction::LoadI { dst: Reg(0), value: i64::MIN });
-        roundtrip(Instruction::LoadF { dst: Reg(0), value: f64::MAX });
-        roundtrip(Instruction::LoadF { dst: Reg(0), value: f64::MIN_POSITIVE });
+        roundtrip(Instruction::LoadI {
+            dst: Reg(0),
+            value: i64::MAX,
+        });
+        roundtrip(Instruction::LoadI {
+            dst: Reg(0),
+            value: i64::MIN,
+        });
+        roundtrip(Instruction::LoadF {
+            dst: Reg(0),
+            value: f64::MAX,
+        });
+        roundtrip(Instruction::LoadF {
+            dst: Reg(0),
+            value: f64::MIN_POSITIVE,
+        });
         roundtrip(Instruction::Jmp { offset: i32::MAX });
         roundtrip(Instruction::Jmp { offset: i32::MIN });
     }
@@ -1939,7 +2084,13 @@ mod property_tests {
 
         let values: Vec<i64> = vec![1, 2, 3, 4, 5];
         for v in &values {
-            ctx.add_defer(vec![Instruction::LoadI { dst: Reg(0), value: *v }], false);
+            ctx.add_defer(
+                vec![Instruction::LoadI {
+                    dst: Reg(0),
+                    value: *v,
+                }],
+                false,
+            );
         }
 
         let defers = ctx.pop_defer_scope(false);
@@ -1973,7 +2124,11 @@ mod property_tests {
         for i in 0..100 {
             let name = format!("var_{}", i);
             ctx.define_var(&name, false);
-            assert!(ctx.lookup_var(&name).is_some(), "Variable {} not found after definition", name);
+            assert!(
+                ctx.lookup_var(&name).is_some(),
+                "Variable {} not found after definition",
+                name
+            );
         }
 
         ctx.end_function();
@@ -2193,14 +2348,20 @@ mod error_message_tests {
     fn test_undefined_variable_message_includes_name() {
         let err = CodegenError::undefined_variable("missing_var_name");
         let msg = format!("{}", err);
-        assert!(msg.contains("missing_var_name"), "Error should include variable name");
+        assert!(
+            msg.contains("missing_var_name"),
+            "Error should include variable name"
+        );
     }
 
     #[test]
     fn test_undefined_function_message_includes_name() {
         let err = CodegenError::undefined_function("unknown_function");
         let msg = format!("{}", err);
-        assert!(msg.contains("unknown_function"), "Error should include function name");
+        assert!(
+            msg.contains("unknown_function"),
+            "Error should include function name"
+        );
     }
 
     #[test]
@@ -2218,7 +2379,9 @@ mod error_message_tests {
 
     #[test]
     fn test_immutable_assignment_message() {
-        let err = CodegenError::new(CodegenErrorKind::ImmutableAssignment("const_var".to_string()));
+        let err = CodegenError::new(CodegenErrorKind::ImmutableAssignment(
+            "const_var".to_string(),
+        ));
         let msg = format!("{}", err);
         assert!(msg.contains("immutable") || msg.contains("const_var"));
     }
@@ -2261,7 +2424,10 @@ mod error_message_tests {
             CodegenErrorKind::ReturnOutsideFunction,
             CodegenErrorKind::InvalidJumpTarget("test".into()),
             CodegenErrorKind::RegisterAllocationFailed,
-            CodegenErrorKind::RegisterOverflow { needed: 100, max: 50 },
+            CodegenErrorKind::RegisterOverflow {
+                needed: 100,
+                max: 50,
+            },
             CodegenErrorKind::Internal("test".into()),
             CodegenErrorKind::NotImplemented("test".into()),
         ];
@@ -2284,8 +2450,7 @@ mod error_message_tests {
 
     #[test]
     fn test_error_with_context() {
-        let err = CodegenError::undefined_variable("x")
-            .with_context("in function main");
+        let err = CodegenError::undefined_variable("x").with_context("in function main");
         assert!(err.context.is_some());
         assert!(err.context.unwrap().contains("main"));
     }
@@ -2306,7 +2471,8 @@ mod cross_module_path_tests {
             param_names: vec![],
             is_async,
             contexts: vec![],
-            return_type: None, ..Default::default()
+            return_type: None,
+            ..Default::default()
         }
     }
 
@@ -2346,12 +2512,18 @@ mod cross_module_path_tests {
 
         // Strict variant: exact match only — must NOT rebind to simple_func.
         let found = ctx.lookup_qualified_function("some_module::simple_func");
-        assert!(found.is_none(), "strict lookup must not fall back to simple name");
+        assert!(
+            found.is_none(),
+            "strict lookup must not fall back to simple name"
+        );
 
         // Opt-in fallback variant: falls back to last-segment when qualified
         // name is not rooted at a module-path keyword.
         let found = ctx.lookup_qualified_function_with_fallback("some_module::simple_func");
-        assert!(found.is_some(), "fallback variant should resolve via last segment");
+        assert!(
+            found.is_some(),
+            "fallback variant should resolve via last segment"
+        );
         assert_eq!(found.unwrap().id, FunctionId(2));
     }
 
@@ -2390,9 +2562,22 @@ mod cross_module_path_tests {
         ctx.register_function("process".into(), info3.clone()); // Simple name
 
         // Each should be found by their qualified name
-        assert_eq!(ctx.lookup_qualified_function("module_a::process").unwrap().id, FunctionId(10));
-        assert_eq!(ctx.lookup_qualified_function("module_b::process").unwrap().id, FunctionId(11));
-        assert_eq!(ctx.lookup_qualified_function("process").unwrap().id, FunctionId(12));
+        assert_eq!(
+            ctx.lookup_qualified_function("module_a::process")
+                .unwrap()
+                .id,
+            FunctionId(10)
+        );
+        assert_eq!(
+            ctx.lookup_qualified_function("module_b::process")
+                .unwrap()
+                .id,
+            FunctionId(11)
+        );
+        assert_eq!(
+            ctx.lookup_qualified_function("process").unwrap().id,
+            FunctionId(12)
+        );
     }
 
     #[test]
@@ -2437,7 +2622,10 @@ mod cross_module_path_tests {
         assert!(ctx.lookup_qualified_function("module::my_func").is_none());
 
         // Fallback variant: exact first, then simple-name for non-rooted paths.
-        assert!(ctx.lookup_qualified_function_with_fallback("module::my_func").is_some());
+        assert!(
+            ctx.lookup_qualified_function_with_fallback("module::my_func")
+                .is_some()
+        );
     }
 
     #[test]
@@ -2506,7 +2694,8 @@ mod cross_module_path_tests {
             param_names: vec![],
             is_async: true,
             contexts: vec!["Database".to_string(), "Logger".to_string()],
-            return_type: None, ..Default::default()
+            return_type: None,
+            ..Default::default()
         };
 
         ctx.register_function("db::execute".into(), info.clone());
@@ -2542,7 +2731,8 @@ mod cross_module_path_tests {
             param_names: vec!["x".to_string(), "y".to_string(), "z".to_string()],
             is_async: false,
             contexts: vec![],
-            return_type: None, ..Default::default()
+            return_type: None,
+            ..Default::default()
         };
 
         ctx.register_function("math::add3".into(), info.clone());

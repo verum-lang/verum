@@ -16,9 +16,9 @@
 // Migrated from src/meta_context.rs per CLAUDE.md standards
 
 use verum_ast::Span;
-use verum_compiler::meta::*;
-use verum_compiler::meta::value_ops::MetaValueOps;
 use verum_common::Text;
+use verum_compiler::meta::value_ops::MetaValueOps;
+use verum_compiler::meta::*;
 
 fn default_span() -> Span {
     Span::default()
@@ -224,11 +224,10 @@ fn test_variant_info_creation() {
     assert!(matches!(unit_variant.kind, VariantKind::Unit));
 
     // Tuple variant
-    let tuple_fields: verum_common::List<FieldInfo> = vec![
-        FieldInfo::new(Text::from("0"), int_type(), 0),
-    ]
-    .into_iter()
-    .collect();
+    let tuple_fields: verum_common::List<FieldInfo> =
+        vec![FieldInfo::new(Text::from("0"), int_type(), 0)]
+            .into_iter()
+            .collect();
     let tuple_variant = VariantInfo::tuple(Text::from("Some"), tuple_fields, 1);
     assert_eq!(tuple_variant.name, Text::from("Some"));
     assert!(matches!(tuple_variant.kind, VariantKind::Tuple));
@@ -247,8 +246,7 @@ fn test_variant_info_creation() {
 
 #[test]
 fn test_function_info_creation() {
-    let method = FunctionInfo::new(Text::from("fmt"), Text::from("()"))
-        .async_fn();
+    let method = FunctionInfo::new(Text::from("fmt"), Text::from("()")).async_fn();
 
     assert_eq!(method.name, Text::from("fmt"));
     assert!(method.is_async);
@@ -404,8 +402,12 @@ fn test_type_property_id_consistency() {
     let ty1 = int_type();
     let ty2 = int_type();
 
-    let id1 = ctx.eval_type_property(&ty1, verum_ast::expr::TypeProperty::Id).unwrap();
-    let id2 = ctx.eval_type_property(&ty2, verum_ast::expr::TypeProperty::Id).unwrap();
+    let id1 = ctx
+        .eval_type_property(&ty1, verum_ast::expr::TypeProperty::Id)
+        .unwrap();
+    let id2 = ctx
+        .eval_type_property(&ty2, verum_ast::expr::TypeProperty::Id)
+        .unwrap();
 
     assert_eq!(id1, id2, "Same type should produce same ID");
 }
@@ -418,8 +420,15 @@ fn test_type_property_id_uniqueness() {
     let int_ty = int_type();
     let text_ty = text_type();
 
-    let int_id = ctx.eval_type_property(&int_ty, verum_ast::expr::TypeProperty::Id).unwrap();
-    let text_id = ctx.eval_type_property(&text_ty, verum_ast::expr::TypeProperty::Id).unwrap();
+    let int_id = ctx
+        .eval_type_property(&int_ty, verum_ast::expr::TypeProperty::Id)
+        .unwrap();
+    let text_id = ctx
+        .eval_type_property(&text_ty, verum_ast::expr::TypeProperty::Id)
+        .unwrap();
 
-    assert_ne!(int_id, text_id, "Different types should produce different IDs");
+    assert_ne!(
+        int_id, text_id,
+        "Different types should produce different IDs"
+    );
 }

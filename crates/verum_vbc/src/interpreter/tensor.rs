@@ -41,10 +41,10 @@
 //! TensorData uses atomic reference counting for safe sharing across async tasks.
 //! Mutation requires exclusive access (enforced at runtime).
 
-use std::alloc::{alloc, alloc_zeroed, dealloc, Layout};
+use std::alloc::{Layout, alloc, alloc_zeroed, dealloc};
 use std::fmt;
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
 use crate::instruction::{TensorBinaryOp, TensorReduceOp, TensorUnaryOp};
 
@@ -374,19 +374,22 @@ impl TensorData {
     /// Mark host data as dirty (modified).
     #[inline]
     pub fn mark_host_dirty(&self) {
-        self.dirty_flags.fetch_or(sync_flags::HOST_DIRTY, Ordering::Release);
+        self.dirty_flags
+            .fetch_or(sync_flags::HOST_DIRTY, Ordering::Release);
     }
 
     /// Mark device data as dirty (modified).
     #[inline]
     pub fn mark_device_dirty(&self) {
-        self.dirty_flags.fetch_or(sync_flags::DEVICE_DIRTY, Ordering::Release);
+        self.dirty_flags
+            .fetch_or(sync_flags::DEVICE_DIRTY, Ordering::Release);
     }
 
     /// Clear dirty flags (data is synced).
     #[inline]
     pub fn mark_synced(&self) {
-        self.dirty_flags.store(sync_flags::SYNCED, Ordering::Release);
+        self.dirty_flags
+            .store(sync_flags::SYNCED, Ordering::Release);
     }
 
     /// Check if host copy needs sync from device.
@@ -600,11 +603,7 @@ impl TensorHandle {
     ///
 
     /// The caller must ensure the data is valid and has the correct size.
-    pub unsafe fn from_raw(
-        shape: &[usize],
-        dtype: DType,
-        data_ptr: *const u8,
-    ) -> Option<Self> {
+    pub unsafe fn from_raw(shape: &[usize], dtype: DType, data_ptr: *const u8) -> Option<Self> {
         let handle = Self::zeros(shape, dtype)?;
 
         if let Some(data) = &handle.data {
@@ -783,7 +782,10 @@ impl TensorHandle {
 
         // SAFETY: offset is computed from valid indices; negative strides are only
         // valid when base pointer has been adjusted to point to the logical start
-        debug_assert!(offset >= 0, "Negative offset from indexing indicates invalid view");
+        debug_assert!(
+            offset >= 0,
+            "Negative offset from indexing indicates invalid view"
+        );
         Some(unsafe { base.add((offset as usize) * self.dtype.size()) })
     }
 
@@ -879,7 +881,8 @@ impl TensorHandle {
         if self.dtype != DType::F32 {
             return std::ptr::null();
         }
-        self.data.as_ref()
+        self.data
+            .as_ref()
             .map(|d| unsafe { (*d.as_ptr()).as_ptr() as *const f32 })
             .unwrap_or(std::ptr::null())
     }
@@ -893,7 +896,8 @@ impl TensorHandle {
         if self.dtype != DType::F32 {
             return std::ptr::null_mut();
         }
-        self.data.as_mut()
+        self.data
+            .as_mut()
             .map(|d| unsafe { (*d.as_ptr()).as_mut_ptr() as *mut f32 })
             .unwrap_or(std::ptr::null_mut())
     }
@@ -904,7 +908,8 @@ impl TensorHandle {
         if self.dtype != DType::F64 {
             return std::ptr::null();
         }
-        self.data.as_ref()
+        self.data
+            .as_ref()
             .map(|d| unsafe { (*d.as_ptr()).as_ptr() as *const f64 })
             .unwrap_or(std::ptr::null())
     }
@@ -915,7 +920,8 @@ impl TensorHandle {
         if self.dtype != DType::F64 {
             return std::ptr::null_mut();
         }
-        self.data.as_mut()
+        self.data
+            .as_mut()
             .map(|d| unsafe { (*d.as_ptr()).as_mut_ptr() as *mut f64 })
             .unwrap_or(std::ptr::null_mut())
     }
@@ -926,7 +932,8 @@ impl TensorHandle {
         if self.dtype != DType::I32 {
             return std::ptr::null();
         }
-        self.data.as_ref()
+        self.data
+            .as_ref()
             .map(|d| unsafe { (*d.as_ptr()).as_ptr() as *const i32 })
             .unwrap_or(std::ptr::null())
     }
@@ -937,7 +944,8 @@ impl TensorHandle {
         if self.dtype != DType::I32 {
             return std::ptr::null_mut();
         }
-        self.data.as_mut()
+        self.data
+            .as_mut()
             .map(|d| unsafe { (*d.as_ptr()).as_mut_ptr() as *mut i32 })
             .unwrap_or(std::ptr::null_mut())
     }
@@ -948,7 +956,8 @@ impl TensorHandle {
         if self.dtype != DType::I64 {
             return std::ptr::null();
         }
-        self.data.as_ref()
+        self.data
+            .as_ref()
             .map(|d| unsafe { (*d.as_ptr()).as_ptr() as *const i64 })
             .unwrap_or(std::ptr::null())
     }
@@ -959,7 +968,8 @@ impl TensorHandle {
         if self.dtype != DType::I64 {
             return std::ptr::null_mut();
         }
-        self.data.as_mut()
+        self.data
+            .as_mut()
             .map(|d| unsafe { (*d.as_ptr()).as_mut_ptr() as *mut i64 })
             .unwrap_or(std::ptr::null_mut())
     }
@@ -970,7 +980,8 @@ impl TensorHandle {
         if self.dtype != DType::I16 {
             return std::ptr::null();
         }
-        self.data.as_ref()
+        self.data
+            .as_ref()
             .map(|d| unsafe { (*d.as_ptr()).as_ptr() as *const i16 })
             .unwrap_or(std::ptr::null())
     }
@@ -981,7 +992,8 @@ impl TensorHandle {
         if self.dtype != DType::I16 {
             return std::ptr::null_mut();
         }
-        self.data.as_mut()
+        self.data
+            .as_mut()
             .map(|d| unsafe { (*d.as_ptr()).as_mut_ptr() as *mut i16 })
             .unwrap_or(std::ptr::null_mut())
     }
@@ -992,7 +1004,8 @@ impl TensorHandle {
         if self.dtype != DType::I8 {
             return std::ptr::null();
         }
-        self.data.as_ref()
+        self.data
+            .as_ref()
             .map(|d| unsafe { (*d.as_ptr()).as_ptr() as *const i8 })
             .unwrap_or(std::ptr::null())
     }
@@ -1003,7 +1016,8 @@ impl TensorHandle {
         if self.dtype != DType::I8 {
             return std::ptr::null_mut();
         }
-        self.data.as_mut()
+        self.data
+            .as_mut()
             .map(|d| unsafe { (*d.as_ptr()).as_mut_ptr() as *mut i8 })
             .unwrap_or(std::ptr::null_mut())
     }
@@ -1014,7 +1028,8 @@ impl TensorHandle {
         if self.dtype != DType::U32 {
             return std::ptr::null();
         }
-        self.data.as_ref()
+        self.data
+            .as_ref()
             .map(|d| unsafe { (*d.as_ptr()).as_ptr() as *const u32 })
             .unwrap_or(std::ptr::null())
     }
@@ -1025,7 +1040,8 @@ impl TensorHandle {
         if self.dtype != DType::U32 {
             return std::ptr::null_mut();
         }
-        self.data.as_mut()
+        self.data
+            .as_mut()
             .map(|d| unsafe { (*d.as_ptr()).as_mut_ptr() as *mut u32 })
             .unwrap_or(std::ptr::null_mut())
     }
@@ -1036,7 +1052,8 @@ impl TensorHandle {
         if self.dtype != DType::U64 {
             return std::ptr::null();
         }
-        self.data.as_ref()
+        self.data
+            .as_ref()
             .map(|d| unsafe { (*d.as_ptr()).as_ptr() as *const u64 })
             .unwrap_or(std::ptr::null())
     }
@@ -1047,7 +1064,8 @@ impl TensorHandle {
         if self.dtype != DType::U64 {
             return std::ptr::null_mut();
         }
-        self.data.as_mut()
+        self.data
+            .as_mut()
             .map(|d| unsafe { (*d.as_ptr()).as_mut_ptr() as *mut u64 })
             .unwrap_or(std::ptr::null_mut())
     }
@@ -1058,7 +1076,8 @@ impl TensorHandle {
         if self.dtype != DType::U8 {
             return std::ptr::null();
         }
-        self.data.as_ref()
+        self.data
+            .as_ref()
             .map(|d| unsafe { (*d.as_ptr()).as_ptr() })
             .unwrap_or(std::ptr::null())
     }
@@ -1069,7 +1088,8 @@ impl TensorHandle {
         if self.dtype != DType::U8 {
             return std::ptr::null_mut();
         }
-        self.data.as_mut()
+        self.data
+            .as_mut()
             .map(|d| unsafe { (*d.as_ptr()).as_mut_ptr() })
             .unwrap_or(std::ptr::null_mut())
     }
@@ -1080,7 +1100,8 @@ impl TensorHandle {
         if self.dtype != DType::U16 {
             return std::ptr::null();
         }
-        self.data.as_ref()
+        self.data
+            .as_ref()
             .map(|d| unsafe { (*d.as_ptr()).as_ptr() as *const u16 })
             .unwrap_or(std::ptr::null())
     }
@@ -1091,7 +1112,8 @@ impl TensorHandle {
         if self.dtype != DType::U16 {
             return std::ptr::null_mut();
         }
-        self.data.as_mut()
+        self.data
+            .as_mut()
             .map(|d| unsafe { (*d.as_ptr()).as_mut_ptr() as *mut u16 })
             .unwrap_or(std::ptr::null_mut())
     }
@@ -1106,7 +1128,8 @@ impl TensorHandle {
         if self.dtype != DType::F16 {
             return std::ptr::null();
         }
-        self.data.as_ref()
+        self.data
+            .as_ref()
             .map(|d| unsafe { (*d.as_ptr()).as_ptr() as *const u16 })
             .unwrap_or(std::ptr::null())
     }
@@ -1117,7 +1140,8 @@ impl TensorHandle {
         if self.dtype != DType::F16 {
             return std::ptr::null_mut();
         }
-        self.data.as_mut()
+        self.data
+            .as_mut()
             .map(|d| unsafe { (*d.as_ptr()).as_mut_ptr() as *mut u16 })
             .unwrap_or(std::ptr::null_mut())
     }
@@ -1132,7 +1156,8 @@ impl TensorHandle {
         if self.dtype != DType::BF16 {
             return std::ptr::null();
         }
-        self.data.as_ref()
+        self.data
+            .as_ref()
             .map(|d| unsafe { (*d.as_ptr()).as_ptr() as *const u16 })
             .unwrap_or(std::ptr::null())
     }
@@ -1143,7 +1168,8 @@ impl TensorHandle {
         if self.dtype != DType::BF16 {
             return std::ptr::null_mut();
         }
-        self.data.as_mut()
+        self.data
+            .as_mut()
             .map(|d| unsafe { (*d.as_ptr()).as_mut_ptr() as *mut u16 })
             .unwrap_or(std::ptr::null_mut())
     }
@@ -1158,7 +1184,8 @@ impl TensorHandle {
         if self.dtype != DType::Complex64 {
             return std::ptr::null();
         }
-        self.data.as_ref()
+        self.data
+            .as_ref()
             .map(|d| unsafe { (*d.as_ptr()).as_ptr() as *const f32 })
             .unwrap_or(std::ptr::null())
     }
@@ -1169,7 +1196,8 @@ impl TensorHandle {
         if self.dtype != DType::Complex64 {
             return std::ptr::null_mut();
         }
-        self.data.as_mut()
+        self.data
+            .as_mut()
             .map(|d| unsafe { (*d.as_ptr()).as_mut_ptr() as *mut f32 })
             .unwrap_or(std::ptr::null_mut())
     }
@@ -1184,7 +1212,8 @@ impl TensorHandle {
         if self.dtype != DType::Complex128 {
             return std::ptr::null();
         }
-        self.data.as_ref()
+        self.data
+            .as_ref()
             .map(|d| unsafe { (*d.as_ptr()).as_ptr() as *const f64 })
             .unwrap_or(std::ptr::null())
     }
@@ -1195,7 +1224,8 @@ impl TensorHandle {
         if self.dtype != DType::Complex128 {
             return std::ptr::null_mut();
         }
-        self.data.as_mut()
+        self.data
+            .as_mut()
             .map(|d| unsafe { (*d.as_ptr()).as_mut_ptr() as *mut f64 })
             .unwrap_or(std::ptr::null_mut())
     }
@@ -1540,7 +1570,10 @@ pub fn tensor_reduce(
                     }
 
                     // Reduce along axis
-                    debug_assert!(src_base_idx >= 0, "Negative base index indicates invalid view");
+                    debug_assert!(
+                        src_base_idx >= 0,
+                        "Negative base index indicates invalid view"
+                    );
                     let value = reduce_axis_f32(
                         (src_ptr as *const f32).offset(src_base_idx),
                         axis_size,
@@ -1570,7 +1603,10 @@ pub fn tensor_reduce(
                     }
 
                     // Reduce along axis
-                    debug_assert!(src_base_idx >= 0, "Negative base index indicates invalid view");
+                    debug_assert!(
+                        src_base_idx >= 0,
+                        "Negative base index indicates invalid view"
+                    );
                     let value = reduce_axis_f64(
                         (src_ptr as *const f64).offset(src_base_idx),
                         axis_size,
@@ -2570,9 +2606,10 @@ pub fn tensor_squeeze(src: &TensorHandle, dim: Option<usize>) -> Option<TensorHa
         if src.shape[i] != 1 {
             new_shape.push(src.shape[i]);
         } else if let Some(d) = dim
-            && i != d {
-                new_shape.push(src.shape[i]);
-            }
+            && i != d
+        {
+            new_shape.push(src.shape[i]);
+        }
     }
 
     if new_shape.is_empty() {
@@ -2835,11 +2872,7 @@ pub fn tensor_slice(src: &TensorHandle, ranges: &[(usize, usize)]) -> Option<Ten
             let src_ptr = (*src_data.as_ptr()).as_ptr();
             let dst_ptr = (*dst_data.as_ptr()).as_mut_ptr();
             let bytes = result.numel * src.dtype.size();
-            std::ptr::copy_nonoverlapping(
-                src_ptr.add(start * src.dtype.size()),
-                dst_ptr,
-                bytes,
-            );
+            std::ptr::copy_nonoverlapping(src_ptr.add(start * src.dtype.size()), dst_ptr, bytes);
         }
     } else if src.ndim == 2 {
         let (row_start, _row_end) = ranges[0];
@@ -2935,11 +2968,7 @@ pub fn tensor_stack(tensors: &[&TensorHandle], axis: usize) -> Option<TensorHand
         for (i, t) in tensors.iter().enumerate() {
             if let Some(src_data) = &t.data {
                 let src_ptr = (*src_data.as_ptr()).as_ptr();
-                std::ptr::copy_nonoverlapping(
-                    src_ptr,
-                    dst_ptr.add(i * tensor_size),
-                    tensor_size,
-                );
+                std::ptr::copy_nonoverlapping(src_ptr, dst_ptr.add(i * tensor_size), tensor_size);
             }
         }
     }
@@ -3331,13 +3360,15 @@ pub fn tensor_layer_norm_cpu(
 
     // Validate gamma/beta shapes if provided
     if let Some(g) = gamma
-        && (g.ndim != 1 || g.shape[0] != norm_size) {
-            return None;
-        }
+        && (g.ndim != 1 || g.shape[0] != norm_size)
+    {
+        return None;
+    }
     if let Some(b) = beta
-        && (b.ndim != 1 || b.shape[0] != norm_size) {
-            return None;
-        }
+        && (b.ndim != 1 || b.shape[0] != norm_size)
+    {
+        return None;
+    }
 
     let result = TensorHandle::zeros(&input.shape[..input.ndim as usize], input.dtype)?;
 
@@ -3351,9 +3382,11 @@ pub fn tensor_layer_norm_cpu(
                 let src_ptr = (*src_data.as_ptr()).as_ptr() as *const f32;
                 let dst_ptr = (*dst_data.as_ptr()).as_mut_ptr() as *mut f32;
 
-                let gamma_ptr = gamma.and_then(|g| g.data.as_ref())
+                let gamma_ptr = gamma
+                    .and_then(|g| g.data.as_ref())
                     .map(|d| (*d.as_ptr()).as_ptr() as *const f32);
-                let beta_ptr = beta.and_then(|b| b.data.as_ref())
+                let beta_ptr = beta
+                    .and_then(|b| b.data.as_ref())
                     .map(|d| (*d.as_ptr()).as_ptr() as *const f32);
 
                 let batch_size = result.numel / norm_size;
@@ -3394,51 +3427,51 @@ pub fn tensor_layer_norm_cpu(
                 }
             }
         }
-        DType::F64 => {
-            unsafe {
-                let src_ptr = (*src_data.as_ptr()).as_ptr() as *const f64;
-                let dst_ptr = (*dst_data.as_ptr()).as_mut_ptr() as *mut f64;
+        DType::F64 => unsafe {
+            let src_ptr = (*src_data.as_ptr()).as_ptr() as *const f64;
+            let dst_ptr = (*dst_data.as_ptr()).as_mut_ptr() as *mut f64;
 
-                let gamma_ptr = gamma.and_then(|g| g.data.as_ref())
-                    .map(|d| (*d.as_ptr()).as_ptr() as *const f64);
-                let beta_ptr = beta.and_then(|b| b.data.as_ref())
-                    .map(|d| (*d.as_ptr()).as_ptr() as *const f64);
+            let gamma_ptr = gamma
+                .and_then(|g| g.data.as_ref())
+                .map(|d| (*d.as_ptr()).as_ptr() as *const f64);
+            let beta_ptr = beta
+                .and_then(|b| b.data.as_ref())
+                .map(|d| (*d.as_ptr()).as_ptr() as *const f64);
 
-                let batch_size = result.numel / norm_size;
+            let batch_size = result.numel / norm_size;
 
-                for batch in 0..batch_size {
-                    let offset = batch * norm_size;
+            for batch in 0..batch_size {
+                let offset = batch * norm_size;
 
-                    let mut sum = 0.0f64;
-                    for i in 0..norm_size {
-                        sum += *src_ptr.add(offset + i);
+                let mut sum = 0.0f64;
+                for i in 0..norm_size {
+                    sum += *src_ptr.add(offset + i);
+                }
+                let mean = sum / norm_size as f64;
+
+                let mut var = 0.0f64;
+                for i in 0..norm_size {
+                    let diff = *src_ptr.add(offset + i) - mean;
+                    var += diff * diff;
+                }
+                var /= norm_size as f64;
+
+                let inv_std = 1.0 / (var + eps).sqrt();
+                for i in 0..norm_size {
+                    let x = *src_ptr.add(offset + i);
+                    let mut y = (x - mean) * inv_std;
+
+                    if let Some(gp) = gamma_ptr {
+                        y *= *gp.add(i);
                     }
-                    let mean = sum / norm_size as f64;
-
-                    let mut var = 0.0f64;
-                    for i in 0..norm_size {
-                        let diff = *src_ptr.add(offset + i) - mean;
-                        var += diff * diff;
+                    if let Some(bp) = beta_ptr {
+                        y += *bp.add(i);
                     }
-                    var /= norm_size as f64;
 
-                    let inv_std = 1.0 / (var + eps).sqrt();
-                    for i in 0..norm_size {
-                        let x = *src_ptr.add(offset + i);
-                        let mut y = (x - mean) * inv_std;
-
-                        if let Some(gp) = gamma_ptr {
-                            y *= *gp.add(i);
-                        }
-                        if let Some(bp) = beta_ptr {
-                            y += *bp.add(i);
-                        }
-
-                        *dst_ptr.add(offset + i) = y;
-                    }
+                    *dst_ptr.add(offset + i) = y;
                 }
             }
-        }
+        },
         _ => return None,
     }
 
@@ -3450,9 +3483,9 @@ pub fn tensor_layer_norm_cpu(
 
 /// Normalizes across N, H, W for each channel C.
 pub fn tensor_batch_norm(
-    input: &TensorHandle,           // [N, C, H, W] or [N, C]
-    gamma: Option<&TensorHandle>,   // [C]
-    beta: Option<&TensorHandle>,    // [C]
+    input: &TensorHandle,                // [N, C, H, W] or [N, C]
+    gamma: Option<&TensorHandle>,        // [C]
+    beta: Option<&TensorHandle>,         // [C]
     running_mean: Option<&TensorHandle>, // [C]
     running_var: Option<&TensorHandle>,  // [C]
     eps: f64,
@@ -3468,9 +3501,10 @@ pub fn tensor_batch_norm(
 
     // Validate shapes
     if let Some(g) = gamma
-        && (g.ndim != 1 || g.shape[0] != channels) {
-            return None;
-        }
+        && (g.ndim != 1 || g.shape[0] != channels)
+    {
+        return None;
+    }
 
     let result = TensorHandle::zeros(&input.shape[..input.ndim as usize], input.dtype)?;
 
@@ -3484,13 +3518,17 @@ pub fn tensor_batch_norm(
                 let src_ptr = (*src_data.as_ptr()).as_ptr() as *const f32;
                 let dst_ptr = (*dst_data.as_ptr()).as_mut_ptr() as *mut f32;
 
-                let gamma_ptr = gamma.and_then(|g| g.data.as_ref())
+                let gamma_ptr = gamma
+                    .and_then(|g| g.data.as_ref())
                     .map(|d| (*d.as_ptr()).as_ptr() as *const f32);
-                let beta_ptr = beta.and_then(|b| b.data.as_ref())
+                let beta_ptr = beta
+                    .and_then(|b| b.data.as_ref())
                     .map(|d| (*d.as_ptr()).as_ptr() as *const f32);
-                let mean_ptr = running_mean.and_then(|m| m.data.as_ref())
+                let mean_ptr = running_mean
+                    .and_then(|m| m.data.as_ref())
                     .map(|d| (*d.as_ptr()).as_ptr() as *const f32);
-                let var_ptr = running_var.and_then(|v| v.data.as_ref())
+                let var_ptr = running_var
+                    .and_then(|v| v.data.as_ref())
                     .map(|d| (*d.as_ptr()).as_ptr() as *const f32);
 
                 let batch_size = input.shape[0];
@@ -3585,9 +3623,10 @@ pub fn tensor_rms_norm(
 
     // Validate gamma shape if provided
     if let Some(g) = gamma
-        && (g.ndim != 1 || g.shape[0] != norm_size) {
-            return None;
-        }
+        && (g.ndim != 1 || g.shape[0] != norm_size)
+    {
+        return None;
+    }
 
     let result = TensorHandle::zeros(&input.shape[..input.ndim as usize], input.dtype)?;
 
@@ -3601,7 +3640,8 @@ pub fn tensor_rms_norm(
                 let src_ptr = (*src_data.as_ptr()).as_ptr() as *const f32;
                 let dst_ptr = (*dst_data.as_ptr()).as_mut_ptr() as *mut f32;
 
-                let gamma_ptr = gamma.and_then(|g| g.data.as_ref())
+                let gamma_ptr = gamma
+                    .and_then(|g| g.data.as_ref())
                     .map(|d| (*d.as_ptr()).as_ptr() as *const f32);
 
                 let batch_size = result.numel / norm_size;
@@ -3632,40 +3672,39 @@ pub fn tensor_rms_norm(
                 }
             }
         }
-        DType::F64 => {
-            unsafe {
-                let src_ptr = (*src_data.as_ptr()).as_ptr() as *const f64;
-                let dst_ptr = (*dst_data.as_ptr()).as_mut_ptr() as *mut f64;
+        DType::F64 => unsafe {
+            let src_ptr = (*src_data.as_ptr()).as_ptr() as *const f64;
+            let dst_ptr = (*dst_data.as_ptr()).as_mut_ptr() as *mut f64;
 
-                let gamma_ptr = gamma.and_then(|g| g.data.as_ref())
-                    .map(|d| (*d.as_ptr()).as_ptr() as *const f64);
+            let gamma_ptr = gamma
+                .and_then(|g| g.data.as_ref())
+                .map(|d| (*d.as_ptr()).as_ptr() as *const f64);
 
-                let batch_size = result.numel / norm_size;
+            let batch_size = result.numel / norm_size;
 
-                for batch in 0..batch_size {
-                    let offset = batch * norm_size;
+            for batch in 0..batch_size {
+                let offset = batch * norm_size;
 
-                    let mut sum_sq = 0.0f64;
-                    for i in 0..norm_size {
-                        let x = *src_ptr.add(offset + i);
-                        sum_sq += x * x;
+                let mut sum_sq = 0.0f64;
+                for i in 0..norm_size {
+                    let x = *src_ptr.add(offset + i);
+                    sum_sq += x * x;
+                }
+                let rms = (sum_sq / norm_size as f64 + eps).sqrt();
+                let inv_rms = 1.0 / rms;
+
+                for i in 0..norm_size {
+                    let x = *src_ptr.add(offset + i);
+                    let mut y = x * inv_rms;
+
+                    if let Some(gp) = gamma_ptr {
+                        y *= *gp.add(i);
                     }
-                    let rms = (sum_sq / norm_size as f64 + eps).sqrt();
-                    let inv_rms = 1.0 / rms;
 
-                    for i in 0..norm_size {
-                        let x = *src_ptr.add(offset + i);
-                        let mut y = x * inv_rms;
-
-                        if let Some(gp) = gamma_ptr {
-                            y *= *gp.add(i);
-                        }
-
-                        *dst_ptr.add(offset + i) = y;
-                    }
+                    *dst_ptr.add(offset + i) = y;
                 }
             }
-        }
+        },
         _ => return None,
     }
 
@@ -3961,9 +4000,13 @@ pub fn tensor_topk(
 
                     // Sort by value
                     if largest {
-                        pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+                        pairs.sort_by(|a, b| {
+                            b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
+                        });
                     } else {
-                        pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                        pairs.sort_by(|a, b| {
+                            a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal)
+                        });
                     }
 
                     if !sorted {
@@ -3995,9 +4038,13 @@ pub fn tensor_topk(
                     }
 
                     if largest {
-                        pairs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+                        pairs.sort_by(|a, b| {
+                            b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
+                        });
                     } else {
-                        pairs.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+                        pairs.sort_by(|a, b| {
+                            a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal)
+                        });
                     }
 
                     if !sorted {
@@ -4190,10 +4237,7 @@ pub fn tensor_pool2d(
 
                             for ih in h_start..h_end {
                                 for iw in w_start..w_end {
-                                    let src_idx = batch * c * h * w
-                                        + channel * h * w
-                                        + ih * w
-                                        + iw;
+                                    let src_idx = batch * c * h * w + channel * h * w + ih * w + iw;
                                     let val = *src_ptr.add(src_idx);
 
                                     pool_val = match op {
@@ -4239,10 +4283,7 @@ pub fn tensor_pool2d(
 
                             for ih in h_start..h_end {
                                 for iw in w_start..w_end {
-                                    let src_idx = batch * c * h * w
-                                        + channel * h * w
-                                        + ih * w
-                                        + iw;
+                                    let src_idx = batch * c * h * w + channel * h * w + ih * w + iw;
                                     let val = *src_ptr.add(src_idx);
 
                                     pool_val = match op {
@@ -4477,23 +4518,19 @@ pub fn tensor_conv2d(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub enum CompareOp {
-    Eq,  // ==
-    Ne,  // !=
-    Lt,  // <
-    Le,  // <=
-    Gt,  // >
-    Ge,  // >=
+    Eq, // ==
+    Ne, // !=
+    Lt, // <
+    Le, // <=
+    Gt, // >
+    Ge, // >=
 }
 
 /// Element-wise comparison.
 ///
 
 /// Returns a boolean tensor with the comparison result.
-pub fn tensor_cmp(
-    a: &TensorHandle,
-    b: &TensorHandle,
-    op: CompareOp,
-) -> Option<TensorHandle> {
+pub fn tensor_cmp(a: &TensorHandle, b: &TensorHandle, op: CompareOp) -> Option<TensorHandle> {
     // Check broadcastable shapes
     let a_shape = &a.shape[..a.ndim as usize];
     let b_shape = &b.shape[..b.ndim as usize];
@@ -4781,8 +4818,7 @@ pub fn tensor_index_select(
 
                     for inner in 0..inner_size {
                         let src_idx = outer * axis_size * inner_size + idx * inner_size + inner;
-                        let dst_idx =
-                            outer * num_indices * inner_size + out_i * inner_size + inner;
+                        let dst_idx = outer * num_indices * inner_size + out_i * inner_size + inner;
                         *dst_ptr.add(dst_idx) = *src_ptr.add(src_idx);
                     }
                 }
@@ -4807,8 +4843,7 @@ pub fn tensor_index_select(
 
                     for inner in 0..inner_size {
                         let src_idx = outer * axis_size * inner_size + idx * inner_size + inner;
-                        let dst_idx =
-                            outer * num_indices * inner_size + out_i * inner_size + inner;
+                        let dst_idx = outer * num_indices * inner_size + out_i * inner_size + inner;
                         *dst_ptr.add(dst_idx) = *src_ptr.add(src_idx);
                     }
                 }
@@ -4858,7 +4893,8 @@ pub fn tensor_scatter(
             for outer in 0..outer_size {
                 for src_i in 0..src_axis_size {
                     for inner in 0..inner_size {
-                        let idx_flat = outer * src_axis_size * inner_size + src_i * inner_size + inner;
+                        let idx_flat =
+                            outer * src_axis_size * inner_size + src_i * inner_size + inner;
                         let idx = if indices.dtype == DType::I64 {
                             *(idx_ptr as *const i64).add(idx_flat) as usize
                         } else {
@@ -4884,7 +4920,8 @@ pub fn tensor_scatter(
             for outer in 0..outer_size {
                 for src_i in 0..src_axis_size {
                     for inner in 0..inner_size {
-                        let idx_flat = outer * src_axis_size * inner_size + src_i * inner_size + inner;
+                        let idx_flat =
+                            outer * src_axis_size * inner_size + src_i * inner_size + inner;
                         let idx = if indices.dtype == DType::I64 {
                             *(idx_ptr as *const i64).add(idx_flat) as usize
                         } else {
@@ -5036,7 +5073,10 @@ pub fn tensor_permute(src: &TensorHandle, axes: &[usize]) -> Option<TensorHandle
                 src_offset += coord * new_stride;
             }
 
-            debug_assert!(src_offset >= 0, "Negative source offset indicates invalid permutation");
+            debug_assert!(
+                src_offset >= 0,
+                "Negative source offset indicates invalid permutation"
+            );
             let dst_offset = flat_idx;
 
             // Copy element
@@ -5318,7 +5358,11 @@ pub fn tensor_unsqueeze(src: &TensorHandle, dim: i32) -> Option<TensorHandle> {
 
 /// Returns a vector of tensors. Each tensor has the same dtype as input.
 /// If the tensor cannot be evenly split, the last chunk will be smaller.
-pub fn tensor_split(src: &TensorHandle, num_or_sizes: &[usize], axis: usize) -> Option<Vec<TensorHandle>> {
+pub fn tensor_split(
+    src: &TensorHandle,
+    num_or_sizes: &[usize],
+    axis: usize,
+) -> Option<Vec<TensorHandle>> {
     if axis >= src.ndim as usize {
         return None;
     }
@@ -5378,7 +5422,11 @@ pub fn tensor_split(src: &TensorHandle, num_or_sizes: &[usize], axis: usize) -> 
 
 /// Returns a tuple of two tensors: (left, right)
 /// where left has indices [0, pos) and right has [pos, size)
-pub fn tensor_split_at(src: &TensorHandle, pos: usize, axis: usize) -> Option<(TensorHandle, TensorHandle)> {
+pub fn tensor_split_at(
+    src: &TensorHandle,
+    pos: usize,
+    axis: usize,
+) -> Option<(TensorHandle, TensorHandle)> {
     if axis >= src.ndim as usize {
         return None;
     }
@@ -7120,12 +7168,13 @@ mod tests {
         let result = tensor_conv2d(
             &input,
             &kernel,
-            None,            // no bias
-            (1, 1),          // stride
-            (0, 0),          // padding
-            (1, 1),          // dilation
-            1,               // groups
-        ).unwrap();
+            None,   // no bias
+            (1, 1), // stride
+            (0, 0), // padding
+            (1, 1), // dilation
+            1,      // groups
+        )
+        .unwrap();
 
         assert_eq!(result.shape[0], 1);
         assert_eq!(result.shape[1], 1);
@@ -7143,11 +7192,12 @@ mod tests {
             &input,
             &kernel,
             None,
-            (1, 1),          // stride
-            (1, 1),          // padding
-            (1, 1),          // dilation
+            (1, 1), // stride
+            (1, 1), // padding
+            (1, 1), // dilation
             1,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(result.shape[2], 4); // (4 + 2*1 - 3) / 1 + 1 = 4
         assert_eq!(result.shape[3], 4);
@@ -7254,15 +7304,7 @@ mod tests {
         let input = TensorHandle::full(&[1, 3, 8, 8], DType::F32, 1.0).unwrap();
         let kernel = TensorHandle::full(&[16, 3, 3, 3], DType::F32, 0.1).unwrap();
 
-        let result = tensor_conv2d(
-            &input,
-            &kernel,
-            None,
-            (1, 1),
-            (0, 0),
-            (1, 1),
-            1,
-        ).unwrap();
+        let result = tensor_conv2d(&input, &kernel, None, (1, 1), (0, 0), (1, 1), 1).unwrap();
 
         assert_eq!(result.shape[0], 1);
         assert_eq!(result.shape[1], 16);

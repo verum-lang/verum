@@ -25,9 +25,9 @@
 //! vbc_writer.write_type_metadata(&metadata)?;
 //! ```
 
-use verum_common::{List, Map, Maybe, Text};
 use crate::context::TypeScheme;
 use crate::ty::{Type, TypeVar};
+use verum_common::{List, Map, Maybe, Text};
 
 /// Exported type definition
 #[derive(Debug, Clone)]
@@ -65,24 +65,16 @@ pub struct TypeParam {
 #[derive(Debug, Clone)]
 pub enum TypeDefinition {
     /// Record type (struct-like)
-    Record {
-        fields: List<ExportedField>,
-    },
+    Record { fields: List<ExportedField> },
 
     /// Variant type (enum-like)
-    Variant {
-        variants: List<ExportedVariant>,
-    },
+    Variant { variants: List<ExportedVariant> },
 
     /// Type alias
-    Alias {
-        target: Type,
-    },
+    Alias { target: Type },
 
     /// Newtype wrapper
-    Newtype {
-        inner: Type,
-    },
+    Newtype { inner: Type },
 
     /// Protocol definition
     Protocol {
@@ -265,9 +257,12 @@ impl<'a> TypeExporter<'a> {
                 let for_type = self.ast_type_to_type(ty);
                 (for_type, Maybe::None)
             }
-            ImplKind::Protocol { protocol, for_type, .. } => {
+            ImplKind::Protocol {
+                protocol, for_type, ..
+            } => {
                 let for_type_converted = self.ast_type_to_type(for_type);
-                let protocol_name = protocol.as_ident()
+                let protocol_name = protocol
+                    .as_ident()
                     .map(|id| id.name.clone())
                     .unwrap_or_else(|| Text::from("?"));
                 (for_type_converted, Maybe::Some(protocol_name))
@@ -292,7 +287,9 @@ impl<'a> TypeExporter<'a> {
         let name = decl.name.name.clone();
         let type_params = self.extract_type_params(&decl.generics);
         let params = self.extract_function_params(&decl.params);
-        let return_type = decl.return_type.as_ref()
+        let return_type = decl
+            .return_type
+            .as_ref()
             .map(|ty| self.ast_type_to_type(ty))
             .unwrap_or(Type::Unit);
 
@@ -307,32 +304,40 @@ impl<'a> TypeExporter<'a> {
     }
 
     fn extract_type_params(&self, generics: &[verum_ast::ty::GenericParam]) -> List<TypeParam> {
-        generics.iter().filter_map(|param| {
-            use verum_ast::ty::GenericParamKind;
-            match &param.kind {
-                GenericParamKind::Type { name, bounds, default } => {
-                    let bounds_list: List<Text> = bounds.iter()
-                        .filter_map(|b| {
-                            use verum_ast::ty::TypeBoundKind;
-                            match &b.kind {
-                                TypeBoundKind::Protocol(path) => {
-                                    path.as_ident().map(|id| id.name.clone())
+        generics
+            .iter()
+            .filter_map(|param| {
+                use verum_ast::ty::GenericParamKind;
+                match &param.kind {
+                    GenericParamKind::Type {
+                        name,
+                        bounds,
+                        default,
+                    } => {
+                        let bounds_list: List<Text> = bounds
+                            .iter()
+                            .filter_map(|b| {
+                                use verum_ast::ty::TypeBoundKind;
+                                match &b.kind {
+                                    TypeBoundKind::Protocol(path) => {
+                                        path.as_ident().map(|id| id.name.clone())
+                                    }
+                                    _ => None,
                                 }
-                                _ => None,
-                            }
-                        })
-                        .collect();
-                    let default_type = default.as_ref().map(|ty| self.ast_type_to_type(ty));
+                            })
+                            .collect();
+                        let default_type = default.as_ref().map(|ty| self.ast_type_to_type(ty));
 
-                    Some(TypeParam {
-                        name: name.name.clone(),
-                        bounds: bounds_list,
-                        default: default_type,
-                    })
+                        Some(TypeParam {
+                            name: name.name.clone(),
+                            bounds: bounds_list,
+                            default: default_type,
+                        })
+                    }
+                    _ => None,
                 }
-                _ => None,
-            }
-        }).collect()
+            })
+            .collect()
     }
 
     fn extract_type_definition(&self, body: &verum_ast::decl::TypeDeclBody) -> TypeDefinition {
@@ -340,147 +345,191 @@ impl<'a> TypeExporter<'a> {
 
         match body {
             TypeDeclBody::Record(fields) => {
-                let exported_fields = fields.iter().map(|f| {
-                    ExportedField {
+                let exported_fields = fields
+                    .iter()
+                    .map(|f| ExportedField {
                         name: f.name.name.clone(),
                         ty: self.ast_type_to_type(&f.ty),
                         is_public: f.visibility.is_public(),
-                    }
-                }).collect();
-                TypeDefinition::Record { fields: exported_fields }
+                    })
+                    .collect();
+                TypeDefinition::Record {
+                    fields: exported_fields,
+                }
             }
 
             TypeDeclBody::Variant(variants) => {
-                let exported_variants = variants.iter().map(|v| {
-                    use verum_ast::decl::VariantData;
-                    let payload = match &v.data {
-                        Maybe::None => VariantPayload::Unit,
-                        Maybe::Some(VariantData::Tuple(types)) => {
-                            let tys = types.iter().map(|t| self.ast_type_to_type(t)).collect();
-                            VariantPayload::Tuple(tys)
+                let exported_variants = variants
+                    .iter()
+                    .map(|v| {
+                        use verum_ast::decl::VariantData;
+                        let payload = match &v.data {
+                            Maybe::None => VariantPayload::Unit,
+                            Maybe::Some(VariantData::Tuple(types)) => {
+                                let tys = types.iter().map(|t| self.ast_type_to_type(t)).collect();
+                                VariantPayload::Tuple(tys)
+                            }
+                            Maybe::Some(VariantData::Record(fields)) => {
+                                let fs = fields
+                                    .iter()
+                                    .map(|f| ExportedField {
+                                        name: f.name.name.clone(),
+                                        ty: self.ast_type_to_type(&f.ty),
+                                        is_public: true,
+                                    })
+                                    .collect();
+                                VariantPayload::Struct(fs)
+                            }
+                        };
+                        ExportedVariant {
+                            name: v.name.name.clone(),
+                            payload,
                         }
-                        Maybe::Some(VariantData::Record(fields)) => {
-                            let fs = fields.iter().map(|f| ExportedField {
-                                name: f.name.name.clone(),
-                                ty: self.ast_type_to_type(&f.ty),
-                                is_public: true,
-                            }).collect();
-                            VariantPayload::Struct(fs)
-                        }
-                    };
-                    ExportedVariant {
-                        name: v.name.name.clone(),
-                        payload,
-                    }
-                }).collect();
-                TypeDefinition::Variant { variants: exported_variants }
+                    })
+                    .collect();
+                TypeDefinition::Variant {
+                    variants: exported_variants,
+                }
             }
 
-            TypeDeclBody::Alias(ty) => {
-                TypeDefinition::Alias { target: self.ast_type_to_type(ty) }
-            }
+            TypeDeclBody::Alias(ty) => TypeDefinition::Alias {
+                target: self.ast_type_to_type(ty),
+            },
 
-            TypeDeclBody::Newtype(ty) => {
-                TypeDefinition::Newtype { inner: self.ast_type_to_type(ty) }
-            }
+            TypeDeclBody::Newtype(ty) => TypeDefinition::Newtype {
+                inner: self.ast_type_to_type(ty),
+            },
 
             TypeDeclBody::Protocol(protocol_body) => {
                 use verum_ast::decl::ProtocolItemKind;
 
-                let methods = protocol_body.items.iter().filter_map(|item| {
-                    if let ProtocolItemKind::Function { decl: m, .. } = &item.kind {
-                        Some(ExportedMethod {
-                            name: m.name.name.clone(),
-                            type_params: self.extract_type_params(&m.generics),
-                            params: self.extract_function_params(&m.params),
-                            return_type: m.return_type.as_ref()
-                                .map(|t| self.ast_type_to_type(t))
-                                .unwrap_or(Type::Unit),
-                            is_static: !m.params.first().map(|p| p.is_self()).unwrap_or(false),
-                            is_async: m.is_async,
-                        })
-                    } else {
-                        None
-                    }
-                }).collect();
+                let methods = protocol_body
+                    .items
+                    .iter()
+                    .filter_map(|item| {
+                        if let ProtocolItemKind::Function { decl: m, .. } = &item.kind {
+                            Some(ExportedMethod {
+                                name: m.name.name.clone(),
+                                type_params: self.extract_type_params(&m.generics),
+                                params: self.extract_function_params(&m.params),
+                                return_type: m
+                                    .return_type
+                                    .as_ref()
+                                    .map(|t| self.ast_type_to_type(t))
+                                    .unwrap_or(Type::Unit),
+                                is_static: !m.params.first().map(|p| p.is_self()).unwrap_or(false),
+                                is_async: m.is_async,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
 
-                let associated_types = protocol_body.items.iter().filter_map(|item| {
-                    if let ProtocolItemKind::Type { name, bounds, default_type, .. } = &item.kind {
-                        Some(AssociatedType {
-                            name: name.name.clone(),
-                            bounds: bounds.iter()
-                                .filter_map(|b| b.as_ident().map(|id| id.name.clone()))
-                                .collect(),
-                            default: default_type.as_ref().map(|t| self.ast_type_to_type(t)),
-                        })
-                    } else {
-                        None
-                    }
-                }).collect();
+                let associated_types = protocol_body
+                    .items
+                    .iter()
+                    .filter_map(|item| {
+                        if let ProtocolItemKind::Type {
+                            name,
+                            bounds,
+                            default_type,
+                            ..
+                        } = &item.kind
+                        {
+                            Some(AssociatedType {
+                                name: name.name.clone(),
+                                bounds: bounds
+                                    .iter()
+                                    .filter_map(|b| b.as_ident().map(|id| id.name.clone()))
+                                    .collect(),
+                                default: default_type.as_ref().map(|t| self.ast_type_to_type(t)),
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
 
-                TypeDefinition::Protocol { methods, associated_types }
+                TypeDefinition::Protocol {
+                    methods,
+                    associated_types,
+                }
             }
 
-            TypeDeclBody::Tuple(_) | TypeDeclBody::SigmaTuple(_) => {
-                TypeDefinition::Record { fields: List::new() }
-            }
+            TypeDeclBody::Tuple(_) | TypeDeclBody::SigmaTuple(_) => TypeDefinition::Record {
+                fields: List::new(),
+            },
 
-            TypeDeclBody::Unit => TypeDefinition::Record { fields: List::new() },
+            TypeDeclBody::Unit => TypeDefinition::Record {
+                fields: List::new(),
+            },
 
-            TypeDeclBody::Inductive(_) | TypeDeclBody::Coinductive(_) => {
-                TypeDefinition::Record { fields: List::new() }
-            }
+            TypeDeclBody::Inductive(_) | TypeDeclBody::Coinductive(_) => TypeDefinition::Record {
+                fields: List::new(),
+            },
 
             // T1-T: quotient types export their base carrier's
             // structure — downstream consumers see `Q` as a refined
             // variant of `T`. Full HIT lowering lives in the
             // elaborator (future follow-up).
-            TypeDeclBody::Quotient { .. } => {
-                TypeDefinition::Record { fields: List::new() }
-            }
+            TypeDeclBody::Quotient { .. } => TypeDefinition::Record {
+                fields: List::new(),
+            },
         }
     }
 
     fn extract_impl_methods(&self, decl: &verum_ast::decl::ImplDecl) -> List<ExportedMethod> {
         use verum_ast::decl::ImplItemKind;
 
-        decl.items.iter().filter_map(|item| {
-            if let ImplItemKind::Function(func) = &item.kind {
-                let is_static = !func.params.first().map(|p| p.is_self()).unwrap_or(false);
-                Some(ExportedMethod {
-                    name: func.name.name.clone(),
-                    type_params: self.extract_type_params(&func.generics),
-                    params: self.extract_function_params(&func.params),
-                    return_type: func.return_type.as_ref()
-                        .map(|t| self.ast_type_to_type(t))
-                        .unwrap_or(Type::Unit),
-                    is_static,
-                    is_async: func.is_async,
-                })
-            } else {
-                None
-            }
-        }).collect()
+        decl.items
+            .iter()
+            .filter_map(|item| {
+                if let ImplItemKind::Function(func) = &item.kind {
+                    let is_static = !func.params.first().map(|p| p.is_self()).unwrap_or(false);
+                    Some(ExportedMethod {
+                        name: func.name.name.clone(),
+                        type_params: self.extract_type_params(&func.generics),
+                        params: self.extract_function_params(&func.params),
+                        return_type: func
+                            .return_type
+                            .as_ref()
+                            .map(|t| self.ast_type_to_type(t))
+                            .unwrap_or(Type::Unit),
+                        is_static,
+                        is_async: func.is_async,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
-    fn extract_function_params(&self, params: &[verum_ast::decl::FunctionParam]) -> List<MethodParam> {
+    fn extract_function_params(
+        &self,
+        params: &[verum_ast::decl::FunctionParam],
+    ) -> List<MethodParam> {
         use verum_ast::decl::FunctionParamKind;
 
-        params.iter().filter_map(|p| {
-            match &p.kind {
-                FunctionParamKind::Regular { pattern, ty, .. } => {
-                    let name = match &pattern.kind {
-                        verum_ast::PatternKind::Ident { name, .. } => name.name.clone(),
-                        _ => Text::from("_"),
-                    };
-                    Some(MethodParam {
-                        name,
-                        ty: self.ast_type_to_type(ty),
-                    })
+        params
+            .iter()
+            .filter_map(|p| {
+                match &p.kind {
+                    FunctionParamKind::Regular { pattern, ty, .. } => {
+                        let name = match &pattern.kind {
+                            verum_ast::PatternKind::Ident { name, .. } => name.name.clone(),
+                            _ => Text::from("_"),
+                        };
+                        Some(MethodParam {
+                            name,
+                            ty: self.ast_type_to_type(ty),
+                        })
+                    }
+                    _ => None, // Skip self parameters
                 }
-                _ => None, // Skip self parameters
-            }
-        }).collect()
+            })
+            .collect()
     }
 
     /// Extract documentation text from a list of attributes.
@@ -509,7 +558,14 @@ impl<'a> TypeExporter<'a> {
         if doc_parts.is_empty() {
             Maybe::None
         } else {
-            Maybe::Some(doc_parts.iter().map(|t| t.as_str()).collect::<Vec<_>>().join("\n").into())
+            Maybe::Some(
+                doc_parts
+                    .iter()
+                    .map(|t| t.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n")
+                    .into(),
+            )
         }
     }
 
@@ -525,52 +581,55 @@ impl<'a> TypeExporter<'a> {
             TypeKind::Text => Type::Text,
             TypeKind::Never => Type::Never,
 
-            TypeKind::Path(path) => {
-                Type::Named {
-                    path: path.clone(),
-                    args: List::new(),
-                }
-            }
+            TypeKind::Path(path) => Type::Named {
+                path: path.clone(),
+                args: List::new(),
+            },
 
             TypeKind::Generic { base, args } => {
                 let base_type = self.ast_type_to_type(base);
-                let type_args: List<Type> = args.iter().filter_map(|arg| {
-                    use verum_ast::ty::GenericArg;
-                    match arg {
-                        GenericArg::Type(ty) => Some(self.ast_type_to_type(ty)),
-                        _ => None,
-                    }
-                }).collect();
+                let type_args: List<Type> = args
+                    .iter()
+                    .filter_map(|arg| {
+                        use verum_ast::ty::GenericArg;
+                        match arg {
+                            GenericArg::Type(ty) => Some(self.ast_type_to_type(ty)),
+                            _ => None,
+                        }
+                    })
+                    .collect();
 
                 match base_type {
-                    Type::Named { path, .. } => Type::Named { path, args: type_args },
+                    Type::Named { path, .. } => Type::Named {
+                        path,
+                        args: type_args,
+                    },
                     _ => base_type,
                 }
             }
 
-            TypeKind::Reference { inner, mutable, .. } => {
-                Type::Reference {
-                    inner: Box::new(self.ast_type_to_type(inner)),
-                    mutable: *mutable,
-                }
-            }
+            TypeKind::Reference { inner, mutable, .. } => Type::Reference {
+                inner: Box::new(self.ast_type_to_type(inner)),
+                mutable: *mutable,
+            },
 
             TypeKind::Tuple(types) => {
                 let tys = types.iter().map(|t| self.ast_type_to_type(t)).collect();
                 Type::Tuple(tys)
             }
 
-            TypeKind::Array { element, .. } => {
-                Type::Array {
-                    element: Box::new(self.ast_type_to_type(element)),
-                    size: Maybe::None,
-                }
-            }
+            TypeKind::Array { element, .. } => Type::Array {
+                element: Box::new(self.ast_type_to_type(element)),
+                size: Maybe::None,
+            },
 
-            TypeKind::Function { params, return_type, .. } => {
-                let param_types: List<Type> = params.iter()
-                    .map(|p| self.ast_type_to_type(p))
-                    .collect();
+            TypeKind::Function {
+                params,
+                return_type,
+                ..
+            } => {
+                let param_types: List<Type> =
+                    params.iter().map(|p| self.ast_type_to_type(p)).collect();
                 let ret_type = self.ast_type_to_type(return_type);
                 Type::function(param_types, ret_type)
             }
@@ -699,7 +758,13 @@ impl BinaryWriter {
                 }
             }
 
-            Type::Function { params, return_type, contexts: _, type_params: _, properties: _ } => {
+            Type::Function {
+                params,
+                return_type,
+                contexts: _,
+                type_params: _,
+                properties: _,
+            } => {
                 self.write_u8(TAG_FUNCTION);
                 self.write_u32(params.len() as u32);
                 for p in params.iter() {
@@ -952,7 +1017,10 @@ impl BinaryWriter {
                     self.write_u8(3);
                     self.write_type(inner);
                 }
-                TypeDefinition::Protocol { methods, associated_types } => {
+                TypeDefinition::Protocol {
+                    methods,
+                    associated_types,
+                } => {
                     self.write_u8(4);
                     self.write_u32(methods.len() as u32);
                     for m in methods.iter() {
@@ -1101,7 +1169,10 @@ impl<'a> BinaryReader<'a> {
                     args.push(self.read_type()?);
                 }
                 // Reconstruct Path from string
-                let path = verum_ast::ty::Path::single(verum_ast::Ident::new(path_str, verum_ast::span::Span::dummy()));
+                let path = verum_ast::ty::Path::single(verum_ast::Ident::new(
+                    path_str,
+                    verum_ast::span::Span::dummy(),
+                ));
                 Some(Type::Named { path, args })
             }
 
@@ -1148,48 +1219,71 @@ impl<'a> BinaryReader<'a> {
                 } else {
                     None
                 };
-                Some(Type::Array { element: Box::new(element), size })
+                Some(Type::Array {
+                    element: Box::new(element),
+                    size,
+                })
             }
 
             TAG_SLICE => {
                 let element = self.read_type()?;
-                Some(Type::Slice { element: Box::new(element) })
+                Some(Type::Slice {
+                    element: Box::new(element),
+                })
             }
 
             TAG_REFERENCE => {
                 let mutable = self.read_bool()?;
                 let inner = self.read_type()?;
-                Some(Type::Reference { mutable, inner: Box::new(inner) })
+                Some(Type::Reference {
+                    mutable,
+                    inner: Box::new(inner),
+                })
             }
 
             TAG_CHECKED_REF => {
                 let mutable = self.read_bool()?;
                 let inner = self.read_type()?;
-                Some(Type::CheckedReference { mutable, inner: Box::new(inner) })
+                Some(Type::CheckedReference {
+                    mutable,
+                    inner: Box::new(inner),
+                })
             }
 
             TAG_UNSAFE_REF => {
                 let mutable = self.read_bool()?;
                 let inner = self.read_type()?;
-                Some(Type::UnsafeReference { mutable, inner: Box::new(inner) })
+                Some(Type::UnsafeReference {
+                    mutable,
+                    inner: Box::new(inner),
+                })
             }
 
             TAG_OWNERSHIP => {
                 let mutable = self.read_bool()?;
                 let inner = self.read_type()?;
-                Some(Type::Ownership { mutable, inner: Box::new(inner) })
+                Some(Type::Ownership {
+                    mutable,
+                    inner: Box::new(inner),
+                })
             }
 
             TAG_POINTER => {
                 let mutable = self.read_bool()?;
                 let inner = self.read_type()?;
-                Some(Type::Pointer { mutable, inner: Box::new(inner) })
+                Some(Type::Pointer {
+                    mutable,
+                    inner: Box::new(inner),
+                })
             }
 
             TAG_VOLATILE_PTR => {
                 let mutable = self.read_bool()?;
                 let inner = self.read_type()?;
-                Some(Type::VolatilePointer { mutable, inner: Box::new(inner) })
+                Some(Type::VolatilePointer {
+                    mutable,
+                    inner: Box::new(inner),
+                })
             }
 
             TAG_RECORD => {
@@ -1254,7 +1348,10 @@ impl<'a> BinaryReader<'a> {
                     vars.push(TypeVar::new(self.read_u32()? as usize));
                 }
                 let body = self.read_type()?;
-                Some(Type::Forall { vars, body: Box::new(body) })
+                Some(Type::Forall {
+                    vars,
+                    body: Box::new(body),
+                })
             }
 
             TAG_META => {
@@ -1277,7 +1374,10 @@ impl<'a> BinaryReader<'a> {
             TAG_EXISTS => {
                 let var = TypeVar::new(self.read_u32()? as usize);
                 let body = self.read_type()?;
-                Some(Type::Exists { var, body: Box::new(body) })
+                Some(Type::Exists {
+                    var,
+                    body: Box::new(body),
+                })
             }
 
             TAG_OPAQUE => {
@@ -1303,14 +1403,22 @@ impl<'a> BinaryReader<'a> {
         } else {
             Maybe::None
         };
-        Some(TypeParam { name, bounds, default })
+        Some(TypeParam {
+            name,
+            bounds,
+            default,
+        })
     }
 
     fn read_field(&mut self) -> Option<ExportedField> {
         let name = self.read_text()?;
         let ty = self.read_type()?;
         let is_public = self.read_bool()?;
-        Some(ExportedField { name, ty, is_public })
+        Some(ExportedField {
+            name,
+            ty,
+            is_public,
+        })
     }
 
     fn read_variant_payload(&mut self) -> Option<VariantPayload> {
@@ -1349,21 +1457,37 @@ impl<'a> BinaryReader<'a> {
         for _ in 0..param_count {
             let pname = self.read_text()?;
             let pty = self.read_type()?;
-            params.push(MethodParam { name: pname, ty: pty });
+            params.push(MethodParam {
+                name: pname,
+                ty: pty,
+            });
         }
         let return_type = self.read_type()?;
         let is_static = self.read_bool()?;
         let is_async = self.read_bool()?;
-        Some(ExportedMethod { name, type_params, params, return_type, is_static, is_async })
+        Some(ExportedMethod {
+            name,
+            type_params,
+            params,
+            return_type,
+            is_static,
+            is_async,
+        })
     }
 
     fn read_exports(&mut self) -> Option<ModuleExports> {
         // Check magic
-        if self.remaining() < 5 { return None; }
-        if &self.data[self.pos..self.pos + 4] != VTYP_MAGIC { return None; }
+        if self.remaining() < 5 {
+            return None;
+        }
+        if &self.data[self.pos..self.pos + 4] != VTYP_MAGIC {
+            return None;
+        }
         self.pos += 4;
         let version = self.read_u8()?;
-        if version != VTYP_VERSION { return None; }
+        if version != VTYP_VERSION {
+            return None;
+        }
 
         let path = self.read_text()?;
 
@@ -1393,7 +1517,10 @@ impl<'a> BinaryReader<'a> {
                     for _ in 0..vcount {
                         let vname = self.read_text()?;
                         let payload = self.read_variant_payload()?;
-                        variants.push(ExportedVariant { name: vname, payload });
+                        variants.push(ExportedVariant {
+                            name: vname,
+                            payload,
+                        });
                     }
                     TypeDefinition::Variant { variants }
                 }
@@ -1432,14 +1559,27 @@ impl<'a> BinaryReader<'a> {
                             default: atdefault,
                         });
                     }
-                    TypeDefinition::Protocol { methods, associated_types }
+                    TypeDefinition::Protocol {
+                        methods,
+                        associated_types,
+                    }
                 }
                 _ => return None,
             };
             let is_public = self.read_bool()?;
             let has_doc = self.read_bool()?;
-            let doc = if has_doc { Maybe::Some(self.read_text()?) } else { Maybe::None };
-            types.push(ExportedType { name, type_params, definition, is_public, doc });
+            let doc = if has_doc {
+                Maybe::Some(self.read_text()?)
+            } else {
+                Maybe::None
+            };
+            types.push(ExportedType {
+                name,
+                type_params,
+                definition,
+                is_public,
+                doc,
+            });
         }
 
         // Impls
@@ -1448,7 +1588,11 @@ impl<'a> BinaryReader<'a> {
         for _ in 0..impl_count {
             let for_type = self.read_type()?;
             let has_protocol = self.read_bool()?;
-            let protocol = if has_protocol { Maybe::Some(self.read_text()?) } else { Maybe::None };
+            let protocol = if has_protocol {
+                Maybe::Some(self.read_text()?)
+            } else {
+                Maybe::None
+            };
             let tp_count = self.read_u32()? as usize;
             let mut type_params = List::new();
             for _ in 0..tp_count {
@@ -1459,7 +1603,12 @@ impl<'a> BinaryReader<'a> {
             for _ in 0..mcount {
                 methods.push(self.read_method()?);
             }
-            impls.push(ExportedImpl { for_type, protocol, type_params, methods });
+            impls.push(ExportedImpl {
+                for_type,
+                protocol,
+                type_params,
+                methods,
+            });
         }
 
         // Re-exports
@@ -1469,7 +1618,11 @@ impl<'a> BinaryReader<'a> {
             let local_name = self.read_text()?;
             let source_module = self.read_text()?;
             let source_name = self.read_text()?;
-            re_exports.push(ReExport { local_name, source_module, source_name });
+            re_exports.push(ReExport {
+                local_name,
+                source_module,
+                source_name,
+            });
         }
 
         // Functions
@@ -1479,7 +1632,13 @@ impl<'a> BinaryReader<'a> {
             functions.push(self.read_method()?);
         }
 
-        Some(ModuleExports { path, types, impls, re_exports, functions })
+        Some(ModuleExports {
+            path,
+            types,
+            impls,
+            re_exports,
+            functions,
+        })
     }
 }
 
@@ -1538,13 +1697,23 @@ mod tests {
                 type_params: List::new(),
                 definition: TypeDefinition::Record {
                     fields: vec![
-                        ExportedField { name: Text::from("x"), ty: Type::Float, is_public: true },
-                        ExportedField { name: Text::from("y"), ty: Type::Float, is_public: true },
-                    ].into(),
+                        ExportedField {
+                            name: Text::from("x"),
+                            ty: Type::Float,
+                            is_public: true,
+                        },
+                        ExportedField {
+                            name: Text::from("y"),
+                            ty: Type::Float,
+                            is_public: true,
+                        },
+                    ]
+                    .into(),
                 },
                 is_public: true,
                 doc: Maybe::Some(Text::from("A 2D point")),
-            }].into(),
+            }]
+            .into(),
             impls: List::new(),
             re_exports: List::new(),
             functions: List::new(),
@@ -1582,19 +1751,25 @@ mod tests {
                     name: Text::from("T"),
                     bounds: List::new(),
                     default: Maybe::None,
-                }].into(),
+                }]
+                .into(),
                 definition: TypeDefinition::Variant {
                     variants: vec![
-                        ExportedVariant { name: Text::from("None"), payload: VariantPayload::Unit },
+                        ExportedVariant {
+                            name: Text::from("None"),
+                            payload: VariantPayload::Unit,
+                        },
                         ExportedVariant {
                             name: Text::from("Some"),
                             payload: VariantPayload::Tuple(vec![Type::Var(TypeVar::new(0))].into()),
                         },
-                    ].into(),
+                    ]
+                    .into(),
                 },
                 is_public: true,
                 doc: Maybe::None,
-            }].into(),
+            }]
+            .into(),
             impls: List::new(),
             re_exports: List::new(),
             functions: List::new(),
@@ -1630,13 +1805,21 @@ mod tests {
                 name: Text::from("add"),
                 type_params: List::new(),
                 params: vec![
-                    MethodParam { name: Text::from("a"), ty: Type::Int },
-                    MethodParam { name: Text::from("b"), ty: Type::Int },
-                ].into(),
+                    MethodParam {
+                        name: Text::from("a"),
+                        ty: Type::Int,
+                    },
+                    MethodParam {
+                        name: Text::from("b"),
+                        ty: Type::Int,
+                    },
+                ]
+                .into(),
                 return_type: Type::Int,
                 is_static: true,
                 is_async: false,
-            }].into(),
+            }]
+            .into(),
         };
         let data = serialize_module_exports(&exports);
         let deserialized = deserialize_module_exports(&data);
@@ -1658,7 +1841,10 @@ mod tests {
             types: List::new(),
             impls: vec![ExportedImpl {
                 for_type: Type::Named {
-                    path: verum_ast::ty::Path::single(verum_ast::Ident::new("Point", verum_ast::span::Span::dummy())),
+                    path: verum_ast::ty::Path::single(verum_ast::Ident::new(
+                        "Point",
+                        verum_ast::span::Span::dummy(),
+                    )),
                     args: List::new(),
                 },
                 protocol: Maybe::Some(Text::from("Display")),
@@ -1670,8 +1856,10 @@ mod tests {
                     return_type: Type::Unit,
                     is_static: false,
                     is_async: false,
-                }].into(),
-            }].into(),
+                }]
+                .into(),
+            }]
+            .into(),
             re_exports: List::new(),
             functions: List::new(),
         };

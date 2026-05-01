@@ -357,8 +357,8 @@ pub fn tcp_peer_addr(fd: i64) -> Option<(u8, String, i64)> {
             // the canonical hex representation; std::net::Ipv6Addr's
             // Display gives RFC 5952 with `::` compression.
             let octets: [u8; 16] = [
-                sa[8], sa[9], sa[10], sa[11], sa[12], sa[13], sa[14], sa[15],
-                sa[16], sa[17], sa[18], sa[19], sa[20], sa[21], sa[22], sa[23],
+                sa[8], sa[9], sa[10], sa[11], sa[12], sa[13], sa[14], sa[15], sa[16], sa[17],
+                sa[18], sa[19], sa[20], sa[21], sa[22], sa[23],
             ];
             let v6 = std::net::Ipv6Addr::from(octets);
             return Some((6, v6.to_string(), port));
@@ -391,7 +391,8 @@ pub fn tcp_accept(listen_fd: i64) -> i64 {
         // Synthetic-fd path (legacy `__tcp_listen_raw`).
         let result = listener.accept();
         REGISTRY.with(|r| {
-            r.borrow_mut().insert(listen_fd, NetResource::Listener(listener));
+            r.borrow_mut()
+                .insert(listen_fd, NetResource::Listener(listener));
         });
         return match result {
             Ok((stream, _peer)) => register(NetResource::Stream(stream)),
@@ -464,12 +465,10 @@ pub fn tcp_send(fd: i64, data: &[u8]) -> i64 {
     let registry_result: Option<i64> = REGISTRY.with(|r| {
         let mut map = r.borrow_mut();
         match map.get_mut(&fd) {
-            Some(NetResource::Stream(s)) => {
-                Some(match s.write_all(data) {
-                    Ok(()) => data.len() as i64,
-                    Err(_) => -1,
-                })
-            }
+            Some(NetResource::Stream(s)) => Some(match s.write_all(data) {
+                Ok(()) => data.len() as i64,
+                Err(_) => -1,
+            }),
             _ => None,
         }
     });
@@ -604,12 +603,10 @@ pub fn udp_send(fd: i64, data: &[u8], host: &str, port: i64) -> i64 {
     REGISTRY.with(|r| {
         let map = r.borrow();
         match map.get(&fd) {
-            Some(NetResource::Udp(s)) => {
-                match s.send_to(data, (host, port as u16)) {
-                    Ok(n) => n as i64,
-                    Err(_) => -1,
-                }
-            }
+            Some(NetResource::Udp(s)) => match s.send_to(data, (host, port as u16)) {
+                Ok(n) => n as i64,
+                Err(_) => -1,
+            },
             _ => -1,
         }
     })
@@ -714,13 +711,19 @@ mod tests {
     #[test]
     fn tcp_listen_v2_invalid_port_returns_einval() {
         assert_eq!(tcp_listen_v2("0.0.0.0", -1, 128, 0), -(libc::EINVAL as i64));
-        assert_eq!(tcp_listen_v2("0.0.0.0", 70_000, 128, 0), -(libc::EINVAL as i64));
+        assert_eq!(
+            tcp_listen_v2("0.0.0.0", 70_000, 128, 0),
+            -(libc::EINVAL as i64)
+        );
     }
 
     #[test]
     fn tcp_listen_v2_invalid_backlog_returns_einval() {
         assert_eq!(tcp_listen_v2("0.0.0.0", 0, -1, 0), -(libc::EINVAL as i64));
-        assert_eq!(tcp_listen_v2("0.0.0.0", 0, 70_000, 0), -(libc::EINVAL as i64));
+        assert_eq!(
+            tcp_listen_v2("0.0.0.0", 0, 70_000, 0),
+            -(libc::EINVAL as i64)
+        );
     }
 
     #[test]
@@ -763,15 +766,15 @@ mod tests {
 // is fully usable end-to-end.
 // ============================================================================
 
-use crate::interpreter::permission::{PermissionDecision, PermissionScope};
-use crate::interpreter::state::InterpreterState;
-use crate::value::Value;
 use super::super::super::error::InterpreterResult;
 use super::heap_helpers::{
     alloc_record_n_fields, extract_byte_slice, extract_text_arg, is_record_typed_as,
     read_buffer_capacity, wrap_in_variant, write_into_byte_slice,
 };
 use super::string_helpers::alloc_string_value;
+use crate::interpreter::permission::{PermissionDecision, PermissionScope};
+use crate::interpreter::state::InterpreterState;
+use crate::value::Value;
 
 pub(in super::super) fn try_intercept_net_runtime(
     state: &mut InterpreterState,
@@ -849,7 +852,10 @@ fn intercept_connect_text(
     let port_split = addr_text.rsplit_once(':');
     let (host, port) = match port_split {
         Some((h, p)) => match p.parse::<u16>() {
-            Ok(n) => (h.trim_matches(|c| c == '[' || c == ']').to_string(), n as i64),
+            Ok(n) => (
+                h.trim_matches(|c| c == '[' || c == ']').to_string(),
+                n as i64,
+            ),
             Err(_) => return Ok(None),
         },
         None => return Ok(None),
@@ -918,7 +924,10 @@ fn intercept_listener_bind_text(
             state,
             "AddrInUse",
             6,
-            &format!("listener.bind: tcp_listen_v2({}:{}) failed errno={}", host, port, -fd),
+            &format!(
+                "listener.bind: tcp_listen_v2({}:{}) failed errno={}",
+                host, port, -fd
+            ),
         )?));
     }
     // Resolve the actually-bound port (handles port=0 / kernel-
@@ -930,9 +939,8 @@ fn intercept_listener_bind_text(
     let fd_value = Value::from_i64(fd);
     // local_addr: try IPv6 first (covers "::", "::1") then IPv4.
     let local_addr = if host.contains(':') {
-        build_peer_addr_v6(state, &host, bound_port).unwrap_or_else(|| {
-            build_peer_addr(state, &host, bound_port).unwrap_or(Value::unit())
-        })
+        build_peer_addr_v6(state, &host, bound_port)
+            .unwrap_or_else(|| build_peer_addr(state, &host, bound_port).unwrap_or(Value::unit()))
     } else {
         build_peer_addr(state, &host, bound_port).unwrap_or(Value::unit())
     };
@@ -984,11 +992,8 @@ fn intercept_udp_bind_text(
     // peer_addr: bind without connect leaves no peer — Maybe.None
     // (tag 0, empty payload).
     let peer_addr_none = wrap_in_variant(state, "Maybe", 0, &[])?;
-    let socket = alloc_record_n_fields(
-        state,
-        "UdpSocket",
-        &[fd_value, local_addr, peer_addr_none],
-    )?;
+    let socket =
+        alloc_record_n_fields(state, "UdpSocket", &[fd_value, local_addr, peer_addr_none])?;
     Ok(Some(wrap_in_variant(state, "Result", 0, &[socket])?))
 }
 
@@ -996,11 +1001,7 @@ fn intercept_udp_bind_text(
 /// construction from a literal `host:port` pair. Returns None when
 /// `host` doesn't parse as a four-octet IPv4 literal — caller falls
 /// back to Unit. IPv6 round-tripping is a V1 follow-up.
-fn build_peer_addr(
-    state: &mut InterpreterState,
-    host: &str,
-    port: i64,
-) -> Option<Value> {
+fn build_peer_addr(state: &mut InterpreterState, host: &str, port: i64) -> Option<Value> {
     let ipv4: std::net::Ipv4Addr = host.parse().ok()?;
     let octets = ipv4.octets();
     let octets_record = alloc_record_n_fields(
@@ -1029,11 +1030,7 @@ fn build_peer_addr(
 /// canonical form (`::1`, `2001:db8::1`, `[::]`). Returns None
 /// when the literal doesn't parse — caller falls back to Unit.
 /// Used by VBC-NET-4 for IPv6 peer_addr round-trip.
-fn build_peer_addr_v6(
-    state: &mut InterpreterState,
-    host: &str,
-    port: i64,
-) -> Option<Value> {
+fn build_peer_addr_v6(state: &mut InterpreterState, host: &str, port: i64) -> Option<Value> {
     let host = host.trim_matches(|c| c == '[' || c == ']');
     let ipv6: std::net::Ipv6Addr = host.parse().ok()?;
     let segs = ipv6.segments();
@@ -1088,8 +1085,7 @@ fn build_io_err(
     let kind_variant = wrap_in_variant(state, "IoErrorKind", kind_tag, &[])?;
     let msg_text = alloc_string_value(state, message)?;
     let msg_some = wrap_in_variant(state, "Maybe", 1, &[msg_text])?;
-    let stream_err =
-        alloc_record_n_fields(state, "StreamError", &[kind_variant, msg_some])?;
+    let stream_err = alloc_record_n_fields(state, "StreamError", &[kind_variant, msg_some])?;
     wrap_in_variant(state, "Result", 1, &[stream_err])
 }
 
@@ -1135,10 +1131,10 @@ pub(in super::super) fn try_intercept_tcp_method(
     // UdpSocket / TcpListener method dispatch — same shape as
     // TcpStream (record with fd at field 0). Detect via
     // method_name OR receiver TypeId.
-    let is_udp = method_name.contains("UdpSocket.")
-        || is_record_typed_as(state, receiver, "UdpSocket");
-    let is_listener = method_name.contains("TcpListener.")
-        || is_record_typed_as(state, receiver, "TcpListener");
+    let is_udp =
+        method_name.contains("UdpSocket.") || is_record_typed_as(state, receiver, "UdpSocket");
+    let is_listener =
+        method_name.contains("TcpListener.") || is_record_typed_as(state, receiver, "TcpListener");
     if std::env::var("VERUM_TRACE_TCP").is_ok() {
         eprintln!(
             "[trace-net-method] method={:?} bare={:?} args={} is_udp={} is_listener={}",
@@ -1174,9 +1170,7 @@ pub(in super::super) fn try_intercept_tcp_method(
     if is_listener {
         return match bare_method {
             // `listener.accept() -> Result<(TcpStream, SocketAddr), IoError>`
-            "accept" if arg_count == 0 => {
-                intercept_listener_accept(state, fd)
-            }
+            "accept" if arg_count == 0 => intercept_listener_accept(state, fd),
             "local_port" if arg_count == 0 => {
                 let p = tcp_local_port(fd);
                 if p < 0 {
@@ -1293,7 +1287,12 @@ fn intercept_udp_send_to(
             &format!("send_to: udp_send to {}:{} failed", host, port),
         )?));
     }
-    Ok(Some(wrap_in_variant(state, "Result", 0, &[Value::from_i64(n)])?))
+    Ok(Some(wrap_in_variant(
+        state,
+        "Result",
+        0,
+        &[Value::from_i64(n)],
+    )?))
 }
 
 /// `socket.recv_from(&mut [Byte]) -> Result<(Int, SocketAddr), IoError>`
@@ -1361,9 +1360,8 @@ fn read_socket_addr_value(v: Value) -> Option<(String, i64)> {
         return None;
     }
     let tag = unsafe { *(ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *const u32) };
-    let payload = unsafe {
-        *(ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE + 8) as *const Value)
-    };
+    let payload =
+        unsafe { *(ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE + 8) as *const Value) };
     if tag == 0 {
         // V4: SocketAddrV4 { ip: Ipv4Addr { (a,b,c,d) }, port: Int }
         if !payload.is_ptr() || payload.is_nil() {
@@ -1373,9 +1371,8 @@ fn read_socket_addr_value(v: Value) -> Option<(String, i64)> {
         if v4_ptr.is_null() {
             return None;
         }
-        let v4_base = unsafe {
-            v4_ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *const Value
-        };
+        let v4_base =
+            unsafe { v4_ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *const Value };
         let ip_v = unsafe { *v4_base };
         let port_v = unsafe { *v4_base.add(1) };
         if !ip_v.is_ptr() || ip_v.is_nil() {
@@ -1385,9 +1382,8 @@ fn read_socket_addr_value(v: Value) -> Option<(String, i64)> {
         if ip_ptr.is_null() {
             return None;
         }
-        let ip_base = unsafe {
-            ip_ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *const Value
-        };
+        let ip_base =
+            unsafe { ip_ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *const Value };
         let a = unsafe { *ip_base }.as_i64() as u8;
         let b = unsafe { *ip_base.add(1) }.as_i64() as u8;
         let c = unsafe { *ip_base.add(2) }.as_i64() as u8;
@@ -1427,9 +1423,7 @@ fn read_tcpstream_fd(v: Value) -> Option<i64> {
         return None;
     }
     // Field 0 of TcpStream is the FileDesc.
-    let fd_v = unsafe {
-        *(ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *const Value)
-    };
+    let fd_v = unsafe { *(ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *const Value) };
     // Transparent-newtype path: FileDesc value IS the Int.
     if fd_v.is_int() {
         return Some(fd_v.as_i64());
@@ -1468,7 +1462,12 @@ fn intercept_tcp_write(
             &format!("tcp.write: send on fd {} failed", fd),
         )?));
     }
-    Ok(Some(wrap_in_variant(state, "Result", 0, &[Value::from_i64(n)])?))
+    Ok(Some(wrap_in_variant(
+        state,
+        "Result",
+        0,
+        &[Value::from_i64(n)],
+    )?))
 }
 
 fn intercept_tcp_read(
@@ -1485,7 +1484,9 @@ fn intercept_tcp_read(
     // and write them into the slice's backing storage. For now, we
     // recv into a Rust Vec and write back via the slice's FatRef
     // pointer — this matches the canonical `read` semantics.
-    let buf_v = state.registers.get(caller_base, crate::instruction::Reg(args_start_reg));
+    let buf_v = state
+        .registers
+        .get(caller_base, crate::instruction::Reg(args_start_reg));
     let unwrapped = if super::cbgr_helpers::is_cbgr_ref(&buf_v) {
         let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(buf_v.as_i64());
         state.registers.get_absolute(abs_index)
@@ -1521,6 +1522,10 @@ fn intercept_tcp_read(
             &format!("tcp.read: recv on fd {} failed", fd),
         )?));
     }
-    Ok(Some(wrap_in_variant(state, "Result", 0, &[Value::from_i64(n)])?))
+    Ok(Some(wrap_in_variant(
+        state,
+        "Result",
+        0,
+        &[Value::from_i64(n)],
+    )?))
 }
-

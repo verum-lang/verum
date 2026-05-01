@@ -471,8 +471,8 @@ impl Default for CompilerOptions {
             debug_assertions_override: None,
             lint_config: LintConfig::default(),
             // Gradual verification defaults
-            enable_bounds_elimination: true,  // Enable by default for performance
-            enable_cbgr_elimination: true,    // Enable by default for memory safety
+            enable_bounds_elimination: true, // Enable by default for performance
+            enable_cbgr_elimination: true,   // Enable by default for memory safety
             emit_proof_certificate: false,
             proof_certificate_format: None,
             proof_certificate_path: None,
@@ -593,7 +593,10 @@ impl CompilerOptions {
     }
 
     /// Builder: Add multiple cfg features
-    pub fn with_cfg_features(mut self, features: impl IntoIterator<Item = impl Into<Text>>) -> Self {
+    pub fn with_cfg_features(
+        mut self,
+        features: impl IntoIterator<Item = impl Into<Text>>,
+    ) -> Self {
         for f in features {
             self.cfg_features.push(f.into());
         }
@@ -649,7 +652,9 @@ impl CompilerOptions {
 
     /// Check if CBGR static-only mode is enabled
     pub fn is_cbgr_static_only(&self) -> bool {
-        self.cfg_features.iter().any(|f| f.as_str() == "cbgr_static_only")
+        self.cfg_features
+            .iter()
+            .any(|f| f.as_str() == "cbgr_static_only")
     }
 
     /// Check if GPU is disabled
@@ -663,7 +668,10 @@ impl CompilerOptions {
 
         let embedded = self.is_embedded();
         TargetProfile {
-            name: self.target_triple.clone().unwrap_or_else(|| "default".into()),
+            name: self
+                .target_triple
+                .clone()
+                .unwrap_or_else(|| "default".into()),
             no_alloc: self.is_no_alloc() || embedded,
             no_std: self.is_no_std() || embedded,
             embedded,

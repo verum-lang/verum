@@ -222,10 +222,7 @@ impl IntervalSet {
     /// Get the first uncovered value in a range
     pub fn first_uncovered(&self, bounds: Interval) -> Option<i128> {
         let complement = self.complement(bounds);
-        complement
-            .intervals
-            .first()
-            .map(|i| i.start)
+        complement.intervals.first().map(|i| i.start)
     }
 }
 
@@ -311,8 +308,8 @@ pub fn analyze_range_overlaps(
 
             if let Some(overlap) = interval_i.intersect(interval_j) {
                 // Check if the later pattern is completely covered by the earlier one
-                let is_redundant = interval_j.start >= interval_i.start
-                    && interval_j.end <= interval_i.end;
+                let is_redundant =
+                    interval_j.start >= interval_i.start && interval_j.end <= interval_i.end;
 
                 overlaps.push(RangeOverlap::new(*idx_i, *idx_j, overlap, is_redundant));
 
@@ -366,7 +363,10 @@ pub fn format_range_overlap_error(analysis: &RangeOverlapAnalysis) -> String {
 
     // Report redundant patterns first
     for &idx in analysis.redundant_patterns.iter() {
-        messages.push(format!("pattern {} is unreachable (completely covered by earlier pattern)", idx + 1));
+        messages.push(format!(
+            "pattern {} is unreachable (completely covered by earlier pattern)",
+            idx + 1
+        ));
     }
 
     // Report non-redundant overlaps
@@ -404,13 +404,16 @@ pub fn suggest_uncovered_ranges(uncovered: &[Interval]) -> String {
         return String::new();
     }
 
-    let suggestions: Vec<String> = uncovered.iter().map(|interval| {
-        if interval.start == interval.end {
-            format!("    {} => todo!(),", interval.start)
-        } else {
-            format!("    {}..={} => todo!(),", interval.start, interval.end)
-        }
-    }).collect();
+    let suggestions: Vec<String> = uncovered
+        .iter()
+        .map(|interval| {
+            if interval.start == interval.end {
+                format!("    {} => todo!(),", interval.start)
+            } else {
+                format!("    {}..={} => todo!(),", interval.start, interval.end)
+            }
+        })
+        .collect();
 
     format!("consider adding arms for:\n{}", suggestions.join("\n"))
 }
@@ -492,10 +495,7 @@ mod tests {
     #[test]
     fn test_range_overlap_detection() {
         // Pattern 0: 1..=5, Pattern 1: 3..=7
-        let ranges = vec![
-            (0, Interval::new(1, 5)),
-            (1, Interval::new(3, 7)),
-        ];
+        let ranges = vec![(0, Interval::new(1, 5)), (1, Interval::new(3, 7))];
         let analysis = analyze_range_overlaps(&ranges);
 
         assert_eq!(analysis.overlaps.len(), 1);
@@ -509,10 +509,7 @@ mod tests {
     #[test]
     fn test_range_redundancy_detection() {
         // Pattern 0: 1..=10, Pattern 1: 3..=7 (subset, redundant)
-        let ranges = vec![
-            (0, Interval::new(1, 10)),
-            (1, Interval::new(3, 7)),
-        ];
+        let ranges = vec![(0, Interval::new(1, 10)), (1, Interval::new(3, 7))];
         let analysis = analyze_range_overlaps(&ranges);
 
         assert_eq!(analysis.overlaps.len(), 1);
@@ -523,10 +520,7 @@ mod tests {
     #[test]
     fn test_no_overlap() {
         // Pattern 0: 1..=5, Pattern 1: 7..=10
-        let ranges = vec![
-            (0, Interval::new(1, 5)),
-            (1, Interval::new(7, 10)),
-        ];
+        let ranges = vec![(0, Interval::new(1, 5)), (1, Interval::new(7, 10))];
         let analysis = analyze_range_overlaps(&ranges);
 
         assert!(analysis.overlaps.is_empty());
@@ -535,10 +529,7 @@ mod tests {
 
     #[test]
     fn test_find_uncovered() {
-        let ranges = vec![
-            (0, Interval::new(1, 5)),
-            (1, Interval::new(8, 10)),
-        ];
+        let ranges = vec![(0, Interval::new(1, 5)), (1, Interval::new(8, 10))];
         let bounds = Interval::new(1, 10);
         let uncovered = find_uncovered_ranges(&ranges, bounds);
 

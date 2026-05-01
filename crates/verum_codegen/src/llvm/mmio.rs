@@ -54,13 +54,13 @@
 //! Release, SeqCst) control synchronization. Architecture-specific: ARM uses
 //! DMB barriers, x86 has naturally ordered volatile ops, RISC-V uses FENCE.
 
-use verum_llvm::values::{BasicValue, IntValue, PointerValue};
-use verum_llvm::types::IntType;
 use verum_llvm::builder::Builder;
+use verum_llvm::types::IntType;
+use verum_llvm::values::{BasicValue, IntValue, PointerValue};
 use verum_llvm::{AtomicOrdering, AtomicRMWBinOp};
 
-use super::types::TypeLowering;
 use super::error::{LlvmLoweringError, Result};
+use super::types::TypeLowering;
 
 /// Memory ordering for volatile operations.
 ///
@@ -219,7 +219,8 @@ impl<'ctx> MmioLowering<'ctx> {
         let int_type = width.llvm_type(self.types);
 
         // Build volatile load instruction
-        let load_instr = self.builder
+        let load_instr = self
+            .builder
             .build_load(int_type, ptr, name)
             .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
 
@@ -251,13 +252,10 @@ impl<'ctx> MmioLowering<'ctx> {
     /// // Writing to a control register
     /// volatile_write(*volatile mut GPIO_CTRL, 0x0F);
     /// ```
-    pub fn volatile_store(
-        &mut self,
-        ptr: PointerValue<'ctx>,
-        value: IntValue<'ctx>,
-    ) -> Result<()> {
+    pub fn volatile_store(&mut self, ptr: PointerValue<'ctx>, value: IntValue<'ctx>) -> Result<()> {
         // Build volatile store instruction
-        let store_instr = self.builder
+        let store_instr = self
+            .builder
             .build_store(ptr, value)
             .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
 
@@ -301,7 +299,8 @@ impl<'ctx> MmioLowering<'ctx> {
         op: AtomicRMWBinOp,
         ordering: VolatileOrdering,
     ) -> Result<IntValue<'ctx>> {
-        let result = self.builder
+        let result = self
+            .builder
             .build_atomicrmw(op, ptr, value, ordering.to_llvm())
             .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
 
@@ -380,7 +379,8 @@ impl<'ctx> MmioLowering<'ctx> {
         mask: IntValue<'ctx>,
     ) -> Result<IntValue<'ctx>> {
         // AND with inverted mask to clear bits
-        let inverted = self.builder
+        let inverted = self
+            .builder
             .build_not(mask, "inv_mask")
             .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
 
@@ -442,15 +442,18 @@ impl<'ctx> MmioLowering<'ctx> {
         let current = self.volatile_load(ptr, width, "current")?;
 
         // Clear specified bits
-        let inverted = self.builder
+        let inverted = self
+            .builder
             .build_not(clear_mask, "inv_clear")
             .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
-        let cleared = self.builder
+        let cleared = self
+            .builder
             .build_and(current, inverted, "cleared")
             .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
 
         // Set specified bits
-        let modified = self.builder
+        let modified = self
+            .builder
             .build_or(cleared, set_mask, "modified")
             .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
 
@@ -479,14 +482,8 @@ mod tests {
             VolatileOrdering::Relaxed.to_llvm(),
             AtomicOrdering::Monotonic
         );
-        assert_eq!(
-            VolatileOrdering::Acquire.to_llvm(),
-            AtomicOrdering::Acquire
-        );
-        assert_eq!(
-            VolatileOrdering::Release.to_llvm(),
-            AtomicOrdering::Release
-        );
+        assert_eq!(VolatileOrdering::Acquire.to_llvm(), AtomicOrdering::Acquire);
+        assert_eq!(VolatileOrdering::Release.to_llvm(), AtomicOrdering::Release);
         assert_eq!(
             VolatileOrdering::SeqCst.to_llvm(),
             AtomicOrdering::SequentiallyConsistent

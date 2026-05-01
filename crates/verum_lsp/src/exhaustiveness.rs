@@ -88,7 +88,10 @@ impl ExhaustivenessDiagnostic {
             let message = if self.uncovered_cases.len() == 1 {
                 format!(
                     "non-exhaustive patterns: `{}` not covered",
-                    self.uncovered_cases.first().map(|s| s.as_str()).unwrap_or("_")
+                    self.uncovered_cases
+                        .first()
+                        .map(|s| s.as_str())
+                        .unwrap_or("_")
                 )
             } else if self.uncovered_cases.len() <= max {
                 let cases: Vec<_> = self
@@ -288,8 +291,7 @@ pub fn create_redundant_pattern_diagnostic(
         related_information: None,
         tags: Some(vec![DiagnosticTag::UNNECESSARY]),
         code_description: Some(CodeDescription {
-            href: Url::parse("https://verum-lang.org/errors/W0602")
-                .unwrap_or_else(|_| uri.clone()),
+            href: Url::parse("https://verum-lang.org/errors/W0602").unwrap_or_else(|_| uri.clone()),
         }),
         data: None,
     }
@@ -359,10 +361,7 @@ impl MatchCoverageInfo {
         }
 
         if self.redundant_count > 0 {
-            lines.push(format!(
-                "⚠️ {} redundant pattern(s)",
-                self.redundant_count
-            ));
+            lines.push(format!("⚠️ {} redundant pattern(s)", self.redundant_count));
         }
 
         lines.join("\n\n")
@@ -467,8 +466,8 @@ impl Default for ExhaustivenessProvider {
 // This section provides APIs for incremental exhaustiveness checking
 // that integrates with the type checker's incremental infrastructure.
 
-use std::sync::Arc;
 use parking_lot::RwLock;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Represents the exhaustiveness state for a single match expression
@@ -619,20 +618,23 @@ impl DocumentExhaustivenessTracker {
     /// Register a match expression for tracking
     pub fn register_match(&self, match_id: u64, range: Range) {
         let mut matches = self.matches.write();
-        matches.insert(match_id, MatchExhaustivenessState {
+        matches.insert(
             match_id,
-            range,
-            result: MatchExhaustivenessResult {
-                is_exhaustive: true, // Assume exhaustive until checked
-                witnesses: List::new(),
-                redundant: List::new(),
-                range_overlaps: List::new(),
-                optimization_hints: None,
-                all_guarded: false,
+            MatchExhaustivenessState {
+                match_id,
+                range,
+                result: MatchExhaustivenessResult {
+                    is_exhaustive: true, // Assume exhaustive until checked
+                    witnesses: List::new(),
+                    redundant: List::new(),
+                    range_overlaps: List::new(),
+                    optimization_hints: None,
+                    all_guarded: false,
+                },
+                last_checked: Instant::now(),
+                dirty: true,
             },
-            last_checked: Instant::now(),
-            dirty: true,
-        });
+        );
     }
 
     /// Mark a match as dirty (needs re-check)
@@ -736,8 +738,8 @@ fn ranges_overlap(a: &Range, b: &Range) -> bool {
 
 /// Compute a hash for a match expression location
 pub fn compute_match_id(uri: &Url, start_line: u32, start_col: u32) -> u64 {
-    use std::hash::{Hash, Hasher};
     use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
 
     let mut hasher = DefaultHasher::new();
     uri.as_str().hash(&mut hasher);
@@ -750,19 +752,24 @@ pub fn compute_match_id(uri: &Url, start_line: u32, start_col: u32) -> u64 {
 pub fn convert_exhaustiveness_result(
     result: &verum_types::exhaustiveness::ExhaustivenessResult,
 ) -> MatchExhaustivenessResult {
-    let witnesses: List<Text> = result.uncovered_witnesses
+    let witnesses: List<Text> = result
+        .uncovered_witnesses
         .iter()
         .map(|w| Text::from(format!("{}", w)))
         .collect();
 
     let range_overlaps = if let Some(ref analysis) = result.range_overlaps {
-        analysis.overlaps.iter().map(|o| RangeOverlapWarning {
-            first_pattern: o.first_pattern_index,
-            second_pattern: o.second_pattern_index,
-            overlap_start: o.overlap.start,
-            overlap_end: o.overlap.end,
-            is_redundant: o.is_redundant,
-        }).collect()
+        analysis
+            .overlaps
+            .iter()
+            .map(|o| RangeOverlapWarning {
+                first_pattern: o.first_pattern_index,
+                second_pattern: o.second_pattern_index,
+                overlap_start: o.overlap.start,
+                overlap_end: o.overlap.end,
+                is_redundant: o.is_redundant,
+            })
+            .collect()
     } else {
         List::new()
     };
@@ -789,8 +796,14 @@ mod tests {
     fn test_exhaustive_diagnostic() {
         let diag = ExhaustivenessDiagnostic {
             range: Range {
-                start: Position { line: 0, character: 0 },
-                end: Position { line: 0, character: 10 },
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 10,
+                },
             },
             is_exhaustive: true,
             uncovered_cases: List::new(),
@@ -807,8 +820,14 @@ mod tests {
     fn test_non_exhaustive_diagnostic() {
         let diag = ExhaustivenessDiagnostic {
             range: Range {
-                start: Position { line: 0, character: 0 },
-                end: Position { line: 0, character: 10 },
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 10,
+                },
             },
             is_exhaustive: false,
             uncovered_cases: List::from_iter([Text::from("None")]),
@@ -830,8 +849,14 @@ mod tests {
     fn test_all_guarded_warning() {
         let diag = ExhaustivenessDiagnostic {
             range: Range {
-                start: Position { line: 0, character: 0 },
-                end: Position { line: 0, character: 10 },
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 10,
+                },
             },
             is_exhaustive: true,
             uncovered_cases: List::new(),
@@ -852,8 +877,14 @@ mod tests {
     fn report_errors_false_suppresses_non_exhaustive_diagnostic() {
         let diag = ExhaustivenessDiagnostic {
             range: Range {
-                start: Position { line: 0, character: 0 },
-                end: Position { line: 0, character: 10 },
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 10,
+                },
             },
             is_exhaustive: false,
             uncovered_cases: List::from_iter([Text::from("None")]),
@@ -876,8 +907,14 @@ mod tests {
     fn report_all_guarded_false_suppresses_warning() {
         let diag = ExhaustivenessDiagnostic {
             range: Range {
-                start: Position { line: 0, character: 0 },
-                end: Position { line: 0, character: 10 },
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 10,
+                },
             },
             is_exhaustive: true,
             uncovered_cases: List::new(),
@@ -900,8 +937,14 @@ mod tests {
     fn report_redundant_emits_summary_only_when_enabled() {
         let diag = ExhaustivenessDiagnostic {
             range: Range {
-                start: Position { line: 0, character: 0 },
-                end: Position { line: 0, character: 10 },
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 10,
+                },
             },
             is_exhaustive: true,
             uncovered_cases: List::new(),
@@ -935,8 +978,14 @@ mod tests {
     fn max_witnesses_truncates_long_uncovered_lists() {
         let diag = ExhaustivenessDiagnostic {
             range: Range {
-                start: Position { line: 0, character: 0 },
-                end: Position { line: 0, character: 10 },
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 10,
+                },
             },
             is_exhaustive: false,
             uncovered_cases: List::from_iter([
@@ -994,8 +1043,14 @@ mod tests {
     fn test_redundant_diagnostic() {
         let diag = create_redundant_pattern_diagnostic(
             Range {
-                start: Position { line: 5, character: 0 },
-                end: Position { line: 5, character: 20 },
+                start: Position {
+                    line: 5,
+                    character: 0,
+                },
+                end: Position {
+                    line: 5,
+                    character: 20,
+                },
             },
             2,
             &test_uri(),

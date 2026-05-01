@@ -173,7 +173,11 @@ impl SoundnessBackend for LeanBackend {
                     well_typed t T := by sorry",
                 header, reason, rule.lemma_name, rule.rule_name,
             ),
-            LemmaStatus::DischargedByFramework { lemma_path, framework, citation } => format!(
+            LemmaStatus::DischargedByFramework {
+                lemma_path,
+                framework,
+                citation,
+            } => format!(
                 "{}\n-- discharged-by: {}\n-- framework: {}\n-- citation: {}\n\
                  theorem {} :\n  ∀ (d_rule : KernelRule) (t T : CoreTerm),\n    \
                     d_rule = KernelRule.{} →\n    \

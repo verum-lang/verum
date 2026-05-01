@@ -60,10 +60,7 @@ pub enum CbpvValue {
     /// `x` — variable.
     Var(Text),
     /// `λx. C` — abstraction; binds variable, body is a computation.
-    Lam {
-        param: Text,
-        body: Box<CbpvComp>,
-    },
+    Lam { param: Text, body: Box<CbpvComp> },
     /// `thunk C` — packaged computation.
     Thunk(Box<CbpvComp>),
 }
@@ -82,10 +79,7 @@ pub enum CbpvComp {
     /// `force V` — run a thunked computation.
     Force(CbpvValue),
     /// `V₁ V₂` — application; V₁ must elaborate to a lambda.
-    App {
-        func: CbpvValue,
-        arg: CbpvValue,
-    },
+    App { func: CbpvValue, arg: CbpvValue },
 }
 
 impl CbpvValue {
@@ -180,7 +174,11 @@ impl CbpvComp {
     fn free_vars_into(&self, out: &mut HashSet<Text>) {
         match self {
             CbpvComp::Return(v) => v.free_vars_into(out),
-            CbpvComp::SeqTo { producer, binder, body } => {
+            CbpvComp::SeqTo {
+                producer,
+                binder,
+                body,
+            } => {
                 producer.free_vars_into(out);
                 let mut inner = HashSet::new();
                 body.free_vars_into(&mut inner);
@@ -201,7 +199,11 @@ impl CbpvComp {
     pub fn substitute(&self, from: &Text, to: &CbpvValue) -> CbpvComp {
         match self {
             CbpvComp::Return(v) => CbpvComp::Return(v.substitute(from, to)),
-            CbpvComp::SeqTo { producer, binder, body } => {
+            CbpvComp::SeqTo {
+                producer,
+                binder,
+                body,
+            } => {
                 if binder == from {
                     CbpvComp::seq_to(
                         producer.substitute(from, to),
@@ -242,7 +244,11 @@ pub fn step(c: &CbpvComp) -> Option<CbpvComp> {
         CbpvComp::Force(CbpvValue::Thunk(inner)) => Some((**inner).clone()),
 
         // return V to x. body ↦ body[x := V]
-        CbpvComp::SeqTo { producer, binder, body } => {
+        CbpvComp::SeqTo {
+            producer,
+            binder,
+            body,
+        } => {
             if let CbpvValue::Var(_) = producer {
                 // Producer is a bare variable — can't reduce yet.
                 return None;
@@ -339,11 +345,7 @@ mod tests {
     #[test]
     fn seq_to_with_var_producer_doesnt_step() {
         // x to y. return y — producer is a bare var, no step.
-        let term = CbpvComp::seq_to(
-            CbpvValue::var("x"),
-            "y",
-            CbpvComp::ret(CbpvValue::var("y")),
-        );
+        let term = CbpvComp::seq_to(CbpvValue::var("x"), "y", CbpvComp::ret(CbpvValue::var("y")));
         assert!(step(&term).is_none());
     }
 
@@ -380,11 +382,7 @@ mod tests {
     #[test]
     fn substitute_into_seq_to_skips_shadow() {
         // (v to x. return x) [x := c] ↦ v to x. return x (binder shadows)
-        let term = CbpvComp::seq_to(
-            CbpvValue::var("v"),
-            "x",
-            CbpvComp::ret(CbpvValue::var("x")),
-        );
+        let term = CbpvComp::seq_to(CbpvValue::var("v"), "x", CbpvComp::ret(CbpvValue::var("x")));
         let r = term.substitute(&t("x"), &CbpvValue::var("c"));
         // The body's `x` is bound by the binder, so it's unchanged.
         if let CbpvComp::SeqTo { body, .. } = r {
@@ -407,11 +405,7 @@ mod tests {
 
     #[test]
     fn free_vars_seq_to_excludes_binder() {
-        let term = CbpvComp::seq_to(
-            CbpvValue::var("v"),
-            "x",
-            CbpvComp::ret(CbpvValue::var("x")),
-        );
+        let term = CbpvComp::seq_to(CbpvValue::var("v"), "x", CbpvComp::ret(CbpvValue::var("x")));
         let fvs = term.free_vars();
         assert!(fvs.contains(&t("v")));
         assert!(!fvs.contains(&t("x")));

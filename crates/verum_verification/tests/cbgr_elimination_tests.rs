@@ -1085,7 +1085,6 @@ fn test_multiple_references() {
     assert!(!can_eliminate_check(&ref3, &result));
 }
 
-
 // ============================================================================
 // Wire-up Pin Tests
 // ============================================================================
@@ -1133,4 +1132,3 @@ fn timeout_ms_zero_means_unlimited() {
     let opt = CBGROptimizer::new(config);
     assert_eq!(opt.timeout_ms(), 0);
 }
-

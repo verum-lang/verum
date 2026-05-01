@@ -53,9 +53,15 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
 }
 
 /// Emit a compile error
-fn meta_compile_error(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_compile_error(
+    ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 1, got: 0 });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: 0,
+        });
     }
 
     let message = match &args[0] {
@@ -78,20 +84,22 @@ fn meta_compile_error(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<C
     // `compile_error("…")` from a meta fn surfaced at "<meta>:0:1"
     // regardless of where the user invoked the macro.
     let span = verum_common::global_span_to_line_col(ctx.call_site_span);
-    let diagnostic = verum_diagnostics::Diagnostic::new_error(
-        message.to_string(),
-        span,
-        "E0000",
-    );
+    let diagnostic = verum_diagnostics::Diagnostic::new_error(message.to_string(), span, "E0000");
     ctx.diagnostics.push(diagnostic);
 
     Err(MetaError::CompileError(message))
 }
 
 /// Emit a compile warning
-fn meta_compile_warning(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_compile_warning(
+    ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 1, got: 0 });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: 0,
+        });
     }
 
     let message = match &args[0] {
@@ -107,11 +115,7 @@ fn meta_compile_warning(ctx: &mut MetaContext, args: List<ConstValue>) -> Result
     // comment for the rationale; closes #239 for the compile_warning
     // builtin.
     let span = verum_common::global_span_to_line_col(ctx.call_site_span);
-    let diagnostic = verum_diagnostics::Diagnostic::new_warning(
-        message.to_string(),
-        span,
-        "W0000",
-    );
+    let diagnostic = verum_diagnostics::Diagnostic::new_warning(message.to_string(), span, "W0000");
     ctx.diagnostics.push(diagnostic);
 
     Ok(ConstValue::Unit)
@@ -155,12 +159,19 @@ mod tests {
 
         let args = List::from(vec![ConstValue::Text(Text::from("oops"))]);
         let result = meta_compile_error(&mut ctx, args);
-        assert!(result.is_err(),
-            "meta_compile_error must surface MetaError::CompileError");
+        assert!(
+            result.is_err(),
+            "meta_compile_error must surface MetaError::CompileError"
+        );
         assert_eq!(ctx.error_count, 1);
-        let diag = ctx.diagnostics.iter().last()
+        let diag = ctx
+            .diagnostics
+            .iter()
+            .last()
             .expect("diagnostic must be pushed");
-        let span = diag.primary_span().expect("diagnostic must carry a primary span");
+        let span = diag
+            .primary_span()
+            .expect("diagnostic must carry a primary span");
         assert_eq!(
             span.file.as_str(),
             "test.vr",

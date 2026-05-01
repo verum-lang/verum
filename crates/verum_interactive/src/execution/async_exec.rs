@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use super::pipeline::ExecutionPipeline;
 use super::context::ExecutionContext;
+use super::pipeline::ExecutionPipeline;
 use crate::playbook::session::CellOutput;
 
 /// Status of an async execution
@@ -25,10 +25,7 @@ pub enum ExecutionStatus {
         output: CellOutput,
     },
     /// Failed with error
-    Failed {
-        duration: Duration,
-        error: String,
-    },
+    Failed { duration: Duration, error: String },
     /// Cancelled by user
     Cancelled,
 }
@@ -39,7 +36,10 @@ impl PartialEq for ExecutionStatus {
             (ExecutionStatus::Pending, ExecutionStatus::Pending) => true,
             (ExecutionStatus::Running { .. }, ExecutionStatus::Running { .. }) => true,
             (ExecutionStatus::Completed { .. }, ExecutionStatus::Completed { .. }) => true,
-            (ExecutionStatus::Failed { error: e1, .. }, ExecutionStatus::Failed { error: e2, .. }) => e1 == e2,
+            (
+                ExecutionStatus::Failed { error: e1, .. },
+                ExecutionStatus::Failed { error: e2, .. },
+            ) => e1 == e2,
             (ExecutionStatus::Cancelled, ExecutionStatus::Cancelled) => true,
             _ => false,
         }
@@ -113,7 +113,10 @@ impl ExecutionHandle {
 
     /// Get current status
     pub fn status(&self) -> ExecutionStatus {
-        self.status.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
+        self.status
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 
     /// Request cancellation
@@ -123,7 +126,10 @@ impl ExecutionHandle {
 
     /// Check if execution is finished
     pub fn is_finished(&self) -> bool {
-        self.status.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).is_finished()
+        self.status
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .is_finished()
     }
 
     /// Wait for completion (blocking)
@@ -131,7 +137,10 @@ impl ExecutionHandle {
         if let Some(handle) = self.thread.take() {
             let _ = handle.join();
         }
-        self.status.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
+        self.status
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 }
 
@@ -172,7 +181,9 @@ impl AsyncExecutor {
 
         let thread = thread::spawn(move || {
             // Signal start
-            *status_clone.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = ExecutionStatus::Running {
+            *status_clone
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = ExecutionStatus::Running {
                 started_at: Instant::now(),
                 progress: None,
             };
@@ -184,21 +195,29 @@ impl AsyncExecutor {
             let check_cancelled = || cancel_rx.try_recv().is_ok();
 
             if check_cancelled() {
-                *status_clone.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = ExecutionStatus::Cancelled;
+                *status_clone
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = ExecutionStatus::Cancelled;
                 return;
             }
 
             // Execute the cell
             let result = {
-                let mut pipeline = pipeline.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                let context = context.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                let mut pipeline = pipeline
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let context = context
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
 
                 // Simple execution (in real impl, would stream output)
                 pipeline.execute_source(&source, cell_id, &context)
             };
 
             if check_cancelled() {
-                *status_clone.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = ExecutionStatus::Cancelled;
+                *status_clone
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = ExecutionStatus::Cancelled;
                 return;
             }
 
@@ -206,18 +225,24 @@ impl AsyncExecutor {
 
             match result {
                 Ok(output) => {
-                    *status_clone.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = ExecutionStatus::Completed {
-                        duration,
-                        output: output.clone(),
-                    };
+                    *status_clone
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                        ExecutionStatus::Completed {
+                            duration,
+                            output: output.clone(),
+                        };
                     let _ = message_tx.send(ExecutionMessage::Completed(output));
                 }
                 Err(e) => {
                     let error = e.to_string();
-                    *status_clone.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = ExecutionStatus::Failed {
-                        duration,
-                        error: error.clone(),
-                    };
+                    *status_clone
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                        ExecutionStatus::Failed {
+                            duration,
+                            error: error.clone(),
+                        };
                     let _ = message_tx.send(ExecutionMessage::Failed(error));
                 }
             }
@@ -245,7 +270,9 @@ impl AsyncExecutor {
         let thread = thread::spawn(move || {
             let start_time = Instant::now();
 
-            *status_clone.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = ExecutionStatus::Running {
+            *status_clone
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = ExecutionStatus::Running {
                 started_at: start_time,
                 progress: Some(0.0),
             };
@@ -255,13 +282,18 @@ impl AsyncExecutor {
 
             for (i, (cell_id, source)) in cells.into_iter().enumerate() {
                 if check_cancelled() {
-                    *status_clone.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = ExecutionStatus::Cancelled;
+                    *status_clone
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                        ExecutionStatus::Cancelled;
                     return;
                 }
 
                 // Update progress
                 let progress = (i as f32) / total_cells;
-                *status_clone.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = ExecutionStatus::Running {
+                *status_clone
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = ExecutionStatus::Running {
                     started_at: start_time,
                     progress: Some(progress),
                 };
@@ -269,23 +301,31 @@ impl AsyncExecutor {
 
                 // Execute cell
                 let result = {
-                    let mut pipeline = pipeline.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                    let context = context.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    let mut pipeline = pipeline
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    let context = context
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
                     pipeline.execute_source(&source, cell_id, &context)
                 };
 
                 match result {
                     Ok(output) => {
-                        let _ = message_tx.send(ExecutionMessage::IntermediateResult(
-                            format!("Cell {}: {:?}", cell_id, output),
-                        ));
+                        let _ = message_tx.send(ExecutionMessage::IntermediateResult(format!(
+                            "Cell {}: {:?}",
+                            cell_id, output
+                        )));
                     }
                     Err(e) => {
                         let error = e.to_string();
-                        *status_clone.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = ExecutionStatus::Failed {
-                            duration: start_time.elapsed(),
-                            error: error.clone(),
-                        };
+                        *status_clone
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                            ExecutionStatus::Failed {
+                                duration: start_time.elapsed(),
+                                error: error.clone(),
+                            };
                         let _ = message_tx.send(ExecutionMessage::Failed(error));
                         return;
                     }
@@ -293,7 +333,9 @@ impl AsyncExecutor {
             }
 
             let duration = start_time.elapsed();
-            *status_clone.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = ExecutionStatus::Completed {
+            *status_clone
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = ExecutionStatus::Completed {
                 duration,
                 output: CellOutput::Empty,
             };
@@ -450,7 +492,12 @@ impl ProgressDisplay {
                 if let Some(p) = progress {
                     let filled = (p * self.width as f32) as usize;
                     let empty = self.width - filled;
-                    format!("[{}{}] {:.0}%", "█".repeat(filled), "░".repeat(empty), p * 100.0)
+                    format!(
+                        "[{}{}] {:.0}%",
+                        "█".repeat(filled),
+                        "░".repeat(empty),
+                        p * 100.0
+                    )
                 } else {
                     let pos = self.spinner_idx % self.width;
                     self.spinner_idx += 1;

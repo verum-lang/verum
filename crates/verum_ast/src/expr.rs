@@ -400,10 +400,7 @@ pub enum ExprKind {
     /// - `foo(x: 1, y: 2)` - named positional args
     /// - `tensor.sum(axis: 0)` - named method args
     /// - `Tensor.rand([100], uniform: (0.0, 1.0))` - distribution params
-    NamedArg {
-        name: Ident,
-        value: Heap<Expr>,
-    },
+    NamedArg { name: Ident, value: Heap<Expr> },
 
     /// Function call: f(a, b, c) or f<T>(a, b) with explicit type arguments
     Call {
@@ -1587,19 +1584,13 @@ pub enum AsmOperandKind {
     },
     /// Symbolic operand: sym(symbol)
     /// References a symbol (function, static) by address
-    Sym {
-        path: Path,
-    },
+    Sym { path: Path },
     /// Constant expression: const(expr)
     /// Compile-time constant to embed in assembly
-    Const {
-        expr: Heap<Expr>,
-    },
+    Const { expr: Heap<Expr> },
     /// Clobbers: clobber("register")
     /// Indicates registers modified but not used as operands
-    Clobber {
-        reg: Text,
-    },
+    Clobber { reg: Text },
 }
 
 /// Assembly operand constraint.
@@ -1644,7 +1635,7 @@ impl AsmConstraint {
             || self.constraint.contains("a")  // specific register (eax)
             || self.constraint.contains("b")  // specific register (ebx)
             || self.constraint.contains("c")  // specific register (ecx)
-            || self.constraint.contains("d")  // specific register (edx)
+            || self.constraint.contains("d") // specific register (edx)
     }
 
     /// Get the base constraint without modifiers
@@ -2352,8 +2343,7 @@ impl NurseryOptions {
 ///
 
 /// Nursery block for structured concurrency with bounded task lifetimes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum NurseryErrorBehavior {
     /// Cancel all remaining tasks immediately when one fails (default)
     #[default]
@@ -2363,7 +2353,6 @@ pub enum NurseryErrorBehavior {
     /// Fail fast - propagate error immediately without waiting
     FailFast,
 }
-
 
 /// A block of statements with an optional trailing expression.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2440,10 +2429,7 @@ impl Spanned for ClosureParam {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum RecoverBody {
     /// Match arms syntax: `recover { SomeError(msg) => handle(msg), _ => default() }`
-    MatchArms {
-        arms: List<MatchArm>,
-        span: Span,
-    },
+    MatchArms { arms: List<MatchArm>, span: Span },
     /// Closure syntax: `recover |e| handle_error(e)`
     Closure {
         param: RecoverClosureParam,

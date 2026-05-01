@@ -127,29 +127,23 @@ impl ModuleWarning {
     /// Get a help message for this warning.
     pub fn help(&self) -> Option<String> {
         match &self.kind {
-            WarningKind::PreludeShadowing { name, .. } => {
-                Some(format!(
-                    "consider renaming `{}` or using `std.prelude.{}` to access the prelude item",
-                    name, name
-                ))
-            }
+            WarningKind::PreludeShadowing { name, .. } => Some(format!(
+                "consider renaming `{}` or using `std.prelude.{}` to access the prelude item",
+                name, name
+            )),
             WarningKind::UnusedImport { .. } => Some("remove this import".to_string()),
-            WarningKind::GlobImportShadowing { name, .. } => {
-                Some(format!(
-                    "use explicit import `import {{ {} }}` to resolve ambiguity",
-                    name
-                ))
-            }
+            WarningKind::GlobImportShadowing { name, .. } => Some(format!(
+                "use explicit import `import {{ {} }}` to resolve ambiguity",
+                name
+            )),
             WarningKind::DeprecatedItem { .. } => None,
             WarningKind::SelfShadowing { name, .. } => {
                 Some(format!("consider renaming `{}` to avoid confusion", name))
             }
-            WarningKind::ModuleNameCollision { name, .. } => {
-                Some(format!(
-                    "remove either the file module or inline module for `{}`",
-                    name
-                ))
-            }
+            WarningKind::ModuleNameCollision { name, .. } => Some(format!(
+                "remove either the file module or inline module for `{}`",
+                name
+            )),
         }
     }
 }
@@ -298,12 +292,17 @@ impl WarningCollector {
 
     /// Get count of warnings by severity.
     pub fn count_by_severity(&self, severity: WarningSeverity) -> usize {
-        self.warnings.iter().filter(|w| w.severity == severity).count()
+        self.warnings
+            .iter()
+            .filter(|w| w.severity == severity)
+            .count()
     }
 
     /// Get warnings for a specific module.
     pub fn warnings_for_module(&self, module_id: ModuleId) -> impl Iterator<Item = &ModuleWarning> {
-        self.warnings.iter().filter(move |w| w.module_id == module_id)
+        self.warnings
+            .iter()
+            .filter(move |w| w.module_id == module_id)
     }
 
     /// Clear all warnings.
@@ -342,28 +341,34 @@ impl PreludeShadowingChecker {
     pub fn register_standard_prelude(&mut self) {
         // Types
         for name in [
-            "Int", "Float", "Bool", "Text", "Char", "Unit",
-            "List", "Map", "Set", "Maybe", "Result",
-            "Option", "Some", "None", "Ok", "Err",
-            "Heap", "Shared", "Weak",
+            "Int", "Float", "Bool", "Text", "Char", "Unit", "List", "Map", "Set", "Maybe",
+            "Result", "Option", "Some", "None", "Ok", "Err", "Heap", "Shared", "Weak",
         ] {
             self.prelude_items.insert(Text::from(name), NameKind::Type);
         }
 
         // Functions
         for name in [
-            "print", "println", "panic", "assert", "assert_eq",
-            "unreachable", "todo", "unimplemented",
+            "print",
+            "println",
+            "panic",
+            "assert",
+            "assert_eq",
+            "unreachable",
+            "todo",
+            "unimplemented",
         ] {
-            self.prelude_items.insert(Text::from(name), NameKind::Function);
+            self.prelude_items
+                .insert(Text::from(name), NameKind::Function);
         }
 
         // Protocols
         for name in [
-            "Iterator", "Clone", "Copy", "Debug", "Display",
-            "Eq", "Ord", "Hash", "Default", "From", "Into",
+            "Iterator", "Clone", "Copy", "Debug", "Display", "Eq", "Ord", "Hash", "Default",
+            "From", "Into",
         ] {
-            self.prelude_items.insert(Text::from(name), NameKind::Protocol);
+            self.prelude_items
+                .insert(Text::from(name), NameKind::Protocol);
         }
     }
 
@@ -424,12 +429,8 @@ mod tests {
         let checker = PreludeShadowingChecker::default();
 
         // "List" is a prelude type
-        let warning = checker.check_shadowing(
-            &Text::from("List"),
-            NameKind::Type,
-            ModuleId::new(1),
-            None,
-        );
+        let warning =
+            checker.check_shadowing(&Text::from("List"), NameKind::Type, ModuleId::new(1), None);
         assert!(warning.is_some());
         let w = warning.unwrap();
         assert!(matches!(w.kind, WarningKind::PreludeShadowing { .. }));
@@ -448,13 +449,14 @@ mod tests {
     fn test_prelude_shadowing_message() {
         let checker = PreludeShadowingChecker::default();
 
-        let warning = checker.check_shadowing(
-            &Text::from("print"),
-            NameKind::Function,
-            ModuleId::new(1),
-            None,
-        )
-        .unwrap();
+        let warning = checker
+            .check_shadowing(
+                &Text::from("print"),
+                NameKind::Function,
+                ModuleId::new(1),
+                None,
+            )
+            .unwrap();
 
         let message = warning.message();
         assert!(message.contains("print"));

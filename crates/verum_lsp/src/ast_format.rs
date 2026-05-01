@@ -683,7 +683,9 @@ pub fn get_builtin_info(symbol: &str) -> Option<String> {
         "async" => "**async** - Async function/block",
         "await" => "**await** - Await async expression",
         "defer" => "**defer** - Defer statement execution (runs at scope exit)",
-        "errdefer" => "**errdefer** - Error-path-only deferred execution (runs when scope exits via error)",
+        "errdefer" => {
+            "**errdefer** - Error-path-only deferred execution (runs when scope exits via error)"
+        }
         "stream" => "**stream** - Stream comprehension",
         "verify" => "**verify** - Verification annotation",
         "requires" => "**requires** - Precondition specification",

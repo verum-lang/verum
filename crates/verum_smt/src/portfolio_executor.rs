@@ -439,12 +439,16 @@ impl PortfolioExecutor {
 
         let z3_result = z3_handle.join().unwrap_or(SolverResult {
             solver: SolverId::Z3,
-            verdict: SolverVerdict::Error { message: "thread panic".into() },
+            verdict: SolverVerdict::Error {
+                message: "thread panic".into(),
+            },
             elapsed_ms: 0,
         });
         let cvc5_result = cvc5_handle.join().unwrap_or(SolverResult {
             solver: SolverId::Cvc5,
-            verdict: SolverVerdict::Error { message: "thread panic".into() },
+            verdict: SolverVerdict::Error {
+                message: "thread panic".into(),
+            },
             elapsed_ms: 0,
         });
 
@@ -468,7 +472,11 @@ impl PortfolioExecutor {
             {
                 let winner = match tie_breaker {
                     TieBreaker::Fastest => {
-                        if z3.elapsed_ms <= cvc5.elapsed_ms { SolverId::Z3 } else { SolverId::Cvc5 }
+                        if z3.elapsed_ms <= cvc5.elapsed_ms {
+                            SolverId::Z3
+                        } else {
+                            SolverId::Cvc5
+                        }
                     }
                     TieBreaker::Z3 => SolverId::Z3,
                     TieBreaker::Cvc5 => SolverId::Cvc5,
@@ -513,16 +521,15 @@ impl PortfolioExecutor {
             // Neither definitive — return the least-bad answer.
             (Some(z3), Some(cvc5)) => {
                 // Prefer Unknown over Error, Error over Cancelled.
-                let (winner, verdict, elapsed) =
-                    match (&z3.verdict, &cvc5.verdict) {
-                        (SolverVerdict::Unknown { .. }, _) => {
-                            (SolverId::Z3, z3.verdict.clone(), z3.elapsed_ms)
-                        }
-                        (_, SolverVerdict::Unknown { .. }) => {
-                            (SolverId::Cvc5, cvc5.verdict.clone(), cvc5.elapsed_ms)
-                        }
-                        _ => (SolverId::Z3, z3.verdict.clone(), z3.elapsed_ms),
-                    };
+                let (winner, verdict, elapsed) = match (&z3.verdict, &cvc5.verdict) {
+                    (SolverVerdict::Unknown { .. }, _) => {
+                        (SolverId::Z3, z3.verdict.clone(), z3.elapsed_ms)
+                    }
+                    (_, SolverVerdict::Unknown { .. }) => {
+                        (SolverId::Cvc5, cvc5.verdict.clone(), cvc5.elapsed_ms)
+                    }
+                    _ => (SolverId::Z3, z3.verdict.clone(), z3.elapsed_ms),
+                };
                 PortfolioResult {
                     winner,
                     verdict,
@@ -636,11 +643,20 @@ mod tests {
 
     #[test]
     fn portfolio_first_wins() {
-        let z3 = MockSolver { id: SolverId::Z3, verdict: SolverVerdict::Sat, delay_ms: 20 };
-        let cvc5 = MockSolver { id: SolverId::Cvc5, verdict: SolverVerdict::Unsat, delay_ms: 100 };
+        let z3 = MockSolver {
+            id: SolverId::Z3,
+            verdict: SolverVerdict::Sat,
+            delay_ms: 20,
+        };
+        let cvc5 = MockSolver {
+            id: SolverId::Cvc5,
+            verdict: SolverVerdict::Unsat,
+            delay_ms: 100,
+        };
 
         let result = PortfolioExecutor::solve_portfolio(
-            z3, cvc5,
+            z3,
+            cvc5,
             Duration::from_millis(500),
             TieBreaker::Fastest,
         );
@@ -651,11 +667,20 @@ mod tests {
 
     #[test]
     fn portfolio_tie_breaker_z3() {
-        let z3 = MockSolver { id: SolverId::Z3, verdict: SolverVerdict::Sat, delay_ms: 50 };
-        let cvc5 = MockSolver { id: SolverId::Cvc5, verdict: SolverVerdict::Sat, delay_ms: 50 };
+        let z3 = MockSolver {
+            id: SolverId::Z3,
+            verdict: SolverVerdict::Sat,
+            delay_ms: 50,
+        };
+        let cvc5 = MockSolver {
+            id: SolverId::Cvc5,
+            verdict: SolverVerdict::Sat,
+            delay_ms: 50,
+        };
 
         let result = PortfolioExecutor::solve_portfolio(
-            z3, cvc5,
+            z3,
+            cvc5,
             Duration::from_millis(500),
             TieBreaker::Z3,
         );
@@ -666,11 +691,20 @@ mod tests {
 
     #[test]
     fn cross_validate_agreement() {
-        let z3 = MockSolver { id: SolverId::Z3, verdict: SolverVerdict::Unsat, delay_ms: 20 };
-        let cvc5 = MockSolver { id: SolverId::Cvc5, verdict: SolverVerdict::Unsat, delay_ms: 20 };
+        let z3 = MockSolver {
+            id: SolverId::Z3,
+            verdict: SolverVerdict::Unsat,
+            delay_ms: 20,
+        };
+        let cvc5 = MockSolver {
+            id: SolverId::Cvc5,
+            verdict: SolverVerdict::Unsat,
+            delay_ms: 20,
+        };
 
         let result = PortfolioExecutor::solve_cross_validate(
-            z3, cvc5,
+            z3,
+            cvc5,
             Duration::from_millis(500),
             CrossValidationStrictness::ResultOnly,
         );
@@ -685,11 +719,20 @@ mod tests {
 
     #[test]
     fn cross_validate_divergence() {
-        let z3 = MockSolver { id: SolverId::Z3, verdict: SolverVerdict::Sat, delay_ms: 20 };
-        let cvc5 = MockSolver { id: SolverId::Cvc5, verdict: SolverVerdict::Unsat, delay_ms: 20 };
+        let z3 = MockSolver {
+            id: SolverId::Z3,
+            verdict: SolverVerdict::Sat,
+            delay_ms: 20,
+        };
+        let cvc5 = MockSolver {
+            id: SolverId::Cvc5,
+            verdict: SolverVerdict::Unsat,
+            delay_ms: 20,
+        };
 
         let result = PortfolioExecutor::solve_cross_validate(
-            z3, cvc5,
+            z3,
+            cvc5,
             Duration::from_millis(500),
             CrossValidationStrictness::ResultOnly,
         );
@@ -699,11 +742,20 @@ mod tests {
 
     #[test]
     fn cross_validate_incomplete_on_timeout() {
-        let z3 = MockSolver { id: SolverId::Z3, verdict: SolverVerdict::Sat, delay_ms: 1000 };
-        let cvc5 = MockSolver { id: SolverId::Cvc5, verdict: SolverVerdict::Sat, delay_ms: 1000 };
+        let z3 = MockSolver {
+            id: SolverId::Z3,
+            verdict: SolverVerdict::Sat,
+            delay_ms: 1000,
+        };
+        let cvc5 = MockSolver {
+            id: SolverId::Cvc5,
+            verdict: SolverVerdict::Sat,
+            delay_ms: 1000,
+        };
 
         let result = PortfolioExecutor::solve_cross_validate(
-            z3, cvc5,
+            z3,
+            cvc5,
             Duration::from_millis(50),
             CrossValidationStrictness::ResultOnly,
         );
@@ -718,8 +770,18 @@ mod tests {
     fn verdict_definitive_classification() {
         assert!(SolverVerdict::Sat.is_definitive());
         assert!(SolverVerdict::Unsat.is_definitive());
-        assert!(!SolverVerdict::Unknown { reason: "timeout".into() }.is_definitive());
+        assert!(
+            !SolverVerdict::Unknown {
+                reason: "timeout".into()
+            }
+            .is_definitive()
+        );
         assert!(!SolverVerdict::Cancelled.is_definitive());
-        assert!(!SolverVerdict::Error { message: "foo".into() }.is_definitive());
+        assert!(
+            !SolverVerdict::Error {
+                message: "foo".into()
+            }
+            .is_definitive()
+        );
     }
 }

@@ -793,10 +793,7 @@ impl CbgrViolationKind {
     pub const fn is_fatal(&self) -> bool {
         matches!(
             self,
-            Self::UseAfterFree
-                | Self::DoubleFree
-                | Self::NullPointer
-                | Self::InvalidReference
+            Self::UseAfterFree | Self::DoubleFree | Self::NullPointer | Self::InvalidReference
         )
     }
 
@@ -847,7 +844,9 @@ impl CbgrViolationKind {
         match self {
             Self::UseAfterFree => "use-after-free: reference used after deallocation",
             Self::DoubleFree => "double-free: object freed multiple times",
-            Self::GenerationMismatch => "generation mismatch: stale reference to reallocated object",
+            Self::GenerationMismatch => {
+                "generation mismatch: stale reference to reallocated object"
+            }
             Self::EpochExpired => "epoch expired: reference from previous runtime epoch",
             Self::CapabilityDenied => "capability denied: operation not permitted by reference",
             Self::InvalidReference => "invalid reference: corrupted or uninitialized reference",

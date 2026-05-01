@@ -182,17 +182,16 @@ pub struct YonedaLemma {
 }
 
 /// Apply the Yoneda lemma at object `x` against presheaf `p`.
-pub fn yoneda_lemma(
-    object: impl Into<Text>,
-    p: &Presheaf,
-) -> YonedaLemma {
+pub fn yoneda_lemma(object: impl Into<Text>, p: &Presheaf) -> YonedaLemma {
     let object_text = object.into();
     YonedaLemma {
         object: object_text.clone(),
         presheaf: p.clone(),
-        lhs_name: Text::from(format!("Hom_PSh({}, {})",
+        lhs_name: Text::from(format!(
+            "Hom_PSh({}, {})",
             format!("y({})", object_text.as_str()),
-            p.name.as_str())),
+            p.name.as_str()
+        )),
         rhs_name: Text::from(format!("{}({})", p.name.as_str(), object_text.as_str())),
         is_natural_isomorphism: true,
     }
@@ -361,10 +360,10 @@ mod tests {
     #[test]
     fn build_kan_extension_succeeds_on_well_formed() {
         let ext = build_kan_extension(
-            "f", "p", "C", "D", "E",
-            true,  // fully faithful
-            true,  // has colimits
-        ).expect("well-formed input");
+            "f", "p", "C", "D", "E", true, // fully faithful
+            true, // has colimits
+        )
+        .expect("well-formed input");
         assert!(ext.exists);
         assert_eq!(ext.base_category, Text::from("C"));
         assert_eq!(ext.intermediate_category, Text::from("D"));
@@ -374,30 +373,29 @@ mod tests {
     #[test]
     fn build_kan_extension_fails_on_non_ff() {
         let ext = build_kan_extension(
-            "f", "p", "C", "D", "E",
-            false, // not fully faithful
+            "f", "p", "C", "D", "E", false, // not fully faithful
             true,
         );
-        assert!(ext.is_none(),
-            "Kan extension requires fully-faithful base functor");
+        assert!(
+            ext.is_none(),
+            "Kan extension requires fully-faithful base functor"
+        );
     }
 
     #[test]
     fn build_kan_extension_fails_without_colimits() {
         let ext = build_kan_extension(
-            "f", "p", "C", "D", "E",
-            true,
-            false, // no colimits in target
+            "f", "p", "C", "D", "E", true, false, // no colimits in target
         );
-        assert!(ext.is_none(),
-            "Kan extension requires target to have appropriate colimits");
+        assert!(
+            ext.is_none(),
+            "Kan extension requires target to have appropriate colimits"
+        );
     }
 
     #[test]
     fn kan_extension_unit_witness_always_true() {
-        let ext = build_kan_extension(
-            "f", "p", "C", "D", "E", true, true,
-        ).unwrap();
+        let ext = build_kan_extension("f", "p", "C", "D", "E", true, true).unwrap();
         assert!(kan_extension_unit_witness(&ext));
     }
 
@@ -416,8 +414,9 @@ mod tests {
             y.target_category.name.clone(),
             "E",
             y.is_fully_faithful, // Yoneda is FF — passes precondition
-            true,                  // assume target E has colimits
-        ).expect("Yoneda is FF, target has colimits");
+            true,                // assume target E has colimits
+        )
+        .expect("Yoneda is FF, target has colimits");
         assert!(ext.exists);
     }
 }

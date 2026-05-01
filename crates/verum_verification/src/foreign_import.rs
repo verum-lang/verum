@@ -167,12 +167,18 @@ impl ForeignSystem {
     pub fn install_hint(self) -> &'static str {
         match self {
             Self::Coq => "install Coq via opam: `opam install coq`",
-            Self::Lean4 => "install Lean 4 via elan: `curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh`",
-            Self::Mizar => "install Mizar from https://mizar.uwb.edu.pl/ (no canonical package manager)",
+            Self::Lean4 => {
+                "install Lean 4 via elan: `curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh`"
+            }
+            Self::Mizar => {
+                "install Mizar from https://mizar.uwb.edu.pl/ (no canonical package manager)"
+            }
             Self::Isabelle => "install Isabelle from https://isabelle.in.tum.de/installation.html",
             Self::Agda => "install Agda via cabal: `cabal install Agda`",
             Self::Dedukti => "install Dedukti via opam: `opam install dedukti`",
-            Self::Metamath => "install Metamath verifier: clone https://github.com/metamath/metamath-exe and build with make",
+            Self::Metamath => {
+                "install Metamath verifier: clone https://github.com/metamath/metamath-exe and build with make"
+            }
         }
     }
 
@@ -211,7 +217,13 @@ impl ForeignSystem {
 
     /// Systems that have a proof-replay backend (SMT cert → target).
     pub fn with_proof_replay() -> [ForeignSystem; 5] {
-        [Self::Coq, Self::Lean4, Self::Agda, Self::Dedukti, Self::Metamath]
+        [
+            Self::Coq,
+            Self::Lean4,
+            Self::Agda,
+            Self::Dedukti,
+            Self::Metamath,
+        ]
     }
 
     /// Whether this system has a corresponding `Checker`
@@ -310,11 +322,7 @@ impl ForeignTheorem {
             self.system.framework_tag(),
             self.framework_citation.as_str()
         ));
-        s.push_str(&format!(
-            "public {} {}()\n",
-            kind,
-            self.name.as_str()
-        ));
+        s.push_str(&format!("public {} {}()\n", kind, self.name.as_str()));
         s.push_str("    ensures /* TODO: translate the foreign statement above */ true\n");
         s.push_str("    proof by axiom;\n\n");
         Text::from(s)
@@ -377,9 +385,7 @@ pub fn try_importer_for(system: ForeignSystem) -> Option<Box<dyn ForeignSystemIm
         ForeignSystem::Lean4 => Some(Box::new(Lean4Importer)),
         ForeignSystem::Mizar => Some(Box::new(MizarImporter)),
         ForeignSystem::Isabelle => Some(Box::new(IsabelleImporter)),
-        ForeignSystem::Agda
-        | ForeignSystem::Dedukti
-        | ForeignSystem::Metamath => None,
+        ForeignSystem::Agda | ForeignSystem::Dedukti | ForeignSystem::Metamath => None,
     }
 }
 
@@ -730,9 +736,7 @@ fn match_scope_open<'a>(line: &'a str, system: ForeignSystem) -> Option<&'a str>
         // and only consumes individual declarations, not nested scopes.
         // A future expansion may add Agda's `module X where` and
         // Dedukti's `module X.` to this dispatcher.
-        ForeignSystem::Agda
-        | ForeignSystem::Dedukti
-        | ForeignSystem::Metamath => None,
+        ForeignSystem::Agda | ForeignSystem::Dedukti | ForeignSystem::Metamath => None,
     }
 }
 
@@ -776,9 +780,7 @@ fn match_scope_close<'a>(line: &'a str, system: ForeignSystem) -> Option<ScopeCl
         ForeignSystem::Mizar => None,
         // Scope-close not yet implemented — see scope-open dispatcher
         // above for the rationale.
-        ForeignSystem::Agda
-        | ForeignSystem::Dedukti
-        | ForeignSystem::Metamath => None,
+        ForeignSystem::Agda | ForeignSystem::Dedukti | ForeignSystem::Metamath => None,
     }
 }
 
@@ -842,9 +844,7 @@ fn aggregate_decl(remaining: &[&str], system: ForeignSystem) -> (String, usize) 
             // caller advances cleanly. Parsing for these systems
             // lives in `verum_smt::proof_replay::*` and consumes
             // single-line declarations only.
-            ForeignSystem::Agda
-            | ForeignSystem::Dedukti
-            | ForeignSystem::Metamath => {
+            ForeignSystem::Agda | ForeignSystem::Dedukti | ForeignSystem::Metamath => {
                 if snapshot.ends_with('.') || raw.trim().is_empty() {
                     return (joined, consumed);
                 }
@@ -1022,7 +1022,10 @@ mod tests {
             ForeignSystem::from_name("mathlib"),
             Some(ForeignSystem::Lean4)
         );
-        assert_eq!(ForeignSystem::from_name("hol"), Some(ForeignSystem::Isabelle));
+        assert_eq!(
+            ForeignSystem::from_name("hol"),
+            Some(ForeignSystem::Isabelle)
+        );
     }
 
     #[test]
@@ -1035,7 +1038,11 @@ mod tests {
     fn extensions_distinct() {
         let exts: std::collections::BTreeSet<&str> =
             ForeignSystem::all().iter().map(|s| s.extension()).collect();
-        assert_eq!(exts.len(), 7, "every foreign system must have a distinct extension");
+        assert_eq!(
+            exts.len(),
+            7,
+            "every foreign system must have a distinct extension"
+        );
     }
 
     #[test]
@@ -1044,7 +1051,11 @@ mod tests {
             .iter()
             .map(|s| s.framework_tag())
             .collect();
-        assert_eq!(tags.len(), 7, "every foreign system must have a distinct framework tag");
+        assert_eq!(
+            tags.len(),
+            7,
+            "every foreign system must have a distinct framework tag"
+        );
     }
 
     #[test]
@@ -1072,7 +1083,10 @@ mod tests {
             ForeignSystem::from_name("metamath"),
             Some(ForeignSystem::Metamath)
         );
-        assert_eq!(ForeignSystem::from_name("mm"), Some(ForeignSystem::Metamath));
+        assert_eq!(
+            ForeignSystem::from_name("mm"),
+            Some(ForeignSystem::Metamath)
+        );
     }
 
     #[test]

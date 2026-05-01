@@ -155,7 +155,11 @@ impl InfinityCategory {
     pub fn truncate_at(&self, n: Ordinal) -> Self {
         Self {
             name: Text::from(format!("τ_{{≤{}}}({})", n.render(), self.name.as_str())),
-            level: if self.level.lt(&n) { self.level.clone() } else { n },
+            level: if self.level.lt(&n) {
+                self.level.clone()
+            } else {
+                n
+            },
             universe: self.universe.clone(),
         }
     }
@@ -191,8 +195,7 @@ impl InfinityMorphism {
     /// True iff this morphism is the identity (source == target and
     /// name follows the `id_…` convention).
     pub fn is_identity(&self) -> bool {
-        self.source == self.target
-            && self.name.as_str().starts_with("id_")
+        self.source == self.target && self.name.as_str().starts_with("id_")
     }
 }
 
@@ -279,7 +282,11 @@ pub fn is_equivalence_at(
         // ω, ω·k, ω², ... — admit Theorem A.7.
         audit.record(
             BridgeId::CohesiveAdjunctionUnitCounit,
-            format!("{}: (∞,{})-equivalence at limit level", context, level.render()),
+            format!(
+                "{}: (∞,{})-equivalence at limit level",
+                context,
+                level.render()
+            ),
         );
         return true;
     }
@@ -300,7 +307,11 @@ pub fn is_equivalence_at(
     // identity morphisms) without over-claiming for V1.
     audit.record(
         BridgeId::ConfluenceOfModalRewrite,
-        format!("{}: V0 conservative-accept at finite level {}", context, level.render()),
+        format!(
+            "{}: V0 conservative-accept at finite level {}",
+            context,
+            level.render()
+        ),
     );
     true
 }
@@ -309,10 +320,7 @@ pub fn is_equivalence_at(
 /// `g: b → c`. V0 strict-composition rule: types must match
 /// (g.source == f.target). The result inherits the higher of the
 /// two cell levels.
-pub fn compose(
-    f: &InfinityMorphism,
-    g: &InfinityMorphism,
-) -> Option<InfinityMorphism> {
+pub fn compose(f: &InfinityMorphism, g: &InfinityMorphism) -> Option<InfinityMorphism> {
     if f.target != g.source {
         return None;
     }
@@ -459,8 +467,10 @@ mod tests {
         let id = InfinityMorphism::identity("X");
         assert!(is_equivalence_at(&id, &Ordinal::Finite(7), &mut a, "test"));
         // Identity at finite level should be DECIDABLE (no bridge admit).
-        assert!(a.is_decidable(),
-            "identity-equivalence at finite level must be decidable");
+        assert!(
+            a.is_decidable(),
+            "identity-equivalence at finite level must be decidable"
+        );
     }
 
     #[test]
@@ -473,8 +483,10 @@ mod tests {
             cell: CellLevel::Morphism,
         };
         is_equivalence_at(&f, &Ordinal::Omega, &mut a, "test");
-        assert!(!a.is_decidable(),
-            "non-identity at limit level requires bridge admit");
+        assert!(
+            !a.is_decidable(),
+            "non-identity at limit level requires bridge admit"
+        );
     }
 
     #[test]
@@ -525,8 +537,10 @@ mod tests {
             target: Text::from("Y"),
             cell: CellLevel::Morphism,
         };
-        assert!(compose(&f, &g).is_none(),
-            "ill-typed composition (B ≠ X) returns None");
+        assert!(
+            compose(&f, &g).is_none(),
+            "ill-typed composition (B ≠ X) returns None"
+        );
     }
 
     #[test]
@@ -549,8 +563,10 @@ mod tests {
             target: Text::from("D"),
             cell: CellLevel::Morphism,
         };
-        assert!(compose_is_associative(&f, &g, &h),
-            "1-categorical composition is strictly associative");
+        assert!(
+            compose_is_associative(&f, &g, &h),
+            "1-categorical composition is strictly associative"
+        );
     }
 
     #[test]
@@ -568,8 +584,10 @@ mod tests {
             cell: CellLevel::TwoCell,
         };
         let gf = compose(&f, &g).unwrap();
-        assert!(matches!(gf.cell, CellLevel::TwoCell),
-            "composition takes the higher of the two cell levels");
+        assert!(
+            matches!(gf.cell, CellLevel::TwoCell),
+            "composition takes the higher of the two cell levels"
+        );
     }
 
     // ----- Integration: id_X is an equivalence of every level -----
@@ -593,11 +611,16 @@ mod tests {
         for level in &levels {
             let mut a = audit();
             let id = InfinityMorphism::identity("X");
-            assert!(is_equivalence_at(&id, level, &mut a, "msfs-thm-5.1-id_X"),
-                "id_X must be (∞,{})-equivalence", level.render());
-            assert!(a.is_decidable(),
+            assert!(
+                is_equivalence_at(&id, level, &mut a, "msfs-thm-5.1-id_X"),
+                "id_X must be (∞,{})-equivalence",
+                level.render()
+            );
+            assert!(
+                a.is_decidable(),
                 "id_X at level {} must be decidable (no bridge admit needed)",
-                level.render());
+                level.render()
+            );
         }
     }
 }

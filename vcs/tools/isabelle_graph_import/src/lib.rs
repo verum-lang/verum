@@ -105,7 +105,9 @@ pub fn parse_theory(src: &str) -> Vec<ImportedTheorem> {
         };
 
         // Name up to `:` (if present on the same line).
-        let Some(colon) = rest.find(':') else { continue };
+        let Some(colon) = rest.find(':') else {
+            continue;
+        };
         let name = rest[..colon].trim().to_string();
         if name.is_empty() {
             continue;
@@ -149,26 +151,18 @@ fn strip_block_comments(src: &str) -> String {
     let mut i = 0;
     let mut depth: u32 = 0;
     while i < bytes.len() {
-        if depth == 0
-            && i + 1 < bytes.len()
-            && bytes[i] == b'('
-            && bytes[i + 1] == b'*'
-        {
+        if depth == 0 && i + 1 < bytes.len() && bytes[i] == b'(' && bytes[i + 1] == b'*' {
             depth = 1;
             i += 2;
             continue;
         }
         if depth > 0 {
-            if i + 1 < bytes.len() && bytes[i] == b'('
-                && bytes[i + 1] == b'*'
-            {
+            if i + 1 < bytes.len() && bytes[i] == b'(' && bytes[i + 1] == b'*' {
                 depth += 1;
                 i += 2;
                 continue;
             }
-            if i + 1 < bytes.len() && bytes[i] == b'*'
-                && bytes[i + 1] == b')'
-            {
+            if i + 1 < bytes.len() && bytes[i] == b'*' && bytes[i + 1] == b')' {
                 depth -= 1;
                 i += 2;
                 continue;

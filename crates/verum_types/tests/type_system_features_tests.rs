@@ -23,11 +23,15 @@ use verum_ast::ty::{Ident, Path, PathSegment};
 use verum_common::{ConstValue, List, Map, Maybe, Set, Text};
 
 use verum_types::Type;
-use verum_types::affine::{AffineTracker, ResourceKind, check_linear_modifier, check_resource_modifier};
+use verum_types::affine::{
+    AffineTracker, ResourceKind, check_linear_modifier, check_resource_modifier,
+};
 use verum_types::implicit::{
     ConstraintSource, ImplicitContext, ImplicitElaborator, ImplicitResolver,
 };
-use verum_types::specialization::{OverlapDetector, SpecializationValidationError, SpecializationValidator};
+use verum_types::specialization::{
+    OverlapDetector, SpecializationValidationError, SpecializationValidator,
+};
 use verum_types::ty::{Substitution, SubstitutionExt, TypeVar, UniverseLevel};
 use verum_types::unify::Unifier;
 use verum_types::{TypeError, UniverseConstraint, UniverseContext, UniverseSubstitution};
@@ -74,7 +78,10 @@ mod linear_types {
         tracker.register_affine_type("FileHandle");
 
         assert_eq!(tracker.get_resource_kind("MustClose"), ResourceKind::Linear);
-        assert_eq!(tracker.get_resource_kind("FileHandle"), ResourceKind::Affine);
+        assert_eq!(
+            tracker.get_resource_kind("FileHandle"),
+            ResourceKind::Affine
+        );
         assert_eq!(tracker.get_resource_kind("Int"), ResourceKind::Copy);
     }
 
@@ -105,7 +112,9 @@ mod linear_types {
         // Don't consume - check should report error
         let errors = tracker.check_linear_consumed(dummy_span());
         assert_eq!(errors.len(), 1);
-        assert!(matches!(&errors[0], TypeError::LinearNotConsumed { name, .. } if name.as_str() == "handle"));
+        assert!(
+            matches!(&errors[0], TypeError::LinearNotConsumed { name, .. } if name.as_str() == "handle")
+        );
     }
 
     #[test]
@@ -154,7 +163,9 @@ mod linear_types {
         // Neither consumed - linear should report error, affine should not
         let errors = tracker.check_linear_consumed(dummy_span());
         assert_eq!(errors.len(), 1);
-        assert!(matches!(&errors[0], TypeError::LinearNotConsumed { name, .. } if name.as_str() == "linear_val"));
+        assert!(
+            matches!(&errors[0], TypeError::LinearNotConsumed { name, .. } if name.as_str() == "linear_val")
+        );
     }
 
     #[test]
@@ -274,12 +285,19 @@ mod implicit_args {
         // fn id{T}(x: T) -> T
         let t_meta = resolver.register_implicit(
             "T".into(),
-            Type::Universe { level: UniverseLevel::TYPE },
+            Type::Universe {
+                level: UniverseLevel::TYPE,
+            },
             span,
         );
 
         // Usage: id(42) => T should be Int
-        resolver.add_constraint(t_meta, Type::Int, span, ConstraintSource::Argument { position: 0 });
+        resolver.add_constraint(
+            t_meta,
+            Type::Int,
+            span,
+            ConstraintSource::Argument { position: 0 },
+        );
 
         let subst = resolver.solve().unwrap();
         let inferred = resolver.get_inferred(t_meta, &subst);
@@ -294,23 +312,43 @@ mod implicit_args {
         // fn pair{A, B}(a: A, b: B) -> (A, B)
         let a_meta = resolver.register_implicit(
             "A".into(),
-            Type::Universe { level: UniverseLevel::TYPE },
+            Type::Universe {
+                level: UniverseLevel::TYPE,
+            },
             span,
         );
         let b_meta = resolver.register_implicit(
             "B".into(),
-            Type::Universe { level: UniverseLevel::TYPE },
+            Type::Universe {
+                level: UniverseLevel::TYPE,
+            },
             span,
         );
 
         // Usage: pair(42, true) => A=Int, B=Bool
-        resolver.add_constraint(a_meta, Type::Int, span, ConstraintSource::Argument { position: 0 });
-        resolver.add_constraint(b_meta, Type::Bool, span, ConstraintSource::Argument { position: 1 });
+        resolver.add_constraint(
+            a_meta,
+            Type::Int,
+            span,
+            ConstraintSource::Argument { position: 0 },
+        );
+        resolver.add_constraint(
+            b_meta,
+            Type::Bool,
+            span,
+            ConstraintSource::Argument { position: 1 },
+        );
 
         let subst = resolver.solve().unwrap();
 
-        assert!(matches!(resolver.get_inferred(a_meta, &subst), Maybe::Some(Type::Int)));
-        assert!(matches!(resolver.get_inferred(b_meta, &subst), Maybe::Some(Type::Bool)));
+        assert!(matches!(
+            resolver.get_inferred(a_meta, &subst),
+            Maybe::Some(Type::Int)
+        ));
+        assert!(matches!(
+            resolver.get_inferred(b_meta, &subst),
+            Maybe::Some(Type::Bool)
+        ));
     }
 
     #[test]
@@ -321,7 +359,9 @@ mod implicit_args {
         // fn default{T}() -> T
         let t_meta = resolver.register_implicit(
             "T".into(),
-            Type::Universe { level: UniverseLevel::TYPE },
+            Type::Universe {
+                level: UniverseLevel::TYPE,
+            },
             span,
         );
 
@@ -329,7 +369,10 @@ mod implicit_args {
         resolver.add_constraint(t_meta, Type::Int, span, ConstraintSource::ReturnType);
 
         let subst = resolver.solve().unwrap();
-        assert!(matches!(resolver.get_inferred(t_meta, &subst), Maybe::Some(Type::Int)));
+        assert!(matches!(
+            resolver.get_inferred(t_meta, &subst),
+            Maybe::Some(Type::Int)
+        ));
     }
 
     #[test]
@@ -340,7 +383,9 @@ mod implicit_args {
         // No constraints => ambiguous
         let _t_meta = resolver.register_implicit(
             "T".into(),
-            Type::Universe { level: UniverseLevel::TYPE },
+            Type::Universe {
+                level: UniverseLevel::TYPE,
+            },
             span,
         );
 
@@ -356,16 +401,31 @@ mod implicit_args {
         // fn f{T}(a: T, b: T) -> T
         let t_meta = resolver.register_implicit(
             "T".into(),
-            Type::Universe { level: UniverseLevel::TYPE },
+            Type::Universe {
+                level: UniverseLevel::TYPE,
+            },
             span,
         );
 
         // Usage: f(42, 43) => T=Int from first, T=Int from second (consistent)
-        resolver.add_constraint(t_meta, Type::Int, span, ConstraintSource::Argument { position: 0 });
-        resolver.add_constraint(t_meta, Type::Int, span, ConstraintSource::Argument { position: 1 });
+        resolver.add_constraint(
+            t_meta,
+            Type::Int,
+            span,
+            ConstraintSource::Argument { position: 0 },
+        );
+        resolver.add_constraint(
+            t_meta,
+            Type::Int,
+            span,
+            ConstraintSource::Argument { position: 1 },
+        );
 
         let subst = resolver.solve().unwrap();
-        assert!(matches!(resolver.get_inferred(t_meta, &subst), Maybe::Some(Type::Int)));
+        assert!(matches!(
+            resolver.get_inferred(t_meta, &subst),
+            Maybe::Some(Type::Int)
+        ));
     }
 
     #[test]
@@ -420,7 +480,11 @@ mod implicit_args {
 
         let elaborated = elaborator.elaborate_type(&fn_ty);
         match &elaborated {
-            Type::Function { params, return_type, .. } => {
+            Type::Function {
+                params,
+                return_type,
+                ..
+            } => {
                 assert_eq!(params[0], Type::Int);
                 assert_eq!(params[1], Type::Bool);
                 assert_eq!(**return_type, Type::Int);
@@ -436,15 +500,25 @@ mod implicit_args {
 
         let t_meta = resolver.register_implicit(
             "T".into(),
-            Type::Universe { level: UniverseLevel::TYPE },
+            Type::Universe {
+                level: UniverseLevel::TYPE,
+            },
             span,
         );
 
-        resolver.add_constraint(t_meta, Type::Int, span, ConstraintSource::Argument { position: 0 });
+        resolver.add_constraint(
+            t_meta,
+            Type::Int,
+            span,
+            ConstraintSource::Argument { position: 0 },
+        );
 
         // solve_with_diagnostics should also work
         let subst = resolver.solve_with_diagnostics().unwrap();
-        assert!(matches!(resolver.get_inferred(t_meta, &subst), Maybe::Some(Type::Int)));
+        assert!(matches!(
+            resolver.get_inferred(t_meta, &subst),
+            Maybe::Some(Type::Int)
+        ));
     }
 
     #[test]
@@ -452,7 +526,13 @@ mod implicit_args {
         let mut resolver = ImplicitResolver::new();
         let span = dummy_span();
 
-        resolver.register_implicit("T".into(), Type::Universe { level: UniverseLevel::TYPE }, span);
+        resolver.register_implicit(
+            "T".into(),
+            Type::Universe {
+                level: UniverseLevel::TYPE,
+            },
+            span,
+        );
         assert_eq!(resolver.pending_count(), 1);
 
         resolver.clear();
@@ -467,7 +547,9 @@ mod implicit_args {
 
         let t_meta = resolver.register_implicit(
             "T".into(),
-            Type::Universe { level: UniverseLevel::TYPE },
+            Type::Universe {
+                level: UniverseLevel::TYPE,
+            },
             span,
         );
 
@@ -480,7 +562,10 @@ mod implicit_args {
         );
 
         let subst = resolver.solve().unwrap();
-        assert!(matches!(resolver.get_inferred(t_meta, &subst), Maybe::Some(Type::Float)));
+        assert!(matches!(
+            resolver.get_inferred(t_meta, &subst),
+            Maybe::Some(Type::Float)
+        ));
     }
 
     #[test]
@@ -490,14 +575,19 @@ mod implicit_args {
 
         let t_meta = resolver.register_implicit(
             "T".into(),
-            Type::Universe { level: UniverseLevel::TYPE },
+            Type::Universe {
+                level: UniverseLevel::TYPE,
+            },
             span,
         );
 
         resolver.add_constraint(t_meta, Type::Text, span, ConstraintSource::TypeAnnotation);
 
         let subst = resolver.solve().unwrap();
-        assert!(matches!(resolver.get_inferred(t_meta, &subst), Maybe::Some(Type::Text)));
+        assert!(matches!(
+            resolver.get_inferred(t_meta, &subst),
+            Maybe::Some(Type::Text)
+        ));
     }
 }
 
@@ -558,9 +648,10 @@ mod gats {
         // type Item<T> where T: Ord
         let where_clause = GATWhereClause {
             param: "T".into(),
-            constraints: List::from_iter([ProtocolBound::simple(
-                Path::single(Ident::new("Ord", dummy_span())),
-            )]),
+            constraints: List::from_iter([ProtocolBound::simple(Path::single(Ident::new(
+                "Ord",
+                dummy_span(),
+            )))]),
             span: dummy_span(),
         };
 
@@ -656,7 +747,10 @@ mod gats {
 
         assert!(protocol.associated_types.contains_key(&Text::from("Item")));
         let item_gat = &protocol.associated_types[&Text::from("Item")];
-        assert!(matches!(item_gat.kind, AssociatedTypeKind::Generic { arity: 1 }));
+        assert!(matches!(
+            item_gat.kind,
+            AssociatedTypeKind::Generic { arity: 1 }
+        ));
     }
 
     #[test]
@@ -802,7 +896,7 @@ mod specialization_overlap {
 
         let impls = vec![
             make_impl("Display", Type::Var(TypeVar::fresh())), // implement<T> Display for T
-            make_impl("Display", Type::Int),                    // implement Display for Int
+            make_impl("Display", Type::Int),                   // implement Display for Int
         ];
 
         // Should detect overlap since T can be Int
@@ -817,7 +911,7 @@ mod specialization_overlap {
 
         let impls = vec![
             make_impl("Display", Type::Var(TypeVar::fresh())), // Base: implement<T> Display for T
-            make_specialized_impl("Display", Type::Int),        // @specialize: implement Display for Int
+            make_specialized_impl("Display", Type::Int), // @specialize: implement Display for Int
         ];
 
         // Should be OK because specialization relationship exists
@@ -831,7 +925,10 @@ mod specialization_overlap {
         let protocol = make_protocol("Clone");
 
         let impls = vec![
-            make_impl("Clone", generic_type("List", vec![Type::Var(TypeVar::fresh())])),
+            make_impl(
+                "Clone",
+                generic_type("List", vec![Type::Var(TypeVar::fresh())]),
+            ),
             make_impl("Clone", generic_type("List", vec![Type::Int])),
         ];
 
@@ -861,7 +958,7 @@ mod specialization_overlap {
 
         let impls = vec![
             make_impl("Display", Type::Var(TypeVar::fresh())), // Base
-            make_specialized_impl("Display", Type::Int),        // Specialized
+            make_specialized_impl("Display", Type::Int),       // Specialized
         ];
 
         let result = validator.validate_specializations(&protocol, &impls);
@@ -910,14 +1007,26 @@ mod specialization_overlap {
     fn test_overlap_detection_array_types() {
         let detector = OverlapDetector::new();
 
-        let arr1 = Type::Array { element: Box::new(Type::Int), size: Some(5) };
-        let arr2 = Type::Array { element: Box::new(Type::Int), size: Some(5) };
+        let arr1 = Type::Array {
+            element: Box::new(Type::Int),
+            size: Some(5),
+        };
+        let arr2 = Type::Array {
+            element: Box::new(Type::Int),
+            size: Some(5),
+        };
         assert!(detector.check_overlap(&arr1, &arr2).is_some());
 
-        let arr3 = Type::Array { element: Box::new(Type::Int), size: Some(10) };
+        let arr3 = Type::Array {
+            element: Box::new(Type::Int),
+            size: Some(10),
+        };
         assert!(detector.check_overlap(&arr1, &arr3).is_none()); // Different sizes
 
-        let arr4 = Type::Array { element: Box::new(Type::Int), size: None };
+        let arr4 = Type::Array {
+            element: Box::new(Type::Int),
+            size: None,
+        };
         assert!(detector.check_overlap(&arr1, &arr4).is_some()); // Unknown size overlaps
     }
 
@@ -925,17 +1034,32 @@ mod specialization_overlap {
     fn test_overlap_reference_types() {
         let detector = OverlapDetector::new();
 
-        let ref1 = Type::Reference { inner: Box::new(Type::Int), mutable: false };
-        let ref2 = Type::Reference { inner: Box::new(Type::Int), mutable: false };
+        let ref1 = Type::Reference {
+            inner: Box::new(Type::Int),
+            mutable: false,
+        };
+        let ref2 = Type::Reference {
+            inner: Box::new(Type::Int),
+            mutable: false,
+        };
         assert!(detector.check_overlap(&ref1, &ref2).is_some());
 
         // Mut ref does not overlap with immut ref (when mut is first arg)
-        let ref_mut = Type::Reference { inner: Box::new(Type::Int), mutable: true };
-        let ref_immut = Type::Reference { inner: Box::new(Type::Int), mutable: false };
+        let ref_mut = Type::Reference {
+            inner: Box::new(Type::Int),
+            mutable: true,
+        };
+        let ref_immut = Type::Reference {
+            inner: Box::new(Type::Int),
+            mutable: false,
+        };
         assert!(detector.check_overlap(&ref_mut, &ref_immut).is_none());
 
         // Different inner types don't overlap
-        let ref3 = Type::Reference { inner: Box::new(Type::Bool), mutable: false };
+        let ref3 = Type::Reference {
+            inner: Box::new(Type::Bool),
+            mutable: false,
+        };
         assert!(detector.check_overlap(&ref1, &ref3).is_none());
     }
 
@@ -948,8 +1072,8 @@ mod specialization_overlap {
         let t2 = TypeVar::fresh();
 
         let impls = vec![
-            make_impl("Debug", Type::Var(t1)),            // implement<T> Debug for T
-            make_impl("Debug", Type::Int),                  // implement Debug for Int
+            make_impl("Debug", Type::Var(t1)), // implement<T> Debug for T
+            make_impl("Debug", Type::Int),     // implement Debug for Int
             make_impl("Debug", generic_type("List", vec![Type::Var(t2)])), // implement<T> Debug for List<T>
         ];
 
@@ -973,22 +1097,21 @@ mod specialization_overlap {
         let mut base = make_impl("Clone", generic_type("List", vec![Type::Var(t_var)]));
         base.where_clauses.push(WhereClause {
             ty: Type::Var(t_var),
-            bounds: List::from_iter([ProtocolBound::simple(
-                Path::single(Ident::new("Clone", dummy_span())),
-            )]),
+            bounds: List::from_iter([ProtocolBound::simple(Path::single(Ident::new(
+                "Clone",
+                dummy_span(),
+            )))]),
         });
 
         // Specialized: implement Clone for List<Int> where Int: Clone
         // (more specific type + where clauses cover base bounds)
-        let mut specialized = make_specialized_impl(
-            "Clone",
-            generic_type("List", vec![Type::Int]),
-        );
+        let mut specialized = make_specialized_impl("Clone", generic_type("List", vec![Type::Int]));
         specialized.where_clauses.push(WhereClause {
             ty: Type::Int,
-            bounds: List::from_iter([ProtocolBound::simple(
-                Path::single(Ident::new("Clone", dummy_span())),
-            )]),
+            bounds: List::from_iter([ProtocolBound::simple(Path::single(Ident::new(
+                "Clone",
+                dummy_span(),
+            )))]),
         });
 
         let impls = vec![base, specialized];
@@ -1010,11 +1133,17 @@ mod specialization_overlap {
     fn test_overlap_slice_types() {
         let detector = OverlapDetector::new();
 
-        let slice1 = Type::Slice { element: Box::new(Type::Int) };
-        let slice2 = Type::Slice { element: Box::new(Type::Int) };
+        let slice1 = Type::Slice {
+            element: Box::new(Type::Int),
+        };
+        let slice2 = Type::Slice {
+            element: Box::new(Type::Int),
+        };
         assert!(detector.check_overlap(&slice1, &slice2).is_some());
 
-        let slice3 = Type::Slice { element: Box::new(Type::Bool) };
+        let slice3 = Type::Slice {
+            element: Box::new(Type::Bool),
+        };
         assert!(detector.check_overlap(&slice1, &slice3).is_none());
     }
 }
@@ -1144,10 +1273,8 @@ mod universe_hierarchy {
 
     #[test]
     fn test_universe_constraint_variables() {
-        let c = UniverseConstraint::LessOrEqual(
-            UniverseLevel::Variable(0),
-            UniverseLevel::Variable(1),
-        );
+        let c =
+            UniverseConstraint::LessOrEqual(UniverseLevel::Variable(0), UniverseLevel::Variable(1));
         let vars = c.variables();
         assert!(vars.contains(&0));
         assert!(vars.contains(&1));
@@ -1163,8 +1290,14 @@ mod universe_hierarchy {
 
         subst1.merge(&subst2);
 
-        assert_eq!(subst1.resolve(&UniverseLevel::Variable(0)), UniverseLevel::Concrete(1));
-        assert_eq!(subst1.resolve(&UniverseLevel::Variable(1)), UniverseLevel::Concrete(2));
+        assert_eq!(
+            subst1.resolve(&UniverseLevel::Variable(0)),
+            UniverseLevel::Concrete(1)
+        );
+        assert_eq!(
+            subst1.resolve(&UniverseLevel::Variable(1)),
+            UniverseLevel::Concrete(2)
+        );
     }
 
     #[test]
@@ -1172,17 +1305,13 @@ mod universe_hierarchy {
         let subst = UniverseSubstitution::new();
 
         // Succ(0) = 0 + 1: true
-        let c = UniverseConstraint::Successor(
-            UniverseLevel::Concrete(1),
-            UniverseLevel::Concrete(0),
-        );
+        let c =
+            UniverseConstraint::Successor(UniverseLevel::Concrete(1), UniverseLevel::Concrete(0));
         assert!(c.is_satisfied(&subst));
 
         // Succ(1) = 0 + 1: false (2 != 1)
-        let c2 = UniverseConstraint::Successor(
-            UniverseLevel::Concrete(2),
-            UniverseLevel::Concrete(0),
-        );
+        let c2 =
+            UniverseConstraint::Successor(UniverseLevel::Concrete(2), UniverseLevel::Concrete(0));
         assert!(!c2.is_satisfied(&subst));
     }
 
@@ -1190,10 +1319,7 @@ mod universe_hierarchy {
     fn test_universe_equal_concrete_violation() {
         let subst = UniverseSubstitution::new();
 
-        let c = UniverseConstraint::Equal(
-            UniverseLevel::Concrete(0),
-            UniverseLevel::Concrete(1),
-        );
+        let c = UniverseConstraint::Equal(UniverseLevel::Concrete(0), UniverseLevel::Concrete(1));
         assert!(!c.is_satisfied(&subst));
     }
 }

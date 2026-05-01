@@ -33,7 +33,12 @@ fn test_zero_in_all_bases() {
         let tokens: Vec<Token> = lexer.map(|r| r.unwrap()).collect();
 
         if let TokenKind::Integer(lit) = &tokens[0].kind {
-            assert_eq!(lit.as_i64().unwrap(), expected, "Failed for input: {}", input);
+            assert_eq!(
+                lit.as_i64().unwrap(),
+                expected,
+                "Failed for input: {}",
+                input
+            );
         }
     }
 }

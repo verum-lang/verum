@@ -5,18 +5,19 @@
 
 //! Spec: closes 13th instance of the inert-defense anti-pattern series.
 
+use verum_ast::Span;
 use verum_ast::expr::{Expr, ExprKind};
 use verum_ast::literal::{IntLit, Literal, LiteralKind};
-use verum_ast::Span;
-use verum_smt::certificates::{
-    CertificateFormat, CertificateGenerator, GeneratorConfig, Theorem,
-};
+use verum_smt::certificates::{CertificateFormat, CertificateGenerator, GeneratorConfig, Theorem};
 use verum_smt::proof_term_unified::ProofTerm;
 
 fn dummy_proof() -> ProofTerm {
     let formula = Expr::new(
         ExprKind::Literal(Literal::new(
-            LiteralKind::Int(IntLit { value: 1, suffix: None }),
+            LiteralKind::Int(IntLit {
+                value: 1,
+                suffix: None,
+            }),
             Span::dummy(),
         )),
         Span::dummy(),

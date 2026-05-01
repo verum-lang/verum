@@ -21,7 +21,7 @@
 //!  * Operator translation chooses the OCaml-canonical form
 //!  (`==` → structural `=`, `!=` → `<>`, `&&` / `||` keep).
 
-use verum_ast::expr::{BinOp, Block, Expr, ExprKind, ConditionKind, IfCondition, UnOp};
+use verum_ast::expr::{BinOp, Block, ConditionKind, Expr, ExprKind, IfCondition, UnOp};
 use verum_ast::literal::{LiteralKind, StringLit};
 use verum_common::Maybe;
 
@@ -89,7 +89,11 @@ pub(super) fn lower_expr(expr: &Expr) -> Option<String> {
             }
         }
         ExprKind::Block(b) => Some(format!("({})", lower_block(b)?)),
-        ExprKind::If { condition, then_branch, else_branch } => {
+        ExprKind::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
             let c = lower_if_condition(condition)?;
             let t = lower_block(then_branch)?;
             let e = match else_branch {
@@ -147,7 +151,14 @@ pub(super) fn lower_expr(expr: &Expr) -> Option<String> {
             let r = lower_expr(right)?;
             Some(format!("({} |> {})", l, r))
         }
-        ExprKind::Closure { async_, move_, params, contexts, return_type: _, body } => {
+        ExprKind::Closure {
+            async_,
+            move_,
+            params,
+            contexts,
+            return_type: _,
+            body,
+        } => {
             // OCaml has no surface form for `async`, `move`, or
             // Verum's context system — bail when any are present so
             // semantics aren't silently dropped.
@@ -167,7 +178,12 @@ pub(super) fn lower_expr(expr: &Expr) -> Option<String> {
             let b = lower_expr(body)?;
             Some(format!("(fun {} -> {})", names.join(" "), b))
         }
-        ExprKind::MethodCall { receiver, method, type_args, args } => {
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            type_args,
+            args,
+        } => {
             // Verum's value-uniform `recv.method(args)` lowers to a
             // free-function application `(method recv args)` because
             // OCaml has no first-class method dispatch on plain values
@@ -223,20 +239,31 @@ fn lower_pattern(pat: &verum_ast::pattern::Pattern) -> Option<String> {
     use verum_ast::pattern::{PatternKind, VariantPatternData};
     match &pat.kind {
         PatternKind::Wildcard => Some("_".to_string()),
-        PatternKind::Ident { name, subpattern, .. } => match subpattern {
+        PatternKind::Ident {
+            name, subpattern, ..
+        } => match subpattern {
             Maybe::None => Some(mangle_ident(name.name.as_str())),
             // `x @ subpat` → OCaml `(x as subpat)` form. We emit
             // `(subpat as x)` which OCaml accepts.
             Maybe::Some(sub) => {
                 let inner = lower_pattern(sub)?;
-                Some(format!("({} as {})", inner, mangle_ident(name.name.as_str())))
+                Some(format!(
+                    "({} as {})",
+                    inner,
+                    mangle_ident(name.name.as_str())
+                ))
             }
         },
         PatternKind::Literal(lit) => match &lit.kind {
-            LiteralKind::Bool(b) => Some(if *b { "true".to_string() } else { "false".to_string() }),
+            LiteralKind::Bool(b) => Some(if *b {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            }),
             LiteralKind::Int(i) => Some(format!("{}", i.value)),
             LiteralKind::Char(c) => Some(format!("'{}'", c)),
-            LiteralKind::Text(StringLit::Regular(s)) | LiteralKind::Text(StringLit::MultiLine(s)) => {
+            LiteralKind::Text(StringLit::Regular(s))
+            | LiteralKind::Text(StringLit::MultiLine(s)) => {
                 Some(format!("\"{}\"", escape_ocaml_string(s.as_str())))
             }
             _ => None,
@@ -296,7 +323,11 @@ fn lower_if_condition(cond: &IfCondition) -> Option<String> {
 
 fn lower_literal(lit: &verum_ast::literal::Literal) -> Option<String> {
     match &lit.kind {
-        LiteralKind::Bool(b) => Some(if *b { "true".to_string() } else { "false".to_string() }),
+        LiteralKind::Bool(b) => Some(if *b {
+            "true".to_string()
+        } else {
+            "false".to_string()
+        }),
         LiteralKind::Int(i) => Some(format!("{}", i.value)),
         LiteralKind::Float(f) => Some(format!("{}", f.value)),
         LiteralKind::Text(StringLit::Regular(s)) | LiteralKind::Text(StringLit::MultiLine(s)) => {
@@ -528,7 +559,10 @@ mod tests {
         let s = StringLit::Regular(Text::from("hello \"world\" \\n"));
         let lit = Literal::new(LiteralKind::Text(s), span());
         let e = Expr::literal(lit);
-        assert_eq!(lower_expr(&e).as_deref(), Some("\"hello \\\"world\\\" \\\\n\""));
+        assert_eq!(
+            lower_expr(&e).as_deref(),
+            Some("\"hello \\\"world\\\" \\\\n\"")
+        );
     }
 
     #[test]
@@ -642,10 +676,7 @@ mod tests {
     fn lower_match_with_variant_arms() {
         let mut arms = verum_common::List::new();
         arms.push(arm(variant_pat("None", vec![]), int_lit(0)));
-        arms.push(arm(
-            variant_pat("Some", vec![ident_pat("v")]),
-            var("v"),
-        ));
+        arms.push(arm(variant_pat("Some", vec![ident_pat("v")]), var("v")));
         let e = Expr::new(
             ExprKind::Match {
                 expr: Heap::new(var("opt")),
@@ -724,7 +755,11 @@ mod tests {
     fn closure(param_names: &[&str], body: Expr) -> Expr {
         let mut params = verum_common::List::new();
         for n in param_names {
-            params.push(ClosureParam::new(ident_pat(n), verum_common::Maybe::None, span()));
+            params.push(ClosureParam::new(
+                ident_pat(n),
+                verum_common::Maybe::None,
+                span(),
+            ));
         }
         Expr::new(
             ExprKind::Closure {
@@ -778,7 +813,10 @@ mod tests {
     #[test]
     fn lower_tuple_index_zero_uses_fst() {
         let e = Expr::new(
-            ExprKind::TupleIndex { expr: Heap::new(var("p")), index: 0 },
+            ExprKind::TupleIndex {
+                expr: Heap::new(var("p")),
+                index: 0,
+            },
             span(),
         );
         assert_eq!(lower_expr(&e).as_deref(), Some("(fst p)"));
@@ -787,7 +825,10 @@ mod tests {
     #[test]
     fn lower_tuple_index_two_returns_none() {
         let e = Expr::new(
-            ExprKind::TupleIndex { expr: Heap::new(var("t")), index: 2 },
+            ExprKind::TupleIndex {
+                expr: Heap::new(var("t")),
+                index: 2,
+            },
             span(),
         );
         assert!(lower_expr(&e).is_none());

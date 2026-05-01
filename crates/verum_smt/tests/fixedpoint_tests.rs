@@ -30,11 +30,11 @@
 // that are solved via Constrained Horn Clauses (CHC). The engine computes least
 // fixpoints for reachability and greatest fixpoints for safety properties.
 
+use verum_common::{List, Text};
 use verum_smt::fixedpoint::{
     Atom, CHC, DatalogRule, FixedPointEngine, create_fixedpoint_context, extract_invariants,
     patterns,
 };
-use verum_common::{List, Text};
 use z3::ast::{Bool, Dynamic, Int};
 use z3::{Context, FuncDecl, SatResult, Sort};
 
@@ -218,8 +218,7 @@ fn test_transitive_closure_basic() {
         .as_bool()
         .unwrap()
         .implies(
-            path
-                .apply(&[&Dynamic::from(x.clone()), &Dynamic::from(y.clone())])
+            path.apply(&[&Dynamic::from(x.clone()), &Dynamic::from(y.clone())])
                 .as_bool()
                 .unwrap(),
         );
@@ -293,8 +292,7 @@ fn test_transitive_closure_long_chain() {
         .as_bool()
         .unwrap()
         .implies(
-            path
-                .apply(&[&Dynamic::from(x.clone()), &Dynamic::from(y.clone())])
+            path.apply(&[&Dynamic::from(x.clone()), &Dynamic::from(y.clone())])
                 .as_bool()
                 .unwrap(),
         );
@@ -506,8 +504,8 @@ fn test_graph_path_length_pattern() {
 
 #[test]
 fn test_extract_invariants_empty() {
-    use verum_smt::fixedpoint::FixedPointSolution;
     use verum_common::Map;
+    use verum_smt::fixedpoint::FixedPointSolution;
 
     let solution = FixedPointSolution {
         interpretations: Map::new(),
@@ -520,8 +518,8 @@ fn test_extract_invariants_empty() {
 
 #[test]
 fn test_extract_invariants_with_data() {
-    use verum_smt::fixedpoint::{FixedPointSolution, PredicateInterpretation};
     use verum_common::Map;
+    use verum_smt::fixedpoint::{FixedPointSolution, PredicateInterpretation};
 
     let _ctx = Context::thread_local();
     let inv1 = Bool::from_bool(true);

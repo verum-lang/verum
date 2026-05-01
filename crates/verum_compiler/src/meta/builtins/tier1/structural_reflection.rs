@@ -606,7 +606,10 @@ fn meta_generics_of(
     match &args[0] {
         ConstValue::Type(ty) => {
             // Handle Generic types (e.g., List<T>, Option<T>)
-            if let TypeKind::Generic { args: type_args, .. } = &ty.kind {
+            if let TypeKind::Generic {
+                args: type_args, ..
+            } = &ty.kind
+            {
                 let generics: Vec<ConstValue> = type_args
                     .iter()
                     .filter_map(|arg| {
@@ -667,40 +670,38 @@ fn meta_inner_type_of(
     }
 
     match &args[0] {
-        ConstValue::Type(ty) => {
-            match &ty.kind {
-                TypeKind::Reference { inner, .. }
-                | TypeKind::CheckedReference { inner, .. }
-                | TypeKind::UnsafeReference { inner, .. } => {
-                    let inner_ty = verum_ast::ty::Type {
-                        kind: inner.kind.clone(),
-                        span: verum_ast::Span::dummy(),
-                    };
-                    Ok(ConstValue::Maybe(Maybe::Some(Heap::new(ConstValue::Type(
-                        inner_ty,
-                    )))))
-                }
-                TypeKind::Pointer { inner, .. } => {
-                    let inner_ty = verum_ast::ty::Type {
-                        kind: inner.kind.clone(),
-                        span: verum_ast::Span::dummy(),
-                    };
-                    Ok(ConstValue::Maybe(Maybe::Some(Heap::new(ConstValue::Type(
-                        inner_ty,
-                    )))))
-                }
-                TypeKind::Array { element, .. } | TypeKind::Slice(element) => {
-                    let inner_ty = verum_ast::ty::Type {
-                        kind: element.kind.clone(),
-                        span: verum_ast::Span::dummy(),
-                    };
-                    Ok(ConstValue::Maybe(Maybe::Some(Heap::new(ConstValue::Type(
-                        inner_ty,
-                    )))))
-                }
-                _ => Ok(ConstValue::Maybe(Maybe::None)),
+        ConstValue::Type(ty) => match &ty.kind {
+            TypeKind::Reference { inner, .. }
+            | TypeKind::CheckedReference { inner, .. }
+            | TypeKind::UnsafeReference { inner, .. } => {
+                let inner_ty = verum_ast::ty::Type {
+                    kind: inner.kind.clone(),
+                    span: verum_ast::Span::dummy(),
+                };
+                Ok(ConstValue::Maybe(Maybe::Some(Heap::new(ConstValue::Type(
+                    inner_ty,
+                )))))
             }
-        }
+            TypeKind::Pointer { inner, .. } => {
+                let inner_ty = verum_ast::ty::Type {
+                    kind: inner.kind.clone(),
+                    span: verum_ast::Span::dummy(),
+                };
+                Ok(ConstValue::Maybe(Maybe::Some(Heap::new(ConstValue::Type(
+                    inner_ty,
+                )))))
+            }
+            TypeKind::Array { element, .. } | TypeKind::Slice(element) => {
+                let inner_ty = verum_ast::ty::Type {
+                    kind: element.kind.clone(),
+                    span: verum_ast::Span::dummy(),
+                };
+                Ok(ConstValue::Maybe(Maybe::Some(Heap::new(ConstValue::Type(
+                    inner_ty,
+                )))))
+            }
+            _ => Ok(ConstValue::Maybe(Maybe::None)),
+        },
         _ => Err(MetaError::TypeMismatch {
             expected: Text::from("Type"),
             found: args[0].type_name(),
@@ -721,26 +722,24 @@ fn meta_element_type_of(
     }
 
     match &args[0] {
-        ConstValue::Type(ty) => {
-            match &ty.kind {
-                TypeKind::Array { element, .. } | TypeKind::Slice(element) => {
-                    let elem_ty = verum_ast::ty::Type {
-                        kind: element.kind.clone(),
-                        span: verum_ast::Span::dummy(),
-                    };
-                    Ok(ConstValue::Maybe(Maybe::Some(Heap::new(ConstValue::Type(
-                        elem_ty,
-                    )))))
-                }
-                TypeKind::Tuple(elements) if !elements.is_empty() => {
-                    let first_ty = elements[0].clone();
-                    Ok(ConstValue::Maybe(Maybe::Some(Heap::new(ConstValue::Type(
-                        first_ty,
-                    )))))
-                }
-                _ => Ok(ConstValue::Maybe(Maybe::None)),
+        ConstValue::Type(ty) => match &ty.kind {
+            TypeKind::Array { element, .. } | TypeKind::Slice(element) => {
+                let elem_ty = verum_ast::ty::Type {
+                    kind: element.kind.clone(),
+                    span: verum_ast::Span::dummy(),
+                };
+                Ok(ConstValue::Maybe(Maybe::Some(Heap::new(ConstValue::Type(
+                    elem_ty,
+                )))))
             }
-        }
+            TypeKind::Tuple(elements) if !elements.is_empty() => {
+                let first_ty = elements[0].clone();
+                Ok(ConstValue::Maybe(Maybe::Some(Heap::new(ConstValue::Type(
+                    first_ty,
+                )))))
+            }
+            _ => Ok(ConstValue::Maybe(Maybe::None)),
+        },
         _ => Err(MetaError::TypeMismatch {
             expected: Text::from("Type"),
             found: args[0].type_name(),
@@ -1055,12 +1054,21 @@ fn meta_key_value_types_of(
     match &args[0] {
         ConstValue::Type(ty) => {
             // Check if it's a Generic type like Map<K, V>
-            if let TypeKind::Generic { base, args: type_args } = &ty.kind {
+            if let TypeKind::Generic {
+                base,
+                args: type_args,
+            } = &ty.kind
+            {
                 // Check if base is a Map type
                 if let TypeKind::Path(path) = &base.kind {
                     if let Some(first) = path.segments.first() {
                         if let Some(name) = segment_name_str(first) {
-                            if matches!(name, verum_common::well_known_types::type_names::MAP | "HashMap" | "BTreeMap") {
+                            if matches!(
+                                name,
+                                verum_common::well_known_types::type_names::MAP
+                                    | "HashMap"
+                                    | "BTreeMap"
+                            ) {
                                 // Extract key and value types from generic args
                                 let types: Vec<verum_ast::ty::Type> = type_args
                                     .iter()

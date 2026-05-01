@@ -153,10 +153,7 @@ fn kernel_recheck_pass_succeeds_on_clean_module() {
     let mut pass = KernelRecheckPass::new();
     let mut ctx = VerificationContext::new();
     let result = pass.run(&module, &mut ctx).expect("pass runs");
-    assert!(
-        result.success,
-        "clean module must produce a success result"
-    );
+    assert!(result.success, "clean module must produce a success result");
     assert_eq!(pass.rejections().len(), 0);
 }
 
@@ -332,10 +329,7 @@ fn kernel_recheck_pass_descends_into_impl_block_methods() {
         vec![bad_refined],
         Maybe::Some(Type::int(span())),
     );
-    let impl_decl = impl_block(
-        Type::int(span()),
-        vec![impl_item_with_function(bad_method)],
-    );
+    let impl_decl = impl_block(Type::int(span()), vec![impl_item_with_function(bad_method)]);
     let module = module_with(vec![]);
     // Manually splice in the Impl item (module_with helper is
     // built around make_function-produced Functions).
@@ -398,15 +392,8 @@ fn kernel_recheck_pass_walks_top_level_and_impl_methods_together() {
     let p = path_expr("p");
     let boxed = method_call_expr(method_call_expr(p, "box"), "box");
     let bad_refined = refined_int(boxed);
-    let bad_method = make_function(
-        "im_bad",
-        vec![bad_refined],
-        Maybe::Some(Type::int(span())),
-    );
-    let impl_decl = impl_block(
-        Type::int(span()),
-        vec![impl_item_with_function(bad_method)],
-    );
+    let bad_method = make_function("im_bad", vec![bad_refined], Maybe::Some(Type::int(span())));
+    let impl_decl = impl_block(Type::int(span()), vec![impl_item_with_function(bad_method)]);
     let mut module = module_with(vec![top]);
     module.items.push(verum_ast::Item::new(
         verum_ast::decl::ItemKind::Impl(impl_decl),
@@ -421,14 +408,24 @@ fn kernel_recheck_pass_walks_top_level_and_impl_methods_together() {
     assert_eq!(result.costs.len(), 2);
     // Only the impl method was rejected.
     assert_eq!(pass.rejections().len(), 1);
-    assert!(pass.rejections().get(0).unwrap().as_str().contains("im_bad"));
+    assert!(
+        pass.rejections()
+            .get(0)
+            .unwrap()
+            .as_str()
+            .contains("im_bad")
+    );
 }
 
 // =============================================================================
 // V6 (#200) — descend into Module + Theorem/Lemma/Corollary/Axiom items
 // =============================================================================
 
-fn axiom_decl(name: &str, params: Vec<Type>, return_type: Maybe<Type>) -> verum_ast::decl::AxiomDecl {
+fn axiom_decl(
+    name: &str,
+    params: Vec<Type>,
+    return_type: Maybe<Type>,
+) -> verum_ast::decl::AxiomDecl {
     let mut p_list: List<verum_ast::decl::FunctionParam> = List::new();
     for ty in params {
         p_list.push(regular_param(ty));
@@ -450,7 +447,11 @@ fn axiom_decl(name: &str, params: Vec<Type>, return_type: Maybe<Type>) -> verum_
     }
 }
 
-fn theorem_decl(name: &str, params: Vec<Type>, return_type: Maybe<Type>) -> verum_ast::decl::TheoremDecl {
+fn theorem_decl(
+    name: &str,
+    params: Vec<Type>,
+    return_type: Maybe<Type>,
+) -> verum_ast::decl::TheoremDecl {
     let mut p_list: List<verum_ast::decl::FunctionParam> = List::new();
     for ty in params {
         p_list.push(regular_param(ty));
@@ -481,7 +482,11 @@ fn kernel_recheck_pass_walks_axiom_signatures() {
     let p = path_expr("p");
     let boxed = method_call_expr(method_call_expr(p, "box"), "box");
     let bad = refined_int(boxed);
-    let axiom = axiom_decl("positive_overshoot", vec![bad], Maybe::Some(Type::int(span())));
+    let axiom = axiom_decl(
+        "positive_overshoot",
+        vec![bad],
+        Maybe::Some(Type::int(span())),
+    );
     let mut module = module_with(vec![]);
     module.items.push(verum_ast::Item::new(
         verum_ast::decl::ItemKind::Axiom(axiom),
@@ -490,9 +495,18 @@ fn kernel_recheck_pass_walks_axiom_signatures() {
     let mut pass = KernelRecheckPass::new();
     let mut ctx = VerificationContext::new();
     let result = pass.run(&module, &mut ctx).expect("pass runs");
-    assert!(!result.success, "axiom modal overshoot must reject under V6");
+    assert!(
+        !result.success,
+        "axiom modal overshoot must reject under V6"
+    );
     assert_eq!(pass.rejections().len(), 1);
-    assert!(pass.rejections().get(0).unwrap().as_str().contains("positive_overshoot"));
+    assert!(
+        pass.rejections()
+            .get(0)
+            .unwrap()
+            .as_str()
+            .contains("positive_overshoot")
+    );
 }
 
 #[test]
@@ -509,8 +523,17 @@ fn kernel_recheck_pass_walks_theorem_signatures() {
     let mut pass = KernelRecheckPass::new();
     let mut ctx = VerificationContext::new();
     let result = pass.run(&module, &mut ctx).expect("pass runs");
-    assert!(!result.success, "theorem modal overshoot must reject under V6");
-    assert!(pass.rejections().get(0).unwrap().as_str().contains("plus_comm_modal"));
+    assert!(
+        !result.success,
+        "theorem modal overshoot must reject under V6"
+    );
+    assert!(
+        pass.rejections()
+            .get(0)
+            .unwrap()
+            .as_str()
+            .contains("plus_comm_modal")
+    );
 }
 
 #[test]
@@ -529,7 +552,13 @@ fn kernel_recheck_pass_walks_lemma_via_theorem_decl() {
     let mut ctx = VerificationContext::new();
     let result = pass.run(&module, &mut ctx).expect("pass runs");
     assert!(!result.success);
-    assert!(pass.rejections().get(0).unwrap().as_str().contains("helper_modal"));
+    assert!(
+        pass.rejections()
+            .get(0)
+            .unwrap()
+            .as_str()
+            .contains("helper_modal")
+    );
 }
 
 #[test]
@@ -583,7 +612,13 @@ fn kernel_recheck_pass_descends_into_nested_module_items() {
     let mut ctx = VerificationContext::new();
     let result = pass.run(&module, &mut ctx).expect("pass runs");
     assert!(!result.success, "nested-module bad fn must be caught by V6");
-    assert!(pass.rejections().get(0).unwrap().as_str().contains("nested_bad"));
+    assert!(
+        pass.rejections()
+            .get(0)
+            .unwrap()
+            .as_str()
+            .contains("nested_bad")
+    );
 }
 
 #[test]
@@ -719,10 +754,7 @@ fn b12_opt_in_policy_runs_when_module_requires_vfe_7() {
 fn b12_extension_set_reads_module_level_require() {
     // White-box test of EnabledExtensions::from_module — it must
     // pick up the module-level @require_extension annotation.
-    let module = module_with_attrs(
-        vec![],
-        vec![require_extension_attr("vfe_7")],
-    );
+    let module = module_with_attrs(vec![], vec![require_extension_attr("vfe_7")]);
     let set = EnabledExtensions::from_module(&module);
     assert!(set.requires("vfe_7"));
     assert!(!set.requires("vfe_1"));
@@ -778,8 +810,8 @@ fn b7_aggregate_mode_runs_all_passes_despite_failure() {
         vec![refined_int(boxed)],
         Maybe::Some(Type::int(span())),
     )]);
-    let mut pipeline = VerificationPipeline::static_analysis_pipeline()
-        .with_mode(PipelineMode::Aggregate);
+    let mut pipeline =
+        VerificationPipeline::static_analysis_pipeline().with_mode(PipelineMode::Aggregate);
     let mut ctx = VerificationContext::new();
     let results = pipeline.run_all(&module, &mut ctx).expect("pipeline runs");
     assert_eq!(
@@ -804,8 +836,8 @@ fn b7_strict_fail_fast_mode_matches_pre_v8_behaviour() {
         vec![refined_int(boxed)],
         Maybe::Some(Type::int(span())),
     )]);
-    let mut pipeline = VerificationPipeline::static_analysis_pipeline()
-        .with_mode(PipelineMode::StrictFailFast);
+    let mut pipeline =
+        VerificationPipeline::static_analysis_pipeline().with_mode(PipelineMode::StrictFailFast);
     let mut ctx = VerificationContext::new();
     let results = pipeline.run_all(&module, &mut ctx).expect("pipeline runs");
     assert_eq!(results.len(), 2, "StrictFailFast halts on first failure");
@@ -884,7 +916,10 @@ fn task_218_static_pipeline_with_opt_in_policy_skips_modal_overshoot() {
     // OptInOnly + no annotation → no rejection → all 5 passes run.
     assert_eq!(results.len(), 5, "all passes run when Modal-depth inactive");
     let kernel = results.get(1).expect("KernelRecheck row");
-    assert!(kernel.success, "kernel recheck succeeds (skipped) under OptInOnly");
+    assert!(
+        kernel.success,
+        "kernel recheck succeeds (skipped) under OptInOnly"
+    );
 }
 
 #[test]

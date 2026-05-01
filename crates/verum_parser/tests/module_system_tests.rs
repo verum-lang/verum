@@ -25,14 +25,16 @@
 //! Tests for module system syntax: module declarations, mount statements, visibility
 //! Module system: hierarchical modules, path resolution with dots (not ::), cog distribution
 
-use verum_ast::decl::{MountDecl, MountTreeKind, ModuleDecl, Visibility};
+use verum_ast::decl::{ModuleDecl, MountDecl, MountTreeKind, Visibility};
 use verum_ast::{FileId, ItemKind, PathSegment};
 use verum_common::{List, Maybe};
 use verum_lexer::Lexer;
 use verum_parser::VerumParser;
 
 /// Helper to parse a module from source.
-fn parse(source: &str) -> Result<verum_ast::Module, verum_common::List<verum_fast_parser::ParseError>> {
+fn parse(
+    source: &str,
+) -> Result<verum_ast::Module, verum_common::List<verum_fast_parser::ParseError>> {
     let file_id = FileId::new(0);
     let lexer = Lexer::new(source, file_id);
     let parser = VerumParser::new();

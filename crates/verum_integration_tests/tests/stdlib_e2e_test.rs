@@ -21,9 +21,9 @@
 //! tests; they have been converted to parse+typecheck tests.
 
 use verum_ast::FileId;
+use verum_common::List;
 use verum_lexer::Lexer;
 use verum_parser::VerumParser;
-use verum_common::List;
 
 /// Helper: parse source and assert it succeeds, returning the module
 fn parse_ok(source: &str) -> verum_ast::Module {

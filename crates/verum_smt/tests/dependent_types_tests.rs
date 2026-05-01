@@ -1539,7 +1539,10 @@ fn test_induction_principle_generation_simple() {
         match &principle.kind {
             ExprKind::Forall { bindings, body: _ } => {
                 // There should be at least one binding
-                assert!(!bindings.is_empty(), "Forall should have at least one binding");
+                assert!(
+                    !bindings.is_empty(),
+                    "Forall should have at least one binding"
+                );
 
                 // Verify the first binding is for motive P
                 let first_binding = &bindings[0];

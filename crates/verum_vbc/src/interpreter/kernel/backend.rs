@@ -79,12 +79,8 @@ pub trait Backend: Send + Sync {
 
     // Compute operations
     /// Binary operation (element-wise)
-    fn binop(
-        &self,
-        a: &TensorHandle,
-        b: &TensorHandle,
-        op: TensorBinaryOp,
-    ) -> Option<TensorHandle>;
+    fn binop(&self, a: &TensorHandle, b: &TensorHandle, op: TensorBinaryOp)
+    -> Option<TensorHandle>;
 
     /// Unary operation (element-wise)
     fn unop(&self, a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle>;
@@ -374,14 +370,14 @@ impl Backend for CpuBackend {
     }
 
     fn allocate(&self, size: usize, align: usize) -> Option<NonNull<u8>> {
-        use std::alloc::{alloc, Layout};
+        use std::alloc::{Layout, alloc};
         let layout = Layout::from_size_align(size, align).ok()?;
         let ptr = unsafe { alloc(layout) };
         NonNull::new(ptr)
     }
 
     fn deallocate(&self, ptr: NonNull<u8>, size: usize, align: usize) {
-        use std::alloc::{dealloc, Layout};
+        use std::alloc::{Layout, dealloc};
         if let Ok(layout) = Layout::from_size_align(size, align) {
             unsafe { dealloc(ptr.as_ptr(), layout) };
         }
@@ -458,9 +454,9 @@ impl Backend for CpuBackend {
 // Global Backend Registry
 // ============================================================================
 
-use std::sync::OnceLock;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 /// Global backend registry
 static BACKEND_REGISTRY: OnceLock<BackendRegistry> = OnceLock::new();

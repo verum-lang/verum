@@ -1,12 +1,12 @@
 //! String operation handlers for VBC interpreter.
 
-use crate::value::Value;
 use super::super::super::error::InterpreterResult;
-use super::super::super::state::InterpreterState;
 use super::super::super::heap;
+use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::super::format_value_for_print;
 use super::bytecode_io::*;
+use crate::value::Value;
 
 // ============================================================================
 // String Operations
@@ -17,7 +17,9 @@ use super::bytecode_io::*;
 
 /// Encoding: opcode + dst + src
 /// Effect: Converts `src` value to a string representation and stores in `dst`.
-pub(in super::super) fn handle_to_string(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_to_string(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let value = state.get_reg(src);
@@ -60,7 +62,9 @@ pub(in super::super) fn handle_to_string(state: &mut InterpreterState) -> Interp
 
 /// Encoding: opcode + dst + a + b
 /// Effect: Concatenates strings `a` and `b` into `dst`.
-pub(in super::super) fn handle_concat(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_concat(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a_reg = read_reg(state)?;
     let b_reg = read_reg(state)?;
@@ -104,7 +108,9 @@ pub(in super::super) fn handle_concat(state: &mut InterpreterState) -> Interpret
 
 /// Encoding: opcode + dst + src
 /// Effect: Converts a Char value (stored as Int codepoint) to a 1-character string.
-pub(in super::super) fn handle_char_to_str(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_char_to_str(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let value = state.get_reg(src);
@@ -147,4 +153,3 @@ pub(in super::super) fn handle_char_to_str(state: &mut InterpreterState) -> Inte
 
     Ok(DispatchResult::Continue)
 }
-

@@ -23,10 +23,10 @@ use verum_ast::{
     expr::{Expr, ExprKind},
     ty::{Ident, Path, Type, TypeKind},
 };
+use verum_common::Heap;
 use verum_compiler::quote::{
     ParseError, ToTokens, TokenStream, ident, literal_int, literal_string,
 };
-use verum_common::Heap;
 
 // Helper function to create a test file ID
 fn test_file_id() -> FileId {
@@ -209,7 +209,11 @@ fn test_parse_complex_arithmetic() {
             assert!(matches!(op, BinOp::Add));
 
             // Left should be 1
-            if let ExprKind::Literal(lit) = &left.kind && let verum_ast::LiteralKind::Int(i) = &lit.kind { assert_eq!(i.value, 1) }
+            if let ExprKind::Literal(lit) = &left.kind
+                && let verum_ast::LiteralKind::Int(i) = &lit.kind
+            {
+                assert_eq!(i.value, 1)
+            }
 
             // Right should be 2 * 3
             if let ExprKind::Binary { op, .. } = &right.kind {

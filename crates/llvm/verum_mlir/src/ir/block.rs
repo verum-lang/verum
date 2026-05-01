@@ -6,15 +6,15 @@ mod block_like;
 pub use self::{argument::BlockArgument, block_like::BlockLike};
 use super::{Location, Type, TypeLike, Value};
 use crate::{context::Context, utility::print_callback};
-use verum_mlir_sys::{
-    MlirBlock, mlirBlockCreate, mlirBlockDestroy, mlirBlockDetach, mlirBlockEqual, mlirBlockPrint,
-};
 use std::{
     ffi::c_void,
     fmt::{self, Debug, Display, Formatter},
     marker::PhantomData,
     mem::{forget, transmute},
     ops::Deref,
+};
+use verum_mlir_sys::{
+    MlirBlock, mlirBlockCreate, mlirBlockDestroy, mlirBlockDetach, mlirBlockEqual, mlirBlockPrint,
 };
 
 /// A block.

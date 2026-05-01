@@ -67,9 +67,9 @@
 
 use verum_ast::decl::{ContextGroupDecl, ContextRequirement as AstContextRequirement};
 use verum_ast::span::{Span, Spanned};
-use verum_diagnostics::{Diagnostic, DiagnosticBuilder};
-use verum_common::{List, Map, Maybe, Set, Text};
 use verum_common::well_known_types::WellKnownType as WKT;
+use verum_common::{List, Map, Maybe, Set, Text};
+use verum_diagnostics::{Diagnostic, DiagnosticBuilder};
 
 use crate::di::group::{ContextGroup, ContextGroupRegistry, GroupError};
 use crate::di::requirement::{ContextRef, ContextRequirement};
@@ -293,7 +293,8 @@ impl ContextResolver {
     /// Context type system integration: context requirements tracked in function types, checked at call sites — Type System Integration
     pub fn register_protocol_as_context(&mut self, name: Text) {
         self.defined_contexts.insert(name.clone());
-        self.protocol_kinds.insert(name, crate::protocol::ProtocolKind::ConstraintAndInjectable);
+        self.protocol_kinds
+            .insert(name, crate::protocol::ProtocolKind::ConstraintAndInjectable);
     }
 
     /// Register multiple protocols as valid context types.
@@ -335,7 +336,8 @@ impl ContextResolver {
     /// Context type system integration: context requirements tracked in function types, checked at call sites — Context Protocol Validation
     pub fn register_constraint_protocol(&mut self, name: Text) {
         self.constraint_protocols.insert(name.clone());
-        self.protocol_kinds.insert(name, crate::protocol::ProtocolKind::Constraint);
+        self.protocol_kinds
+            .insert(name, crate::protocol::ProtocolKind::Constraint);
     }
 
     /// Check if a name is a known constraint protocol (not injectable).
@@ -450,7 +452,10 @@ impl ContextResolver {
                 // Extract the context name from the path
                 // For paths like "Database" or "State<Int>", get the first segment name
                 use verum_ast::ty::PathSegment;
-                let name = ctx.path.segments.first()
+                let name = ctx
+                    .path
+                    .segments
+                    .first()
                     .map(|seg| match seg {
                         PathSegment::Name(ident) => ident.name.to_string(),
                         PathSegment::SelfValue => "self".to_string(),
@@ -462,18 +467,13 @@ impl ContextResolver {
 
                 // Extract type arguments from the context requirement
                 // e.g., State<Int> -> type_args = ["Int"], Cache<User> -> type_args = ["User"]
-                let type_args: List<Text> = ctx.args.iter()
-                    .map(type_to_text)
-                    .collect();
+                let type_args: List<Text> = ctx.args.iter().map(type_to_text).collect();
 
                 // Build the ContextRef with appropriate flags for negation and type args
                 if !type_args.is_empty() {
                     // Parameterized context (e.g., State<Int>, Cache<User>)
-                    let mut ctx_ref = ContextRef::with_type_args(
-                        name.into(),
-                        sentinel_type_id,
-                        type_args,
-                    );
+                    let mut ctx_ref =
+                        ContextRef::with_type_args(name.into(), sentinel_type_id, type_args);
                     // Propagate negation flag for parameterized negative contexts
                     // e.g., `!State<_>` in `using Pure = [!IO, !State<_>]`
                     ctx_ref.is_negative = ctx.is_negative;
@@ -620,7 +620,11 @@ impl ContextResolver {
             if let Some(ref alias_name) = effective_alias {
                 if used_aliases.contains(alias_name) {
                     return Err(TypeError::Other(
-                        format!("Duplicate context alias '{}'. Each alias must be unique.", alias_name).into()
+                        format!(
+                            "Duplicate context alias '{}'. Each alias must be unique.",
+                            alias_name
+                        )
+                        .into(),
                     ));
                 }
                 used_aliases.insert(alias_name.clone());
@@ -644,11 +648,7 @@ impl ContextResolver {
             if !ctx.args.is_empty() {
                 // Convert AST types to text representation for storage
                 // At runtime, these will be resolved to actual types
-                let type_args: List<Text> = ctx
-                    .args
-                    .iter()
-                    .map(type_to_text)
-                    .collect();
+                let type_args: List<Text> = ctx.args.iter().map(type_to_text).collect();
                 ctx_ref.type_args = type_args;
             }
 
@@ -666,11 +666,8 @@ impl ContextResolver {
             // Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.3 - Context Transformations
             if !ctx.transforms.is_empty() {
                 // Extract transform names for validation
-                let transform_names: List<Text> = ctx
-                    .transforms
-                    .iter()
-                    .map(|t| t.name.name.clone())
-                    .collect();
+                let transform_names: List<Text> =
+                    ctx.transforms.iter().map(|t| t.name.name.clone()).collect();
 
                 // Validate transforms are applicable to this context type
                 validate_transforms(name.as_str(), &transform_names, span)?;
@@ -817,15 +814,15 @@ pub mod transforms {
 
     /// List of standard transform names
     pub const STANDARD_TRANSFORMS: &[&str] = &[
-        "transactional",  // Database contexts - wraps in transaction
-        "traced",         // Any context - adds tracing spans
-        "scoped",         // Cache/State contexts - scope isolation
-        "timed",          // Any context - timeout wrapper
-        "pooled",         // Connection contexts - connection pooling
-        "encrypted",      // Data contexts - encryption wrapper
-        "logged",         // Any context - logging wrapper
-        "retrying",       // Network contexts - retry logic
-        "cached",         // Any context - caching layer
+        "transactional", // Database contexts - wraps in transaction
+        "traced",        // Any context - adds tracing spans
+        "scoped",        // Cache/State contexts - scope isolation
+        "timed",         // Any context - timeout wrapper
+        "pooled",        // Connection contexts - connection pooling
+        "encrypted",     // Data contexts - encryption wrapper
+        "logged",        // Any context - logging wrapper
+        "retrying",      // Network contexts - retry logic
+        "cached",        // Any context - caching layer
     ];
 
     /// Transforms that require specific context types
@@ -1216,17 +1213,16 @@ pub mod transforms {
     ///
 
     /// `Ok(())` if argument count is valid, `Err(TransformArgError)` otherwise
-    pub fn validate_arg_count(transform_name: &str, arg_count: usize) -> std::result::Result<(), TransformArgError> {
+    pub fn validate_arg_count(
+        transform_name: &str,
+        arg_count: usize,
+    ) -> std::result::Result<(), TransformArgError> {
         let signature = match get_transform_signature(transform_name) {
             Some(sig) => sig,
             None => return Ok(()), // Unknown transform - validated elsewhere
         };
 
-        let required_count = signature
-            .args
-            .iter()
-            .filter(|arg| !arg.optional)
-            .count();
+        let required_count = signature.args.iter().filter(|arg| !arg.optional).count();
 
         let max_count = signature.args.len();
 
@@ -1279,9 +1275,15 @@ pub mod transforms {
     ///
 
     /// `Some(TransformArgType)` if the argument exists, `None` otherwise
-    pub fn get_expected_arg_type(transform_name: &str, arg_index: usize) -> Option<TransformArgType> {
+    pub fn get_expected_arg_type(
+        transform_name: &str,
+        arg_index: usize,
+    ) -> Option<TransformArgType> {
         let signature = get_transform_signature(transform_name)?;
-        signature.args.get(arg_index).map(|spec| spec.expected_type.clone())
+        signature
+            .args
+            .get(arg_index)
+            .map(|spec| spec.expected_type.clone())
     }
 
     /// Check if a type matches the expected type for a transform argument.
@@ -1349,11 +1351,7 @@ pub mod transforms {
 ///
 
 /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.3 - Context Transformations
-pub fn validate_transforms(
-    context_name: &str,
-    transform_names: &[Text],
-    span: Span,
-) -> Result<()> {
+pub fn validate_transforms(context_name: &str, transform_names: &[Text], span: Span) -> Result<()> {
     for transform_name in transform_names {
         let name = transform_name.as_str();
 
@@ -1529,14 +1527,10 @@ pub fn extract_transform_arg_type(expr: &verum_ast::expr::Expr) -> Text {
         },
 
         // Method call: Duration.seconds(30) -> "Duration"
-        ExprKind::MethodCall { receiver, .. } => {
-            extract_transform_arg_type(receiver)
-        }
+        ExprKind::MethodCall { receiver, .. } => extract_transform_arg_type(receiver),
 
         // Field access: Duration.ZERO -> look at the base
-        ExprKind::Field { expr: base, .. } => {
-            extract_transform_arg_type(base)
-        }
+        ExprKind::Field { expr: base, .. } => extract_transform_arg_type(base),
 
         // Path: Duration, EncryptionKey, etc.
         ExprKind::Path(path) => {
@@ -1549,9 +1543,7 @@ pub fn extract_transform_arg_type(expr: &verum_ast::expr::Expr) -> Text {
         }
 
         // Call expression: func(args) - try to get the function name
-        ExprKind::Call { func, .. } => {
-            extract_transform_arg_type(func)
-        }
+        ExprKind::Call { func, .. } => extract_transform_arg_type(func),
 
         // Parenthesized expression
         ExprKind::Paren(inner) => extract_transform_arg_type(inner),
@@ -1771,8 +1763,13 @@ pub mod condition_eval {
 
         /// * `type_param` - Name of the type parameter (e.g., "T")
         /// * `concrete_type` - Name of the concrete type (e.g., "User")
-        pub fn substitute_type(&mut self, type_param: impl Into<Text>, concrete_type: impl Into<Text>) {
-            self.concrete_types.insert(type_param.into(), concrete_type.into());
+        pub fn substitute_type(
+            &mut self,
+            type_param: impl Into<Text>,
+            concrete_type: impl Into<Text>,
+        ) {
+            self.concrete_types
+                .insert(type_param.into(), concrete_type.into());
         }
 
         /// Register a protocol implementation for a concrete type.
@@ -1969,9 +1966,10 @@ pub mod condition_eval {
     ) -> ConditionResult {
         match &expr.kind {
             // Boolean literals: true, false
-            ExprKind::Literal(Literal { kind: LiteralKind::Bool(value), .. }) => {
-                ConditionResult::Known(*value)
-            }
+            ExprKind::Literal(Literal {
+                kind: LiteralKind::Bool(value),
+                ..
+            }) => ConditionResult::Known(*value),
 
             // Path expressions: could be cfg.something or a type constraint
             ExprKind::Path(path) => evaluate_path_condition(path, config),
@@ -2062,9 +2060,11 @@ pub mod condition_eval {
 
             // Is expression: T is Protocol (type constraint check)
             // This is an alternative syntax for type bounds
-            ExprKind::Is { expr: type_expr, pattern, negated } => {
-                evaluate_is_expression(type_expr, pattern, *negated, type_env)
-            }
+            ExprKind::Is {
+                expr: type_expr,
+                pattern,
+                negated,
+            } => evaluate_is_expression(type_expr, pattern, *negated, type_env),
 
             // Parenthesized expression
             ExprKind::Paren(inner) => evaluate_condition_with_types(inner, config, type_env),
@@ -2283,10 +2283,7 @@ pub mod condition_eval {
     }
 
     /// Evaluate a path-based condition
-    fn evaluate_path_condition(
-        path: &verum_ast::ty::Path,
-        config: &ConfigEnv,
-    ) -> ConditionResult {
+    fn evaluate_path_condition(path: &verum_ast::ty::Path, config: &ConfigEnv) -> ConditionResult {
         // Single-segment path might be a cfg flag or constant
         if path.segments.len() == 1 {
             if let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0] {
@@ -2392,7 +2389,7 @@ fn path_to_string(path: &verum_ast::ty::Path) -> Text {
 /// // Type::Named { path: "Result", args: [Ok, Err] } -> "Result<Ok, Err>"
 /// ```
 fn type_to_text(ty: &verum_ast::ty::Type) -> Text {
-    use verum_ast::ty::{TypeKind, GenericArg};
+    use verum_ast::ty::{GenericArg, TypeKind};
 
     match &ty.kind {
         TypeKind::Path(path) => path_to_string(path),
@@ -2415,7 +2412,11 @@ fn type_to_text(ty: &verum_ast::ty::Type) -> Text {
                 format!(
                     "{}<{}>",
                     base_text,
-                    args_str.iter().map(|t| t.as_str()).collect::<Vec<_>>().join(", ")
+                    args_str
+                        .iter()
+                        .map(|t| t.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 )
                 .into()
             }
@@ -2424,7 +2425,11 @@ fn type_to_text(ty: &verum_ast::ty::Type) -> Text {
             let types_str: Vec<Text> = types.iter().map(type_to_text).collect();
             format!(
                 "({})",
-                types_str.iter().map(|t| t.as_str()).collect::<Vec<_>>().join(", ")
+                types_str
+                    .iter()
+                    .map(|t| t.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             )
             .into()
         }
@@ -2440,15 +2445,19 @@ fn type_to_text(ty: &verum_ast::ty::Type) -> Text {
             let mut_str = if *mutable { "mut " } else { "" };
             format!("&unsafe {}{}", mut_str, type_to_text(inner)).into()
         }
-        TypeKind::Array { element, size: _ } => {
-            format!("[{}]", type_to_text(element)).into()
-        }
-        TypeKind::Slice(inner) => {
-            format!("[{}]", type_to_text(inner)).into()
-        }
-        TypeKind::Function { params, return_type, .. } => {
+        TypeKind::Array { element, size: _ } => format!("[{}]", type_to_text(element)).into(),
+        TypeKind::Slice(inner) => format!("[{}]", type_to_text(inner)).into(),
+        TypeKind::Function {
+            params,
+            return_type,
+            ..
+        } => {
             let params_str: Vec<Text> = params.iter().map(type_to_text).collect();
-            let params_joined = params_str.iter().map(|t| t.as_str()).collect::<Vec<_>>().join(", ");
+            let params_joined = params_str
+                .iter()
+                .map(|t| t.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
             format!("fn({}) -> {}", params_joined, type_to_text(return_type)).into()
         }
         TypeKind::Unit => "()".into(),
@@ -2688,7 +2697,8 @@ mod tests {
             vec![
                 PathSegment::Name(Ident::new("module".to_string(), make_span())),
                 PathSegment::Name(Ident::new("Database".to_string(), make_span())),
-            ].into(),
+            ]
+            .into(),
             make_span(),
         );
         assert_eq!(path_to_string(&path), "module.Database");
@@ -2707,11 +2717,17 @@ mod tests {
 
         // Set the flag to true
         resolver.set_config_flag("analytics_enabled", true);
-        assert_eq!(resolver.is_config_flag_enabled("analytics_enabled"), Some(true));
+        assert_eq!(
+            resolver.is_config_flag_enabled("analytics_enabled"),
+            Some(true)
+        );
 
         // Set the flag to false
         resolver.set_config_flag("analytics_enabled", false);
-        assert_eq!(resolver.is_config_flag_enabled("analytics_enabled"), Some(false));
+        assert_eq!(
+            resolver.is_config_flag_enabled("analytics_enabled"),
+            Some(false)
+        );
     }
 
     #[test]
@@ -2724,13 +2740,16 @@ mod tests {
 
         let resolver = ContextResolver::with_config(config);
 
-        assert_eq!(resolver.is_config_flag_enabled("feature_enabled"), Some(true));
+        assert_eq!(
+            resolver.is_config_flag_enabled("feature_enabled"),
+            Some(true)
+        );
         assert_eq!(resolver.is_config_flag_enabled("debug_mode"), Some(false));
     }
 
     #[test]
     fn test_config_env_boolean_evaluation() {
-        use super::condition_eval::{ConfigEnv, ConditionResult, evaluate_condition};
+        use super::condition_eval::{ConditionResult, ConfigEnv, evaluate_condition};
         use verum_ast::expr::{Expr, ExprKind};
         use verum_ast::literal::{Literal, LiteralKind};
 
@@ -2832,7 +2851,9 @@ mod tests {
         let mut env = TypeConstraintEnv::new();
 
         // Register a type parameter with bounds
-        let bounds: List<Text> = vec!["Validatable".into(), "Display".into()].into_iter().collect();
+        let bounds: List<Text> = vec!["Validatable".into(), "Display".into()]
+            .into_iter()
+            .collect();
         env.register_type_param("T", bounds);
 
         // Check the bound is satisfied
@@ -3013,7 +3034,7 @@ mod tests {
 
     #[test]
     fn test_transform_signature_timed() {
-        use super::transforms::{get_transform_signature, TransformArgType};
+        use super::transforms::{TransformArgType, get_transform_signature};
 
         let sig = get_transform_signature("timed");
         assert!(sig.is_some());
@@ -3028,7 +3049,7 @@ mod tests {
 
     #[test]
     fn test_transform_signature_cached() {
-        use super::transforms::{get_transform_signature, TransformArgType};
+        use super::transforms::{TransformArgType, get_transform_signature};
 
         let sig = get_transform_signature("cached");
         assert!(sig.is_some());
@@ -3094,9 +3115,10 @@ mod tests {
         use super::validate_transforms_with_args;
 
         // Valid: Database.timed(Duration)
-        let transforms: Vec<(Text, List<Text>)> = vec![
-            ("timed".into(), vec!["Duration".into()].into_iter().collect()),
-        ];
+        let transforms: Vec<(Text, List<Text>)> = vec![(
+            "timed".into(),
+            vec!["Duration".into()].into_iter().collect(),
+        )];
 
         let result = validate_transforms_with_args("Database", &transforms, make_span());
         assert!(result.is_ok());
@@ -3107,9 +3129,8 @@ mod tests {
         use super::validate_transforms_with_args;
 
         // Invalid: Database.timed(Int) - expects Duration
-        let transforms: Vec<(Text, List<Text>)> = vec![
-            ("timed".into(), vec!["Int".into()].into_iter().collect()),
-        ];
+        let transforms: Vec<(Text, List<Text>)> =
+            vec![("timed".into(), vec!["Int".into()].into_iter().collect())];
 
         let result = validate_transforms_with_args("Database", &transforms, make_span());
         assert!(result.is_err());
@@ -3120,9 +3141,7 @@ mod tests {
         use super::validate_transforms_with_args;
 
         // Invalid: Database.timed() - missing required Duration argument
-        let transforms: Vec<(Text, List<Text>)> = vec![
-            ("timed".into(), List::new()),
-        ];
+        let transforms: Vec<(Text, List<Text>)> = vec![("timed".into(), List::new())];
 
         let result = validate_transforms_with_args("Database", &transforms, make_span());
         assert!(result.is_err());
@@ -3162,17 +3181,14 @@ mod tests {
         use verum_ast::expr::{Expr, ExprKind};
 
         // Path expression: Duration
-        let path_expr = Expr::new(
-            ExprKind::Path(make_path("Duration")),
-            make_span(),
-        );
+        let path_expr = Expr::new(ExprKind::Path(make_path("Duration")), make_span());
         assert_eq!(extract_transform_arg_type(&path_expr).as_str(), "Duration");
 
         // Path expression: EncryptionKey
-        let key_expr = Expr::new(
-            ExprKind::Path(make_path("EncryptionKey")),
-            make_span(),
+        let key_expr = Expr::new(ExprKind::Path(make_path("EncryptionKey")), make_span());
+        assert_eq!(
+            extract_transform_arg_type(&key_expr).as_str(),
+            "EncryptionKey"
         );
-        assert_eq!(extract_transform_arg_type(&key_expr).as_str(), "EncryptionKey");
     }
 }

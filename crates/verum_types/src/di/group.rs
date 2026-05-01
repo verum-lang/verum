@@ -327,8 +327,7 @@ impl ContextGroupRegistry {
 
     /// `Some(&ContextGroup)` if found, `None` otherwise
     pub fn get(&self, name: &str) -> Maybe<&ContextGroup> {
-        self.groups
-            .get(&name.into()).and_then(Maybe::Some)
+        self.groups.get(&name.into()).and_then(Maybe::Some)
     }
 
     /// Check if a group is registered

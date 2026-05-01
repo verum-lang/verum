@@ -64,10 +64,10 @@
 //! for consistent dataflow analysis across expression and reference tracking.
 
 use verum_ast::{
+    Module,
     decl::{FunctionBody, FunctionDecl, ItemKind},
     expr::{Block, Expr, ExprKind, UnOp},
     stmt::{Stmt, StmtKind},
-    Module,
 };
 use verum_cbgr::analysis::{
     BasicBlock, BlockId, CfgBuilder, ControlFlowGraph, DefSite, FunctionId, RefId, UseeSite,
@@ -241,12 +241,21 @@ impl CfgConstructor {
     /// Process a statement.
     fn process_stmt(&mut self, stmt: &Stmt, exit: BlockId) {
         match &stmt.kind {
-            StmtKind::Let { pattern: _, ty: _, value } => {
+            StmtKind::Let {
+                pattern: _,
+                ty: _,
+                value,
+            } => {
                 if let Maybe::Some(expr) = value {
                     self.process_expr(expr);
                 }
             }
-            StmtKind::LetElse { pattern: _, ty: _, value, else_block } => {
+            StmtKind::LetElse {
+                pattern: _,
+                ty: _,
+                value,
+                else_block,
+            } => {
                 self.process_expr(value);
                 // else_block is a diverging block, create separate CFG path
                 let else_entry = self.new_block_with_predecessor(self.current_block);
@@ -268,10 +277,19 @@ impl CfgConstructor {
             StmtKind::Errdefer(expr) => {
                 self.process_expr(expr);
             }
-            StmtKind::Provide { context: _, alias: _, value } => {
+            StmtKind::Provide {
+                context: _,
+                alias: _,
+                value,
+            } => {
                 self.process_expr(value);
             }
-            StmtKind::ProvideScope { context: _, alias: _, value, block } => {
+            StmtKind::ProvideScope {
+                context: _,
+                alias: _,
+                value,
+                block,
+            } => {
                 self.process_expr(value);
                 self.process_expr(block);
             }
@@ -287,8 +305,14 @@ impl CfgConstructor {
             // Reference creation (DefSite)
             ExprKind::Unary { op, expr: inner } => {
                 match op {
-                    UnOp::Ref | UnOp::RefMut | UnOp::RefChecked | UnOp::RefCheckedMut
-                    | UnOp::RefUnsafe | UnOp::RefUnsafeMut | UnOp::Own | UnOp::OwnMut => {
+                    UnOp::Ref
+                    | UnOp::RefMut
+                    | UnOp::RefChecked
+                    | UnOp::RefCheckedMut
+                    | UnOp::RefUnsafe
+                    | UnOp::RefUnsafeMut
+                    | UnOp::Own
+                    | UnOp::OwnMut => {
                         // This is a reference definition
                         let ref_id = self.builder.new_ref_id_with_span(span);
                         let is_stack_allocated = self.is_stack_allocated(inner);
@@ -328,7 +352,11 @@ impl CfgConstructor {
             }
 
             // Function calls
-            ExprKind::Call { func, type_args: _, args } => {
+            ExprKind::Call {
+                func,
+                type_args: _,
+                args,
+            } => {
                 self.process_expr(func);
                 for arg in args.iter() {
                     self.process_expr(arg);
@@ -336,7 +364,12 @@ impl CfgConstructor {
             }
 
             // Method calls
-            ExprKind::MethodCall { receiver, method: _, type_args: _, args } => {
+            ExprKind::MethodCall {
+                receiver,
+                method: _,
+                type_args: _,
+                args,
+            } => {
                 self.process_expr(receiver);
                 for arg in args.iter() {
                     self.process_expr(arg);
@@ -344,17 +377,26 @@ impl CfgConstructor {
             }
 
             // Field access
-            ExprKind::Field { expr: inner, field: _ } => {
+            ExprKind::Field {
+                expr: inner,
+                field: _,
+            } => {
                 self.process_expr(inner);
             }
 
             // Optional chaining
-            ExprKind::OptionalChain { expr: inner, field: _ } => {
+            ExprKind::OptionalChain {
+                expr: inner,
+                field: _,
+            } => {
                 self.process_expr(inner);
             }
 
             // Tuple index
-            ExprKind::TupleIndex { expr: inner, index: _ } => {
+            ExprKind::TupleIndex {
+                expr: inner,
+                index: _,
+            } => {
                 self.process_expr(inner);
             }
 
@@ -397,18 +439,28 @@ impl CfgConstructor {
             }
 
             // Try-recover
-            ExprKind::TryRecover { try_block, recover: _ } => {
+            ExprKind::TryRecover {
+                try_block,
+                recover: _,
+            } => {
                 self.process_expr(try_block);
             }
 
             // Try-finally
-            ExprKind::TryFinally { try_block, finally_block } => {
+            ExprKind::TryFinally {
+                try_block,
+                finally_block,
+            } => {
                 self.process_expr(try_block);
                 self.process_expr(finally_block);
             }
 
             // Try-recover-finally
-            ExprKind::TryRecoverFinally { try_block, recover: _, finally_block } => {
+            ExprKind::TryRecoverFinally {
+                try_block,
+                recover: _,
+                finally_block,
+            } => {
                 self.process_expr(try_block);
                 self.process_expr(finally_block);
             }
@@ -421,32 +473,40 @@ impl CfgConstructor {
             }
 
             // Array
-            ExprKind::Array(array_expr) => {
-                match array_expr {
-                    verum_ast::expr::ArrayExpr::List(elements) => {
-                        for elem in elements.iter() {
-                            self.process_expr(elem);
-                        }
-                    }
-                    verum_ast::expr::ArrayExpr::Repeat { value, count } => {
-                        self.process_expr(value);
-                        self.process_expr(count);
+            ExprKind::Array(array_expr) => match array_expr {
+                verum_ast::expr::ArrayExpr::List(elements) => {
+                    for elem in elements.iter() {
+                        self.process_expr(elem);
                     }
                 }
-            }
+                verum_ast::expr::ArrayExpr::Repeat { value, count } => {
+                    self.process_expr(value);
+                    self.process_expr(count);
+                }
+            },
 
             // Comprehension
-            ExprKind::Comprehension { expr: inner, clauses: _ } => {
+            ExprKind::Comprehension {
+                expr: inner,
+                clauses: _,
+            } => {
                 self.process_expr(inner);
             }
 
             // Stream comprehension
-            ExprKind::StreamComprehension { expr: inner, clauses: _ } => {
+            ExprKind::StreamComprehension {
+                expr: inner,
+                clauses: _,
+            } => {
                 self.process_expr(inner);
             }
 
             // If expression - creates branching CFG
-            ExprKind::If { condition, then_branch, else_branch } => {
+            ExprKind::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
                 // Process condition expressions
                 for cond in condition.conditions.iter() {
                     match cond {
@@ -489,7 +549,10 @@ impl CfgConstructor {
             }
 
             // Match expression
-            ExprKind::Match { expr: scrutinee, arms } => {
+            ExprKind::Match {
+                expr: scrutinee,
+                arms,
+            } => {
                 self.process_expr(scrutinee);
 
                 let merge_block = self.builder.new_block_id();
@@ -512,7 +575,11 @@ impl CfgConstructor {
             }
 
             // Loop
-            ExprKind::Loop { label: _, body, invariants } => {
+            ExprKind::Loop {
+                label: _,
+                body,
+                invariants,
+            } => {
                 // Process invariants (verification expressions)
                 for inv in invariants.iter() {
                     self.process_expr(inv);
@@ -536,7 +603,13 @@ impl CfgConstructor {
             }
 
             // While loop
-            ExprKind::While { label: _, condition, body, invariants, decreases } => {
+            ExprKind::While {
+                label: _,
+                condition,
+                body,
+                invariants,
+                decreases,
+            } => {
                 // Process invariants and decreases (verification expressions)
                 for inv in invariants.iter() {
                     self.process_expr(inv);
@@ -574,7 +647,14 @@ impl CfgConstructor {
             }
 
             // For loop
-            ExprKind::For { label: _, pattern: _, iter, body, invariants, decreases } => {
+            ExprKind::For {
+                label: _,
+                pattern: _,
+                iter,
+                body,
+                invariants,
+                decreases,
+            } => {
                 self.process_expr(iter);
 
                 // Process invariants and decreases (verification expressions)
@@ -644,7 +724,14 @@ impl CfgConstructor {
             }
 
             // Closure - analyzed separately if needed
-            ExprKind::Closure { async_: _, move_: _, params: _, contexts: _, return_type: _, body } => {
+            ExprKind::Closure {
+                async_: _,
+                move_: _,
+                params: _,
+                contexts: _,
+                return_type: _,
+                body,
+            } => {
                 // Process closure body in current context for capture analysis
                 self.process_expr(body);
             }
@@ -664,7 +751,10 @@ impl CfgConstructor {
             }
 
             // Spawn
-            ExprKind::Spawn { expr: inner, contexts: _ } => {
+            ExprKind::Spawn {
+                expr: inner,
+                contexts: _,
+            } => {
                 self.process_expr(inner);
             }
 
@@ -809,7 +899,9 @@ mod tests {
 
         let mut constructor = CfgConstructor::new();
         constructor.current_block = BlockId(0);
-        constructor.blocks.insert(BlockId(0), BasicBlock::empty(BlockId(0)));
+        constructor
+            .blocks
+            .insert(BlockId(0), BasicBlock::empty(BlockId(0)));
 
         constructor.process_expr(&ref_expr);
 
@@ -834,7 +926,9 @@ mod tests {
 
         let mut constructor = CfgConstructor::new();
         constructor.current_block = BlockId(0);
-        constructor.blocks.insert(BlockId(0), BasicBlock::empty(BlockId(0)));
+        constructor
+            .blocks
+            .insert(BlockId(0), BasicBlock::empty(BlockId(0)));
 
         constructor.process_expr(&deref_expr);
 

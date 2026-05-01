@@ -110,17 +110,14 @@ impl WorkspaceIndex {
                     .ok()
                     .and_then(|p| {
                         let root = self.workspace_root.read();
-                        root.as_ref()
-                            .and_then(|r| self.path_to_module_name(r, &p))
+                        root.as_ref().and_then(|r| self.path_to_module_name(r, &p))
                     })
                     .unwrap_or_else(|| "unknown".to_string())
             });
 
         // Register URI <-> module mapping
-        self.uri_to_module
-            .insert(uri.clone(), module_name.clone());
-        self.module_to_uri
-            .insert(module_name.clone(), uri.clone());
+        self.uri_to_module.insert(uri.clone(), module_name.clone());
+        self.module_to_uri.insert(module_name.clone(), uri.clone());
 
         // Clear old exports for this URI
         self.remove_exports_for_uri(uri);
@@ -340,13 +337,8 @@ fn parse_mount_text(text: &str, range: Range) -> Option<MountInfo> {
 
     // Check for selective imports: "foo.bar.{a, b, c}"
     if let Some(brace_start) = text.find('{') {
-        let module_path = text[..brace_start]
-            .trim()
-            .trim_end_matches('.')
-            .to_string();
-        let symbols_text = text[brace_start + 1..]
-            .trim_end_matches('}')
-            .trim();
+        let module_path = text[..brace_start].trim().trim_end_matches('.').to_string();
+        let symbols_text = text[brace_start + 1..].trim_end_matches('}').trim();
         let symbols: Vec<String> = symbols_text
             .split(',')
             .map(|s| s.trim().to_string())
@@ -406,16 +398,20 @@ pub fn goto_definition_cross_file(
                     // Look for the symbol in the target file
                     let found = document_store
                         .with_document(&target_uri, |doc| {
-                            crate::goto_definition::goto_definition(doc, Position::default(), &target_uri)
-                                .or_else(|| {
-                                    // Direct symbol table lookup
-                                    let symbol = doc.get_symbol(&word)?;
-                                    let range = ast_span_to_range(&symbol.def_span, &doc.text);
-                                    Some(GotoDefinitionResponse::Scalar(Location {
-                                        uri: target_uri.clone(),
-                                        range,
-                                    }))
-                                })
+                            crate::goto_definition::goto_definition(
+                                doc,
+                                Position::default(),
+                                &target_uri,
+                            )
+                            .or_else(|| {
+                                // Direct symbol table lookup
+                                let symbol = doc.get_symbol(&word)?;
+                                let range = ast_span_to_range(&symbol.def_span, &doc.text);
+                                Some(GotoDefinitionResponse::Scalar(Location {
+                                    uri: target_uri.clone(),
+                                    range,
+                                }))
+                            })
                         })
                         .flatten();
 
@@ -434,10 +430,7 @@ pub fn goto_definition_cross_file(
     }
 
     // Filter out the current file's own definitions
-    let external: Vec<_> = locations
-        .iter()
-        .filter(|loc| &loc.uri != uri)
-        .collect();
+    let external: Vec<_> = locations.iter().filter(|loc| &loc.uri != uri).collect();
 
     if external.len() == 1 {
         Some(GotoDefinitionResponse::Scalar(Location {
@@ -513,7 +506,8 @@ pub fn find_references_cross_file(
             let refs = document_store
                 .with_document(&file_uri, |doc| {
                     if let Some(module) = &doc.module {
-                        let refs = references::find_ast_references(module, &word, &file_uri, &doc.text);
+                        let refs =
+                            references::find_ast_references(module, &word, &file_uri, &doc.text);
                         let locations: Vec<Location> = refs
                             .into_iter()
                             .filter(|r| {
@@ -555,8 +549,7 @@ pub fn find_references_cross_file(
                     let locations: Vec<Location> = refs
                         .into_iter()
                         .filter(|r| {
-                            include_declaration
-                                || r.kind != references::ReferenceKind::Definition
+                            include_declaration || r.kind != references::ReferenceKind::Definition
                         })
                         .map(|r| r.location)
                         .collect();
@@ -603,13 +596,10 @@ pub fn rename_cross_file(
     // Group edits by URI
     let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
     for location in all_refs {
-        changes
-            .entry(location.uri)
-            .or_default()
-            .push(TextEdit {
-                range: location.range,
-                new_text: new_name.clone(),
-            });
+        changes.entry(location.uri).or_default().push(TextEdit {
+            range: location.range,
+            new_text: new_name.clone(),
+        });
     }
 
     Some(WorkspaceEdit {

@@ -47,7 +47,10 @@ fn make_variant_typed_encoding_is_deterministic() {
     let mut b = Vec::new();
     encode_instruction(&instr, &mut a);
     encode_instruction(&instr, &mut b);
-    assert_eq!(a, b, "two encodes of the same IR variant must produce identical bytes");
+    assert_eq!(
+        a, b,
+        "two encodes of the same IR variant must produce identical bytes"
+    );
 }
 
 /// Pin: encoder writes the documented wire prefix
@@ -94,8 +97,7 @@ fn make_variant_typed_roundtrip_preserves_all_operands() {
         let mut encoded = Vec::new();
         encode_instruction(&instr, &mut encoded);
         let mut offset = 0;
-        let decoded =
-            decode_instruction(&encoded, &mut offset).expect("decode succeeds");
+        let decoded = decode_instruction(&encoded, &mut offset).expect("decode succeeds");
         assert_eq!(offset, encoded.len());
         assert_eq!(decoded, instr);
     }

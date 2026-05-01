@@ -62,18 +62,14 @@ impl<'s> CompilationPipeline<'s> {
             for item in module.items.iter() {
                 if let verum_ast::decl::ItemKind::Impl(impl_block) = &item.kind {
                     if let verum_ast::decl::ImplKind::Protocol {
-                        protocol,
-                        for_type,
-                        ..
+                        protocol, for_type, ..
                     } = &impl_block.kind
                     {
                         let protocol_name = protocol
                             .segments
                             .iter()
                             .map(|s| match s {
-                                verum_ast::ty::PathSegment::Name(id) => {
-                                    id.name.as_str()
-                                }
+                                verum_ast::ty::PathSegment::Name(id) => id.name.as_str(),
                                 _ => "_",
                             })
                             .collect::<Vec<_>>()
@@ -99,7 +95,9 @@ impl<'s> CompilationPipeline<'s> {
             for goal in self.deferred_verification_goals.iter() {
                 match goal {
                     verum_types::infer::DeferredVerificationGoal::CubicalEquality {
-                        lhs, rhs, ..
+                        lhs,
+                        rhs,
+                        ..
                     } => {
                         use verum_types::cubical_bridge::eq_to_cubical;
                         verifier.add_goal(
@@ -128,7 +126,11 @@ impl<'s> CompilationPipeline<'s> {
                     report.verified_count(),
                     report.refuted_count(),
                     report.undetermined_count(),
-                    if report.coherence.is_coherent() { "clean" } else { "violated" },
+                    if report.coherence.is_coherent() {
+                        "clean"
+                    } else {
+                        "violated"
+                    },
                 );
             }
         }
@@ -145,8 +147,7 @@ impl<'s> CompilationPipeline<'s> {
         // proof terms survive into VBC and become runtime values — used
         // by research scenarios that inspect the proof witness at
         // runtime. Default: true (production path).
-        let proof_erasure_on =
-            self.session.language_features().codegen.proof_erasure;
+        let proof_erasure_on = self.session.language_features().codegen.proof_erasure;
         let erased_module = if proof_erasure_on {
             let (m, erasure_stats) =
                 crate::phases::proof_erasure::erase_proofs_from_module(module.clone());
@@ -228,8 +229,7 @@ impl<'s> CompilationPipeline<'s> {
             use crate::phases::cfg_constructor::CfgConstructor;
             use verum_cbgr::tier_analysis::TierAnalyzer;
             let module_cfg = CfgConstructor::from_module(module);
-            let parallel_tier =
-                std::env::var("VERUM_NO_PARALLEL_TIER").is_err();
+            let parallel_tier = std::env::var("VERUM_NO_PARALLEL_TIER").is_err();
 
             let aggregate = std::sync::Mutex::new(TierContext::new());
             let analyse_one = |func_cfg: &crate::phases::cfg_constructor::FunctionCfg| {
@@ -245,10 +245,7 @@ impl<'s> CompilationPipeline<'s> {
 
             if parallel_tier && module_cfg.functions.len() > 1 {
                 use rayon::prelude::*;
-                let cfgs: Vec<_> = module_cfg
-                    .functions
-                    .values()
-                    .collect();
+                let cfgs: Vec<_> = module_cfg.functions.values().collect();
                 cfgs.par_iter().for_each(|func_cfg| analyse_one(func_cfg));
             } else {
                 for (_func_id, func_cfg) in module_cfg.functions.iter() {
@@ -261,7 +258,10 @@ impl<'s> CompilationPipeline<'s> {
             tc
         };
         codegen.set_tier_context(tier_context);
-        debug!("tier analysis in compile_ast_to_vbc took {:.2}s", tier_start.elapsed().as_secs_f64());
+        debug!(
+            "tier analysis in compile_ast_to_vbc took {:.2}s",
+            tier_start.elapsed().as_secs_f64()
+        );
 
         // Collect imported stdlib modules that need to be compiled alongside the main module.
         // Without this, constants/functions from imported modules (e.g., CLOCK_REALTIME_ID
@@ -269,12 +269,14 @@ impl<'s> CompilationPipeline<'s> {
         let imported_modules = self.collect_imported_stdlib_modules(module);
         debug!(
             "Collected {} imported stdlib module(s) for VBC compilation (from {} retained)",
-            imported_modules.len(), self.modules.len()
+            imported_modules.len(),
+            self.modules.len()
         );
 
         let mut vbc_module = if imported_modules.is_empty() {
             // Fast path: no imported modules, use simple single-module compilation
-            codegen.compile_module(module)
+            codegen
+                .compile_module(module)
                 .map_err(|e| anyhow::anyhow!("VBC codegen error: {}", e))?
         } else {
             // Multi-module compilation: register declarations from imported modules
@@ -300,8 +302,11 @@ impl<'s> CompilationPipeline<'s> {
             // (not shifted by auto-included stdlib types). The VBC codegen uses
             // sequential counters for TypeId and field interning, so whichever
             // module is registered first gets the lower IDs.
-            codegen.collect_non_protocol_declarations(module)
-                .map_err(|e| anyhow::anyhow!("VBC codegen error (main module declarations): {}", e))?;
+            codegen
+                .collect_non_protocol_declarations(module)
+                .map_err(|e| {
+                    anyhow::anyhow!("VBC codegen error (main module declarations): {}", e)
+                })?;
             codegen.mark_user_defined_types(module);
 
             // Pass 1c: Collect all non-protocol declarations from imported modules.
@@ -312,8 +317,11 @@ impl<'s> CompilationPipeline<'s> {
             // (e.g., "pipe" from libsystem.vr) don't overwrite user-defined functions.
             codegen.set_prefer_existing_functions(true);
             for imported_module in &imported_modules {
-                codegen.collect_non_protocol_declarations(imported_module)
-                    .map_err(|e| anyhow::anyhow!("VBC codegen error (imported module declarations): {}", e))?;
+                codegen
+                    .collect_non_protocol_declarations(imported_module)
+                    .map_err(|e| {
+                        anyhow::anyhow!("VBC codegen error (imported module declarations): {}", e)
+                    })?;
             }
             codegen.set_prefer_existing_functions(false);
 
@@ -324,7 +332,8 @@ impl<'s> CompilationPipeline<'s> {
             // Compile pending default protocol methods.
             // These were registered during declaration collection but their bodies need to be
             // compiled after all functions are registered (e.g., Iterator.advance_by uses `range`).
-            codegen.compile_pending_default_methods()
+            codegen
+                .compile_pending_default_methods()
                 .map_err(|e| anyhow::anyhow!("VBC codegen error (default methods): {}", e))?;
 
             // Disable @test propagation for stdlib modules — only user code @test functions
@@ -338,18 +347,23 @@ impl<'s> CompilationPipeline<'s> {
             // Uses lenient compilation because imported modules may contain functions that
             // reference FFI/external symbols not available in VBC (e.g., mach_timebase_info).
             for imported_module in &imported_modules {
-                codegen.compile_module_items_lenient(imported_module)
-                    .map_err(|e| anyhow::anyhow!("VBC codegen error (imported module bodies): {}", e))?;
+                codegen
+                    .compile_module_items_lenient(imported_module)
+                    .map_err(|e| {
+                        anyhow::anyhow!("VBC codegen error (imported module bodies): {}", e)
+                    })?;
             }
 
             // Pass 2b: Compile the main module's function bodies.
             // Re-enable @test propagation for user code.
             codegen.set_propagate_test_attr(true);
-            codegen.compile_module_items(module)
+            codegen
+                .compile_module_items(module)
                 .map_err(|e| anyhow::anyhow!("VBC codegen error (main module bodies): {}", e))?;
 
             // Build the final VBC module
-            codegen.finalize_module()
+            codegen
+                .finalize_module()
                 .map_err(|e| anyhow::anyhow!("VBC codegen error (finalize): {}", e))?
         };
 
@@ -357,7 +371,9 @@ impl<'s> CompilationPipeline<'s> {
         // Use the parent directory of the input file, or current directory if none
         let input_path = &self.session.options().input;
         let source_dir = if input_path.is_file() {
-            input_path.parent().map(|p| p.to_string_lossy().into_owned())
+            input_path
+                .parent()
+                .map(|p| p.to_string_lossy().into_owned())
         } else {
             Some(input_path.to_string_lossy().into_owned())
         };
@@ -455,9 +471,9 @@ impl<'s> CompilationPipeline<'s> {
             "core.collections.heap",
             // Phase 3: core/mem CBGR modules — bottom-up by dependency
             // Tier 1: Pure logic (no intrinsics)
-            "core.mem.mod",          // ExecutionTier enum, error types
-            "core.mem.capability",   // Capability flags, pure bit ops
-            "core.mem.size_class",   // Size class bins (needs clz_u64, wired via ArithExtended)
+            "core.mem.mod",        // ExecutionTier enum, error types
+            "core.mem.capability", // Capability flags, pure bit ops
+            "core.mem.size_class", // Size class bins (needs clz_u64, wired via ArithExtended)
             // Tier 1.5: Capability-audit substrate (#202). MUST come
             // before `core.mem.header` because header.vr's writer
             // entry points (try_revoke / attenuate_capabilities /
@@ -474,14 +490,14 @@ impl<'s> CompilationPipeline<'s> {
             "core.mem.cap_audit_ring",
             "core.mem.cap_audit",
             // Tier 2: Atomic operations
-            "core.mem.header",       // AllocationHeader (atomic load/store/fetch_add u32/u16/u64)
-            "core.mem.epoch",        // Global epoch manager (atomics + spin_hint)
+            "core.mem.header", // AllocationHeader (atomic load/store/fetch_add u32/u16/u64)
+            "core.mem.epoch",  // Global epoch manager (atomics + spin_hint)
             // Tier 3: Complex reference types
-            "core.mem.thin_ref",     // ThinRef<T> 16-byte reference
-            "core.mem.fat_ref",      // FatRef<T> 32-byte reference
-            "core.mem.hazard",       // Hazard pointer system (pointer atomics)
+            "core.mem.thin_ref", // ThinRef<T> 16-byte reference
+            "core.mem.fat_ref",  // FatRef<T> 32-byte reference
+            "core.mem.hazard",   // Hazard pointer system (pointer atomics)
             // Tier 4: OS integration
-            "core.mem.segment",      // Segment management (mmap/munmap via @ffi)
+            "core.mem.segment", // Segment management (mmap/munmap via @ffi)
             // Tier 5: blocked until segment + heap stable
             "core.mem.heap",      // @thread_local now implemented
             "core.mem.allocator", // GLOBAL_ALLOCATOR + @thread_local
@@ -496,20 +512,18 @@ impl<'s> CompilationPipeline<'s> {
             "core.async.generator",
             "core.async.spawn_with",
             "core.async.parallel",
-            "core.async.select",          // join_all, select_all, race family
-            "core.async.spawn_config",    // spawn_with_config
+            "core.async.select",       // join_all, select_all, race family
+            "core.async.spawn_config", // spawn_with_config
             // Runtime context bridge for AOT spawn/provide/using
             "core.runtime.ctx_bridge",
             // I/O type definitions — needed before io/net modules that use IoError/IoErrorKind
-            "core.sys.io_engine",    // IoError variant type, IOEngine, IOInterest
+            "core.sys.io_engine", // IoError variant type, IOEngine, IOInterest
             "core.io.file",
             "core.net.tcp",
             "core.net.udp",
             "core.base.panic",
         ];
-        const EXCLUDED_MODULES: &[&str] = &[
-            "core.base.maybe",
-        ];
+        const EXCLUDED_MODULES: &[&str] = &["core.base.maybe"];
         // Detect host platform for filtering platform-specific modules.
         let is_macos = cfg!(target_os = "macos");
         let is_linux = cfg!(target_os = "linux");
@@ -528,12 +542,12 @@ impl<'s> CompilationPipeline<'s> {
         modules_sorted.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
         for (path, module_rc) in modules_sorted {
             let path_str = path.as_str().to_string();
-            let is_excluded = EXCLUDED_MODULES.iter().any(|m| {
-                path_str.ends_with(m) || path_str.ends_with(&format!("{}.vr", m))
-            });
-            let is_always = ALWAYS_INCLUDE.iter().any(|m| {
-                path_str.ends_with(m) || path_str.ends_with(&format!("{}.vr", m))
-            });
+            let is_excluded = EXCLUDED_MODULES
+                .iter()
+                .any(|m| path_str.ends_with(m) || path_str.ends_with(&format!("{}.vr", m)));
+            let is_always = ALWAYS_INCLUDE
+                .iter()
+                .any(|m| path_str.ends_with(m) || path_str.ends_with(&format!("{}.vr", m)));
             // Skip platform-specific modules that don't match the host OS.
             // e.g. on macOS, skip core.sys.linux.* and vice versa.
             if !is_linux && (path_str.contains("sys.linux") || path_str.contains("sys/linux")) {
@@ -572,20 +586,19 @@ impl<'s> CompilationPipeline<'s> {
                     // ensures a stale resolution shows up as an unmatched
                     // path rather than a silently-corrupted one.
                     match &mount_decl.tree.kind {
-                        MountTreeKind::Path(path) => {
-                            path.segments
-                                .iter()
-                                .filter_map(|seg| match seg {
-                                    verum_ast::ty::PathSegment::Name(ident) =>
-                                        Some(ident.name.as_str().to_string()),
-                                    verum_ast::ty::PathSegment::Super
-                                    | verum_ast::ty::PathSegment::Relative =>
-                                        Some("super".to_string()),
-                                    _ => None,
-                                })
-                                .collect::<Vec<String>>()
-                                .join(".")
-                        }
+                        MountTreeKind::Path(path) => path
+                            .segments
+                            .iter()
+                            .filter_map(|seg| match seg {
+                                verum_ast::ty::PathSegment::Name(ident) => {
+                                    Some(ident.name.as_str().to_string())
+                                }
+                                verum_ast::ty::PathSegment::Super
+                                | verum_ast::ty::PathSegment::Relative => Some("super".to_string()),
+                                _ => None,
+                            })
+                            .collect::<Vec<String>>()
+                            .join("."),
                         _ => String::new(),
                     }
                 };
@@ -608,8 +621,17 @@ impl<'s> CompilationPipeline<'s> {
 
                     // Handle short paths like core.maybe -> core.base.maybe
                     const BASE_MODULES: &[&str] = &[
-                        "maybe", "result", "ordering", "protocols", "primitives",
-                        "memory", "iterator", "panic", "env", "data", "ops",
+                        "maybe",
+                        "result",
+                        "ordering",
+                        "protocols",
+                        "primitives",
+                        "memory",
+                        "iterator",
+                        "panic",
+                        "env",
+                        "data",
+                        "ops",
                     ];
                     for &base_mod in BASE_MODULES {
                         if stripped == base_mod {
@@ -643,10 +665,15 @@ impl<'s> CompilationPipeline<'s> {
                     let module_rc = self.modules.get(&Text::from(candidate.as_str()));
                     if let Some(module_rc) = module_rc {
                         // Skip platform-specific modules that don't match host.
-                        if !is_linux && (candidate.contains("sys.linux") || candidate.contains("sys/linux")) {
+                        if !is_linux
+                            && (candidate.contains("sys.linux") || candidate.contains("sys/linux"))
+                        {
                             break;
                         }
-                        if !is_macos && (candidate.contains("sys.darwin") || candidate.contains("sys/darwin")) {
+                        if !is_macos
+                            && (candidate.contains("sys.darwin")
+                                || candidate.contains("sys/darwin"))
+                        {
                             break;
                         }
                         seen_paths.insert(candidate.clone());
@@ -666,10 +693,16 @@ impl<'s> CompilationPipeline<'s> {
                             if path.as_str().starts_with(&prefix) {
                                 let subpath = path.as_str().to_string();
                                 // Skip cross-platform submodules.
-                                if !is_linux && (subpath.contains("sys.linux") || subpath.contains("sys/linux")) {
+                                if !is_linux
+                                    && (subpath.contains("sys.linux")
+                                        || subpath.contains("sys/linux"))
+                                {
                                     continue;
                                 }
-                                if !is_macos && (subpath.contains("sys.darwin") || subpath.contains("sys/darwin")) {
+                                if !is_macos
+                                    && (subpath.contains("sys.darwin")
+                                        || subpath.contains("sys/darwin"))
+                                {
                                     continue;
                                 }
                                 if !seen_paths.contains(&subpath) {
@@ -728,7 +761,9 @@ impl<'s> CompilationPipeline<'s> {
                 .collect();
             for (src_path, src_mod) in &pending {
                 for item in src_mod.items.iter() {
-                    let ItemKind::Mount(mount_decl) = &item.kind else { continue };
+                    let ItemKind::Mount(mount_decl) = &item.kind else {
+                        continue;
+                    };
                     use verum_ast::MountTreeKind;
                     let path = match &mount_decl.tree.kind {
                         MountTreeKind::Path(p) => p,
@@ -771,9 +806,7 @@ impl<'s> CompilationPipeline<'s> {
                                 Some(ident.name.as_str().to_string())
                             }
                             verum_ast::ty::PathSegment::Super
-                            | verum_ast::ty::PathSegment::Relative => {
-                                Some("super".to_string())
-                            }
+                            | verum_ast::ty::PathSegment::Relative => Some("super".to_string()),
                             _ => None,
                         })
                         .collect::<Vec<String>>()
@@ -789,8 +822,7 @@ impl<'s> CompilationPipeline<'s> {
                     // referenced module never reaches codegen and bodies
                     // mounting functions from it compile to
                     // `[lenient] SKIP … undefined function` (#163).
-                    let full_path =
-                        Self::resolve_super_path(src_path, &raw_path);
+                    let full_path = Self::resolve_super_path(src_path, &raw_path);
                     // Walk progressive prefixes so a mount whose full path
                     // is `core.x.y.z.{...}` matches the leaf module or any
                     // ancestor that happens to be indexed directly.
@@ -806,33 +838,34 @@ impl<'s> CompilationPipeline<'s> {
                     // function from it compiles to `[lenient] SKIP …
                     // undefined function: <name>` (#163).
                     let segs: Vec<&str> = full_path.split('.').collect();
-                    let try_candidate = |this: &Self,
-                                         candidate: &str,
-                                         seen_paths: &mut std::collections::HashSet<String>,
-                                         imported: &mut Vec<Module>,
-                                         imported_paths: &mut Vec<String>| {
-                        if seen_paths.contains(candidate) {
-                            return;
-                        }
-                        if !is_linux
-                            && (candidate.contains("sys.linux")
-                                || candidate.contains("sys/linux"))
-                        {
-                            return;
-                        }
-                        if !is_macos
-                            && (candidate.contains("sys.darwin")
-                                || candidate.contains("sys/darwin"))
-                        {
-                            return;
-                        }
-                        let key = Text::from(candidate);
-                        if let Some(module_rc) = this.modules.get(&key) {
-                            seen_paths.insert(candidate.to_string());
-                            imported_paths.push(candidate.to_string());
-                            imported.push((**module_rc).clone());
-                        }
-                    };
+                    let try_candidate =
+                        |this: &Self,
+                         candidate: &str,
+                         seen_paths: &mut std::collections::HashSet<String>,
+                         imported: &mut Vec<Module>,
+                         imported_paths: &mut Vec<String>| {
+                            if seen_paths.contains(candidate) {
+                                return;
+                            }
+                            if !is_linux
+                                && (candidate.contains("sys.linux")
+                                    || candidate.contains("sys/linux"))
+                            {
+                                return;
+                            }
+                            if !is_macos
+                                && (candidate.contains("sys.darwin")
+                                    || candidate.contains("sys/darwin"))
+                            {
+                                return;
+                            }
+                            let key = Text::from(candidate);
+                            if let Some(module_rc) = this.modules.get(&key) {
+                                seen_paths.insert(candidate.to_string());
+                                imported_paths.push(candidate.to_string());
+                                imported.push((**module_rc).clone());
+                            }
+                        };
                     for cut in (1..=segs.len()).rev() {
                         let candidate = segs[..cut].join(".");
                         try_candidate(
@@ -1076,13 +1109,15 @@ impl<'s> CompilationPipeline<'s> {
                         // truncated path. See the user-mount loop at
                         // ~line 11158 and the closure walker at
                         // ~line 11336 for the full bug-class context.
-                        let full = path.segments.iter()
+                        let full = path
+                            .segments
+                            .iter()
                             .filter_map(|seg| match seg {
-                                verum_ast::ty::PathSegment::Name(ident) =>
-                                    Some(ident.name.as_str().to_string()),
+                                verum_ast::ty::PathSegment::Name(ident) => {
+                                    Some(ident.name.as_str().to_string())
+                                }
                                 verum_ast::ty::PathSegment::Super
-                                | verum_ast::ty::PathSegment::Relative =>
-                                    Some("super".to_string()),
+                                | verum_ast::ty::PathSegment::Relative => Some("super".to_string()),
                                 _ => None,
                             })
                             .collect::<Vec<_>>()
@@ -1114,7 +1149,8 @@ impl<'s> CompilationPipeline<'s> {
         };
 
         let total_before = self.modules.len();
-        let retained: Map<Text, Arc<Module>> = self.modules
+        let retained: Map<Text, Arc<Module>> = self
+            .modules
             .drain()
             .filter(|(path, _module)| {
                 let p = path.as_str();
@@ -1126,8 +1162,9 @@ impl<'s> CompilationPipeline<'s> {
         self.modules = retained;
         debug!(
             "Retained {}/{} stdlib modules for AOT compilation ({} user-mount paths)",
-            retained_count, total_before, user_mount_prefixes.len()
+            retained_count,
+            total_before,
+            user_mount_prefixes.len()
         );
     }
-
 }

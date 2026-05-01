@@ -5,7 +5,7 @@ use crate::error::Result;
 use verum_common::{List, Set, Text};
 
 // Re-export types for tests
-pub use super::types::{DependencySpec, CogMetadata, TierArtifacts};
+pub use super::types::{CogMetadata, DependencySpec, TierArtifacts};
 pub use semver::{Version, VersionReq};
 pub use verum_common::Map;
 

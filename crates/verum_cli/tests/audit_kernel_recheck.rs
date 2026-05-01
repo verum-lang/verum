@@ -98,20 +98,15 @@ public theorem trivial_truth()
     proof by auto;
 "#,
     );
-    let out = run_verum(
-        &["audit", "--kernel-recheck", "--format", "json"],
-        &dir,
-    );
+    let out = run_verum(&["audit", "--kernel-recheck", "--format", "json"], &dir);
     assert!(
         out.status.success(),
         "JSON format should succeed: stderr={}",
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let parsed: serde_json::Value =
-        serde_json::from_str(stdout.trim()).unwrap_or_else(|e| {
-            panic!("JSON parse failed for `{}`: {}", stdout, e)
-        });
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|e| panic!("JSON parse failed for `{}`: {}", stdout, e));
     assert_eq!(parsed["schema_version"], 1);
     assert_eq!(parsed["command"], "audit-kernel-recheck");
     assert!(parsed["total_files"].is_number());
@@ -123,10 +118,7 @@ public theorem trivial_truth()
 #[test]
 fn invalid_format_flag_rejected() {
     let (_temp, dir) = create_project("krch_bad_fmt", r#""#);
-    let out = run_verum(
-        &["audit", "--kernel-recheck", "--format", "garbage"],
-        &dir,
-    );
+    let out = run_verum(&["audit", "--kernel-recheck", "--format", "garbage"], &dir);
     assert!(!out.status.success(), "invalid format should reject");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
@@ -180,10 +172,7 @@ public theorem t1() ensures true proof by auto;
 public theorem t2() ensures true proof by auto;
 "#,
     );
-    let out = run_verum(
-        &["audit", "--kernel-recheck", "--format", "json"],
-        &dir,
-    );
+    let out = run_verum(&["audit", "--kernel-recheck", "--format", "json"], &dir);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();

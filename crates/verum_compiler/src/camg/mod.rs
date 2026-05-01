@@ -181,7 +181,10 @@ pub struct ModuleArtifacts {
 impl ModuleArtifacts {
     /// Construct from raw source.
     pub fn from_source(source: impl Into<Arc<str>>) -> Self {
-        Self { source: source.into(), slots: DashMap::new() }
+        Self {
+            source: source.into(),
+            slots: DashMap::new(),
+        }
     }
 
     /// Get-or-compute an artifact slot keyed by `tag`. The closure
@@ -442,7 +445,11 @@ mod tests {
         let g = CamgGraph::new();
         let a = g.insert_node(ModuleNode::new("a", "fn a() {}"));
         let b = g.insert_node(ModuleNode::new("b", "fn b() {}"));
-        g.add_edge(ModuleEdge { from: a, to: b, kind: EdgeKind::Mount });
+        g.add_edge(ModuleEdge {
+            from: a,
+            to: b,
+            kind: EdgeKind::Mount,
+        });
         let edges = g.edges_of(a);
         assert_eq!(edges.len(), 1);
         assert_eq!(edges[0].to, b);
@@ -455,17 +462,24 @@ mod tests {
         let arts = ModuleArtifacts::from_source("source");
         let counter = Arc::new(AtomicUsize::new(0));
         let c1 = Arc::clone(&counter);
-        let v1: Arc<u32> = arts.get_or_init("test", move || {
-            c1.fetch_add(1, Ordering::Relaxed);
-            42u32
-        }).unwrap();
+        let v1: Arc<u32> = arts
+            .get_or_init("test", move || {
+                c1.fetch_add(1, Ordering::Relaxed);
+                42u32
+            })
+            .unwrap();
         let c2 = Arc::clone(&counter);
-        let v2: Arc<u32> = arts.get_or_init("test", move || {
-            c2.fetch_add(1, Ordering::Relaxed);
-            99u32 // would-be different value, but init runs only once
-        }).unwrap();
+        let v2: Arc<u32> = arts
+            .get_or_init("test", move || {
+                c2.fetch_add(1, Ordering::Relaxed);
+                99u32 // would-be different value, but init runs only once
+            })
+            .unwrap();
         assert_eq!(*v1, 42);
-        assert_eq!(*v2, 42, "second call must return cached value, not re-run init");
+        assert_eq!(
+            *v2, 42,
+            "second call must return cached value, not re-run init"
+        );
         assert_eq!(counter.load(Ordering::Relaxed), 1);
     }
 

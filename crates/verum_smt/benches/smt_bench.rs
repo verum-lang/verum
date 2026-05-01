@@ -110,7 +110,11 @@ fn bench_complex_formulas(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("conjunctions", num_conjuncts),
             num_conjuncts,
-            |b, _| b.iter(|| verify_refinement(black_box(&ctx), black_box(&ty), None, VerifyMode::Proof)),
+            |b, _| {
+                b.iter(|| {
+                    verify_refinement(black_box(&ctx), black_box(&ty), None, VerifyMode::Proof)
+                })
+            },
         );
     }
 

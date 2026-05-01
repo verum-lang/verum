@@ -76,7 +76,9 @@ macro_rules! impl_to_text_for_numeric {
     };
 }
 
-impl_to_text_for_numeric!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize, f32, f64);
+impl_to_text_for_numeric!(
+    i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize, f32, f64
+);
 
 // Blanket implementation for references
 impl<T: ToText + ?Sized> ToText for &T {

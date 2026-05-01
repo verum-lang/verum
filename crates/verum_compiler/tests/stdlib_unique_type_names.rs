@@ -144,12 +144,23 @@ impl CfgConstraint {
 ///  - anything else → conservative (treat as always-active)
 fn parse_cfg_attr(attr_line: &str) -> CfgConstraint {
     let trimmed = attr_line.trim();
-    let inner = match trimmed.strip_prefix("@cfg(").and_then(|s| s.strip_suffix(")")) {
+    let inner = match trimmed
+        .strip_prefix("@cfg(")
+        .and_then(|s| s.strip_suffix(")"))
+    {
         Some(s) => s.trim(),
-        None => return CfgConstraint { constraints: vec![], conservative: true },
+        None => {
+            return CfgConstraint {
+                constraints: vec![],
+                conservative: true,
+            };
+        }
     };
     // Strip optional `all(...)` wrapper.
-    let body = inner.strip_prefix("all(").and_then(|s| s.strip_suffix(")")).unwrap_or(inner);
+    let body = inner
+        .strip_prefix("all(")
+        .and_then(|s| s.strip_suffix(")"))
+        .unwrap_or(inner);
     let mut out = CfgConstraint::default();
     for part in body.split(',') {
         let part = part.trim();
@@ -159,12 +170,18 @@ fn parse_cfg_attr(attr_line: &str) -> CfgConstraint {
             let val = val_with_quotes.trim_matches('"').to_string();
             // Refuse to model nested any(...) or unmatched quotes.
             if key.contains('(') || val.contains('(') {
-                return CfgConstraint { constraints: vec![], conservative: true };
+                return CfgConstraint {
+                    constraints: vec![],
+                    conservative: true,
+                };
             }
             out.constraints.push((key, val));
         } else {
             // Bare predicate like `unix` — conservative.
-            return CfgConstraint { constraints: vec![], conservative: true };
+            return CfgConstraint {
+                constraints: vec![],
+                conservative: true,
+            };
         }
     }
     out
@@ -197,9 +214,10 @@ fn stdlib_public_type_names_are_unique() {
             .iter()
             .enumerate()
             .filter(|(i, s)| {
-                sites.iter().enumerate().any(|(j, t)| {
-                    *i != j && !s.3.mutually_exclusive(&t.3)
-                })
+                sites
+                    .iter()
+                    .enumerate()
+                    .any(|(j, t)| *i != j && !s.3.mutually_exclusive(&t.3))
             })
             .map(|(_, s)| s)
             .collect();
@@ -212,7 +230,12 @@ fn stdlib_public_type_names_are_unique() {
             colliding.len()
         );
         for (modpath, file, line, _cfg) in &colliding {
-            entry.push_str(&format!("    - {} ({}:{})\n", modpath, file.display(), line));
+            entry.push_str(&format!(
+                "    - {} ({}:{})\n",
+                modpath,
+                file.display(),
+                line
+            ));
         }
         violations.push(entry);
     }
@@ -309,7 +332,10 @@ fn walk_dir(
 /// matching keys with non-equal values.
 fn merge_cfg(a: &CfgConstraint, b: &CfgConstraint) -> CfgConstraint {
     if a.conservative || b.conservative {
-        return CfgConstraint { constraints: vec![], conservative: true };
+        return CfgConstraint {
+            constraints: vec![],
+            conservative: true,
+        };
     }
     let mut out = a.clone();
     for (k, v) in &b.constraints {
@@ -348,16 +374,19 @@ fn parse_module_cfg_gates(mod_file: &Path) -> BTreeMap<String, CfgConstraint> {
         // visibility variants we don't care to model, so be lenient.
         let module_kw = if let Some(rest) = trimmed.strip_prefix("public module ") {
             Some(rest)
-        } else { trimmed.strip_prefix("module ").map(|rest| rest) };
+        } else {
+            trimmed.strip_prefix("module ").map(|rest| rest)
+        };
         if let Some(rest) = module_kw {
             let name: String = rest
                 .chars()
                 .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
                 .collect();
             if !name.is_empty()
-                && let Some(cfg) = pending_cfg.take() {
-                    out.insert(name, cfg);
-                }
+                && let Some(cfg) = pending_cfg.take()
+            {
+                out.insert(name, cfg);
+            }
             continue;
         }
         // Non-attribute non-module line: drop pending cfg so it
@@ -459,7 +488,11 @@ fn scan_file(
             }
             &r[cut..]
         });
-        let rest = rest.trim_start().strip_prefix("is").unwrap_or(rest).trim_start();
+        let rest = rest
+            .trim_start()
+            .strip_prefix("is")
+            .unwrap_or(rest)
+            .trim_start();
         if rest.starts_with("protocol") {
             continue;
         }
@@ -468,8 +501,7 @@ fn scan_file(
         // gated by `@cfg(target_arch = "x86_64")` inside a module
         // gated by `@cfg(target_os = "linux")` is active only on
         // linux+x86_64.
-        let combined =
-            merge_cfg(inherited_cfg, &std::mem::take(&mut pending_cfg));
+        let combined = merge_cfg(inherited_cfg, &std::mem::take(&mut pending_cfg));
         sink.entry(name.to_string()).or_default().push((
             module_path.clone(),
             file.to_path_buf(),
@@ -538,15 +570,24 @@ mod cfg_parsing_tests {
     #[test]
     fn parses_simple_target_os() {
         let c = cfg(r#"@cfg(target_os = "linux")"#);
-        assert!(!c.conservative, "simple target_os should not be conservative");
-        assert_eq!(c.constraints, vec![("target_os".to_string(), "linux".to_string())]);
+        assert!(
+            !c.conservative,
+            "simple target_os should not be conservative"
+        );
+        assert_eq!(
+            c.constraints,
+            vec![("target_os".to_string(), "linux".to_string())]
+        );
     }
 
     #[test]
     fn parses_simple_target_arch() {
         let c = cfg(r#"@cfg(target_arch = "x86_64")"#);
         assert!(!c.conservative);
-        assert_eq!(c.constraints, vec![("target_arch".to_string(), "x86_64".to_string())]);
+        assert_eq!(
+            c.constraints,
+            vec![("target_arch".to_string(), "x86_64".to_string())]
+        );
     }
 
     #[test]
@@ -683,12 +724,16 @@ mod cfg_parsing_tests {
         let child = cfg(r#"@cfg(target_arch = "x86_64")"#);
         let merged = merge_cfg(&parent, &child);
         assert!(!merged.conservative);
-        assert!(merged
-            .constraints
-            .contains(&("target_os".to_string(), "linux".to_string())));
-        assert!(merged
-            .constraints
-            .contains(&("target_arch".to_string(), "x86_64".to_string())));
+        assert!(
+            merged
+                .constraints
+                .contains(&("target_os".to_string(), "linux".to_string()))
+        );
+        assert!(
+            merged
+                .constraints
+                .contains(&("target_arch".to_string(), "x86_64".to_string()))
+        );
     }
 
     #[test]

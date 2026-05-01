@@ -131,13 +131,13 @@ impl UnsafePatternKind {
     /// Get CWE (Common Weakness Enumeration) ID if applicable
     pub fn cwe_id(&self) -> Option<u32> {
         match self {
-            UnsafePatternKind::SqlInjection => Some(89),            // CWE-89: SQL Injection
-            UnsafePatternKind::CommandInjection => Some(78),        // CWE-78: OS Command Injection
-            UnsafePatternKind::PathTraversal => Some(22),           // CWE-22: Path Traversal
-            UnsafePatternKind::DynamicCodeExecution => Some(94),    // CWE-94: Code Injection
-            UnsafePatternKind::UnsafeFormat => Some(134),           // CWE-134: Format String
-            UnsafePatternKind::SensitiveDataExposure => Some(200),  // CWE-200: Information Exposure
-            UnsafePatternKind::UnsafeMemory => Some(119),           // CWE-119: Buffer Overflow
+            UnsafePatternKind::SqlInjection => Some(89), // CWE-89: SQL Injection
+            UnsafePatternKind::CommandInjection => Some(78), // CWE-78: OS Command Injection
+            UnsafePatternKind::PathTraversal => Some(22), // CWE-22: Path Traversal
+            UnsafePatternKind::DynamicCodeExecution => Some(94), // CWE-94: Code Injection
+            UnsafePatternKind::UnsafeFormat => Some(134), // CWE-134: Format String
+            UnsafePatternKind::SensitiveDataExposure => Some(200), // CWE-200: Information Exposure
+            UnsafePatternKind::UnsafeMemory => Some(119), // CWE-119: Buffer Overflow
             _ => None,
         }
     }

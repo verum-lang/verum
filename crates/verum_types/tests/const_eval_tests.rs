@@ -582,7 +582,8 @@ fn test_eval_not_constant() {
     let path = Path::single(Ident::new("func".to_string(), Span::dummy()));
     let func = Expr::new(ExprKind::Path(path), Span::dummy());
     let expr = Expr::new(
-        ExprKind::Call { type_args: vec![].into(),
+        ExprKind::Call {
+            type_args: vec![].into(),
             func: Box::new(func),
             args: List::new(),
         },

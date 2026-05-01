@@ -73,11 +73,11 @@ use verum_common::{List, Map, Maybe, Text};
 
 use crate::TypeError;
 use crate::const_eval::ConstEvaluator;
-use verum_common::ConstValue;
 use crate::protocol::{
     AssociatedConst, AssociatedType, Protocol, ProtocolBound, ProtocolMethod, TypeParam,
 };
 use crate::ty::Type;
+use verum_common::ConstValue;
 
 /// NestedArray type representation
 ///

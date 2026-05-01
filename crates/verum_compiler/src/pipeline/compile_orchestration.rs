@@ -26,7 +26,7 @@ use std::time::Instant;
 use anyhow::{Context as AnyhowContext, Result};
 use tracing::{debug, info, warn};
 
-use verum_ast::{decl::ItemKind, FileId, Module};
+use verum_ast::{FileId, Module, decl::ItemKind};
 use verum_common::{List, Map, Shared, Text};
 use verum_diagnostics::DiagnosticBuilder;
 use verum_fast_parser::VerumParser;
@@ -174,7 +174,8 @@ impl<'s> CompilationPipeline<'s> {
                 self.staged_pipeline.reset();
 
                 // Import meta functions from main registry into staged pipeline
-                self.staged_pipeline.import_from_registry(&self.meta_registry, &module);
+                self.staged_pipeline
+                    .import_from_registry(&self.meta_registry, &module);
 
                 // Execute staged compilation
                 match self.staged_pipeline.compile(module) {
@@ -197,7 +198,8 @@ impl<'s> CompilationPipeline<'s> {
                         );
 
                         // Update module with expanded version (runtime_code from staged result)
-                        self.modules.insert(path.clone(), Arc::new(result.runtime_code));
+                        self.modules
+                            .insert(path.clone(), Arc::new(result.runtime_code));
                     }
                     Err(e) => {
                         // Fallback to simple expansion on staged compilation error
@@ -210,7 +212,8 @@ impl<'s> CompilationPipeline<'s> {
                         // Clone module again for fallback (original was consumed)
                         if let Some(module_rc) = self.modules.get(path) {
                             let mut fallback_module = (**module_rc).clone();
-                            if let Err(expand_err) = self.expand_module(path, &mut fallback_module) {
+                            if let Err(expand_err) = self.expand_module(path, &mut fallback_module)
+                            {
                                 warn!("  Fallback expansion also failed: {}", expand_err);
                                 return Err(expand_err);
                             }
@@ -235,7 +238,8 @@ impl<'s> CompilationPipeline<'s> {
             if let Some(module_rc) = self.modules.get(path) {
                 let hashes = compute_item_hashes_from_module(module_rc.as_ref());
                 let file_path = PathBuf::from(path.as_str());
-                self.incremental_compiler.update_item_hashes(file_path, hashes);
+                self.incremental_compiler
+                    .update_item_hashes(file_path, hashes);
             }
         }
         debug!(
@@ -260,9 +264,9 @@ impl<'s> CompilationPipeline<'s> {
             .compute_incremental_sets_fine_grained(&file_paths, |path| {
                 // Find the module for this path and compute its hashes
                 let path_text = Text::from(path.to_string_lossy().to_string());
-                self.modules.get(&path_text).map(|module_rc| {
-                    compute_item_hashes_from_module(module_rc.as_ref())
-                })
+                self.modules
+                    .get(&path_text)
+                    .map(|module_rc| compute_item_hashes_from_module(module_rc.as_ref()))
             });
 
         // Convert back to Text paths for lookup
@@ -386,8 +390,7 @@ impl<'s> CompilationPipeline<'s> {
                 })
                 .collect();
 
-            let parallel_verify_outer =
-                std::env::var("VERUM_NO_PARALLEL_VERIFY").is_err();
+            let parallel_verify_outer = std::env::var("VERUM_NO_PARALLEL_VERIFY").is_err();
 
             if parallel_verify_outer && verify_workset.len() > 1 {
                 use rayon::prelude::*;
@@ -597,7 +600,11 @@ impl<'s> CompilationPipeline<'s> {
             if let Some(prev) = path_to_source.get(&module_path_str) {
                 eprintln!(
                     "error<E_MODULE_PATH_COLLISION>: module path '{}' resolves to two source files",
-                    if module_path_str.is_empty() { "<root>" } else { module_path_str.as_str() },
+                    if module_path_str.is_empty() {
+                        "<root>"
+                    } else {
+                        module_path_str.as_str()
+                    },
                 );
                 eprintln!("  using:    {}", prev.display());
                 eprintln!("  ignoring: {}", file_path.display());
@@ -763,7 +770,8 @@ impl<'s> CompilationPipeline<'s> {
                 self.staged_pipeline.reset();
 
                 // Import meta functions from main registry into staged pipeline
-                self.staged_pipeline.import_from_registry(&self.meta_registry, &module);
+                self.staged_pipeline
+                    .import_from_registry(&self.meta_registry, &module);
 
                 // Execute staged compilation
                 match self.staged_pipeline.compile(module) {
@@ -786,7 +794,8 @@ impl<'s> CompilationPipeline<'s> {
                         );
 
                         // Update module with expanded version (runtime_code from staged result)
-                        self.modules.insert(path.clone(), Arc::new(result.runtime_code));
+                        self.modules
+                            .insert(path.clone(), Arc::new(result.runtime_code));
                     }
                     Err(e) => {
                         // Fallback to simple expansion on staged compilation error
@@ -799,7 +808,8 @@ impl<'s> CompilationPipeline<'s> {
                         // Clone module again for fallback (original was consumed)
                         if let Some(module_rc) = self.modules.get(path) {
                             let mut fallback_module = (**module_rc).clone();
-                            if let Err(expand_err) = self.expand_module(path, &mut fallback_module) {
+                            if let Err(expand_err) = self.expand_module(path, &mut fallback_module)
+                            {
                                 warn!("  Fallback expansion also failed: {}", expand_err);
                                 return Err(expand_err);
                             }
@@ -824,7 +834,8 @@ impl<'s> CompilationPipeline<'s> {
             if let Some(module_rc) = self.modules.get(path) {
                 let hashes = compute_item_hashes_from_module(module_rc.as_ref());
                 let file_path = PathBuf::from(path.as_str());
-                self.incremental_compiler.update_item_hashes(file_path, hashes);
+                self.incremental_compiler
+                    .update_item_hashes(file_path, hashes);
             }
         }
         debug!(
@@ -845,9 +856,7 @@ impl<'s> CompilationPipeline<'s> {
         // visible to all other modules, regardless of compilation order.
         // Order-independent method resolution: methods in implement blocks are shared
         // across all modules regardless of compilation order.
-        let shared_inherent_methods = Shared::new(parking_lot::RwLock::new(
-            Map::new(),
-        ));
+        let shared_inherent_methods = Shared::new(parking_lot::RwLock::new(Map::new()));
 
         for path in &module_paths {
             // Skip stdlib modules from full type checking - they only need their
@@ -917,14 +926,18 @@ impl<'s> CompilationPipeline<'s> {
                 // Sort for deterministic iteration (self.modules is a HashMap).
                 // Shallower (fewer-dot) module keys come first so top-level stdlib
                 // functions beat nested-module helpers when short names collide.
-                let mut stdlib_entries: Vec<_> = self.modules.iter()
+                let mut stdlib_entries: Vec<_> = self
+                    .modules
+                    .iter()
                     .filter(|(k, _)| k.as_str().starts_with("core"))
                     .map(|(k, v)| (k.clone(), v.clone()))
                     .collect();
                 stdlib_entries.sort_by(|(a, _), (b, _)| {
                     let depth_a = a.as_str().matches('.').count();
                     let depth_b = b.as_str().matches('.').count();
-                    depth_a.cmp(&depth_b).then_with(|| a.as_str().cmp(b.as_str()))
+                    depth_a
+                        .cmp(&depth_b)
+                        .then_with(|| a.as_str().cmp(b.as_str()))
                 });
 
                 // Preserve the user-file module path so we can restore it after
@@ -946,7 +959,8 @@ impl<'s> CompilationPipeline<'s> {
                             checker.set_current_module_path(module_path.clone());
                             for item in &stdlib_mod.items {
                                 if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
-                                    let _ = checker.resolve_type_definition(type_decl, &mut resolution_stack);
+                                    let _ = checker
+                                        .resolve_type_definition(type_decl, &mut resolution_stack);
                                 }
                             }
                         }
@@ -1060,16 +1074,21 @@ impl<'s> CompilationPipeline<'s> {
                 }
 
                 // Enable lenient context validation for files with @test annotations.
-                let has_test_annotation = module.items.iter().any(|item| {
-                    item.attributes.iter().any(|attr| attr.is_named("test"))
-                }) || module.items.first().and_then(|item| {
-                    self.session.get_source(item.span.file_id)
-                }).map(|sf| {
-                    sf.source.as_str().lines().take(10).any(|line| {
-                        let trimmed = line.trim();
-                        trimmed.starts_with("// @test:") || trimmed.starts_with("// @test ")
-                    })
-                }).unwrap_or(false);
+                let has_test_annotation = module
+                    .items
+                    .iter()
+                    .any(|item| item.attributes.iter().any(|attr| attr.is_named("test")))
+                    || module
+                        .items
+                        .first()
+                        .and_then(|item| self.session.get_source(item.span.file_id))
+                        .map(|sf| {
+                            sf.source.as_str().lines().take(10).any(|line| {
+                                let trimmed = line.trim();
+                                trimmed.starts_with("// @test:") || trimmed.starts_with("// @test ")
+                            })
+                        })
+                        .unwrap_or(false);
                 if has_test_annotation {
                     checker.context_resolver_mut().set_lenient_contexts(true);
                 }

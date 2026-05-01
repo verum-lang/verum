@@ -36,10 +36,10 @@
 
 use std::time::{Duration, Instant};
 
-use verum_ast::{BinOp, Expr, ExprKind, Ident, Path, UnOp};
 use verum_ast::pattern::{Pattern, PatternKind};
-use verum_common::{Heap, List, Map, Maybe, Text};
+use verum_ast::{BinOp, Expr, ExprKind, Ident, Path, UnOp};
 use verum_common::ToText;
+use verum_common::{Heap, List, Map, Maybe, Text};
 
 use crate::context::Context;
 use crate::option_to_maybe;
@@ -138,10 +138,7 @@ impl HintsDatabase {
     /// });
     /// ```
     pub fn register_lemma(&mut self, pattern: Text, hint: LemmaHint) {
-        self.lemmas
-            .entry(pattern)
-            .or_default()
-            .push(hint);
+        self.lemmas.entry(pattern).or_default().push(hint);
     }
 
     /// Register a lemma by name for direct lookup
@@ -474,10 +471,7 @@ impl HintsDatabase {
 
     /// Register a tactic hint
     pub fn register_tactic(&mut self, pattern: Text, hint: TacticHint) {
-        self.tactics
-            .entry(pattern)
-            .or_default()
-            .push(hint);
+        self.tactics.entry(pattern).or_default().push(hint);
     }
 
     /// Register a decision procedure
@@ -1547,7 +1541,9 @@ impl HintsDatabase {
     fn collect_pattern_idents(pattern: &verum_ast::Pattern, vars: &mut List<Text>) {
         use verum_ast::pattern::{PatternKind, VariantPatternData};
         match &pattern.kind {
-            PatternKind::Ident { name, subpattern, .. } => {
+            PatternKind::Ident {
+                name, subpattern, ..
+            } => {
                 vars.push(Text::from(name.as_str()));
                 if let Maybe::Some(sub) = subpattern {
                     Self::collect_pattern_idents(sub, vars);
@@ -1558,7 +1554,11 @@ impl HintsDatabase {
                     Self::collect_pattern_idents(elem, vars);
                 }
             }
-            PatternKind::Slice { before, rest, after } => {
+            PatternKind::Slice {
+                before,
+                rest,
+                after,
+            } => {
                 for elem in before.iter() {
                     Self::collect_pattern_idents(elem, vars);
                 }
@@ -1574,7 +1574,10 @@ impl HintsDatabase {
                     Self::collect_field_idents(field, vars);
                 }
             }
-            PatternKind::Variant { data: Maybe::Some(data), .. } => match data {
+            PatternKind::Variant {
+                data: Maybe::Some(data),
+                ..
+            } => match data {
                 VariantPatternData::Tuple(elems) => {
                     for elem in elems.iter() {
                         Self::collect_pattern_idents(elem, vars);
@@ -2321,10 +2324,7 @@ pub struct ProofSearchEngine {
     /// function declarations (including body-less `fn f(...) -> T;`
     /// surface). Each entry maps name → (param sort names, return
     /// sort name) in SMT-LIB form.
-    callee_signatures: std::collections::HashMap<
-        Text,
-        (Vec<Text>, Text),
-    >,
+    callee_signatures: std::collections::HashMap<Text, (Vec<Text>, Text)>,
 
     /// Module-level axiom expressions. Asserted on the solver
     /// before every goal check. Populated from
@@ -2474,8 +2474,7 @@ impl ProofSearchEngine {
         param_sorts: Vec<Text>,
         ret_sort: Text,
     ) {
-        self.callee_signatures
-            .insert(name, (param_sorts, ret_sort));
+        self.callee_signatures.insert(name, (param_sorts, ret_sort));
     }
 
     /// Register a module-level axiom expression that will be
@@ -2520,12 +2519,9 @@ impl ProofSearchEngine {
     /// as non-recursive — `induction` reduces to case analysis with
     /// no recursive subgoals, which is correct for `Color = Red |
     /// Green | Blue`-shaped variants.
-    pub fn register_variant_recursion(
-        &mut self,
-        type_name: Text,
-        recursive_args: Vec<Vec<usize>>,
-    ) {
-        self.variant_recursive_args.insert(type_name, recursive_args);
+    pub fn register_variant_recursion(&mut self, type_name: Text, recursive_args: Vec<Vec<usize>>) {
+        self.variant_recursive_args
+            .insert(type_name, recursive_args);
     }
 
     /// Public reflection over the constructor lookup added in #35.
@@ -2797,8 +2793,11 @@ impl ProofSearchEngine {
         match solver.check() {
             z3::SatResult::Unsat => {
                 // No counterexample to the goal — proven valid.
-                let cost =
-                    VerificationCost::new(format!("decision_{}", proc.name).into(), proc.timeout, true);
+                let cost = VerificationCost::new(
+                    format!("decision_{}", proc.name).into(),
+                    proc.timeout,
+                    true,
+                );
                 Ok(ProofResult::new(cost))
             }
             z3::SatResult::Sat => {
@@ -2868,8 +2867,11 @@ impl ProofSearchEngine {
 
         // If lemma has no premises and unifies with goal, we're done
         if premises.is_empty() {
-            let cost =
-                VerificationCost::new(format!("lemma_{}", lemma.name).into(), start.elapsed(), true);
+            let cost = VerificationCost::new(
+                format!("lemma_{}", lemma.name).into(),
+                start.elapsed(),
+                true,
+            );
             return Ok(ProofResult::new(cost));
         }
 
@@ -2922,9 +2924,12 @@ impl ProofSearchEngine {
         }
 
         // All premises verified, lemma applies
-        let final_cost =
-            VerificationCost::new(format!("lemma_{}", lemma.name).into(), start.elapsed(), true)
-                .merge(total_cost);
+        let final_cost = VerificationCost::new(
+            format!("lemma_{}", lemma.name).into(),
+            start.elapsed(),
+            true,
+        )
+        .merge(total_cost);
 
         Ok(ProofResult::new(final_cost))
     }
@@ -3089,7 +3094,11 @@ impl ProofSearchEngine {
         // goals that the author intended to flag.
         let trivial_close = match &goal.goal.kind {
             ExprKind::Literal(lit) => matches!(lit.kind, verum_ast::LiteralKind::Bool(true)),
-            ExprKind::Binary { op: BinOp::Eq, left, right } => Self::expr_eq(left, right),
+            ExprKind::Binary {
+                op: BinOp::Eq,
+                left,
+                right,
+            } => Self::expr_eq(left, right),
             _ => false,
         };
         if trivial_close
@@ -3564,7 +3573,14 @@ impl ProofSearchEngine {
             (_, Paren(e2)) => self.unify_recursive(pattern, e2, subst),
 
             // Call expressions - unify function and arguments
-            (Call { func: f1, args: a1, .. }, Call { func: f2, args: a2, .. }) => {
+            (
+                Call {
+                    func: f1, args: a1, ..
+                },
+                Call {
+                    func: f2, args: a2, ..
+                },
+            ) => {
                 if a1.len() != a2.len() {
                     return Err(ProofError::UnificationFailed(
                         "Different number of arguments".into(),
@@ -4562,10 +4578,7 @@ impl ProofSearchEngine {
             let mut extended = goal.clone();
             for (ident, bound) in bindings {
                 let span = bound.span;
-                let var_expr = Expr::new(
-                    ExprKind::Path(Path::from_ident(ident)),
-                    span,
-                );
+                let var_expr = Expr::new(ExprKind::Path(Path::from_ident(ident)), span);
                 extended.hypotheses.push(Expr::new(
                     ExprKind::Binary {
                         op: BinOp::Eq,
@@ -4610,7 +4623,10 @@ impl ProofSearchEngine {
             hypotheses: goal.hypotheses.clone(),
             label: Maybe::Some("if-cond-probe".to_text()),
         };
-        if self.try_smt(&no_solver, &probe_timeout, &cond_probe).is_ok() {
+        if self
+            .try_smt(&no_solver, &probe_timeout, &cond_probe)
+            .is_ok()
+        {
             return self.execute_tactic(then_branch, goal);
         }
         let neg_cond = Expr::new(
@@ -4660,9 +4676,7 @@ impl ProofSearchEngine {
                 Some(bindings)
             }
             PatternKind::Literal(lit_pat) => match &value.kind {
-                ExprKind::Literal(lit_val) if lit_pat.kind == lit_val.kind => {
-                    Some(Vec::new())
-                }
+                ExprKind::Literal(lit_val) if lit_pat.kind == lit_val.kind => Some(Vec::new()),
                 _ => None,
             },
             _ => None,
@@ -4703,7 +4717,8 @@ impl ProofSearchEngine {
         match self.try_smt(&Maybe::None, &Maybe::None, goal) {
             Ok(subgoals) => Ok(subgoals),
             Err(smt_err) => Err(ProofError::TacticFailed(
-                format!("'auto': no structural tactic applies and SMT fallback: {smt_err:?}").into(),
+                format!("'auto': no structural tactic applies and SMT fallback: {smt_err:?}")
+                    .into(),
             )),
         }
     }
@@ -4746,7 +4761,14 @@ impl ProofSearchEngine {
             // structural equality. Type-args are not part of equality
             // reasoning at this level (the type system has already
             // monomorphized whatever is being compared).
-            (Call { func: f1, args: a1, .. }, Call { func: f2, args: a2, .. }) => {
+            (
+                Call {
+                    func: f1, args: a1, ..
+                },
+                Call {
+                    func: f2, args: a2, ..
+                },
+            ) => {
                 Self::expr_eq(f1, f2)
                     && a1.len() == a2.len()
                     && a1.iter().zip(a2.iter()).all(|(x, y)| Self::expr_eq(x, y))
@@ -4774,19 +4796,40 @@ impl ProofSearchEngine {
             }
 
             // Field access — same base + same field name.
-            (Field { expr: b1, field: f1 }, Field { expr: b2, field: f2 }) => {
-                f1.name == f2.name && Self::expr_eq(b1, b2)
-            }
+            (
+                Field {
+                    expr: b1,
+                    field: f1,
+                },
+                Field {
+                    expr: b2,
+                    field: f2,
+                },
+            ) => f1.name == f2.name && Self::expr_eq(b1, b2),
 
             // Tuple field access (e.g. tuple.0).
-            (TupleIndex { expr: b1, index: i1 }, TupleIndex { expr: b2, index: i2 }) => {
-                i1 == i2 && Self::expr_eq(b1, b2)
-            }
+            (
+                TupleIndex {
+                    expr: b1,
+                    index: i1,
+                },
+                TupleIndex {
+                    expr: b2,
+                    index: i2,
+                },
+            ) => i1 == i2 && Self::expr_eq(b1, b2),
 
             // Indexing.
-            (Index { expr: b1, index: i1 }, Index { expr: b2, index: i2 }) => {
-                Self::expr_eq(b1, b2) && Self::expr_eq(i1, i2)
-            }
+            (
+                Index {
+                    expr: b1,
+                    index: i1,
+                },
+                Index {
+                    expr: b2,
+                    index: i2,
+                },
+            ) => Self::expr_eq(b1, b2) && Self::expr_eq(i1, i2),
 
             // Tuple literals.
             (Tuple(es1), Tuple(es2)) => {
@@ -4796,16 +4839,19 @@ impl ProofSearchEngine {
 
             // Array literals — handle both List and Repeat shapes.
             (Array(a1), Array(a2)) => match (a1, a2) {
-                (
-                    verum_ast::expr::ArrayExpr::List(l1),
-                    verum_ast::expr::ArrayExpr::List(l2),
-                ) => {
+                (verum_ast::expr::ArrayExpr::List(l1), verum_ast::expr::ArrayExpr::List(l2)) => {
                     l1.len() == l2.len()
                         && l1.iter().zip(l2.iter()).all(|(x, y)| Self::expr_eq(x, y))
                 }
                 (
-                    verum_ast::expr::ArrayExpr::Repeat { value: v1, count: c1 },
-                    verum_ast::expr::ArrayExpr::Repeat { value: v2, count: c2 },
+                    verum_ast::expr::ArrayExpr::Repeat {
+                        value: v1,
+                        count: c1,
+                    },
+                    verum_ast::expr::ArrayExpr::Repeat {
+                        value: v2,
+                        count: c2,
+                    },
                 ) => Self::expr_eq(v1, v2) && Self::expr_eq(c1, c2),
                 _ => false,
             },
@@ -4819,14 +4865,27 @@ impl ProofSearchEngine {
             }
 
             // Pipeline: x |> f is sugar for f(x); we compare structurally.
-            (Pipeline { left: l1, right: r1 }, Pipeline { left: l2, right: r2 }) => {
-                Self::expr_eq(l1, l2) && Self::expr_eq(r1, r2)
-            }
+            (
+                Pipeline {
+                    left: l1,
+                    right: r1,
+                },
+                Pipeline {
+                    left: l2,
+                    right: r2,
+                },
+            ) => Self::expr_eq(l1, l2) && Self::expr_eq(r1, r2),
 
             // Null coalesce.
             (
-                NullCoalesce { left: l1, right: r1 },
-                NullCoalesce { left: l2, right: r2 },
+                NullCoalesce {
+                    left: l1,
+                    right: r1,
+                },
+                NullCoalesce {
+                    left: l2,
+                    right: r2,
+                },
             ) => Self::expr_eq(l1, l2) && Self::expr_eq(r1, r2),
 
             // Try operator.
@@ -4860,10 +4919,7 @@ impl ProofSearchEngine {
     /// are not observed because `LiteralKind::PartialEq` already delegates
     /// to the value fields, but we centralise it here for clarity and to
     /// shield from future additions of span-bearing variants).
-    fn literal_kind_eq(
-        k1: &verum_ast::LiteralKind,
-        k2: &verum_ast::LiteralKind,
-    ) -> bool {
+    fn literal_kind_eq(k1: &verum_ast::LiteralKind, k2: &verum_ast::LiteralKind) -> bool {
         k1 == k2
     }
 
@@ -4905,8 +4961,7 @@ impl ProofSearchEngine {
         // correct, so `exists p: Nat. is_prime(p)` can at least
         // translate without the "not boolean" failure.
         for (name, (ps, r)) in &self.callee_signatures {
-            let param_sorts: Vec<String> =
-                ps.iter().map(|s| s.as_str().to_string()).collect();
+            let param_sorts: Vec<String> = ps.iter().map(|s| s.as_str().to_string()).collect();
             translator.register_callee_signature(
                 name.as_str(),
                 param_sorts,
@@ -4918,8 +4973,7 @@ impl ProofSearchEngine {
         // quantifier-bound variables typed as variants get the
         // exhaustiveness constraint automatically applied.
         for (type_name, ctors) in &self.variant_map {
-            let ctor_names: Vec<String> =
-                ctors.iter().map(|c| c.as_str().to_string()).collect();
+            let ctor_names: Vec<String> = ctors.iter().map(|c| c.as_str().to_string()).collect();
             translator.register_variant_type(type_name.as_str(), ctor_names);
         }
 
@@ -5094,12 +5148,10 @@ impl ProofSearchEngine {
                 return Err(ProofError::SmtTimeout);
             }
             match cvc5.check_sat() {
-                Ok(crate::cvc5_backend::SatResult::Unsat) => {
-                    Ok(Maybe::Some(ProofTerm::SmtProof {
-                        solver: "cvc5".into(),
-                        formula: goal.goal.clone(),
-                    }))
-                }
+                Ok(crate::cvc5_backend::SatResult::Unsat) => Ok(Maybe::Some(ProofTerm::SmtProof {
+                    solver: "cvc5".into(),
+                    formula: goal.goal.clone(),
+                })),
                 Ok(crate::cvc5_backend::SatResult::Sat) => Ok(Maybe::None),
                 _ => Err(ProofError::SmtTimeout),
             }
@@ -5181,7 +5233,11 @@ impl ProofSearchEngine {
                         current_goal.goal.span,
                     );
                 }
-                ExprKind::Binary { op: BinOp::Ne, left, right } => {
+                ExprKind::Binary {
+                    op: BinOp::Ne,
+                    left,
+                    right,
+                } => {
                     // `a != b` is sugar for `!(a == b)`. Proof by
                     // contradiction on a `Ne` goal therefore assumes
                     // `a == b` and leaves `False` to derive — exactly
@@ -5559,13 +5615,14 @@ impl ProofSearchEngine {
             }
             ExprKind::Paren(inner) => {
                 if let Maybe::Some(new_inner) = Self::try_rewrite_once(inner, from, to) {
-                    return Maybe::Some(Expr::new(
-                        ExprKind::Paren(Box::new(new_inner)),
-                        expr.span,
-                    ));
+                    return Maybe::Some(Expr::new(ExprKind::Paren(Box::new(new_inner)), expr.span));
                 }
             }
-            ExprKind::Call { func, type_args, args } => {
+            ExprKind::Call {
+                func,
+                type_args,
+                args,
+            } => {
                 let new_func = Self::try_rewrite_once(func, from, to);
                 let mut new_args = List::new();
                 let mut any_changed = new_func.is_some();
@@ -5609,8 +5666,7 @@ impl ProofSearchEngine {
                     }
                 }
                 if any_changed {
-                    let result_receiver =
-                        new_receiver.unwrap_or_else(|| (**receiver).clone());
+                    let result_receiver = new_receiver.unwrap_or_else(|| (**receiver).clone());
                     return Maybe::Some(Expr::new(
                         ExprKind::MethodCall {
                             receiver: Box::new(result_receiver),
@@ -5724,10 +5780,7 @@ impl ProofSearchEngine {
             }
             ExprKind::Try(inner) => {
                 if let Maybe::Some(new_inner) = Self::try_rewrite_once(inner, from, to) {
-                    return Maybe::Some(Expr::new(
-                        ExprKind::Try(Box::new(new_inner)),
-                        expr.span,
-                    ));
+                    return Maybe::Some(Expr::new(ExprKind::Try(Box::new(new_inner)), expr.span));
                 }
             }
             _ => {}
@@ -6002,7 +6055,12 @@ impl ProofSearchEngine {
     ) -> Result<List<ProofGoal>, ProofError> {
         let idx = self.find_hypothesis_index(hypothesis, goal)?;
         let hyp = &goal.hypotheses[idx];
-        let ExprKind::Binary { op: BinOp::Eq, left, right } = &hyp.kind else {
+        let ExprKind::Binary {
+            op: BinOp::Eq,
+            left,
+            right,
+        } = &hyp.kind
+        else {
             return Err(ProofError::TacticFailed(
                 format!(
                     "rewrite: hypothesis '{}' is not an equality (got {:?})",
@@ -6013,7 +6071,11 @@ impl ProofSearchEngine {
             ));
         };
 
-        let (from, to) = if reverse { (right, left) } else { (left, right) };
+        let (from, to) = if reverse {
+            (right, left)
+        } else {
+            (left, right)
+        };
 
         let new_goal_expr = match Self::try_rewrite_once(&goal.goal, from, to) {
             Maybe::Some(expr) => expr,
@@ -6465,10 +6527,7 @@ impl ProofSearchEngine {
             );
         }
         let ident = verum_ast::ty::Ident::new(witness_text, span);
-        Expr::new(
-            ExprKind::Path(verum_ast::ty::Path::single(ident)),
-            span,
-        )
+        Expr::new(ExprKind::Path(verum_ast::ty::Path::single(ident)), span)
     }
 
     fn try_exists(
@@ -6502,7 +6561,9 @@ impl ProofSearchEngine {
                 // Extract the bound name from the pattern; only
                 // single-identifier bindings get real substitution,
                 // which is the overwhelmingly common case.
-                let bound_name = if let verum_ast::pattern::PatternKind::Ident { name, .. } = &first.pattern.kind {
+                let bound_name = if let verum_ast::pattern::PatternKind::Ident { name, .. } =
+                    &first.pattern.kind
+                {
                     Some(name.name.clone())
                 } else {
                     None
@@ -6800,7 +6861,10 @@ impl ProofSearchEngine {
             return None;
         };
         let ctor_name = ident.as_str();
-        self.variant_map.values().find(|&ctors| ctors.iter().any(|c| c.as_str() == ctor_name)).map(|v| v as _)
+        self.variant_map
+            .values()
+            .find(|&ctors| ctors.iter().any(|c| c.as_str() == ctor_name))
+            .map(|v| v as _)
     }
 
     /// Try exact proof term
@@ -6949,7 +7013,7 @@ impl ProofSearchEngine {
         goal: &ProofGoal,
     ) -> Result<List<ProofGoal>, ProofError> {
         use crate::cubical_tactic::{
-            try_cubical, try_category_simp, try_category_law, try_descent_check,
+            try_category_law, try_category_simp, try_cubical, try_descent_check,
         };
 
         match name.as_str() {
@@ -7204,7 +7268,11 @@ pub fn substitute_ident_with_text(
             ))),
             expr.span,
         ),
-        ExprKind::Call { func, type_args, args } => {
+        ExprKind::Call {
+            func,
+            type_args,
+            args,
+        } => {
             let new_args: List<Expr> = args
                 .iter()
                 .map(|a| substitute_ident_with_text(a, name, witness_text, span))
@@ -7218,7 +7286,12 @@ pub fn substitute_ident_with_text(
                 expr.span,
             )
         }
-        ExprKind::MethodCall { receiver, method, type_args, args } => {
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            type_args,
+            args,
+        } => {
             let new_args: List<Expr> = args
                 .iter()
                 .map(|a| substitute_ident_with_text(a, name, witness_text, span))
@@ -7226,7 +7299,10 @@ pub fn substitute_ident_with_text(
             Expr::new(
                 ExprKind::MethodCall {
                     receiver: Heap::new(substitute_ident_with_text(
-                        receiver, name, witness_text, span,
+                        receiver,
+                        name,
+                        witness_text,
+                        span,
                     )),
                     method: method.clone(),
                     type_args: type_args.clone(),
@@ -7359,7 +7435,10 @@ fn check_linear_arithmetic(expr: &Expr) -> bool {
             ) && check_linear_arithmetic(left)
                 && check_linear_arithmetic(right)
         }
-        ExprKind::Unary { op: UnOp::Neg, expr } => check_linear_arithmetic(expr),
+        ExprKind::Unary {
+            op: UnOp::Neg,
+            expr,
+        } => check_linear_arithmetic(expr),
         ExprKind::Literal(_) => true,
         ExprKind::Path(_) => true, // variable
         ExprKind::Paren(inner) => check_linear_arithmetic(inner),
@@ -7398,7 +7477,10 @@ fn check_propositional(expr: &Expr) -> bool {
                 && check_propositional(left)
                 && check_propositional(right)
         }
-        ExprKind::Unary { op: UnOp::Not, expr } => check_propositional(expr),
+        ExprKind::Unary {
+            op: UnOp::Not,
+            expr,
+        } => check_propositional(expr),
         ExprKind::Literal(_) | ExprKind::Path(_) => true,
         ExprKind::Paren(inner) => check_propositional(inner),
         _ => false,
@@ -7465,20 +7547,23 @@ fn check_descent_goal(expr: &Expr) -> bool {
     match &expr.kind {
         ExprKind::Call { func, .. } => {
             if let ExprKind::Path(p) = &func.kind {
-                p.segments.last().map(|s| {
-                    if let verum_ast::ty::PathSegment::Name(ident) = s {
-                        matches!(
-                            ident.name.as_str(),
-                            "descent_condition"
-                                | "compatible_sections"
-                                | "sheaf_condition"
-                                | "check_descent"
-                                | "gluing_condition"
-                        )
-                    } else {
-                        false
-                    }
-                }).unwrap_or(false)
+                p.segments
+                    .last()
+                    .map(|s| {
+                        if let verum_ast::ty::PathSegment::Name(ident) = s {
+                            matches!(
+                                ident.name.as_str(),
+                                "descent_condition"
+                                    | "compatible_sections"
+                                    | "sheaf_condition"
+                                    | "check_descent"
+                                    | "gluing_condition"
+                            )
+                        } else {
+                            false
+                        }
+                    })
+                    .unwrap_or(false)
             } else {
                 false
             }
@@ -7494,9 +7579,7 @@ fn check_descent_goal(expr: &Expr) -> bool {
 /// Compute the nesting depth of an expression tree.
 fn compute_depth(expr: &Expr) -> usize {
     match &expr.kind {
-        ExprKind::Binary { left, right, .. } => {
-            1 + compute_depth(left).max(compute_depth(right))
-        }
+        ExprKind::Binary { left, right, .. } => 1 + compute_depth(left).max(compute_depth(right)),
         ExprKind::Unary { expr, .. } => 1 + compute_depth(expr),
         ExprKind::Call { func, args, .. } => {
             let max_arg = args.iter().map(compute_depth).max().unwrap_or(0);

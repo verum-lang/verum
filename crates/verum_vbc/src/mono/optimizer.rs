@@ -223,7 +223,9 @@ impl SpecializationOptimizer {
                         }
 
                         // Check if both operands are constants
-                        if let (Some(&val_a), Some(&val_b)) = (reg_constants.get(&a), reg_constants.get(&b)) {
+                        if let (Some(&val_a), Some(&val_b)) =
+                            (reg_constants.get(&a), reg_constants.get(&b))
+                        {
                             let folded = match opcode {
                                 Opcode::AddI => Some(val_a.wrapping_add(val_b)),
                                 Opcode::SubI => Some(val_a.wrapping_sub(val_b)),
@@ -271,9 +273,19 @@ impl SpecializationOptimizer {
                 }
 
                 // Control flow invalidates all constants (conservative)
-                Opcode::Jmp | Opcode::JmpIf | Opcode::JmpNot | Opcode::JmpEq | Opcode::JmpNe
-                | Opcode::JmpLt | Opcode::JmpLe | Opcode::JmpGt | Opcode::JmpGe
-                | Opcode::Call | Opcode::CallG | Opcode::CallV | Opcode::CallC => {
+                Opcode::Jmp
+                | Opcode::JmpIf
+                | Opcode::JmpNot
+                | Opcode::JmpEq
+                | Opcode::JmpNe
+                | Opcode::JmpLt
+                | Opcode::JmpLe
+                | Opcode::JmpGt
+                | Opcode::JmpGe
+                | Opcode::Call
+                | Opcode::CallG
+                | Opcode::CallV
+                | Opcode::CallC => {
                     reg_constants.clear();
                     result.push(opcode_byte);
                     pc += 1;

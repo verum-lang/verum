@@ -109,9 +109,10 @@ fn example_bounds_verification() {
         SatResult::Sat => {
             println!("✓ Valid indices exist in range [0, 10)");
             if let Some(model) = solver.get_model()
-                && let Some(val) = model.eval(&idx, true) {
-                    println!("  Example valid index: {}", val);
-                }
+                && let Some(val) = model.eval(&idx, true)
+            {
+                println!("  Example valid index: {}", val);
+            }
         }
         SatResult::Unsat => println!("✗ No valid indices (impossible)"),
         SatResult::Unknown => println!("? Solver returned unknown"),
@@ -132,9 +133,10 @@ fn example_bounds_verification() {
         SatResult::Sat => {
             println!("✓ Out-of-bounds indices exist (correctly detected)");
             if let Some(model) = solver2.get_model()
-                && let Some(val) = model.eval(&bad_idx, true) {
-                    println!("  Example out-of-bounds index: {}", val);
-                }
+                && let Some(val) = model.eval(&bad_idx, true)
+            {
+                println!("  Example out-of-bounds index: {}", val);
+            }
         }
         _ => println!("? Unexpected result"),
     }

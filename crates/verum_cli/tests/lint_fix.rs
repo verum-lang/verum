@@ -21,7 +21,11 @@ fn binary() -> &'static str {
 
 fn make_fixture(name: &str, file_name: &str, contents: &str) -> (PathBuf, PathBuf) {
     let mut dir = std::env::temp_dir();
-    dir.push(format!("verum_lint_fix_test_{}_{}", name, std::process::id()));
+    dir.push(format!(
+        "verum_lint_fix_test_{}_{}",
+        name,
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("src")).expect("create src");
     std::fs::write(
@@ -54,9 +58,7 @@ fn lint_fix(dir: &PathBuf) {
 fn rule_count(json_out: &str, rule: &str) -> usize {
     json_out
         .lines()
-        .filter(|line| {
-            line.contains(&format!("\"rule\":\"{rule}\""))
-        })
+        .filter(|line| line.contains(&format!("\"rule\":\"{rule}\"")))
         .count()
 }
 
@@ -181,11 +183,7 @@ fn fix_redundant_refinement_strips_trivial_predicate() {
 
 #[test]
 fn structured_edits_match_disk_fix_for_deprecated_syntax_impl() {
-    let (dir, file) = make_fixture(
-        "edits_match_impl",
-        "main.vr",
-        "impl Foo { fn bar() {} }\n",
-    );
+    let (dir, file) = make_fixture("edits_match_impl", "main.vr", "impl Foo { fn bar() {} }\n");
     let pre = std::fs::read_to_string(&file).expect("read pre");
     let json = lint_json(&dir);
     let edits_present = json.contains("\"fix\":{\"edits\"");

@@ -4,8 +4,8 @@
 use crate::error::{CliError, Result};
 use std::path::PathBuf;
 use verum_verification::cert_replay::{
-    cross_check, engine_for, CertFormat, CertReplayEngine, KernelOnlyReplayEngine,
-    MockReplayEngine, ReplayBackend, ReplayVerdict, SmtCertificate,
+    CertFormat, CertReplayEngine, KernelOnlyReplayEngine, MockReplayEngine, ReplayBackend,
+    ReplayVerdict, SmtCertificate, cross_check, engine_for,
 };
 
 fn parse_format(s: &str) -> Result<CertFormat> {
@@ -38,11 +38,7 @@ fn validate_output(s: &str) -> Result<()> {
 
 fn load_cert_file(path: &PathBuf) -> Result<SmtCertificate> {
     let raw = std::fs::read_to_string(path).map_err(|e| {
-        CliError::VerificationFailed(format!(
-            "reading cert file {}: {}",
-            path.display(),
-            e
-        ))
+        CliError::VerificationFailed(format!("reading cert file {}: {}", path.display(), e))
     })?;
     serde_json::from_str::<SmtCertificate>(&raw).map_err(|e| {
         CliError::InvalidArgument(format!(
@@ -71,9 +67,7 @@ fn build_inline_cert(
         ));
     }
     if body.is_empty() {
-        return Err(CliError::InvalidArgument(
-            "--body must be non-empty".into(),
-        ));
+        return Err(CliError::InvalidArgument("--body must be non-empty".into()));
     }
     Ok(SmtCertificate::new(fmt, theory, conclusion, body))
 }
@@ -285,9 +279,7 @@ pub fn run_cross_check(
     let engines: Vec<Box<dyn CertReplayEngine>> = parsed_backends
         .iter()
         .filter(|b| **b != ReplayBackend::KernelOnly)
-        .map(|b| {
-            Box::new(MockReplayEngine::new(*b)) as Box<dyn CertReplayEngine>
-        })
+        .map(|b| Box::new(MockReplayEngine::new(*b)) as Box<dyn CertReplayEngine>)
         .collect();
 
     let verdict = cross_check(&cert, &engines);
@@ -417,8 +409,10 @@ pub fn run_formats(output: &str) -> Result<()> {
             out.push_str("  \"schema_version\": 1,\n");
             out.push_str(&format!("  \"count\": {},\n", formats.len()));
             out.push_str("  \"formats\": [");
-            let parts: Vec<String> =
-                formats.iter().map(|f| format!("\"{}\"", f.name())).collect();
+            let parts: Vec<String> = formats
+                .iter()
+                .map(|f| format!("\"{}\"", f.name()))
+                .collect();
             out.push_str(&parts.join(", "));
             out.push_str("]\n}");
             println!("{}", out);
@@ -509,8 +503,17 @@ mod tests {
     #[test]
     fn parse_format_canonical_and_aliases() {
         for s in [
-            "verum_canonical", "canonical", "z3_proof", "z3", "cvc5_alethe", "alethe",
-            "lfsc_pattern", "lfsc", "open_smt", "opensmt", "mathsat",
+            "verum_canonical",
+            "canonical",
+            "z3_proof",
+            "z3",
+            "cvc5_alethe",
+            "alethe",
+            "lfsc_pattern",
+            "lfsc",
+            "open_smt",
+            "opensmt",
+            "mathsat",
         ] {
             assert!(parse_format(s).is_ok(), "{}", s);
         }
@@ -519,7 +522,15 @@ mod tests {
 
     #[test]
     fn parse_backend_canonical() {
-        for s in ["kernel_only", "kernel", "z3", "cvc5", "verit", "open_smt", "mathsat"] {
+        for s in [
+            "kernel_only",
+            "kernel",
+            "z3",
+            "cvc5",
+            "verit",
+            "open_smt",
+            "mathsat",
+        ] {
             assert!(parse_backend(s).is_ok(), "{}", s);
         }
         assert!(parse_backend("garbage").is_err());

@@ -259,7 +259,10 @@ fn test_predicate_decl_text_validation() {
                 span,
             )),
             method: test_ident("contains"),
-            args: List::from(vec![Expr::literal(Literal::string("@".to_string().into(), span))]),
+            args: List::from(vec![Expr::literal(Literal::string(
+                "@".to_string().into(),
+                span,
+            ))]),
             type_args: List::new(),
         },
         span,

@@ -144,9 +144,13 @@ pub(crate) extern "C" fn allocate_data_section_adapter(
 ) -> *mut u8 {
     let adapter = unsafe { &mut *(opaque as *mut MemoryManagerAdapter) };
     let sname = unsafe { c_str_to_str(section_name) };
-    adapter
-        .memory_manager
-        .allocate_data_section(size, alignment, section_id, sname, is_read_only != 0)
+    adapter.memory_manager.allocate_data_section(
+        size,
+        alignment,
+        section_id,
+        sname,
+        is_read_only != 0,
+    )
 }
 
 /// Adapter for `finalize_memory`.
@@ -166,7 +170,7 @@ pub(crate) extern "C" fn finalize_memory_adapter(
                 *err_msg_out = cstring.into_raw();
             }
             1
-        },
+        }
     }
 }
 
@@ -198,6 +202,8 @@ unsafe fn c_str_to_str<'a>(ptr: *const libc::c_char) -> &'a str {
     if ptr.is_null() {
         ""
     } else {
-        unsafe { std::ffi::CStr::from_ptr(ptr) }.to_str().unwrap_or("")
+        unsafe { std::ffi::CStr::from_ptr(ptr) }
+            .to_str()
+            .unwrap_or("")
     }
 }

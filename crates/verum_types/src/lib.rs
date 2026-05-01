@@ -151,11 +151,11 @@
 #![allow(dead_code)]
 
 pub mod attr; // Attribute registry and validation (Attribute registry: validation rules for @derive, @verify, @cfg, @repr and other compile-time attributes — )
-pub mod core_metadata; // Stdlib type metadata definitions (Stdlib type metadata: definitions extracted from core .vr files during compilation pipeline — )
-pub mod core_pipeline; // Dependency-ordered stdlib compilation (Stdlib bootstrap: dependency-ordered compilation of core .vr modules, type metadata extracted from parsed stdlib files — )
 pub mod capability; // Capability attenuation for contexts (Context system core: "context Name { fn method(...) }" declarations, "using [Ctx1, Ctx2]" on functions, "provide Ctx = impl" for injection — 0)
 pub mod const_eval;
 pub mod context;
+pub mod core_metadata; // Stdlib type metadata definitions (Stdlib type metadata: definitions extracted from core .vr files during compilation pipeline — )
+pub mod core_pipeline; // Dependency-ordered stdlib compilation (Stdlib bootstrap: dependency-ordered compilation of core .vr modules, type metadata extracted from parsed stdlib files — )
 // Strict-positivity check for user-declared inductive types
 // (AST-level, runs before kernel elaboration; mirrors verum_kernel's
 // CoreTerm-level walker so any path that bypasses one still hits the
@@ -166,10 +166,10 @@ pub mod positivity;
 // External / Project) so glob-vs-glob conflicts resolve via a total
 // ordering rather than source-text position. Project always beats
 // stdlib; explicit imports win over both.
-pub mod import_origin;
 pub mod context_check;
 pub mod context_resolution; // Context group resolution for type checking
-pub mod contract_integration; // Phase 3a → Phase 4 contract integration
+pub mod contract_integration;
+pub mod import_origin; // Phase 3a → Phase 4 contract integration
 // =========================================================================
 // TYPE-CHECKER INFRASTRUCTURE
 // These modules are actively used by the type-checker pipeline
@@ -178,9 +178,9 @@ pub mod contract_integration; // Phase 3a → Phase 4 contract integration
 pub mod cubical; // Cubical normalizer: WHNF for path types
 pub mod cubical_bridge; // EqTerm ↔ CubicalTerm translator (used by unifier)
 pub mod expr_to_eqterm; // AST Expr → EqTerm lowering (used by HIT metadata)
+pub mod instance_search; // Protocol instance search + coherence (used by DependentVerifier)
 pub mod qtt_usage; // QTT usage counting (used by check_function_qtt)
 pub mod qtt_walker; // QTT AST walker (used by check_function_qtt)
-pub mod instance_search; // Protocol instance search + coherence (used by DependentVerifier)
 pub mod universe_solver; // Universe constraint solving (used by Phase 2.5)
 
 // =========================================================================
@@ -197,25 +197,13 @@ pub mod universe_solver; // Universe constraint solving (used by Phase 2.5)
 // graphs. The separation is documented; physical extraction is
 // a safe future cleanup.
 // =========================================================================
-pub mod session_types; // Session-typed channel protocols
-pub mod modal_types; // Security labels + information flow
-pub mod tactic_meta; // Tactic metaprogramming: quote/splice/reflect
-pub mod two_level; // Two-Level Type Theory: fibrant vs strict
-pub mod coinductive_analysis; // Productivity + bisimulation
-pub mod sdg; // Synthetic differential geometry
-pub mod observational_equality; // OTT: type-directed equality
-pub mod poly_kinds; // Polymorphic kinds: kind variables + unification
-pub mod contracts_old; // Dependent contracts with old()
 pub mod bitvec_decision; // Bit-vector decision procedure
-pub mod linear_logic; // Full linear logic: ⊗ ⅋ & ⊕ ! ?
-pub mod region_calculus; // Tofte-Talpin region calculus
-pub mod pi_calculus; // π-calculus process algebra
-pub mod kripke; // Kripke semantics: modal worlds
-pub mod proof_obligations; // T1-R phase 2: model-theoretic discharge of protocol axioms
 pub mod category_algebra; // Categorical morphism algebra
-pub mod continuation_calculus; // Delimited continuations
 pub mod cbpv; // Call-by-push-value
+pub mod coinductive_analysis; // Productivity + bisimulation
+pub mod continuation_calculus; // Delimited continuations
 pub mod contracts; // Precondition and postcondition validation
+pub mod contracts_old; // Dependent contracts with old()
 pub mod control_flow; // Flow-sensitive analysis for @must_handle
 pub mod dependent_helpers; // Helper methods for dependent type checking
 pub mod dependent_integration; // Integration with verum_smt dependent types (Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking — )
@@ -228,15 +216,27 @@ pub mod infer;
 pub(crate) mod infer_path_resolution; // Path resolution methods extracted from infer.rs
 pub(crate) mod infer_patterns; // Pattern binding methods extracted from infer.rs
 pub mod integer_hierarchy;
+pub mod kripke; // Kripke semantics: modal worlds
+pub mod linear_logic; // Full linear logic: ⊗ ⅋ & ⊕ ! ?
+pub mod modal_types; // Security labels + information flow
 pub mod module_context; // Module-level type inference context
-pub mod proof_checker; // Proof type checker (Formal proof system (future v2.0+): machine-checkable proofs with tactics (simp, ring, omega, blast, induction), theorem/lemma/corollary statements — )
+pub mod observational_equality; // OTT: type-directed equality
+pub mod pi_calculus; // π-calculus process algebra
+pub mod poly_kinds; // Polymorphic kinds: kind variables + unification
 pub mod projection; // Associated type projection resolution (Associated type bounds: constraining associated types in where clauses (where T.Item: Display)
+pub mod proof_checker; // Proof type checker (Formal proof system (future v2.0+): machine-checkable proofs with tactics (simp, ring, omega, blast, induction), theorem/lemma/corollary statements — )
+pub mod proof_obligations; // T1-R phase 2: model-theoretic discharge of protocol axioms
 pub mod protocol;
 pub mod references; // Deref protocol implementations for reference types
 pub mod refinement;
 pub mod refinement_diagnostics;
 pub mod refinement_evidence; // Refinement types enhancement: flow-sensitive refinement propagation, evidence tracking for verified predicates — Flow-sensitive refinement propagation
+pub mod region_calculus; // Tofte-Talpin region calculus
+pub mod sdg; // Synthetic differential geometry
 pub mod send_sync;
+pub mod session_types; // Session-typed channel protocols
+pub mod tactic_meta; // Tactic metaprogramming: quote/splice/reflect
+pub mod two_level; // Two-Level Type Theory: fibrant vs strict
 // smt_backend: moved to `verum_smt::refinement_backend` (cycle break).
 pub mod source_files; // Source file registry for span→line:col conversion
 pub mod subtype;
@@ -254,9 +254,9 @@ pub mod annotations; // Spec 1.13-1.14: @must_handle, @cold
 pub mod computational_properties; // Computational properties: tracking Pure, IO, Async, Fallible, Mutates as compile-time properties (Pure/IO/Async/etc)
 pub mod dependency_injection; // Spec 1.11.7: DI type checking
 pub mod di;
+pub mod literal_conversion; // Spec 1.4: Protocol-based literals
 pub mod meta_context; // Meta context validation for meta fn (Meta contexts: meta functions have restricted context access (only compile-time-safe contexts) — )
 pub mod stage_checker; // Staged metaprogramming validation (N-level meta: meta(N) fn)
-pub mod literal_conversion; // Spec 1.4: Protocol-based literals
 pub mod where_clause; // Where clause disambiguation: separating value refinements from type constraints // Context system (dependency injection): provide/using for runtime DI, ~5-30ns overhead
 
 // Advanced Protocol Features (Advanced protocols (future v2.0+): GATs, higher-rank bounds, specialization with lattice ordering, coherence rules — )
@@ -272,9 +272,9 @@ pub mod tensor_protocol; // FromTensorLiteral protocol for compile-time tensor c
 pub mod tensor_shape_checker; // Tensor shape validation and broadcasting
 
 // Stdlib-agnostic type system architecture
-pub mod operator_protocols; // Operator -> Protocol mapping for stdlib-agnostic operators
-pub mod method_resolution; // Protocol-based method resolution
 pub mod core_integration; // Bridge between stdlib-agnostic architecture and ProtocolChecker
+pub mod method_resolution; // Protocol-based method resolution
+pub mod operator_protocols; // Operator -> Protocol mapping for stdlib-agnostic operators
 pub mod type_exporter; // Type metadata serialization for separate compilation
 pub mod unified_type_error; // Unified type error wrapper for Phase 2 error consolidation
 
@@ -287,7 +287,11 @@ pub use capability::{
     TypeCapabilitySet,
 };
 pub use context::{
+    // Definite assignment analysis (L0-critical/memory-safety/uninitialized)
+    InitState,
+    InitTracker,
     ModuleId,
+    PartialInit,
     TypeContext,
     TypeEnv,
     TypeScheme,
@@ -296,10 +300,6 @@ pub use context::{
     UniverseContext,
     UniverseSubstitution,
     UniverseVar,
-    // Definite assignment analysis (L0-critical/memory-safety/uninitialized)
-    InitState,
-    InitTracker,
-    PartialInit,
 };
 pub use contracts::{
     ContractStats, PostconditionError, PostconditionValidator, PreconditionError,
@@ -337,8 +337,8 @@ pub use unify::Unifier;
 
 // Advanced features
 pub use const_eval::{ConstEvalError, ConstEvaluator};
-pub use verum_common::ConstValue;
 pub use dependent_match::{ConstructorRefinement, DependentPatternChecker, Motive};
+pub use verum_common::ConstValue;
 // Note: ContextChecker types from context_check with unique names to avoid conflict with di module
 pub use advanced_protocol_errors::{
     CandidateInfo, GATArityError, GATWhereClauseError, GenerationMismatchError, ImplementId,
@@ -369,35 +369,37 @@ pub use advanced_protocols::{
     // Variance is exported from variance module
 };
 pub use context_check::{
-    ContextChecker,
-    ContextEnv as TwoLevelContextEnv, // Two-Level context environment (check-time)
-    ContextRequirement as TwoLevelContextRequirement, // Two-Level context requirements (check-time)
-    ContextSet,
-    // Advanced context patterns - negative context verification: checking !Ctx constraints across transitive call chains
-    NegativeContextViolation,
-    ContextAccess,
-    collect_context_accesses,
-    verify_direct_negative_contexts,
-    build_negative_context_map,
-    check_function_contexts,
+    AliasConflict,
+    // Advanced context patterns - module-level alias validation: verifying @using module annotations don't conflict with function-level contexts
+    AliasUsage,
+    CallChainStep,
     // Advanced context patterns - call graph analysis: ensuring context requirements are satisfied transitively through all callees
     CallGraph,
     CallGraphNode,
     CallSiteInfo,
-    CallChainStep,
-    TransitiveViolationInfo,
+    ContextAccess,
+    ContextChecker,
+    ContextEnv as TwoLevelContextEnv, // Two-Level context environment (check-time)
     ContextPath,
+    ContextRequirement as TwoLevelContextRequirement, // Two-Level context requirements (check-time)
+    ContextSet,
     FunctionContextInfo,
-    // Advanced context patterns - module-level alias validation: verifying @using module annotations don't conflict with function-level contexts
-    AliasUsage,
-    AliasConflict,
     ModuleAliasRegistry,
+    // Advanced context patterns - negative context verification: checking !Ctx constraints across transitive call chains
+    NegativeContextViolation,
+    TransitiveViolationInfo,
+    build_negative_context_map,
+    check_function_contexts,
+    collect_context_accesses,
     validate_module_aliases,
+    verify_direct_negative_contexts,
 };
 pub use integer_hierarchy::{
     CheckedOps, IntegerHierarchy, IntegerKind, OverflowMode, SaturatingOps, WrappingOps,
 };
 pub use kind_inference::{
+    // HKT instantiation: applying type constructors to type arguments (e.g., List applied to Int gives List<Int>)
+    HKTInstantiationResult,
     // Kind System
     Kind,
     Kind as KindType, // Alias for backward compatibility
@@ -407,13 +409,10 @@ pub use kind_inference::{
     // Kind Inference
     KindInferer,
     KindSubstitution,
-    // HKT instantiation: applying type constructors to type arguments (e.g., List applied to Int gives List<Int>)
-    HKTInstantiationResult,
 };
-pub use variance::Variance;
 pub use projection::{
-    check_associated_type_bound, parse_projection, DeferredProjection, Projection,
-    ProjectionError, ProjectionResolver, ProjectionResult,
+    DeferredProjection, Projection, ProjectionError, ProjectionResolver, ProjectionResult,
+    check_associated_type_bound, parse_projection,
 };
 pub use protocol::{
     AssociatedConst, AssociatedType, MethodResolution, MethodSource, Protocol, ProtocolBound,
@@ -432,6 +431,7 @@ pub use refinement_diagnostics::{
 pub use send_sync::{
     SendSyncDerivation, register_send_sync_protocols, register_standard_send_sync_impls,
 };
+pub use variance::Variance;
 // smt_backend::{BackendStats, Z3Backend, check_subsumption_smt} moved to
 // verum_smt::refinement_backend::{BackendStats, RefinementZ3Backend, check_subsumption_smt}.
 // Callers that want the full concrete SMT bridge should depend on verum_smt.
@@ -448,8 +448,7 @@ pub use control_flow::{
 pub use where_clause::{DisambiguatedWhereClause, WhereClauseContext, WhereClauseKind};
 // Note: DI module DependencyGraph renamed to avoid conflict with module_context::DependencyGraph
 pub use computational_properties::{
-    ComputationalProperty, PropertyInferenceContext, PropertySet,
-    lift_ffi_function_to_properties,
+    ComputationalProperty, PropertyInferenceContext, PropertySet, lift_ffi_function_to_properties,
 };
 pub use dependency_injection::{
     DITypeChecker,
@@ -468,8 +467,8 @@ pub use specialization::{OverlapDetector, SpecializationValidationError, Special
 // Specialization Selection - Higher-kinded type (HKT) inference and specialization selection: kind inference for type constructors (Type -> Type), automatic selection of most specific specialization
 // Note: ImplementId is exported from advanced_protocol_errors module
 pub use specialization_selection::{
-    CoherenceChecker, CoherenceViolation, NegativeBoundResult, SelectionStats,
-    SpecializationError, SpecializationSelector,
+    CoherenceChecker, CoherenceViolation, NegativeBoundResult, SelectionStats, SpecializationError,
+    SpecializationSelector,
 };
 
 // Context System (Dependency Injection) - Context system: capability-based dependency injection with "context" declarations, "using" requirements, "provide" injection, ~5-30ns runtime overhead via task-local storage
@@ -503,13 +502,12 @@ pub use tensor_shape_checker::{TensorShapeChecker, TensorShapeError};
 // SIMD Type Validation - SIMD type validation: verifying SIMD vector types match hardware capabilities and element type constraints
 pub use simd::{
     MultiversionInfo, SimdCheckStats, SimdElementType, SimdErrorKind, SimdMaskInfo,
-    SimdTargetFeature, SimdTypeChecker, SimdTypeError, SimdVecInfo, SimdWidth, TargetArch as SimdTargetArch,
+    SimdTargetFeature, SimdTypeChecker, SimdTypeError, SimdVecInfo, SimdWidth,
+    TargetArch as SimdTargetArch,
 };
 
 // Staged Metaprogramming - N-level meta (meta(N) fn)
-pub use stage_checker::{
-    FunctionStageInfo, StageChecker, StageConfig, StageError, StageWarning,
-};
+pub use stage_checker::{FunctionStageInfo, StageChecker, StageConfig, StageError, StageWarning};
 
 // Dependent Type Integration - Dependent types (future v2.0+): Pi types, Sigma types, equality types, universe hierarchy, dependent pattern matching, termination checking
 pub use dependent_helpers::{DependentTypeCheckerExt, enable_dependent_types, has_dependent_types};
@@ -525,8 +523,8 @@ pub use termination::{TerminationChecker, TerminationError};
 pub use unified_type_error::UnifiedTypeError;
 
 use thiserror::Error;
-use verum_diagnostics::{Diagnostic, DiagnosticBuilder};
 use verum_common::{List, Text};
+use verum_diagnostics::{Diagnostic, DiagnosticBuilder};
 
 /// Type checking errors.
 /// Error codes follow Verum specification:
@@ -565,7 +563,9 @@ pub enum TypeError {
         span: verum_ast::span::Span,
     },
 
-    #[error("Type mismatch: if-expression branches have incompatible types: then has '{then_ty}', else has '{else_ty}'")]
+    #[error(
+        "Type mismatch: if-expression branches have incompatible types: then has '{then_ty}', else has '{else_ty}'"
+    )]
     BranchMismatch {
         then_ty: Text,
         else_ty: Text,
@@ -746,7 +746,9 @@ pub enum TypeError {
         span: verum_ast::span::Span,
     },
 
-    #[error("transitive negative context violation: calling `{callee}` uses excluded context `{excluded_context}`")]
+    #[error(
+        "transitive negative context violation: calling `{callee}` uses excluded context `{excluded_context}`"
+    )]
     TransitiveNegativeContextViolation {
         excluded_context: Text,
         callee: Text,
@@ -766,7 +768,9 @@ pub enum TypeError {
     ///  Database.query(...); // E3050: Direct violation
     /// }
     /// ```
-    #[error("E3050: direct negative context violation: `{context}` is accessed but excluded via `!{context}`")]
+    #[error(
+        "E3050: direct negative context violation: `{context}` is accessed but excluded via `!{context}`"
+    )]
     DirectNegativeContextViolation {
         /// The excluded context that was directly accessed
         context: Text,
@@ -837,7 +841,9 @@ pub enum TypeError {
     ///  db.delete("DELETE FROM users"); // ERROR - delete requires Write
     /// }
     /// ```
-    #[error("method `{method}` on `{type_name}` requires `{required_capability}` capability but only [{available_capabilities:?}] are available")]
+    #[error(
+        "method `{method}` on `{type_name}` requires `{required_capability}` capability but only [{available_capabilities:?}] are available"
+    )]
     CapabilityViolation {
         /// Method name that was called
         method: Text,
@@ -896,7 +902,10 @@ pub enum TypeError {
     TryOperatorOutsideFunction { span: verum_ast::span::Span },
 
     #[error("cannot use '?' on non-Result/Maybe type")]
-    TryOnNonResult { ty: Type, span: verum_ast::span::Span },
+    TryOnNonResult {
+        ty: Type,
+        span: verum_ast::span::Span,
+    },
 
     #[error("'?' operator error type mismatch")]
     TryOperatorMismatch {
@@ -1008,7 +1017,6 @@ pub enum TypeError {
     },
 
     // ========== Advanced type syntax errors: malformed HKTs, invalid associated type projections, existential type misuse ==========
-
     /// Existential type escapes its scope
     ///
 
@@ -1113,7 +1121,6 @@ pub enum TypeError {
 
     // ========== Definite Assignment Analysis Errors (E201) ==========
     // Spec: L0-critical/memory-safety/uninitialized - Compile-time detection of partial initialization
-
     /// Use of completely uninitialized variable
     ///
 
@@ -1238,7 +1245,6 @@ pub enum TypeError {
 
     // Reference Aliasing Errors
     // Reference safety invariants: managed refs validated at dereference, checked refs proven safe at compile time, unsafe refs unchecked — Borrow Rules
-
     /// Borrow conflict: attempting to create conflicting borrows
     ///
 
@@ -1367,7 +1373,6 @@ pub enum TypeError {
     // Stack Safety Errors (E320-E329)
     // Spec: L0-critical/memory-safety/buffer_overflow/no_stack_overflow
     // =====================================================================
-
     /// Stack allocation exceeds safe limit (E320)
     ///
 
@@ -1418,7 +1423,6 @@ pub enum TypeError {
     // Import Resolution Errors (E401-E409)
     // Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — Import Resolution
     // =====================================================================
-
     /// Imported item not found in module (E401)
     ///
 
@@ -1535,7 +1539,9 @@ pub enum TypeError {
     ///  TypeInfo.fields_of::<T>()
     /// }
     /// ```
-    #[error("E502: meta function `{func_name}` uses runtime context(s) {invalid_contexts} which is/are not available at compile-time")]
+    #[error(
+        "E502: meta function `{func_name}` uses runtime context(s) {invalid_contexts} which is/are not available at compile-time"
+    )]
     InvalidMetaContext {
         /// Name of the meta function
         func_name: Text,
@@ -1603,7 +1609,6 @@ pub enum TypeError {
     // =========================================================================
     // Coinductive / Productivity Errors (E505)
     // =========================================================================
-
     /// Non-productive corecursive function (E505).
     ///
 
@@ -1630,7 +1635,9 @@ pub enum TypeError {
     ///  Stream.cons(1, ones())
     /// }
     /// ```
-    #[error("E505: cofix function `{func_name}` is non-productive: unguarded recursive calls: {unguarded_calls}")]
+    #[error(
+        "E505: cofix function `{func_name}` is non-productive: unguarded recursive calls: {unguarded_calls}"
+    )]
     NonProductiveCorecursion {
         /// Name of the corecursive function
         func_name: Text,
@@ -1644,7 +1651,6 @@ pub enum TypeError {
     // Quote Hygiene Errors (M400-M409)
     // Quote hygiene: macro-generated code uses hygienic naming to prevent variable capture and scope pollution — Quote Hygiene
     // =========================================================================
-
     /// Unbound splice variable (M400)
     ///
 
@@ -1881,7 +1887,6 @@ pub enum TypeError {
 
     // Inline assembly errors
     // Low-level type operations: raw pointer casting, transmute, memory layout control
-
     /// Invalid type for const asm operand
     #[error("invalid type for inline assembly const operand: {found}")]
     InvalidAsmConstType {
@@ -1907,7 +1912,9 @@ pub enum TypeError {
     /// declaration would let the user encode Berardi-shaped paradoxes
     /// and break logical consistency. Non-recoverable: a subsequent
     /// retry pass cannot rescue this — the violation is structural.
-    #[error("E370: positivity violation in type '{type_name}' constructor '{constructor}': {position}")]
+    #[error(
+        "E370: positivity violation in type '{type_name}' constructor '{constructor}': {position}"
+    )]
     PositivityViolation {
         type_name: Text,
         constructor: Text,
@@ -2002,7 +2009,9 @@ impl TypeError {
             AmbiguousName { span, .. } => *span,
             CircularConstantDependency { span, .. } => *span,
             // Reference aliasing error spans
-            BorrowConflict { new_borrow_span, .. } => *new_borrow_span,
+            BorrowConflict {
+                new_borrow_span, ..
+            } => *new_borrow_span,
             FieldBorrowConflict { new_span, .. } => *new_span,
             DanglingReference { ref_span, .. } => *ref_span,
             CheckedRefEscape { span, .. } => *span,
@@ -2088,12 +2097,10 @@ impl TypeError {
                 // E400: Type mismatch - type system incompatibility error
                 // Format matches spec expectation: "Type mismatch: expected 'X', found 'Y'"
                 // Note: E310 is for borrow/aliasing errors, E400 is for type mismatches
-                let mut builder = DiagnosticBuilder::error()
-                    .code("E400")
-                    .message(format!(
-                        "Type mismatch: expected '{}', found '{}'",
-                        expected, actual
-                    ));
+                let mut builder = DiagnosticBuilder::error().code("E400").message(format!(
+                    "Type mismatch: expected '{}', found '{}'",
+                    expected, actual
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -2109,8 +2116,9 @@ impl TypeError {
             }
 
             InfiniteType { var, ty, span } => {
-                let mut builder =
-                    DiagnosticBuilder::error().code("E403").message(format!("Infinite type: {} = {}", var, ty));
+                let mut builder = DiagnosticBuilder::error()
+                    .code("E403")
+                    .message(format!("Infinite type: {} = {}", var, ty));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -2118,8 +2126,9 @@ impl TypeError {
             }
 
             UnboundVariable { name, span } => {
-                let mut builder =
-                    DiagnosticBuilder::error().code("E100").message(format!("unbound variable: {}", name));
+                let mut builder = DiagnosticBuilder::error()
+                    .code("E100")
+                    .message(format!("unbound variable: {}", name));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -2170,13 +2179,29 @@ impl TypeError {
                 // E403: Type does not implement Sync
                 // E312: Generic protocol constraint not satisfied
                 let (code, msg) = match protocol.as_str() {
-                    "Send" => ("E402", format!("Type does not implement Send: '{}' cannot be sent between threads", ty)),
-                    "Sync" => ("E403", format!("Type does not implement Sync: '{}' cannot be shared between threads", ty)),
-                    _ => ("E312", format!("Protocol constraint not satisfied: '{}' does not implement '{}'", ty, protocol)),
+                    "Send" => (
+                        "E402",
+                        format!(
+                            "Type does not implement Send: '{}' cannot be sent between threads",
+                            ty
+                        ),
+                    ),
+                    "Sync" => (
+                        "E403",
+                        format!(
+                            "Type does not implement Sync: '{}' cannot be shared between threads",
+                            ty
+                        ),
+                    ),
+                    _ => (
+                        "E312",
+                        format!(
+                            "Protocol constraint not satisfied: '{}' does not implement '{}'",
+                            ty, protocol
+                        ),
+                    ),
                 };
-                let mut builder = DiagnosticBuilder::error()
-                    .code(code)
-                    .message(msg);
+                let mut builder = DiagnosticBuilder::error().code(code).message(msg);
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -2293,17 +2318,15 @@ impl TypeError {
                 binding_span,
                 use_span,
             } => {
-                let mut builder = DiagnosticBuilder::error()
-                    .code("E302")
-                    .message(format!(
-                        "affine value `{}` cannot be used in loop\n  \
+                let mut builder = DiagnosticBuilder::error().code("E302").message(format!(
+                    "affine value `{}` cannot be used in loop\n  \
                          defined at: {}\n  \
                          used in loop at: {}\n  \
                          help: affine values from outer scope cannot be moved in a loop \
                          because the loop may execute multiple times\n  \
                          help: consider cloning the value or restructuring the code",
-                        name, binding_span.start, use_span.start
-                    ));
+                    name, binding_span.start, use_span.start
+                ));
                 if let Some(diag_span) = convert_span(*use_span) {
                     builder = builder.span(diag_span);
                 }
@@ -2316,17 +2339,15 @@ impl TypeError {
                 moved_at,
                 used_at,
             } => {
-                let mut builder = DiagnosticBuilder::error()
-                    .code("E302")
-                    .message(format!(
-                        "value `{}` used after partial move\n  \
+                let mut builder = DiagnosticBuilder::error().code("E302").message(format!(
+                    "value `{}` used after partial move\n  \
                          field `{}` was moved at: {}\n  \
                          whole struct used at: {}\n  \
                          help: after moving a field out of a struct, the whole struct \
                          cannot be used as a value\n  \
                          help: individual non-moved fields can still be accessed",
-                        name, moved_field, moved_at.start, used_at.start
-                    ));
+                    name, moved_field, moved_at.start, used_at.start
+                ));
                 if let Some(diag_span) = convert_span(*used_at) {
                     builder = builder.span(diag_span);
                 }
@@ -2356,14 +2377,12 @@ impl TypeError {
 
             MissingContext { context, span } => {
                 // E801: Context used but not declared in function signature
-                let mut builder = DiagnosticBuilder::error()
-                    .code("E801")
-                    .message(format!(
-                        "context `{}` used but not declared in function signature\n  \
+                let mut builder = DiagnosticBuilder::error().code("E801").message(format!(
+                    "context `{}` used but not declared in function signature\n  \
                          help: add `using [{}]` to function signature\n  \
                          help: or provide it with `provide {} = ...`",
-                        context, context, context
-                    ));
+                    context, context, context
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -2386,14 +2405,12 @@ impl TypeError {
             }
 
             DuplicateProvide { context, span } => {
-                let mut builder = DiagnosticBuilder::error()
-                    .code("E808")
-                    .message(format!(
-                        "Duplicate provide for same context\n  \
+                let mut builder = DiagnosticBuilder::error().code("E808").message(format!(
+                    "Duplicate provide for same context\n  \
                          context `{}` already provided in this scope\n  \
                          help: use different scopes with `provide {} = ... in {{ ... }}`",
-                        context, context
-                    ));
+                    context, context
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -2574,26 +2591,26 @@ impl TypeError {
             } => {
                 // E401: Invalid assignment/cast - type conversion error
                 // E402 for specific protocol constraints (Send/Sync), E401 for general casts
-                let mut builder = DiagnosticBuilder::error()
-                    .code("E401")
-                    .message(format!(
-                        "Cannot assign value of type '{}' to variable of type '{}'\n  \
+                let mut builder = DiagnosticBuilder::error().code("E401").message(format!(
+                    "Cannot assign value of type '{}' to variable of type '{}'\n  \
                              reason: {}\n  \
                              help: use explicit conversion method if available\n  \
                              help: or ensure types are compatible for casting",
-                        from, to, reason
-                    ));
+                    from, to, reason
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
                 builder.build()
             }
 
-            MethodNotFound { ty, method, span, did_you_mean } => {
-                let mut msg = format!(
-                    "no method named `{}` found for type `{}`",
-                    method, ty
-                );
+            MethodNotFound {
+                ty,
+                method,
+                span,
+                did_you_mean,
+            } => {
+                let mut msg = format!("no method named `{}` found for type `{}`", method, ty);
                 if let Some(suggestion) = did_you_mean {
                     msg.push_str(&format!("\n  help: did you mean `{}`?", suggestion));
                 } else {
@@ -2620,7 +2637,8 @@ impl TypeError {
                 available_capabilities,
                 span,
             } => {
-                let available_list: Vec<&str> = available_capabilities.iter().map(|c| c.as_str()).collect();
+                let available_list: Vec<&str> =
+                    available_capabilities.iter().map(|c| c.as_str()).collect();
                 let mut builder = DiagnosticBuilder::error()
                     .code("E306")
                     .message(format!(
@@ -2695,8 +2713,9 @@ impl TypeError {
             }
 
             TypeNotFound { name, span } => {
-                let mut builder =
-                    DiagnosticBuilder::error().code("E101").message(format!("type not found: {}", name));
+                let mut builder = DiagnosticBuilder::error()
+                    .code("E101")
+                    .message(format!("type not found: {}", name));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -2730,24 +2749,22 @@ impl TypeError {
             TryOnNonResult { ty, span } => {
                 let mut builder = DiagnosticBuilder::error()
                     .code("E0203")
-                    .message(format!(
-                        "cannot use '?' on non-Result/Maybe type: {}",
-                        ty
-                    ));
+                    .message(format!("cannot use '?' on non-Result/Maybe type: {}", ty));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
                 builder.build()
             }
 
-            TryOperatorMismatch { expr_type, return_type, span } => {
-                let mut builder = DiagnosticBuilder::error()
-                    .code("E0203")
-                    .message(format!(
-                        "type mismatch in '?' operator: cannot convert {} to {}",
-                        expr_type,
-                        return_type
-                    ));
+            TryOperatorMismatch {
+                expr_type,
+                return_type,
+                span,
+            } => {
+                let mut builder = DiagnosticBuilder::error().code("E0203").message(format!(
+                    "type mismatch in '?' operator: cannot convert {} to {}",
+                    expr_type, return_type
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -2779,27 +2796,25 @@ impl TypeError {
             NotResultOrMaybe { ty, span } => {
                 let mut builder = DiagnosticBuilder::error()
                     .code("E0205")
-                    .message(format!(
-                        "cannot use `?` on a value of type `{}`",
-                        ty
-                    ))
+                    .message(format!("cannot use `?` on a value of type `{}`", ty))
                     .add_note(
                         "the `?` operator requires a type that implements the \
                          `Try` protocol (e.g. `Result<T, E>`, `Maybe<T>`)"
                             .to_string(),
                     )
-                    .help("pattern-match instead: `match expr { Some(v) => v, None => ... }` \
-                         (or `Ok`/`Err` for Result)".to_string())
+                    .help(
+                        "pattern-match instead: `match expr { Some(v) => v, None => ... }` \
+                         (or `Ok`/`Err` for Result)"
+                            .to_string(),
+                    )
                     .help(
                         "for `Map`/`Set`/`List` lookups, use the `_optional` \
                          variants (e.g. `map.get_optional(key)`) which return `Maybe<V>`"
                             .to_string(),
                     );
                 if let Some(diag_span) = convert_span(*span) {
-                    builder = builder.span_label(
-                        diag_span,
-                        format!("`{}` does not implement `Try`", ty),
-                    );
+                    builder =
+                        builder.span_label(diag_span, format!("`{}` does not implement `Try`", ty));
                 }
                 builder.build()
             }
@@ -2847,9 +2862,7 @@ impl TypeError {
                      help: import specific items (`mount core.base.{Int, Text}`) instead of a glob, \
                      or remove the re-export that closes the cycle."
                 );
-                let mut builder = DiagnosticBuilder::error()
-                    .code("E0811")
-                    .message(msg);
+                let mut builder = DiagnosticBuilder::error().code("E0811").message(msg);
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -2898,8 +2911,11 @@ impl TypeError {
             }
 
             // ========== Advanced type syntax errors: malformed HKTs, invalid associated type projections, existential type misuse ==========
-
-            ExistentialEscape { skolem_name, unpacking_span, escape_span } => {
+            ExistentialEscape {
+                skolem_name,
+                unpacking_span,
+                escape_span,
+            } => {
                 let mut builder = DiagnosticBuilder::error().message(format!(
                     "existential type escapes its scope\n  \
                          the opaque type '{}' cannot be used outside its unpacking scope\n  \
@@ -2912,7 +2928,11 @@ impl TypeError {
                 builder.build()
             }
 
-            ExistentialBoundNotSatisfied { witness_type, protocol, span } => {
+            ExistentialBoundNotSatisfied {
+                witness_type,
+                protocol,
+                span,
+            } => {
                 let mut builder = DiagnosticBuilder::error().message(format!(
                     "existential bound not satisfied\n  \
                          type '{}' does not implement '{}'\n  \
@@ -2925,7 +2945,12 @@ impl TypeError {
                 builder.build()
             }
 
-            KindMismatch { expected_kind, actual_kind, type_name, span } => {
+            KindMismatch {
+                expected_kind,
+                actual_kind,
+                type_name,
+                span,
+            } => {
                 let mut builder = DiagnosticBuilder::error().message(format!(
                     "kind mismatch for '{}'\n  \
                          expected kind: {}\n  \
@@ -2939,7 +2964,12 @@ impl TypeError {
                 builder.build()
             }
 
-            TypeConstructorArityMismatch { name, expected_arity, actual_arity, span } => {
+            TypeConstructorArityMismatch {
+                name,
+                expected_arity,
+                actual_arity,
+                span,
+            } => {
                 let mut builder = DiagnosticBuilder::error().message(format!(
                     "type constructor '{}' has wrong arity\n  \
                          expected {} type argument(s), found {}\n  \
@@ -2952,7 +2982,12 @@ impl TypeError {
                 builder.build()
             }
 
-            CannotResolveAssociatedType { base_type, assoc_name, reason, span } => {
+            CannotResolveAssociatedType {
+                base_type,
+                assoc_name,
+                reason,
+                span,
+            } => {
                 let mut builder = DiagnosticBuilder::error().message(format!(
                     "cannot resolve associated type '{}.{}'\n  \
                          {}\n  \
@@ -2965,8 +3000,17 @@ impl TypeError {
                 builder.build()
             }
 
-            AmbiguousAssociatedType { base_type, assoc_name, candidates, span } => {
-                let candidates_str = candidates.iter().map(|c| c.as_str()).collect::<Vec<_>>().join(", ");
+            AmbiguousAssociatedType {
+                base_type,
+                assoc_name,
+                candidates,
+                span,
+            } => {
+                let candidates_str = candidates
+                    .iter()
+                    .map(|c| c.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 let mut builder = DiagnosticBuilder::error().message(format!(
                     "ambiguous associated type '{}.{}'\n  \
                          multiple implementations define '{}': {}\n  \
@@ -2992,7 +3036,12 @@ impl TypeError {
                 builder.build()
             }
 
-            SpecializationOverlap { ty, impl1, impl2, span } => {
+            SpecializationOverlap {
+                ty,
+                impl1,
+                impl2,
+                span,
+            } => {
                 let mut builder = DiagnosticBuilder::error().message(format!(
                     "specialization overlap for type '{}'\n  \
                          conflicting implementations:\n  \
@@ -3007,7 +3056,11 @@ impl TypeError {
                 builder.build()
             }
 
-            HKTBoundNotSatisfied { type_constructor, protocol, span } => {
+            HKTBoundNotSatisfied {
+                type_constructor,
+                protocol,
+                span,
+            } => {
                 let mut builder = DiagnosticBuilder::error().message(format!(
                     "higher-kinded bound not satisfied\n  \
                          type constructor '{}' does not implement '{}'\n  \
@@ -3036,7 +3089,7 @@ impl TypeError {
             AsmOutputNotLvalue { span } => {
                 let mut builder = DiagnosticBuilder::error().message(
                     "inline assembly output operand must be an lvalue\n  \
-                         help: use a variable or field access, not a literal or expression"
+                         help: use a variable or field access, not a literal or expression",
                 );
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
@@ -3044,15 +3097,20 @@ impl TypeError {
                 builder.build()
             }
 
-            RecursionLimit(msg) => DiagnosticBuilder::error().message(format!("recursion limit exceeded: {}", msg)).build(),
+            RecursionLimit(msg) => DiagnosticBuilder::error()
+                .message(format!("recursion limit exceeded: {}", msg))
+                .build(),
 
-            PositivityViolation { type_name, constructor, position, span } => {
-                let mut builder = DiagnosticBuilder::error()
-                    .code("E370")
-                    .message(format!(
-                        "positivity violation in type '{}' constructor '{}': {}",
-                        type_name, constructor, position
-                    ));
+            PositivityViolation {
+                type_name,
+                constructor,
+                position,
+                span,
+            } => {
+                let mut builder = DiagnosticBuilder::error().code("E370").message(format!(
+                    "positivity violation in type '{}' constructor '{}': {}",
+                    type_name, constructor, position
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -3061,7 +3119,10 @@ impl TypeError {
 
             Other(msg) => DiagnosticBuilder::error().message(msg.as_str()).build(),
 
-            OtherWithCode { code, msg } => DiagnosticBuilder::error().code(code.as_str()).message(msg.as_str()).build(),
+            OtherWithCode { code, msg } => DiagnosticBuilder::error()
+                .code(code.as_str())
+                .message(msg.as_str())
+                .build(),
 
             OtherWithCodeSpanned { code, msg, span } => {
                 let mut builder = DiagnosticBuilder::error()
@@ -3083,7 +3144,11 @@ impl TypeError {
                 builder.build()
             }
 
-            PartiallyInitializedVariable { name, missing, span } => {
+            PartiallyInitializedVariable {
+                name,
+                missing,
+                span,
+            } => {
                 let mut builder = DiagnosticBuilder::error().message(format!(
                     "E201: use of partially initialized variable '{}' (missing: {})",
                     name, missing
@@ -3095,8 +3160,10 @@ impl TypeError {
             }
 
             UninitializedField { var, field, span } => {
-                let mut builder = DiagnosticBuilder::error()
-                    .message(format!("E201: field '{}' of variable '{}' is not initialized", field, var));
+                let mut builder = DiagnosticBuilder::error().message(format!(
+                    "E201: field '{}' of variable '{}' is not initialized",
+                    field, var
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -3126,8 +3193,10 @@ impl TypeError {
             }
 
             IterationOverPartialArray { var, span, .. } => {
-                let mut builder = DiagnosticBuilder::error()
-                    .message(format!("E201: cannot iterate over partially initialized array '{}'", var));
+                let mut builder = DiagnosticBuilder::error().message(format!(
+                    "E201: cannot iterate over partially initialized array '{}'",
+                    var
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -3150,7 +3219,11 @@ impl TypeError {
                 builder.build()
             }
 
-            AmbiguousName { name, sources, span } => {
+            AmbiguousName {
+                name,
+                sources,
+                span,
+            } => {
                 let mut builder = DiagnosticBuilder::error().message(format!(
                     "E602: ambiguous name: '{}' is imported from multiple modules: {}",
                     name, sources
@@ -3176,7 +3249,7 @@ impl TypeError {
                 }
                 msg.push_str(
                     "  help: break the cycle by removing one of the dependencies\n  \
-                     help: constants must have a well-defined evaluation order"
+                     help: constants must have a well-defined evaluation order",
                 );
                 let mut builder = DiagnosticBuilder::error().message(msg);
                 if let Some(diag_span) = convert_span(*span) {
@@ -3186,29 +3259,43 @@ impl TypeError {
             }
 
             // Reference Aliasing Errors
-            BorrowConflict { var, existing_borrow_span, existing_is_mut, new_borrow_span, new_is_mut } => {
+            BorrowConflict {
+                var,
+                existing_borrow_span,
+                existing_is_mut,
+                new_borrow_span,
+                new_is_mut,
+            } => {
                 let new_kind = if *new_is_mut { "mutable" } else { "immutable" };
-                let existing_kind = if *existing_is_mut { "mutable" } else { "immutable" };
-                let mut builder = DiagnosticBuilder::error()
-                    .message(format!(
-                        "E310: cannot borrow `{}` as {} because it is already borrowed as {}",
-                        var, new_kind, existing_kind
-                    ));
+                let existing_kind = if *existing_is_mut {
+                    "mutable"
+                } else {
+                    "immutable"
+                };
+                let mut builder = DiagnosticBuilder::error().message(format!(
+                    "E310: cannot borrow `{}` as {} because it is already borrowed as {}",
+                    var, new_kind, existing_kind
+                ));
                 if let Some(diag_span) = convert_span(*new_borrow_span) {
                     builder = builder.span(diag_span);
                 }
                 if let Some(_existing_span) = convert_span(*existing_borrow_span) {
-                    builder = builder.add_note(format!("previous {} borrow occurs here", existing_kind));
+                    builder =
+                        builder.add_note(format!("previous {} borrow occurs here", existing_kind));
                 }
                 builder.build()
             }
 
-            FieldBorrowConflict { var, field, existing_span, new_span } => {
-                let mut builder = DiagnosticBuilder::error()
-                    .message(format!(
-                        "E311: cannot borrow `{}` because field `{}` is already borrowed",
-                        var, field
-                    ));
+            FieldBorrowConflict {
+                var,
+                field,
+                existing_span,
+                new_span,
+            } => {
+                let mut builder = DiagnosticBuilder::error().message(format!(
+                    "E311: cannot borrow `{}` because field `{}` is already borrowed",
+                    var, field
+                ));
                 if let Some(diag_span) = convert_span(*new_span) {
                     builder = builder.span(diag_span);
                 }
@@ -3218,12 +3305,15 @@ impl TypeError {
                 builder.build()
             }
 
-            DanglingReference { var, ref_span, drop_span } => {
-                let mut builder = DiagnosticBuilder::error()
-                    .message(format!(
-                        "E312: `{}` does not live long enough - reference outlives referent",
-                        var
-                    ));
+            DanglingReference {
+                var,
+                ref_span,
+                drop_span,
+            } => {
+                let mut builder = DiagnosticBuilder::error().message(format!(
+                    "E312: `{}` does not live long enough - reference outlives referent",
+                    var
+                ));
                 if let Some(diag_span) = convert_span(*ref_span) {
                     builder = builder.span(diag_span);
                 }
@@ -3234,24 +3324,27 @@ impl TypeError {
             }
 
             CheckedRefEscape { var, span } => {
-                let mut builder = DiagnosticBuilder::error()
-                    .message(format!(
-                        "E310: `&checked` reference to `{}` may escape through function call",
-                        var
-                    ));
+                let mut builder = DiagnosticBuilder::error().message(format!(
+                    "E310: `&checked` reference to `{}` may escape through function call",
+                    var
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
                 builder = builder.add_note(
-                    "&checked references have zero runtime overhead and cannot escape their scope"
+                    "&checked references have zero runtime overhead and cannot escape their scope",
                 );
                 builder = builder.add_note(
-                    "help: use a managed reference (&T) instead, which has CBGR runtime checks"
+                    "help: use a managed reference (&T) instead, which has CBGR runtime checks",
                 );
                 builder.build()
             }
 
-            MoveWhileBorrowed { var, move_span, borrow_span } => {
+            MoveWhileBorrowed {
+                var,
+                move_span,
+                borrow_span,
+            } => {
                 let mut builder = DiagnosticBuilder::error()
                     .message(format!("E313: cannot move `{}` while it is borrowed", var));
                 if let Some(diag_span) = convert_span(*move_span) {
@@ -3263,9 +3356,15 @@ impl TypeError {
                 builder.build()
             }
 
-            AssignWhileBorrowed { var, assign_span, borrow_span } => {
-                let mut builder = DiagnosticBuilder::error()
-                    .message(format!("E314: cannot assign to `{}` while it is borrowed", var));
+            AssignWhileBorrowed {
+                var,
+                assign_span,
+                borrow_span,
+            } => {
+                let mut builder = DiagnosticBuilder::error().message(format!(
+                    "E314: cannot assign to `{}` while it is borrowed",
+                    var
+                ));
                 if let Some(diag_span) = convert_span(*assign_span) {
                     builder = builder.span(diag_span);
                 }
@@ -3276,12 +3375,10 @@ impl TypeError {
             }
 
             StackAllocationExceedsLimit { size, limit, span } => {
-                let mut builder = DiagnosticBuilder::error()
-                    .code("E320")
-                    .message(format!(
-                        "stack allocation exceeds safe limit ({} bytes exceeds {} byte limit)",
-                        size, limit
-                    ));
+                let mut builder = DiagnosticBuilder::error().code("E320").message(format!(
+                    "stack allocation exceeds safe limit ({} bytes exceeds {} byte limit)",
+                    size, limit
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -3289,35 +3386,45 @@ impl TypeError {
                 builder.build()
             }
 
-            UnboundedRecursionDetected { func_name, span, cycle } => {
-                let mut builder = DiagnosticBuilder::error()
-                    .code("E321")
-                    .message(format!(
-                        "potential stack overflow: unbounded recursion detected in function `{}`",
-                        func_name
-                    ));
+            UnboundedRecursionDetected {
+                func_name,
+                span,
+                cycle,
+            } => {
+                let mut builder = DiagnosticBuilder::error().code("E321").message(format!(
+                    "potential stack overflow: unbounded recursion detected in function `{}`",
+                    func_name
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
                 if !cycle.is_empty() {
                     builder = builder.add_note(format!(
                         "recursion cycle: {}",
-                        cycle.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" -> ")
+                        cycle
+                            .iter()
+                            .map(|s| s.as_str())
+                            .collect::<Vec<_>>()
+                            .join(" -> ")
                     ));
                 }
-                builder = builder.add_note("add @allow(unbounded_recursion) to suppress this warning if intentional");
+                builder = builder.add_note(
+                    "add @allow(unbounded_recursion) to suppress this warning if intentional",
+                );
                 builder.build()
             }
 
             // ========== Import Resolution Errors ==========
-
-            ImportItemNotFound { item_name, module_path, available_items, span } => {
-                let mut builder = DiagnosticBuilder::error()
-                    .code("E401")
-                    .message(format!(
-                        "cannot find `{}` in module `{}`",
-                        item_name, module_path
-                    ));
+            ImportItemNotFound {
+                item_name,
+                module_path,
+                available_items,
+                span,
+            } => {
+                let mut builder = DiagnosticBuilder::error().code("E401").message(format!(
+                    "cannot find `{}` in module `{}`",
+                    item_name, module_path
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -3327,12 +3434,24 @@ impl TypeError {
                     if !similar.is_empty() {
                         builder = builder.help(format!(
                             "did you mean one of these? {}",
-                            similar.iter().map(|s| format!("`{}`", s)).collect::<Vec<_>>().join(", ")
+                            similar
+                                .iter()
+                                .map(|s| format!("`{}`", s))
+                                .collect::<Vec<_>>()
+                                .join(", ")
                         ));
                     }
                     // Show available exports (limited to first 10)
-                    let items_preview: Vec<&str> = available_items.iter().take(10).map(|s| s.as_str()).collect();
-                    let suffix = if available_items.len() > 10 { format!(" and {} more", available_items.len() - 10) } else { String::new() };
+                    let items_preview: Vec<&str> = available_items
+                        .iter()
+                        .take(10)
+                        .map(|s| s.as_str())
+                        .collect();
+                    let suffix = if available_items.len() > 10 {
+                        format!(" and {} more", available_items.len() - 10)
+                    } else {
+                        String::new()
+                    };
                     builder = builder.add_note(format!(
                         "module `{}` exports: {}{}",
                         module_path,
@@ -3343,13 +3462,14 @@ impl TypeError {
                 builder.build()
             }
 
-            ImportModuleNotFound { module_path, similar_modules, span } => {
+            ImportModuleNotFound {
+                module_path,
+                similar_modules,
+                span,
+            } => {
                 let mut builder = DiagnosticBuilder::error()
                     .code("E402")
-                    .message(format!(
-                        "module `{}` not found",
-                        module_path
-                    ));
+                    .message(format!("module `{}` not found", module_path));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -3357,20 +3477,26 @@ impl TypeError {
                 if !similar_modules.is_empty() {
                     builder = builder.help(format!(
                         "did you mean one of these modules? {}",
-                        similar_modules.iter().map(|s| format!("`{}`", s)).collect::<Vec<_>>().join(", ")
+                        similar_modules
+                            .iter()
+                            .map(|s| format!("`{}`", s))
+                            .collect::<Vec<_>>()
+                            .join(", ")
                     ));
                 }
-                builder = builder.add_note("check that the module path is correct and the module is available");
+                builder = builder
+                    .add_note("check that the module path is correct and the module is available");
                 builder.build()
             }
 
-            UndefinedFunction { func_name, similar_functions, span } => {
+            UndefinedFunction {
+                func_name,
+                similar_functions,
+                span,
+            } => {
                 let mut builder = DiagnosticBuilder::error()
                     .code("E403")
-                    .message(format!(
-                        "undefined function `{}`",
-                        func_name
-                    ));
+                    .message(format!("undefined function `{}`", func_name));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -3378,31 +3504,43 @@ impl TypeError {
                 if !similar_functions.is_empty() {
                     builder = builder.help(format!(
                         "did you mean one of these? {}",
-                        similar_functions.iter().map(|s| format!("`{}`", s)).collect::<Vec<_>>().join(", ")
+                        similar_functions
+                            .iter()
+                            .map(|s| format!("`{}`", s))
+                            .collect::<Vec<_>>()
+                            .join(", ")
                     ));
                 }
                 builder = builder.add_note("ensure the function is defined or imported");
                 builder.build()
             }
 
-            ImpureMetaFunction { func_name, properties, span } => {
+            ImpureMetaFunction {
+                func_name,
+                properties,
+                span,
+            } => {
                 // E501: Meta function purity violation
                 // Meta function purity: meta functions are implicitly pure (no IO, no mutation of non-meta state) — Meta functions are implicitly pure
-                let mut builder = DiagnosticBuilder::error()
-                    .code("E501")
-                    .message(format!(
-                        "meta function `{}` must be pure but has side effects: {}",
-                        func_name, properties
-                    ));
+                let mut builder = DiagnosticBuilder::error().code("E501").message(format!(
+                    "meta function `{}` must be pure but has side effects: {}",
+                    func_name, properties
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
-                builder = builder.add_note("meta functions run at compile-time and cannot have side effects");
-                builder = builder.help("remove IO, external state access, or mutation from the function body");
+                builder = builder
+                    .add_note("meta functions run at compile-time and cannot have side effects");
+                builder = builder
+                    .help("remove IO, external state access, or mutation from the function body");
                 builder.build()
             }
 
-            InvalidMetaContext { func_name, invalid_contexts, span } => {
+            InvalidMetaContext {
+                func_name,
+                invalid_contexts,
+                span,
+            } => {
                 // E502: Invalid meta context usage
                 // Meta contexts: meta functions have restricted context access (only compile-time-safe contexts) — Meta contexts
                 let mut builder = DiagnosticBuilder::error()
@@ -3414,24 +3552,31 @@ impl TypeError {
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
-                builder = builder.add_note("meta functions can only use compiler-provided contexts");
+                builder =
+                    builder.add_note("meta functions can only use compiler-provided contexts");
                 builder = builder.help("valid meta contexts: BuildAssets, TypeInfo, AstAccess, CompileDiag, MetaRuntime, MacroState");
                 builder.build()
             }
 
-            ImpurePureFunction { func_name, properties, span } => {
+            ImpurePureFunction {
+                func_name,
+                properties,
+                span,
+            } => {
                 // E503: Pure function purity violation
-                let mut builder = DiagnosticBuilder::error()
-                    .code("E503")
-                    .message(format!(
-                        "pure function `{}` has side effects: {}",
-                        func_name, properties
-                    ));
+                let mut builder = DiagnosticBuilder::error().code("E503").message(format!(
+                    "pure function `{}` has side effects: {}",
+                    func_name, properties
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
-                builder = builder.add_note("pure functions must not have IO, mutation, async, or external state access");
-                builder = builder.help("remove the `pure` modifier or eliminate side effects from the function body");
+                builder = builder.add_note(
+                    "pure functions must not have IO, mutation, async, or external state access",
+                );
+                builder = builder.help(
+                    "remove the `pure` modifier or eliminate side effects from the function body",
+                );
                 builder.build()
             }
 
@@ -3447,14 +3592,16 @@ impl TypeError {
                 builder.build()
             }
 
-            NonProductiveCorecursion { func_name, unguarded_calls, span } => {
+            NonProductiveCorecursion {
+                func_name,
+                unguarded_calls,
+                span,
+            } => {
                 // E505: Non-productive corecursive function
-                let mut builder = DiagnosticBuilder::error()
-                    .code("E505")
-                    .message(format!(
-                        "cofix function `{}` is non-productive: unguarded recursive calls: {}",
-                        func_name, unguarded_calls
-                    ));
+                let mut builder = DiagnosticBuilder::error().code("E505").message(format!(
+                    "cofix function `{}` is non-productive: unguarded recursive calls: {}",
+                    func_name, unguarded_calls
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -3471,14 +3618,11 @@ impl TypeError {
 
             // Quote hygiene errors (M400-M409)
             // Quote hygiene: macro-generated code uses hygienic naming to prevent variable capture and scope pollution — Quote Hygiene
-
             UnboundSpliceVariable { var_name, span } => {
-                let mut builder = DiagnosticBuilder::error()
-                    .code("M400")
-                    .message(format!(
-                        "unbound splice variable `{}` - not in scope at quote evaluation",
-                        var_name
-                    ));
+                let mut builder = DiagnosticBuilder::error().code("M400").message(format!(
+                    "unbound splice variable `{}` - not in scope at quote evaluation",
+                    var_name
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -3488,45 +3632,42 @@ impl TypeError {
             }
 
             UnquoteOutsideQuote { expr, span } => {
-                let mut builder = DiagnosticBuilder::error()
-                    .code("M401")
-                    .message(format!(
-                        "splice/unquote `${{{}}}` used outside of quote block",
-                        expr
-                    ));
+                let mut builder = DiagnosticBuilder::error().code("M401").message(format!(
+                    "splice/unquote `${{{}}}` used outside of quote block",
+                    expr
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
                 builder = builder.add_note("splice expressions are only valid inside quote blocks");
-                builder = builder.help("wrap the code in a quote block or use a regular expression");
+                builder =
+                    builder.help("wrap the code in a quote block or use a regular expression");
                 builder.build()
             }
 
-            AccidentalCapture { var_name, inner_span, outer_span } => {
-                let mut builder = DiagnosticBuilder::error()
-                    .code("M402")
-                    .message(format!(
-                        "accidental variable capture - `{}` in quote shadows outer binding",
-                        var_name
-                    ));
+            AccidentalCapture {
+                var_name,
+                inner_span,
+                outer_span,
+            } => {
+                let mut builder = DiagnosticBuilder::error().code("M402").message(format!(
+                    "accidental variable capture - `{}` in quote shadows outer binding",
+                    var_name
+                ));
                 if let Some(diag_span) = convert_span(*inner_span) {
                     builder = builder.span(diag_span);
                 }
-                builder = builder.add_note(format!(
-                    "outer binding at position {}",
-                    outer_span.start
-                ));
+                builder =
+                    builder.add_note(format!("outer binding at position {}", outer_span.start));
                 builder = builder.help("use a different name or explicitly capture with gensym");
                 builder.build()
             }
 
             GensymCollision { symbol, span } => {
-                let mut builder = DiagnosticBuilder::error()
-                    .code("M403")
-                    .message(format!(
-                        "gensym collision - generated symbol `{}` collides with user-defined name",
-                        symbol
-                    ));
+                let mut builder = DiagnosticBuilder::error().code("M403").message(format!(
+                    "gensym collision - generated symbol `{}` collides with user-defined name",
+                    symbol
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -3536,12 +3677,10 @@ impl TypeError {
             }
 
             ScopeResolutionFailure { name, span } => {
-                let mut builder = DiagnosticBuilder::error()
-                    .code("M404")
-                    .message(format!(
-                        "scope resolution failure - cannot resolve `{}` in quote",
-                        name
-                    ));
+                let mut builder = DiagnosticBuilder::error().code("M404").message(format!(
+                    "scope resolution failure - cannot resolve `{}` in quote",
+                    name
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -3550,13 +3689,15 @@ impl TypeError {
                 builder.build()
             }
 
-            StageMismatch { expected, actual, span } => {
-                let mut builder = DiagnosticBuilder::error()
-                    .code("M405")
-                    .message(format!(
-                        "stage mismatch - expected stage {}, found stage {}",
-                        expected, actual
-                    ));
+            StageMismatch {
+                expected,
+                actual,
+                span,
+            } => {
+                let mut builder = DiagnosticBuilder::error().code("M405").message(format!(
+                    "stage mismatch - expected stage {}, found stage {}",
+                    expected, actual
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
@@ -3571,14 +3712,13 @@ impl TypeError {
             LiftTypeMismatch { ty, reason, span } => {
                 let mut builder = DiagnosticBuilder::error()
                     .code("M406")
-                    .message(format!(
-                        "cannot lift type `{}` - {}",
-                        ty, reason
-                    ));
+                    .message(format!("cannot lift type `{}` - {}", ty, reason));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
-                builder = builder.add_note("lift() can only convert values whose types can be represented as code");
+                builder = builder.add_note(
+                    "lift() can only convert values whose types can be represented as code",
+                );
                 builder = builder.help("use splice ($) for values that are already code, or restructure to avoid lifting unliftable types");
                 builder.build()
             }
@@ -3586,29 +3726,28 @@ impl TypeError {
             InvalidStageEscape { reason, span } => {
                 let mut builder = DiagnosticBuilder::error()
                     .code("M407")
-                    .message(format!(
-                        "invalid stage escape - {}",
-                        reason
-                    ));
+                    .message(format!("invalid stage escape - {}", reason));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
                 builder = builder.add_note("stage escapes must reference valid compilation stages");
-                builder = builder.help("check that the stage number is valid and the escape is in a valid context");
+                builder = builder.help(
+                    "check that the stage number is valid and the escape is in a valid context",
+                );
                 builder.build()
             }
 
             UndeclaredCapture { var_name, span } => {
-                let mut builder = DiagnosticBuilder::error()
-                    .code("M408")
-                    .message(format!(
-                        "undeclared capture of meta-level binding `{}` - use $var or lift(var)",
-                        var_name
-                    ));
+                let mut builder = DiagnosticBuilder::error().code("M408").message(format!(
+                    "undeclared capture of meta-level binding `{}` - use $var or lift(var)",
+                    var_name
+                ));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
-                builder = builder.add_note("bare identifiers in quotes cannot directly reference meta-level bindings");
+                builder = builder.add_note(
+                    "bare identifiers in quotes cannot directly reference meta-level bindings",
+                );
                 builder = builder.help(format!(
                     "use ${} to splice the value, or lift({}) to convert it to syntax",
                     var_name, var_name
@@ -3619,15 +3758,13 @@ impl TypeError {
             RepetitionMismatch { reason, span } => {
                 let mut builder = DiagnosticBuilder::error()
                     .code("M409")
-                    .message(format!(
-                        "repetition mismatch - {}",
-                        reason
-                    ));
+                    .message(format!("repetition mismatch - {}", reason));
                 if let Some(diag_span) = convert_span(*span) {
                     builder = builder.span(diag_span);
                 }
                 builder = builder.add_note("all repetition variables must have the same length");
-                builder = builder.help("ensure all lists/iterables in the repetition have matching lengths");
+                builder = builder
+                    .help("ensure all lists/iterables in the repetition have matching lengths");
                 builder.build()
             }
         }
@@ -3643,7 +3780,10 @@ fn find_similar_names<'a>(target: &str, candidates: &'a [Text]) -> Vec<&'a str> 
             let c_lower = c.to_lowercase();
             let dist = edit_distance(&target_lower, &c_lower);
             // Only suggest if edit distance is reasonably small (< 3) or prefix matches
-            if dist < 3 || c_lower.starts_with(target_lower.as_str()) || target_lower.starts_with(c_lower.as_str()) {
+            if dist < 3
+                || c_lower.starts_with(target_lower.as_str())
+                || target_lower.starts_with(c_lower.as_str())
+            {
                 Some((c.as_str(), dist))
             } else {
                 None
@@ -3661,17 +3801,29 @@ fn edit_distance(a: &str, b: &str) -> usize {
     let m = a_chars.len();
     let n = b_chars.len();
 
-    if m == 0 { return n; }
-    if n == 0 { return m; }
+    if m == 0 {
+        return n;
+    }
+    if n == 0 {
+        return m;
+    }
 
     let mut dp = vec![vec![0usize; n + 1]; m + 1];
 
-    for i in 0..=m { dp[i][0] = i; }
-    for j in 0..=n { dp[0][j] = j; }
+    for i in 0..=m {
+        dp[i][0] = i;
+    }
+    for j in 0..=n {
+        dp[0][j] = j;
+    }
 
     for i in 1..=m {
         for j in 1..=n {
-            let cost = if a_chars[i - 1] == b_chars[j - 1] { 0 } else { 1 };
+            let cost = if a_chars[i - 1] == b_chars[j - 1] {
+                0
+            } else {
+                1
+            };
             dp[i][j] = (dp[i - 1][j] + 1)
                 .min(dp[i][j - 1] + 1)
                 .min(dp[i - 1][j - 1] + cost);

@@ -23,7 +23,7 @@ use std::path::PathBuf;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::prelude::*;
 
@@ -187,8 +187,7 @@ pub fn export_to_script(input: &str, output: Option<&str>, include_outputs: bool
     }
 
     // Load playbook
-    let app =
-        PlaybookApp::from_file(input_path).map_err(|e| CliError::custom(e.to_string()))?;
+    let app = PlaybookApp::from_file(input_path).map_err(|e| CliError::custom(e.to_string()))?;
 
     // Export
     if include_outputs {
@@ -230,4 +229,3 @@ pub fn import_from_script(input: &str, output: Option<&str>) -> Result<()> {
     ui::success(&format!("Created: {}", output_path.display()));
     Ok(())
 }
-

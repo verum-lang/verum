@@ -28,8 +28,8 @@
 // - Complex nested types
 
 use verum_ast::{FileId, Span, Type, TypeKind};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 /// Helper function to parse a type from a string.
 fn parse_type(source: &str) -> Result<Type, String> {

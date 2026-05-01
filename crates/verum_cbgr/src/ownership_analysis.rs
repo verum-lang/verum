@@ -127,7 +127,10 @@ impl AllocationInfo {
             kind,
             state: OwnershipState::Owned,
             size: None,
-            is_heap: matches!(kind, AllocationKind::Heap | AllocationKind::HeapNew | AllocationKind::RawAlloc),
+            is_heap: matches!(
+                kind,
+                AllocationKind::Heap | AllocationKind::HeapNew | AllocationKind::RawAlloc
+            ),
         }
     }
 
@@ -190,7 +193,10 @@ impl AllocationKind {
     /// Check if this kind typically requires manual deallocation.
     #[must_use]
     pub fn requires_dealloc(&self) -> bool {
-        matches!(self, Self::Heap | Self::HeapNew | Self::RawAlloc | Self::Collection | Self::String)
+        matches!(
+            self,
+            Self::Heap | Self::HeapNew | Self::RawAlloc | Self::Collection | Self::String
+        )
     }
 
     /// Get a human-readable name for this kind.
@@ -741,16 +747,16 @@ impl OwnershipAnalyzer {
             total_allocations: self.allocations.len(),
             total_deallocations: self.deallocations.len(),
             total_transfers: self.transfers.len(),
-            stack_allocations: self.allocations.values()
+            stack_allocations: self
+                .allocations
+                .values()
                 .filter(|a| matches!(a.kind, AllocationKind::Stack))
                 .count(),
-            heap_allocations: self.allocations.values()
-                .filter(|a| a.is_heap)
-                .count(),
-            matched_deallocs: self.allocations.values()
-                .filter(|a| a.is_freed())
-                .count(),
-            unmatched_allocs: self.allocations.values()
+            heap_allocations: self.allocations.values().filter(|a| a.is_heap).count(),
+            matched_deallocs: self.allocations.values().filter(|a| a.is_freed()).count(),
+            unmatched_allocs: self
+                .allocations
+                .values()
                 .filter(|a| a.is_owned() && a.kind.requires_dealloc())
                 .count(),
             analysis_time_us: start.elapsed().as_micros() as u64,
@@ -803,7 +809,13 @@ impl OwnershipAnalyzer {
                     .flat_map(|(block_id, block)| {
                         block.definitions.iter().map(move |def| {
                             let kind = Self::classify_allocation_static(def);
-                            (*block_id, def.reference, def.span, kind, def.is_stack_allocated)
+                            (
+                                *block_id,
+                                def.reference,
+                                def.span,
+                                kind,
+                                def.is_stack_allocated,
+                            )
                         })
                     })
                     .collect()
@@ -813,7 +825,13 @@ impl OwnershipAnalyzer {
                     .flat_map(|(block_id, block)| {
                         block.definitions.iter().map(move |def| {
                             let kind = Self::classify_allocation_static(def);
-                            (*block_id, def.reference, def.span, kind, def.is_stack_allocated)
+                            (
+                                *block_id,
+                                def.reference,
+                                def.span,
+                                kind,
+                                def.is_stack_allocated,
+                            )
                         })
                     })
                     .collect()
@@ -824,8 +842,7 @@ impl OwnershipAnalyzer {
         for (block_id, ref_id, span, kind, _is_stack) in alloc_data {
             if kind != AllocationKind::Unknown {
                 let skip_stack = !self.config.track_stack && kind == AllocationKind::Stack;
-                let skip_temp = !self.config.track_temporaries
-                    && kind == AllocationKind::Temporary;
+                let skip_temp = !self.config.track_temporaries && kind == AllocationKind::Temporary;
                 if !skip_stack && !skip_temp {
                     let alloc_id = self.new_alloc_id();
                     let mut info = AllocationInfo::new(alloc_id, block_id, kind);
@@ -1015,7 +1032,9 @@ mod tests {
 
         // Entry block with allocation
         let mut entry_block = BasicBlock::empty(entry);
-        entry_block.definitions.push(DefSite::new(entry, RefId(1), false)); // Heap allocation
+        entry_block
+            .definitions
+            .push(DefSite::new(entry, RefId(1), false)); // Heap allocation
         entry_block.successors.insert(exit);
         cfg.add_block(entry_block);
 
@@ -1045,12 +1064,10 @@ mod tests {
         // threshold. The analyzer's own filter is the same one
         // we apply here — the test pins the behaviour without
         // requiring the analyzer to actually produce a denial.
-        let high =
-            DoubleFreeWarning::new(AllocId(1), BlockId(0), BlockId(1), BlockId(2))
-                .with_confidence(0.9);
-        let low =
-            DoubleFreeWarning::new(AllocId(2), BlockId(0), BlockId(1), BlockId(2))
-                .with_confidence(0.3);
+        let high = DoubleFreeWarning::new(AllocId(1), BlockId(0), BlockId(1), BlockId(2))
+            .with_confidence(0.9);
+        let low = DoubleFreeWarning::new(AllocId(2), BlockId(0), BlockId(1), BlockId(2))
+            .with_confidence(0.3);
         let warnings = vec![high.clone(), low.clone()];
 
         let kept_05: Vec<_> = warnings
@@ -1079,7 +1096,8 @@ mod tests {
         let mut cfg = ControlFlowGraph::new(BlockId(0), BlockId(3));
         for i in 0..4 {
             let mut b = BasicBlock::empty(BlockId(i));
-            b.definitions.push(DefSite::new(BlockId(i), RefId(i as u64 + 100), false));
+            b.definitions
+                .push(DefSite::new(BlockId(i), RefId(i as u64 + 100), false));
             cfg.add_block(b);
         }
         let analyzer = OwnershipAnalyzer::new(cfg).with_config(OwnershipAnalysisConfig {
@@ -1130,12 +1148,7 @@ mod tests {
 
     #[test]
     fn test_double_free_warning_creation() {
-        let warning = DoubleFreeWarning::new(
-            AllocId(1),
-            BlockId(0),
-            BlockId(1),
-            BlockId(2),
-        );
+        let warning = DoubleFreeWarning::new(AllocId(1), BlockId(0), BlockId(1), BlockId(2));
 
         assert_eq!(warning.alloc_id, AllocId(1));
         assert_eq!(warning.allocation_site, BlockId(0));

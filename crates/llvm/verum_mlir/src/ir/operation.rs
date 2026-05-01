@@ -20,14 +20,14 @@ use core::{
     fmt,
     mem::{forget, transmute},
 };
-use verum_mlir_sys::{
-    MlirOperation, mlirOperationClone, mlirOperationDestroy, mlirOperationEqual, mlirOperationPrint,
-};
 use std::{
     ffi::c_void,
     fmt::{Debug, Display, Formatter},
     marker::PhantomData,
     ops::{Deref, DerefMut},
+};
+use verum_mlir_sys::{
+    MlirOperation, mlirOperationClone, mlirOperationDestroy, mlirOperationEqual, mlirOperationPrint,
 };
 
 /// An operation.

@@ -27,8 +27,8 @@
 //! - Channel operations in async context
 
 use verum_ast::{Expr, ExprKind, FileId, ItemKind, Module};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 fn parse_expr(source: &str) -> Expr {
     let file_id = FileId::new(0);
@@ -379,9 +379,7 @@ fn test_async_closure_with_block() {
 fn test_async_move_closure() {
     let expr = parse_expr("async move |x| x * 2");
     match &expr.kind {
-        ExprKind::Closure {
-            async_, move_, ..
-        } => {
+        ExprKind::Closure { async_, move_, .. } => {
             assert!(*async_, "Should be async");
             assert!(*move_, "Should be move");
         }

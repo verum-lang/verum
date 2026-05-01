@@ -48,7 +48,8 @@ fn assert_interp_ok(label: &str, source: &str, expected_stdout: &str) {
     let code = out.status.code().unwrap_or(-1);
 
     assert_eq!(
-        code, 0,
+        code,
+        0,
         "[{}] interpreter failed with exit {}.\nstdout: {}\nstderr: {}",
         label,
         code,
@@ -74,7 +75,8 @@ fn assert_interp_fails(label: &str, source: &str) {
     let out = run_interp(&prog, tmp.path());
     let code = out.status.code().unwrap_or(-1);
     assert_ne!(
-        code, 0,
+        code,
+        0,
         "[{}] expected failure but got exit 0.\nstdout: {}",
         label,
         String::from_utf8_lossy(&out.stdout),
@@ -97,11 +99,7 @@ fn mechanism_let_binding() {
 
 #[test]
 fn mechanism_print() {
-    assert_interp_ok(
-        "print",
-        "fn main() {\n    print(\"hello\");\n}\n",
-        "hello",
-    );
+    assert_interp_ok("print", "fn main() {\n    print(\"hello\");\n}\n", "hello");
 }
 
 #[test]
@@ -115,11 +113,7 @@ fn mechanism_arithmetic() {
 
 #[test]
 fn mechanism_assert_true() {
-    assert_interp_ok(
-        "assert_true",
-        "fn main() {\n    assert(1 == 1);\n}\n",
-        "",
-    );
+    assert_interp_ok("assert_true", "fn main() {\n    assert(1 == 1);\n}\n", "");
 }
 
 #[test]
@@ -221,10 +215,7 @@ fn mechanism_fstring() {
 #[test]
 fn aot_build_and_run_hello() {
     let tmp = TempDir::new().expect("tempdir");
-    let prog = write_program(
-        tmp.path(),
-        "fn main() {\n    print(\"aot-ok\");\n}\n",
-    );
+    let prog = write_program(tmp.path(), "fn main() {\n    print(\"aot-ok\");\n}\n");
 
     // Build to native binary
     let build = Command::new(verum_bin())
@@ -240,20 +231,19 @@ fn aot_build_and_run_hello() {
             eprintln!("AOT build crashed (LLVM residual instability) — skipping");
             return;
         }
-        panic!(
-            "AOT build failed (not LLVM crash):\n{}",
-            stderr
-        );
+        panic!("AOT build failed (not LLVM crash):\n{}", stderr);
     }
 
     // Find and run the binary
     let stem = prog.file_stem().unwrap().to_str().unwrap();
     let binary = tmp.path().join("target").join("release").join(stem);
-    assert!(binary.exists(), "compiled binary must exist at {:?}", binary);
+    assert!(
+        binary.exists(),
+        "compiled binary must exist at {:?}",
+        binary
+    );
 
-    let run = Command::new(&binary)
-        .output()
-        .expect("run compiled binary");
+    let run = Command::new(&binary).output().expect("run compiled binary");
     let stdout = String::from_utf8_lossy(&run.stdout);
     assert_eq!(
         stdout.trim(),
@@ -286,7 +276,10 @@ fn aot_build_arithmetic() {
     let binary = tmp.path().join("target").join("release").join(stem);
     if binary.exists() {
         let run = Command::new(&binary).output().expect("run");
-        assert!(run.status.success(), "arithmetic AOT binary must pass assertions");
+        assert!(
+            run.status.success(),
+            "arithmetic AOT binary must pass assertions"
+        );
     }
 }
 

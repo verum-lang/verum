@@ -4,14 +4,14 @@
 //! Handles: Call (0x5B), CallR (0x5F), CallG (0x80), CallV (0x81),
 //! CallC (0x82), CallClosure (0x5E), TailCall (0x5C), NewClosure (0x8A)
 
-use crate::instruction::Reg;
-use crate::module::FunctionId;
-use crate::types::{StringId, TypeId};
-use crate::value::Value;
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
+use crate::instruction::Reg;
+use crate::module::FunctionId;
+use crate::types::{StringId, TypeId};
+use crate::value::Value;
 
 // ============================================================================
 // Call Operations
@@ -21,7 +21,9 @@ use super::bytecode_io::*;
 ///
 
 /// Format: `[0x5B] [dst:reg] [func_id:varint] [args:reg_range]`
-pub(in super::super) fn handle_call(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_call(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let func_id = FunctionId(read_varint(state)? as u32);
     let args = read_reg_range(state)?;
@@ -42,8 +44,10 @@ pub(in super::super) fn handle_call(state: &mut InterpreterState) -> Interpreter
             .get(func_name_id)
             .map(|s| s.to_string())
             .unwrap_or_default();
-        eprintln!("[trace-call] handler=Call func_id={} name='{}' descriptor.id={} args.count={} bytecode_length={}",
-            func_id.0, func_name, func.id.0, args.count, bytecode_length);
+        eprintln!(
+            "[trace-call] handler=Call func_id={} name='{}' descriptor.id={} args.count={} bytecode_length={}",
+            func_id.0, func_name, func.id.0, args.count, bytecode_length
+        );
     }
 
     // **High-level Rust intercept** — fires regardless of bytecode_length.
@@ -136,7 +140,12 @@ pub(in super::super) fn handle_call(state: &mut InterpreterState) -> Interpreter
     if bytecode_length == 0 {
         let caller_base = state.reg_base();
         if let Some(result) = try_dispatch_intrinsic_by_name(
-            state, func_name_id, dst, args.start, args.count, caller_base,
+            state,
+            func_name_id,
+            dst,
+            args.start,
+            args.count,
+            caller_base,
         )? {
             state.set_reg(dst, result);
             return Ok(DispatchResult::Continue);
@@ -149,14 +158,18 @@ pub(in super::super) fn handle_call(state: &mut InterpreterState) -> Interpreter
     let caller_base = state.reg_base();
 
     // Push new frame
-    let new_base = state.call_stack.push_frame(func_id, reg_count, return_pc, dst)?;
+    let new_base = state
+        .call_stack
+        .push_frame(func_id, reg_count, return_pc, dst)?;
 
     // Allocate registers for new frame
     state.registers.push_frame(reg_count);
 
     // Copy arguments from caller to callee
     for i in 0..args.count {
-        let arg_value = state.registers.get(caller_base, Reg(args.start.0 + i as u16));
+        let arg_value = state
+            .registers
+            .get(caller_base, Reg(args.start.0 + i as u16));
         state.registers.set(new_base, Reg(i as u16), arg_value);
     }
 
@@ -171,7 +184,9 @@ pub(in super::super) fn handle_call(state: &mut InterpreterState) -> Interpreter
 ///
 
 /// The function address is stored in a register rather than being a constant.
-pub(in super::super) fn handle_call_indirect(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_call_indirect(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let fn_reg = read_reg(state)?;
     let args = read_reg_range(state)?;
@@ -194,14 +209,18 @@ pub(in super::super) fn handle_call_indirect(state: &mut InterpreterState) -> In
         let caller_base = state.reg_base();
 
         // Push new frame
-        let new_base = state.call_stack.push_frame(func_id, reg_count, return_pc, dst)?;
+        let new_base = state
+            .call_stack
+            .push_frame(func_id, reg_count, return_pc, dst)?;
 
         // Allocate registers for new frame
         state.registers.push_frame(reg_count);
 
         // Copy arguments from caller to callee
         for i in 0..args.count {
-            let arg_value = state.registers.get(caller_base, Reg(args.start.0 + i as u16));
+            let arg_value = state
+                .registers
+                .get(caller_base, Reg(args.start.0 + i as u16));
             state.registers.set(new_base, Reg(i as u16), arg_value);
         }
 
@@ -224,7 +243,9 @@ pub(in super::super) fn handle_call_indirect(state: &mut InterpreterState) -> In
 
 /// Encoding: opcode + dst:reg + func_id:varint + type_args:reg_vec + args:reg_range
 /// type_args is encoded as varint(count) + reg * count (must consume all type arg registers).
-pub(in super::super) fn handle_call_generic(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_call_generic(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let func_id = FunctionId(read_varint(state)? as u32);
     // Read type_args as reg_vec: varint(count) + reg * count
@@ -245,16 +266,28 @@ pub(in super::super) fn handle_call_generic(state: &mut InterpreterState) -> Int
     let reg_count = func.register_count;
 
     if std::env::var("VERUM_TRACE_CALLS").is_ok() {
-        let func_name: String = state.module.strings.get(func_name_id).map(|s| s.to_string()).unwrap_or_default();
-        eprintln!("[trace-callG] func_id={} name='{}' descriptor.id={} args.count={} bytecode_length={}",
-            func_id.0, func_name, func.id.0, args.count, bytecode_length);
+        let func_name: String = state
+            .module
+            .strings
+            .get(func_name_id)
+            .map(|s| s.to_string())
+            .unwrap_or_default();
+        eprintln!(
+            "[trace-callG] func_id={} name='{}' descriptor.id={} args.count={} bytecode_length={}",
+            func_id.0, func_name, func.id.0, args.count, bytecode_length
+        );
     }
 
     // Intercept external/intrinsic functions with no bytecode body
     if bytecode_length == 0 {
         let caller_base = state.reg_base();
         if let Some(result) = try_dispatch_intrinsic_by_name(
-            state, func_name_id, dst, args.start, args.count, caller_base,
+            state,
+            func_name_id,
+            dst,
+            args.start,
+            args.count,
+            caller_base,
         )? {
             state.set_reg(dst, result);
             return Ok(DispatchResult::Continue);
@@ -265,14 +298,18 @@ pub(in super::super) fn handle_call_generic(state: &mut InterpreterState) -> Int
     let caller_base = state.reg_base();
 
     // Push new frame
-    let new_base = state.call_stack.push_frame(func_id, reg_count, return_pc, dst)?;
+    let new_base = state
+        .call_stack
+        .push_frame(func_id, reg_count, return_pc, dst)?;
 
     // Allocate registers for new frame
     state.registers.push_frame(reg_count);
 
     // Copy arguments from caller to callee
     for i in 0..args.count {
-        let arg_value = state.registers.get(caller_base, Reg(args.start.0 + i as u16));
+        let arg_value = state
+            .registers
+            .get(caller_base, Reg(args.start.0 + i as u16));
         state.registers.set(new_base, Reg(i as u16), arg_value);
     }
 
@@ -288,7 +325,9 @@ pub(in super::super) fn handle_call_generic(state: &mut InterpreterState) -> Int
 
 /// Performs vtable-based method dispatch on the receiver's runtime type.
 /// The vtable_slot encodes protocol index (upper 16 bits) and method index (lower 16 bits).
-pub(in super::super) fn handle_call_virtual(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_call_virtual(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let receiver = read_reg(state)?;
     let vtable_slot = read_varint(state)? as u32;
@@ -311,7 +350,9 @@ pub(in super::super) fn handle_call_virtual(state: &mut InterpreterState) -> Int
     let caller_base = state.reg_base();
 
     // Push new frame
-    let new_base = state.call_stack.push_frame(resolved_func_id, reg_count, return_pc, dst)?;
+    let new_base = state
+        .call_stack
+        .push_frame(resolved_func_id, reg_count, return_pc, dst)?;
 
     // Allocate registers for new frame
     state.registers.push_frame(reg_count);
@@ -321,7 +362,9 @@ pub(in super::super) fn handle_call_virtual(state: &mut InterpreterState) -> Int
 
     // Copy remaining arguments from caller to callee
     for i in 0..args.count {
-        let arg_value = state.registers.get(caller_base, Reg(args.start.0 + i as u16));
+        let arg_value = state
+            .registers
+            .get(caller_base, Reg(args.start.0 + i as u16));
         state.registers.set(new_base, Reg(1 + i as u16), arg_value);
     }
 
@@ -348,8 +391,8 @@ fn resolve_vtable_method(
     let type_id = if recv_val.is_ptr() && !recv_val.is_nil() {
         let data_ptr = recv_val.as_ptr::<u8>();
         unsafe {
-            let header_ptr = data_ptr.sub(OBJECT_HEADER_SIZE)
-                as *const super::super::super::heap::ObjectHeader;
+            let header_ptr =
+                data_ptr.sub(OBJECT_HEADER_SIZE) as *const super::super::super::heap::ObjectHeader;
             if header_ptr.is_null() {
                 return Err(InterpreterError::NullPointer);
             }
@@ -364,8 +407,8 @@ fn resolve_vtable_method(
             return Err(InterpreterError::NullPointer);
         }
         unsafe {
-            let header_ptr = data_ptr.sub(OBJECT_HEADER_SIZE)
-                as *const super::super::super::heap::ObjectHeader;
+            let header_ptr =
+                data_ptr.sub(OBJECT_HEADER_SIZE) as *const super::super::super::heap::ObjectHeader;
             (*header_ptr).type_id
         }
     } else if recv_val.is_fat_ref() {
@@ -375,8 +418,8 @@ fn resolve_vtable_method(
             return Err(InterpreterError::NullPointer);
         }
         unsafe {
-            let header_ptr = data_ptr.sub(OBJECT_HEADER_SIZE)
-                as *const super::super::super::heap::ObjectHeader;
+            let header_ptr =
+                data_ptr.sub(OBJECT_HEADER_SIZE) as *const super::super::super::heap::ObjectHeader;
             (*header_ptr).type_id
         }
     } else {
@@ -390,24 +433,24 @@ fn resolve_vtable_method(
         .ok_or(InterpreterError::InvalidType(type_id))?;
 
     // Find the protocol implementation
-    let protocol_impl = type_desc
-        .protocols
-        .get(protocol_index)
-        .ok_or_else(|| InterpreterError::InvalidFieldIndex {
+    let protocol_impl = type_desc.protocols.get(protocol_index).ok_or_else(|| {
+        InterpreterError::InvalidFieldIndex {
             type_id,
             field: protocol_index as u16,
             num_fields: type_desc.protocols.len() as u16,
-        })?;
+        }
+    })?;
 
     // Get the method from the protocol
-    let func_id_raw = *protocol_impl
-        .methods
-        .get(method_index)
-        .ok_or(InterpreterError::InvalidFieldIndex {
-            type_id,
-            field: method_index as u16,
-            num_fields: protocol_impl.methods.len() as u16,
-        })?;
+    let func_id_raw =
+        *protocol_impl
+            .methods
+            .get(method_index)
+            .ok_or(InterpreterError::InvalidFieldIndex {
+                type_id,
+                field: method_index as u16,
+                num_fields: protocol_impl.methods.len() as u16,
+            })?;
 
     Ok(FunctionId(func_id_raw))
 }
@@ -433,7 +476,9 @@ fn get_builtin_type_id(val: Value) -> TypeId {
 ///
 
 /// Uses a cache slot to speed up repeated calls to the same target.
-pub(in super::super) fn handle_call_cached(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_call_cached(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let func_id = FunctionId(read_varint(state)? as u32);
     let _cache_slot = read_u8(state)?; // Cache slot for PIC (optimization, ignored in interpreter)
@@ -452,7 +497,12 @@ pub(in super::super) fn handle_call_cached(state: &mut InterpreterState) -> Inte
     if bytecode_length == 0 {
         let caller_base = state.reg_base();
         if let Some(result) = try_dispatch_intrinsic_by_name(
-            state, func_name_id, dst, args.start, args.count, caller_base,
+            state,
+            func_name_id,
+            dst,
+            args.start,
+            args.count,
+            caller_base,
         )? {
             state.set_reg(dst, result);
             return Ok(DispatchResult::Continue);
@@ -463,14 +513,18 @@ pub(in super::super) fn handle_call_cached(state: &mut InterpreterState) -> Inte
     let caller_base = state.reg_base();
 
     // Push new frame
-    let new_base = state.call_stack.push_frame(func_id, reg_count, return_pc, dst)?;
+    let new_base = state
+        .call_stack
+        .push_frame(func_id, reg_count, return_pc, dst)?;
 
     // Allocate registers for new frame
     state.registers.push_frame(reg_count);
 
     // Copy arguments from caller to callee
     for i in 0..args.count {
-        let arg_value = state.registers.get(caller_base, Reg(args.start.0 + i as u16));
+        let arg_value = state
+            .registers
+            .get(caller_base, Reg(args.start.0 + i as u16));
         state.registers.set(new_base, Reg(i as u16), arg_value);
     }
 
@@ -482,7 +536,9 @@ pub(in super::super) fn handle_call_cached(state: &mut InterpreterState) -> Inte
 }
 
 /// Call closure: `dst = closure(args...)`
-pub(in super::super) fn handle_call_closure(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_call_closure(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let closure_reg = read_reg(state)?;
     let args_start = read_reg(state)?;
@@ -530,13 +586,16 @@ pub(in super::super) fn handle_call_closure(state: &mut InterpreterState) -> Int
     unsafe {
         let captures_offset = header_offset + 8; // after func_id + capture_count
         for i in 0..capture_count {
-            let cap_ptr = base_ptr.add(captures_offset + i * std::mem::size_of::<Value>()) as *const Value;
+            let cap_ptr =
+                base_ptr.add(captures_offset + i * std::mem::size_of::<Value>()) as *const Value;
             capture_values.push(std::ptr::read(cap_ptr));
         }
     }
 
     // Push new frame
-    let new_base = state.call_stack.push_frame(func_id, reg_count, return_pc, dst)?;
+    let new_base = state
+        .call_stack
+        .push_frame(func_id, reg_count, return_pc, dst)?;
     state.registers.push_frame(reg_count);
 
     // Copy captured values first (they go before parameters in the closure's register layout)
@@ -546,7 +605,9 @@ pub(in super::super) fn handle_call_closure(state: &mut InterpreterState) -> Int
 
     // Copy arguments after captures
     for (i, val) in arg_values.into_iter().enumerate() {
-        state.registers.set(new_base, Reg((capture_count + i) as u16), val);
+        state
+            .registers
+            .set(new_base, Reg((capture_count + i) as u16), val);
     }
 
     // Jump to function start
@@ -558,7 +619,9 @@ pub(in super::super) fn handle_call_closure(state: &mut InterpreterState) -> Int
 ///
 
 /// Format: `[0x5C] [func_id:varint] [args:reg_range]`
-pub(in super::super) fn handle_tail_call_op(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_tail_call_op(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let func_id = FunctionId(read_varint(state)? as u32);
     let args = read_reg_range(state)?;
 
@@ -596,7 +659,9 @@ pub(in super::super) fn handle_tail_call_op(state: &mut InterpreterState) -> Int
 
 /// Create closure: `dst = closure(fn_id, captures...)`
 /// Encoding: opcode + dst:reg + func_id:varint + captures:reg_vec
-pub(in super::super) fn handle_new_closure(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_new_closure(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let func_id = read_varint(state)? as u32;
     let capture_count = read_varint(state)? as usize;
@@ -611,19 +676,15 @@ pub(in super::super) fn handle_new_closure(state: &mut InterpreterState) -> Inte
     let data_size = 8 + capture_count * std::mem::size_of::<Value>();
     let type_id = TypeId(0xC000); // Closure type ID
 
-    let obj = state.heap.alloc_with_init(
-        type_id,
-        data_size,
-        |data| {
-            let ptr = data.as_mut_ptr();
-            unsafe {
-                // Write func_id
-                *(ptr as *mut u32) = func_id;
-                // Write capture count
-                *(ptr.add(4) as *mut u32) = capture_count as u32;
-            }
-        },
-    )?;
+    let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
+        let ptr = data.as_mut_ptr();
+        unsafe {
+            // Write func_id
+            *(ptr as *mut u32) = func_id;
+            // Write capture count
+            *(ptr.add(4) as *mut u32) = capture_count as u32;
+        }
+    })?;
     state.record_allocation();
 
     // Write captured values
@@ -632,7 +693,8 @@ pub(in super::super) fn handle_new_closure(state: &mut InterpreterState) -> Inte
     for (i, cap_reg) in capture_regs.iter().enumerate() {
         let val = state.get_reg(*cap_reg);
         unsafe {
-            let cap_ptr = base_ptr.add(captures_offset + i * std::mem::size_of::<Value>()) as *mut Value;
+            let cap_ptr =
+                base_ptr.add(captures_offset + i * std::mem::size_of::<Value>()) as *mut Value;
             std::ptr::write(cap_ptr, val);
         }
     }
@@ -683,19 +745,17 @@ fn try_dispatch_intrinsic_by_name(
     // Helper closures to read argument values from the caller's frame
     let get_arg = |state: &InterpreterState, idx: u8| -> Value {
         if idx < arg_count {
-            state.registers.get(caller_base, Reg(args_start.0 + idx as u16))
+            state
+                .registers
+                .get(caller_base, Reg(args_start.0 + idx as u16))
         } else {
             Value::from_i64(0)
         }
     };
 
-    let get_f64_arg = |state: &InterpreterState, idx: u8| -> f64 {
-        get_arg(state, idx).as_f64()
-    };
+    let get_f64_arg = |state: &InterpreterState, idx: u8| -> f64 { get_arg(state, idx).as_f64() };
 
-    let get_i64_arg = |state: &InterpreterState, idx: u8| -> i64 {
-        get_arg(state, idx).as_i64()
-    };
+    let get_i64_arg = |state: &InterpreterState, idx: u8| -> i64 { get_arg(state, idx).as_i64() };
 
     // Normalize function name: strip common prefixes and qualifications
     // e.g., "math.sqrt" -> "sqrt", "elementary.sqrt" -> "sqrt",
@@ -1072,20 +1132,26 @@ fn try_dispatch_intrinsic_by_name(
         // ================================================================
         // Saturating Arithmetic
         // ================================================================
-        "verum_saturating_add" | "verum_saturating_add_i64"
-        | "verum_saturating_add_i128" | "saturating_add" => {
+        "verum_saturating_add"
+        | "verum_saturating_add_i64"
+        | "verum_saturating_add_i128"
+        | "saturating_add" => {
             let a = get_i64_arg(state, 0);
             let b = get_i64_arg(state, 1);
             Ok(Some(Value::from_i64(a.saturating_add(b))))
         }
-        "verum_saturating_sub" | "verum_saturating_sub_i64"
-        | "verum_saturating_sub_i128" | "saturating_sub" => {
+        "verum_saturating_sub"
+        | "verum_saturating_sub_i64"
+        | "verum_saturating_sub_i128"
+        | "saturating_sub" => {
             let a = get_i64_arg(state, 0);
             let b = get_i64_arg(state, 1);
             Ok(Some(Value::from_i64(a.saturating_sub(b))))
         }
-        "verum_saturating_mul" | "verum_saturating_mul_i64"
-        | "verum_saturating_mul_i128" | "saturating_mul" => {
+        "verum_saturating_mul"
+        | "verum_saturating_mul_i64"
+        | "verum_saturating_mul_i128"
+        | "saturating_mul" => {
             let a = get_i64_arg(state, 0);
             let b = get_i64_arg(state, 1);
             Ok(Some(Value::from_i64(a.saturating_mul(b))))
@@ -1100,19 +1166,21 @@ fn try_dispatch_intrinsic_by_name(
                 .unwrap_or(1);
             Ok(Some(Value::from_i64(cpus)))
         }
-        "abort" | "verum_abort" => {
-            Err(InterpreterError::Panic { message: "abort() called".to_string() })
-        }
+        "abort" | "verum_abort" => Err(InterpreterError::Panic {
+            message: "abort() called".to_string(),
+        }),
 
         // ================================================================
         // CBGR Intrinsics (no-ops in interpreter)
         // ================================================================
-        "verum_cbgr_advance_epoch" | "cbgr_advance_epoch"
-        | "verum_cbgr_new_generation" | "verum_cbgr_invalidate"
-        | "verum_cbgr_get_generation" | "verum_cbgr_advance_generation"
-        | "verum_cbgr_get_epoch_caps" | "verum_cbgr_get_stats" => {
-            Ok(Some(Value::from_i64(0)))
-        }
+        "verum_cbgr_advance_epoch"
+        | "cbgr_advance_epoch"
+        | "verum_cbgr_new_generation"
+        | "verum_cbgr_invalidate"
+        | "verum_cbgr_get_generation"
+        | "verum_cbgr_advance_generation"
+        | "verum_cbgr_get_epoch_caps"
+        | "verum_cbgr_get_stats" => Ok(Some(Value::from_i64(0))),
 
         // ================================================================
         // Tier / Async Stubs (no-ops in interpreter)
@@ -1125,9 +1193,7 @@ fn try_dispatch_intrinsic_by_name(
             // Interpreter is always tier 0
             Ok(Some(Value::from_i64(0)))
         }
-        "is_interpreted" => {
-            Ok(Some(Value::from_bool(true)))
-        }
+        "is_interpreted" => Ok(Some(Value::from_bool(true))),
         "verum_future_poll_sync" | "future_poll_sync" => {
             // Return false/nil: async not supported in tier 0
             Ok(Some(Value::from_bool(false)))
@@ -1174,15 +1240,11 @@ fn try_dispatch_intrinsic_by_name(
             Ok(Some(Value::nil()))
         }
         "__file_write_string_raw" => Ok(Some(Value::from_i64(-1))),
-        "__file_open_raw" | "__file_close_raw" | "__file_size_raw" |
-        "__file_seek_raw" | "__file_delete_raw" | "__mkdir_raw" => {
-            Ok(Some(Value::from_i64(0)))
-        }
+        "__file_open_raw" | "__file_close_raw" | "__file_size_raw" | "__file_seek_raw"
+        | "__file_delete_raw" | "__mkdir_raw" => Ok(Some(Value::from_i64(0))),
 
         // --- Command-line Arguments ---
-        "__args_count_raw" => {
-            Ok(Some(Value::from_i64(std::env::args().count() as i64)))
-        }
+        "__args_count_raw" => Ok(Some(Value::from_i64(std::env::args().count() as i64))),
         "__arg_raw" => {
             let idx = get_i64_arg(state, 0) as usize;
             match std::env::args().nth(idx) {
@@ -1220,37 +1282,43 @@ fn try_dispatch_intrinsic_by_name(
         }
 
         // --- Synchronization (single-threaded interpreter stubs) ---
-        "__mutex_new_raw" => Ok(Some(Value::from_i64(1))),  // fake handle
+        "__mutex_new_raw" => Ok(Some(Value::from_i64(1))), // fake handle
         "__mutex_lock_raw" | "__mutex_unlock_raw" | "__mutex_trylock_raw" => {
-            Ok(Some(Value::from_i64(0)))  // always succeed
+            Ok(Some(Value::from_i64(0))) // always succeed
         }
         "__cond_new_raw" => Ok(Some(Value::from_i64(1))),
         "__cond_wait_raw" | "__cond_timedwait_raw" => Ok(Some(Value::from_i64(0))),
         "__cond_signal_raw" | "__cond_broadcast_raw" => Ok(Some(Value::from_i64(0))),
         "__waitgroup_new_raw" => Ok(Some(Value::from_i64(1))),
-        "__waitgroup_add_raw" | "__waitgroup_done_raw" | "__waitgroup_wait_raw" |
-        "__waitgroup_destroy_raw" => Ok(Some(Value::from_i64(0))),
+        "__waitgroup_add_raw"
+        | "__waitgroup_done_raw"
+        | "__waitgroup_wait_raw"
+        | "__waitgroup_destroy_raw" => Ok(Some(Value::from_i64(0))),
         "__gen_close_raw" => Ok(Some(Value::from_i64(0))),
 
         // --- IO Engine (interpreter: no-op, returns fake handles) ---
         "__io_engine_new_raw" => Ok(Some(Value::from_i64(1))),
-        "__io_engine_destroy_raw" | "__io_submit_raw" | "__io_remove_raw" |
-        "__io_modify_raw" => Ok(Some(Value::from_i64(0))),
-        "__io_poll_raw" => Ok(Some(Value::from_i64(0))),  // no events
+        "__io_engine_destroy_raw" | "__io_submit_raw" | "__io_remove_raw" | "__io_modify_raw" => {
+            Ok(Some(Value::from_i64(0)))
+        }
+        "__io_poll_raw" => Ok(Some(Value::from_i64(0))), // no events
 
         // --- Thread Pool (interpreter: single-threaded execution) ---
         "__pool_create_raw" => Ok(Some(Value::from_i64(1))),
-        "__pool_submit_raw" | "__pool_await_raw" | "__pool_destroy_raw" |
-        "__pool_global_submit_raw" => Ok(Some(Value::from_i64(0))),
+        "__pool_submit_raw"
+        | "__pool_await_raw"
+        | "__pool_destroy_raw"
+        | "__pool_global_submit_raw" => Ok(Some(Value::from_i64(0))),
 
         // --- Socket Options ---
-        "__socket_set_nonblocking_raw" | "__socket_set_blocking_raw" |
-        "__socket_set_reuseaddr_raw" | "__socket_set_nodelay_raw" |
-        "__socket_set_keepalive_raw" | "__socket_get_error_raw" => {
-            Ok(Some(Value::from_i64(0)))
-        }
+        "__socket_set_nonblocking_raw"
+        | "__socket_set_blocking_raw"
+        | "__socket_set_reuseaddr_raw"
+        | "__socket_set_nodelay_raw"
+        | "__socket_set_keepalive_raw"
+        | "__socket_get_error_raw" => Ok(Some(Value::from_i64(0))),
         "__async_accept_raw" | "__async_read_raw" | "__async_write_raw" => {
-            Ok(Some(Value::from_i64(-1)))  // not available in interpreter
+            Ok(Some(Value::from_i64(-1))) // not available in interpreter
         }
 
         // --- TCP Networking (Tier-0 std-net backed; see handlers/net_runtime.rs) ---
@@ -1260,19 +1328,24 @@ fn try_dispatch_intrinsic_by_name(
         }
         "__tcp_accept_raw" | "tcp_accept" => {
             let listen_fd = get_i64_arg(state, 0);
-            Ok(Some(Value::from_i64(super::net_runtime::tcp_accept(listen_fd))))
+            Ok(Some(Value::from_i64(super::net_runtime::tcp_accept(
+                listen_fd,
+            ))))
         }
         "__tcp_connect_raw" | "tcp_connect" => {
             let host = super::string_helpers::resolve_string_value(&get_arg(state, 0), state);
             let port = get_i64_arg(state, 1);
-            Ok(Some(Value::from_i64(super::net_runtime::tcp_connect(&host, port))))
+            Ok(Some(Value::from_i64(super::net_runtime::tcp_connect(
+                &host, port,
+            ))))
         }
         "__tcp_send_raw" | "tcp_send" => {
             let fd = get_i64_arg(state, 0);
             let data = super::string_helpers::resolve_string_value(&get_arg(state, 1), state);
-            Ok(Some(Value::from_i64(
-                super::net_runtime::tcp_send(fd, data.as_bytes()),
-            )))
+            Ok(Some(Value::from_i64(super::net_runtime::tcp_send(
+                fd,
+                data.as_bytes(),
+            ))))
         }
         "__tcp_recv_raw" | "tcp_recv" => {
             let fd = get_i64_arg(state, 0);
@@ -1294,16 +1367,18 @@ fn try_dispatch_intrinsic_by_name(
             let port = get_i64_arg(state, 1);
             let backlog = get_i64_arg(state, 2);
             let flags = get_i64_arg(state, 3);
-            Ok(Some(Value::from_i64(
-                super::net_runtime::tcp_listen_v2(&host, port, backlog, flags),
-            )))
+            Ok(Some(Value::from_i64(super::net_runtime::tcp_listen_v2(
+                &host, port, backlog, flags,
+            ))))
         }
         // Companion to `__tcp_listen_v2_raw`: retrieves the OS-assigned
         // local port after `port=0` binds. Also works for connected
         // streams and UDP sockets.
         "__tcp_local_port_raw" | "tcp_local_port" => {
             let fd = get_i64_arg(state, 0);
-            Ok(Some(Value::from_i64(super::net_runtime::tcp_local_port(fd))))
+            Ok(Some(Value::from_i64(super::net_runtime::tcp_local_port(
+                fd,
+            ))))
         }
         "__udp_bind_raw" | "udp_bind" => {
             let port = get_i64_arg(state, 0);
@@ -1314,9 +1389,12 @@ fn try_dispatch_intrinsic_by_name(
             let data = super::string_helpers::resolve_string_value(&get_arg(state, 1), state);
             let host = super::string_helpers::resolve_string_value(&get_arg(state, 2), state);
             let port = get_i64_arg(state, 3);
-            Ok(Some(Value::from_i64(
-                super::net_runtime::udp_send(fd, data.as_bytes(), &host, port),
-            )))
+            Ok(Some(Value::from_i64(super::net_runtime::udp_send(
+                fd,
+                data.as_bytes(),
+                &host,
+                port,
+            ))))
         }
         "__udp_recv_raw" | "udp_recv" => {
             let fd = get_i64_arg(state, 0);
@@ -1399,22 +1477,27 @@ fn try_dispatch_intrinsic_by_name(
         // Memory-protection and advice syscalls: in the interpreter all
         // pages are host-allocated rwx by default, so these are no-ops
         // that must return 0 so the stdlib doesn't error.
-        "mprotect" | "madvise" | "mlock" | "munlock" | "msync"
-            | "madvise_willneed" | "madvise_dontneed" | "madvise_free"
-            | "madvise_free_reusable" | "madvise_free_reuse" => {
-            Ok(Some(Value::from_i64(0)))
-        }
+        "mprotect"
+        | "madvise"
+        | "mlock"
+        | "munlock"
+        | "msync"
+        | "madvise_willneed"
+        | "madvise_dontneed"
+        | "madvise_free"
+        | "madvise_free_reusable"
+        | "madvise_free_reuse" => Ok(Some(Value::from_i64(0))),
 
         // --- Process Management ---
         // Process bridge via core.sys.process_native — these legacy stubs
         // are kept for backwards-compat with bytecode that still references
         // the old C-runtime entrypoint names. Once all callers have been
         // moved to the native path they can be removed entirely.
-        "__process_spawn_raw" | "__process_exec_raw"
-            | "__process_spawn_full_raw"
-            | "__process_wait_raw" | "__process_kill_raw" => {
-            Ok(Some(Value::from_i64(-1)))
-        }
+        "__process_spawn_raw"
+        | "__process_exec_raw"
+        | "__process_spawn_full_raw"
+        | "__process_wait_raw"
+        | "__process_kill_raw" => Ok(Some(Value::from_i64(-1))),
         "__fd_read_all_raw" | "__fd_read_chunk_raw" => Ok(Some(Value::from_i64(0))),
         "__fd_write_all_raw" => Ok(Some(Value::from_i64(-1))),
         "__fd_close_raw" | "__fd_close_raw_buf" => Ok(Some(Value::from_i64(0))),
@@ -1427,39 +1510,90 @@ fn try_dispatch_intrinsic_by_name(
         "__termios_restore_echo" | "__windows_restore_echo" => Ok(Some(Value::from_i64(0))),
 
         // --- Metal GPU (interpreter: not available) ---
-        "__metal_get_device" => Ok(Some(Value::from_i64(0))),  // no GPU
-        "__metal_device_name" | "__metal_max_memory" |
-        "__metal_max_threads_per_threadgroup" | "__metal_gpu_core_count" => {
-            Ok(Some(Value::from_i64(0)))
-        }
-        "__metal_alloc" | "__metal_alloc_with_data" | "__metal_buffer_contents" |
-        "__metal_buffer_length" | "__metal_compile_shader" | "__metal_get_pipeline" => {
-            Ok(Some(Value::from_i64(0)))
-        }
-        "__metal_free" | "__metal_wait" | "__metal_dispatch_1d" |
-        "__metal_dispatch_2d" | "__metal_dispatch_async" => {
-            Ok(Some(Value::from_i64(0)))
-        }
-        "__metal_execution_time_ns" | "__metal_vector_add_f32" |
-        "__metal_sgemm" | "__metal_benchmark" => {
-            Ok(Some(Value::from_i64(0)))
-        }
+        "__metal_get_device" => Ok(Some(Value::from_i64(0))), // no GPU
+        "__metal_device_name"
+        | "__metal_max_memory"
+        | "__metal_max_threads_per_threadgroup"
+        | "__metal_gpu_core_count" => Ok(Some(Value::from_i64(0))),
+        "__metal_alloc"
+        | "__metal_alloc_with_data"
+        | "__metal_buffer_contents"
+        | "__metal_buffer_length"
+        | "__metal_compile_shader"
+        | "__metal_get_pipeline" => Ok(Some(Value::from_i64(0))),
+        "__metal_free"
+        | "__metal_wait"
+        | "__metal_dispatch_1d"
+        | "__metal_dispatch_2d"
+        | "__metal_dispatch_async" => Ok(Some(Value::from_i64(0))),
+        "__metal_execution_time_ns"
+        | "__metal_vector_add_f32"
+        | "__metal_sgemm"
+        | "__metal_benchmark" => Ok(Some(Value::from_i64(0))),
 
         // --- LLVM Math Intrinsics ---
-        "__llvm_sqrt" => { let x = get_f64_arg(state, 0); Ok(Some(Value::from_f64(x.sqrt()))) }
-        "__llvm_sin" => { let x = get_f64_arg(state, 0); Ok(Some(Value::from_f64(x.sin()))) }
-        "__llvm_cos" => { let x = get_f64_arg(state, 0); Ok(Some(Value::from_f64(x.cos()))) }
-        "__llvm_exp" => { let x = get_f64_arg(state, 0); Ok(Some(Value::from_f64(x.exp()))) }
-        "__llvm_log" => { let x = get_f64_arg(state, 0); Ok(Some(Value::from_f64(x.ln()))) }
-        "__llvm_pow" => { let x = get_f64_arg(state, 0); let y = get_f64_arg(state, 1); Ok(Some(Value::from_f64(x.powf(y)))) }
-        "__llvm_fabs" => { let x = get_f64_arg(state, 0); Ok(Some(Value::from_f64(x.abs()))) }
-        "__llvm_floor" => { let x = get_f64_arg(state, 0); Ok(Some(Value::from_f64(x.floor()))) }
-        "__llvm_ceil" => { let x = get_f64_arg(state, 0); Ok(Some(Value::from_f64(x.ceil()))) }
-        "__llvm_round" => { let x = get_f64_arg(state, 0); Ok(Some(Value::from_f64(x.round()))) }
-        "__llvm_copysign" => { let x = get_f64_arg(state, 0); let y = get_f64_arg(state, 1); Ok(Some(Value::from_f64(x.copysign(y)))) }
-        "__llvm_minnum" => { let x = get_f64_arg(state, 0); let y = get_f64_arg(state, 1); Ok(Some(Value::from_f64(x.min(y)))) }
-        "__llvm_maxnum" => { let x = get_f64_arg(state, 0); let y = get_f64_arg(state, 1); Ok(Some(Value::from_f64(x.max(y)))) }
-        "__llvm_fma" => { let a = get_f64_arg(state, 0); let b = get_f64_arg(state, 1); let c = get_f64_arg(state, 2); Ok(Some(Value::from_f64(a.mul_add(b, c)))) }
+        "__llvm_sqrt" => {
+            let x = get_f64_arg(state, 0);
+            Ok(Some(Value::from_f64(x.sqrt())))
+        }
+        "__llvm_sin" => {
+            let x = get_f64_arg(state, 0);
+            Ok(Some(Value::from_f64(x.sin())))
+        }
+        "__llvm_cos" => {
+            let x = get_f64_arg(state, 0);
+            Ok(Some(Value::from_f64(x.cos())))
+        }
+        "__llvm_exp" => {
+            let x = get_f64_arg(state, 0);
+            Ok(Some(Value::from_f64(x.exp())))
+        }
+        "__llvm_log" => {
+            let x = get_f64_arg(state, 0);
+            Ok(Some(Value::from_f64(x.ln())))
+        }
+        "__llvm_pow" => {
+            let x = get_f64_arg(state, 0);
+            let y = get_f64_arg(state, 1);
+            Ok(Some(Value::from_f64(x.powf(y))))
+        }
+        "__llvm_fabs" => {
+            let x = get_f64_arg(state, 0);
+            Ok(Some(Value::from_f64(x.abs())))
+        }
+        "__llvm_floor" => {
+            let x = get_f64_arg(state, 0);
+            Ok(Some(Value::from_f64(x.floor())))
+        }
+        "__llvm_ceil" => {
+            let x = get_f64_arg(state, 0);
+            Ok(Some(Value::from_f64(x.ceil())))
+        }
+        "__llvm_round" => {
+            let x = get_f64_arg(state, 0);
+            Ok(Some(Value::from_f64(x.round())))
+        }
+        "__llvm_copysign" => {
+            let x = get_f64_arg(state, 0);
+            let y = get_f64_arg(state, 1);
+            Ok(Some(Value::from_f64(x.copysign(y))))
+        }
+        "__llvm_minnum" => {
+            let x = get_f64_arg(state, 0);
+            let y = get_f64_arg(state, 1);
+            Ok(Some(Value::from_f64(x.min(y))))
+        }
+        "__llvm_maxnum" => {
+            let x = get_f64_arg(state, 0);
+            let y = get_f64_arg(state, 1);
+            Ok(Some(Value::from_f64(x.max(y))))
+        }
+        "__llvm_fma" => {
+            let a = get_f64_arg(state, 0);
+            let b = get_f64_arg(state, 1);
+            let c = get_f64_arg(state, 2);
+            Ok(Some(Value::from_f64(a.mul_add(b, c))))
+        }
 
         // --- Memory Operations ---
         "__llvm_memcpy" | "__llvm_memmove" => {
@@ -1499,7 +1633,9 @@ fn try_dispatch_intrinsic_by_name(
             let addr = get_i64_arg(state, 0);
             let val = get_i64_arg(state, 1) as u8;
             if addr != 0 {
-                unsafe { *(addr as *mut u8) = val; }
+                unsafe {
+                    *(addr as *mut u8) = val;
+                }
             }
             Ok(Some(Value::from_i64(0)))
         }
@@ -1516,7 +1652,9 @@ fn try_dispatch_intrinsic_by_name(
             let addr = get_i64_arg(state, 0);
             let val = get_i64_arg(state, 1);
             if addr != 0 {
-                unsafe { *(addr as *mut i64) = val; }
+                unsafe {
+                    *(addr as *mut i64) = val;
+                }
             }
             Ok(Some(Value::from_i64(0)))
         }
@@ -1533,7 +1671,9 @@ fn try_dispatch_intrinsic_by_name(
             let addr = get_i64_arg(state, 0);
             let val = get_i64_arg(state, 1) as i32;
             if addr != 0 {
-                unsafe { *(addr as *mut i32) = val; }
+                unsafe {
+                    *(addr as *mut i32) = val;
+                }
             }
             Ok(Some(Value::from_i64(0)))
         }
@@ -1546,7 +1686,13 @@ fn try_dispatch_intrinsic_by_name(
             let suffix = name.rsplit('.').next().unwrap_or(name);
             if suffix != name {
                 // Recurse with just the suffix
-                return try_dispatch_intrinsic_by_suffix(state, suffix, args_start, arg_count, caller_base);
+                return try_dispatch_intrinsic_by_suffix(
+                    state,
+                    suffix,
+                    args_start,
+                    arg_count,
+                    caller_base,
+                );
             }
             Ok(None)
         }
@@ -1564,7 +1710,10 @@ fn try_dispatch_intrinsic_by_suffix(
 ) -> InterpreterResult<Option<Value>> {
     let get_f64_arg = |state: &InterpreterState, idx: u8| -> f64 {
         if idx < arg_count {
-            state.registers.get(caller_base, Reg(args_start.0 + idx as u16)).as_f64()
+            state
+                .registers
+                .get(caller_base, Reg(args_start.0 + idx as u16))
+                .as_f64()
         } else {
             0.0
         }
@@ -1572,7 +1721,10 @@ fn try_dispatch_intrinsic_by_suffix(
 
     let get_i64_arg = |state: &InterpreterState, idx: u8| -> i64 {
         if idx < arg_count {
-            state.registers.get(caller_base, Reg(args_start.0 + idx as u16)).as_i64()
+            state
+                .registers
+                .get(caller_base, Reg(args_start.0 + idx as u16))
+                .as_i64()
         } else {
             0
         }
@@ -1607,22 +1759,42 @@ fn try_dispatch_intrinsic_by_suffix(
         "trunc" => Ok(Some(Value::from_f64(get_f64_arg(state, 0).trunc()))),
         "fabs" | "abs" => Ok(Some(Value::from_f64(get_f64_arg(state, 0).abs()))),
         // Binary F64 math
-        "atan2" => Ok(Some(Value::from_f64(get_f64_arg(state, 0).atan2(get_f64_arg(state, 1))))),
-        "pow" => Ok(Some(Value::from_f64(get_f64_arg(state, 0).powf(get_f64_arg(state, 1))))),
-        "hypot" => Ok(Some(Value::from_f64(get_f64_arg(state, 0).hypot(get_f64_arg(state, 1))))),
-        "copysign" => Ok(Some(Value::from_f64(get_f64_arg(state, 0).copysign(get_f64_arg(state, 1))))),
-        "minnum" => Ok(Some(Value::from_f64(get_f64_arg(state, 0).min(get_f64_arg(state, 1))))),
-        "maxnum" => Ok(Some(Value::from_f64(get_f64_arg(state, 0).max(get_f64_arg(state, 1))))),
+        "atan2" => Ok(Some(Value::from_f64(
+            get_f64_arg(state, 0).atan2(get_f64_arg(state, 1)),
+        ))),
+        "pow" => Ok(Some(Value::from_f64(
+            get_f64_arg(state, 0).powf(get_f64_arg(state, 1)),
+        ))),
+        "hypot" => Ok(Some(Value::from_f64(
+            get_f64_arg(state, 0).hypot(get_f64_arg(state, 1)),
+        ))),
+        "copysign" => Ok(Some(Value::from_f64(
+            get_f64_arg(state, 0).copysign(get_f64_arg(state, 1)),
+        ))),
+        "minnum" => Ok(Some(Value::from_f64(
+            get_f64_arg(state, 0).min(get_f64_arg(state, 1)),
+        ))),
+        "maxnum" => Ok(Some(Value::from_f64(
+            get_f64_arg(state, 0).max(get_f64_arg(state, 1)),
+        ))),
         // Ternary
-        "fma" => Ok(Some(Value::from_f64(get_f64_arg(state, 0).mul_add(get_f64_arg(state, 1), get_f64_arg(state, 2))))),
+        "fma" => Ok(Some(Value::from_f64(
+            get_f64_arg(state, 0).mul_add(get_f64_arg(state, 1), get_f64_arg(state, 2)),
+        ))),
         // Classification
         "is_nan" => Ok(Some(Value::from_bool(get_f64_arg(state, 0).is_nan()))),
         "is_infinite" | "is_inf" => Ok(Some(Value::from_bool(get_f64_arg(state, 0).is_infinite()))),
         "is_finite" => Ok(Some(Value::from_bool(get_f64_arg(state, 0).is_finite()))),
         // Saturating
-        "saturating_add" => Ok(Some(Value::from_i64(get_i64_arg(state, 0).saturating_add(get_i64_arg(state, 1))))),
-        "saturating_sub" => Ok(Some(Value::from_i64(get_i64_arg(state, 0).saturating_sub(get_i64_arg(state, 1))))),
-        "saturating_mul" => Ok(Some(Value::from_i64(get_i64_arg(state, 0).saturating_mul(get_i64_arg(state, 1))))),
+        "saturating_add" => Ok(Some(Value::from_i64(
+            get_i64_arg(state, 0).saturating_add(get_i64_arg(state, 1)),
+        ))),
+        "saturating_sub" => Ok(Some(Value::from_i64(
+            get_i64_arg(state, 0).saturating_sub(get_i64_arg(state, 1)),
+        ))),
+        "saturating_mul" => Ok(Some(Value::from_i64(
+            get_i64_arg(state, 0).saturating_mul(get_i64_arg(state, 1)),
+        ))),
         // Not recognized
         _ => Ok(None),
     }

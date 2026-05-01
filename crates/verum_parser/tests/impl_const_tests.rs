@@ -39,13 +39,14 @@ fn parse_impl_items(source: &str) -> Vec<ImplItemKind> {
     match parser.parse_module(lexer, file_id) {
         Ok(module) => {
             if let Some(item) = module.items.first()
-                && let ItemKind::Impl(impl_decl) = &item.kind {
-                    return impl_decl
-                        .items
-                        .iter()
-                        .map(|item| item.kind.clone())
-                        .collect();
-                }
+                && let ItemKind::Impl(impl_decl) = &item.kind
+            {
+                return impl_decl
+                    .items
+                    .iter()
+                    .map(|item| item.kind.clone())
+                    .collect();
+            }
             vec![]
         }
         Err(_) => vec![],

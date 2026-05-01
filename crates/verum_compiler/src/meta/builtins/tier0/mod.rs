@@ -24,8 +24,8 @@
 // Re-export from the main modules (for now, to maintain backward compatibility)
 // These can be moved here gradually as the codebase migrates
 pub use super::arithmetic;
-pub use super::collections;
 pub use super::code_gen;
+pub use super::collections;
 
 use super::context_requirements::BuiltinRegistry;
 

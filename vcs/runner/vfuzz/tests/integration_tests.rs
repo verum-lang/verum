@@ -12,49 +12,43 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use rand::prelude::*;
 use rand::SeedableRng;
+use rand::prelude::*;
 use rand_chacha::ChaCha8Rng;
 use tempfile::tempdir;
 
 use verum_vfuzz::{
+    FuzzConfig, FuzzEngine,
     campaign::{
-        CampaignConfig, CampaignType, TargetComponent,
-        SeedCorpus, SeedCorpusConfig, SeedSource,
-        EnergyScheduler, EnergyConfig, PowerSchedule,
-        ParallelCoordinator, ParallelConfig, WorkItem, WorkType,
-        CampaignCheckpoint, CampaignState, CampaignPhase,
+        CampaignCheckpoint, CampaignConfig, CampaignPhase, CampaignState, CampaignType,
+        EnergyConfig, EnergyScheduler, ParallelConfig, ParallelCoordinator, PowerSchedule,
+        SeedCorpus, SeedCorpusConfig, SeedSource, TargetComponent, WorkItem, WorkType,
     },
     corpus::CorpusManager,
     coverage::{
-        CoverageTracker, GlobalCoverage,
-        BranchCoverage, BranchId, AstNodeCoverage, ErrorCodeCoverage, ErrorSeverity,
-        SmtTheoryCoverage, SmtTheory, UnifiedCoverage,
+        AstNodeCoverage, BranchCoverage, BranchId, CoverageTracker, ErrorCodeCoverage,
+        ErrorSeverity, GlobalCoverage, SmtTheory, SmtTheoryCoverage, UnifiedCoverage,
     },
     generator::{Generator, GeneratorConfig, GeneratorKind},
     generators::{GeneratorStrategy, UnifiedGenerator},
     mutator::{Mutator, MutatorConfig},
     oracle::{
-        CompareConfig, DifferentialOracle, ExecutionTier, SerializedValue,
-        TierResult, CrashOracle, MemorySafetyOracle, TypeSafetyOracle, SmtOracle,
-        TimeoutOracle, TimeoutPhase, OracleRunner, OracleExecutionResult,
+        CompareConfig, CrashOracle, DifferentialOracle, ExecutionTier, MemorySafetyOracle,
+        OracleExecutionResult, OracleRunner, SerializedValue, SmtOracle, TierResult, TimeoutOracle,
+        TimeoutPhase, TypeSafetyOracle,
     },
     property::{
-        PropertyRunner, ExtendedPropertyRunner,
-        IdempotencyProperties, RoundtripProperties, CommutativityProperties,
-        AssociativityProperties, PropertyCategory,
+        AssociativityProperties, CommutativityProperties, ExtendedPropertyRunner,
+        IdempotencyProperties, PropertyCategory, PropertyRunner, RoundtripProperties,
     },
     shrink::{
-        ShrinkConfig, ShrinkResult, ShrinkStrategy, Shrinker,
-        DeltaDebugger, DeltaDebugConfig, DeltaUnit,
-        HierarchicalShrinker, HierarchicalConfig, AstAwareShrinker,
+        AstAwareShrinker, DeltaDebugConfig, DeltaDebugger, DeltaUnit, HierarchicalConfig,
+        HierarchicalShrinker, ShrinkConfig, ShrinkResult, ShrinkStrategy, Shrinker,
     },
     triage::{
-        CrashClass, CrashSignature, CrashTriager,
-        CrashDeduplicator, SeverityClassifier, Severity,
-        RegressionDetector, AutoCategorizer,
+        AutoCategorizer, CrashClass, CrashDeduplicator, CrashSignature, CrashTriager,
+        RegressionDetector, Severity, SeverityClassifier,
     },
-    FuzzConfig, FuzzEngine,
 };
 
 /// Test the complete fuzzing pipeline
@@ -150,7 +144,11 @@ fn test_unified_generator() {
 
     for strategy in strategies {
         let program = gen_instance.generate_with(strategy, &mut rng);
-        assert!(!program.is_empty(), "Strategy {:?} produced empty output", strategy);
+        assert!(
+            !program.is_empty(),
+            "Strategy {:?} produced empty output",
+            strategy
+        );
     }
 }
 
@@ -478,7 +476,10 @@ fn test_end_to_end_fuzzing() {
 
     // Verify results
     assert!(!corpus.is_empty(), "Corpus should have entries");
-    assert!(global_coverage.discovered_count() > 0, "Should have coverage");
+    assert!(
+        global_coverage.discovered_count() > 0,
+        "Should have coverage"
+    );
 
     let stats = property_runner.stats();
     assert!(stats.total > 0, "Should have run properties");
@@ -491,13 +492,25 @@ fn test_complex_value_comparison() {
 
     // Nested structures
     let a = SerializedValue::List(vec![
-        SerializedValue::Tuple(vec![SerializedValue::Int(1), SerializedValue::Text("a".into())]),
-        SerializedValue::Tuple(vec![SerializedValue::Int(2), SerializedValue::Text("b".into())]),
+        SerializedValue::Tuple(vec![
+            SerializedValue::Int(1),
+            SerializedValue::Text("a".into()),
+        ]),
+        SerializedValue::Tuple(vec![
+            SerializedValue::Int(2),
+            SerializedValue::Text("b".into()),
+        ]),
     ]);
 
     let b = SerializedValue::List(vec![
-        SerializedValue::Tuple(vec![SerializedValue::Int(1), SerializedValue::Text("a".into())]),
-        SerializedValue::Tuple(vec![SerializedValue::Int(2), SerializedValue::Text("b".into())]),
+        SerializedValue::Tuple(vec![
+            SerializedValue::Int(1),
+            SerializedValue::Text("a".into()),
+        ]),
+        SerializedValue::Tuple(vec![
+            SerializedValue::Int(2),
+            SerializedValue::Text("b".into()),
+        ]),
     ]);
 
     let result = a.compare(&b, &config);
@@ -505,7 +518,10 @@ fn test_complex_value_comparison() {
 
     // Nested with difference
     let c = SerializedValue::List(vec![
-        SerializedValue::Tuple(vec![SerializedValue::Int(1), SerializedValue::Text("a".into())]),
+        SerializedValue::Tuple(vec![
+            SerializedValue::Int(1),
+            SerializedValue::Text("a".into()),
+        ]),
         SerializedValue::Tuple(vec![
             SerializedValue::Int(3), // Different!
             SerializedValue::Text("b".into()),
@@ -910,7 +926,13 @@ fn test_error_code_coverage_integration() {
 fn test_smt_theory_coverage_integration() {
     let coverage = SmtTheoryCoverage::new();
 
-    coverage.record_usage(&[SmtTheory::LIA, SmtTheory::Arrays], true, false, false, 100);
+    coverage.record_usage(
+        &[SmtTheory::LIA, SmtTheory::Arrays],
+        true,
+        false,
+        false,
+        100,
+    );
     coverage.record_usage(&[SmtTheory::BV, SmtTheory::UF], false, true, false, 5000);
     coverage.record_usage(&[SmtTheory::Quantifiers], true, false, false, 200);
 
@@ -941,10 +963,14 @@ fn test_unified_coverage_integration() {
     unified.ast.record_node("FunctionDef", 0, None, true, false);
 
     // Add error coverage
-    unified.error.record_error("E0001", None, None, ErrorSeverity::Error);
+    unified
+        .error
+        .record_error("E0001", None, None, ErrorSeverity::Error);
 
     // Add SMT coverage
-    unified.smt.record_usage(&[SmtTheory::LIA], true, false, false, 50);
+    unified
+        .smt
+        .record_usage(&[SmtTheory::LIA], true, false, false, 50);
 
     let report = unified.report();
     assert!(report.branch.covered_branches > 0);
@@ -1067,7 +1093,12 @@ fn test_regression_detection_integration() {
 
     // Baseline crashes
     triager.triage("old1", "input1", "panicked at 'old bug'", "0: old_func");
-    triager.triage("old2", "input2", "panicked at 'another old bug'", "0: old_func2");
+    triager.triage(
+        "old2",
+        "input2",
+        "panicked at 'another old bug'",
+        "0: old_func2",
+    );
 
     let baseline = detector.create_baseline("v1.0.0", &triager);
 
@@ -1087,18 +1118,13 @@ fn test_auto_categorization_integration() {
     let categorizer = AutoCategorizer::new();
 
     // Parser crash
-    let sig = CrashSignature::from_crash(
-        "panicked at 'parse error'",
-        "0: verum_parser::parse_expr",
-    );
+    let sig =
+        CrashSignature::from_crash("panicked at 'parse error'", "0: verum_parser::parse_expr");
     let cat = categorizer.categorize(&sig, "parse error", "verum_parser::parse_expr");
     assert_eq!(cat.component, "parser");
 
     // Type system crash
-    let sig = CrashSignature::from_crash(
-        "panicked at 'type mismatch'",
-        "0: verum_types::unify",
-    );
+    let sig = CrashSignature::from_crash("panicked at 'type mismatch'", "0: verum_types::unify");
     let cat = categorizer.categorize(&sig, "type mismatch", "verum_types::unify");
     assert_eq!(cat.component, "type-system");
 }
@@ -1115,9 +1141,15 @@ fn test_seed_corpus_integration() {
     let corpus = SeedCorpus::new(dir.path().to_path_buf(), config);
 
     // Add seeds
-    let hash1 = corpus.add("fn main() { 1 }", SeedSource::UserProvided).unwrap();
-    let _hash2 = corpus.add("fn main() { 2 }", SeedSource::UserProvided).unwrap();
-    let _hash3 = corpus.add("fn main() { 3 }", SeedSource::Generated).unwrap();
+    let hash1 = corpus
+        .add("fn main() { 1 }", SeedSource::UserProvided)
+        .unwrap();
+    let _hash2 = corpus
+        .add("fn main() { 2 }", SeedSource::UserProvided)
+        .unwrap();
+    let _hash3 = corpus
+        .add("fn main() { 3 }", SeedSource::Generated)
+        .unwrap();
 
     assert_eq!(corpus.len(), 3);
 
@@ -1240,7 +1272,11 @@ fn test_checkpoint_integration() {
 
     let checkpoint = CampaignCheckpoint::new(
         state,
-        vec!["hash1".to_string(), "hash2".to_string(), "hash3".to_string()],
+        vec![
+            "hash1".to_string(),
+            "hash2".to_string(),
+            "hash3".to_string(),
+        ],
         "coverage_abc123".to_string(),
         vec!["crash_sig1".to_string()],
     );
@@ -1274,10 +1310,7 @@ fn test_comprehensive_fuzzing_pipeline() {
         ..Default::default()
     });
 
-    let corpus = SeedCorpus::new(
-        dir.path().join("corpus"),
-        SeedCorpusConfig::default(),
-    );
+    let corpus = SeedCorpus::new(dir.path().join("corpus"), SeedCorpusConfig::default());
 
     let scheduler = EnergyScheduler::default();
     let unified_coverage = UnifiedCoverage::new();
@@ -1305,7 +1338,10 @@ fn test_comprehensive_fuzzing_pipeline() {
             generator.generate(&mut rng)
         } else {
             let hash = scheduler.select(&mut rng).unwrap_or_default();
-            corpus.get(&hash).map(|e| e.content).unwrap_or_else(|| generator.generate(&mut rng))
+            corpus
+                .get(&hash)
+                .map(|e| e.content)
+                .unwrap_or_else(|| generator.generate(&mut rng))
         };
 
         // Track coverage
@@ -1317,9 +1353,12 @@ fn test_comprehensive_fuzzing_pipeline() {
         let found_new = unified_coverage.edge.update(tracker.bitmap());
         if found_new {
             coverage_discoveries += 1;
-            if let Ok(hash) = corpus.add(&input, SeedSource::Mutated {
-                parent: "parent".to_string(),
-            }) {
+            if let Ok(hash) = corpus.add(
+                &input,
+                SeedSource::Mutated {
+                    parent: "parent".to_string(),
+                },
+            ) {
                 scheduler.add(hash, 5, 500);
             }
         }
@@ -1327,12 +1366,18 @@ fn test_comprehensive_fuzzing_pipeline() {
         // Track branches
         let branch_id = BranchId::new("test.vr", i, 0, "");
         unified_coverage.branch.register_branch(branch_id.clone());
-        unified_coverage.branch.record_branch(&branch_id, rng.random_bool(0.5));
+        unified_coverage
+            .branch
+            .record_branch(&branch_id, rng.random_bool(0.5));
 
         // Simulate execution result
         let result = OracleExecutionResult {
             success: rng.random_bool(0.95),
-            exit_code: if rng.random_bool(0.95) { Some(0) } else { Some(1) },
+            exit_code: if rng.random_bool(0.95) {
+                Some(0)
+            } else {
+                Some(1)
+            },
             stdout: "output".to_string(),
             stderr: if rng.random_bool(0.05) {
                 "panicked at 'test error'".to_string()
@@ -1379,7 +1424,8 @@ fn test_shrinking_with_oracles() {
     let shrinker = Shrinker::new(ShrinkConfig::default());
     let oracle = OracleRunner::default();
 
-    let buggy_input = "fn main() {\n    let x = 1;\n    let y = 2;\n    let CRASH = panic!;\n    let z = 3;\n}";
+    let buggy_input =
+        "fn main() {\n    let x = 1;\n    let y = 2;\n    let CRASH = panic!;\n    let z = 3;\n}";
 
     // Test function that checks for the CRASH pattern
     // We cannot use check_all here because it requires mutable access,

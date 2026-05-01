@@ -260,10 +260,7 @@ pub enum SolverChoice {
         reason: String,
     },
     /// Use CVC5 exclusively.
-    Cvc5Only {
-        confidence: f64,
-        reason: String,
-    },
+    Cvc5Only { confidence: f64, reason: String },
     /// Run both solvers in parallel; first result wins.
     Portfolio {
         /// Timeout in milliseconds for each solver.
@@ -329,8 +326,8 @@ impl Default for RouterConfig {
         Self {
             enable_portfolio: true,
             enable_cross_validation: true,
-            portfolio_timeout_ms: 30_000,          // 30s per solver
-            cross_validation_timeout_ms: 60_000,   // 60s per solver (cross-val is slower)
+            portfolio_timeout_ms: 30_000,        // 30s per solver
+            cross_validation_timeout_ms: 60_000, // 60s per solver (cross-val is slower)
             tie_breaker: TieBreaker::Fastest,
             single_solver_confidence_threshold: 0.7,
             portfolio_complexity_threshold: 1000.0,
@@ -570,12 +567,24 @@ impl CapabilityRouter {
     /// Detect if the goal mixes multiple theories (making portfolio beneficial).
     fn is_mixed_theory(&self, chars: &ExtendedCharacteristics) -> bool {
         let mut theory_count = 0;
-        if chars.base.is_qfbv { theory_count += 1; }
-        if chars.base.is_qflia || chars.base.is_qfnra { theory_count += 1; }
-        if chars.has_arrays { theory_count += 1; }
-        if chars.has_strings { theory_count += 1; }
-        if chars.has_inductive_datatypes { theory_count += 1; }
-        if chars.base.has_quantifiers { theory_count += 1; }
+        if chars.base.is_qfbv {
+            theory_count += 1;
+        }
+        if chars.base.is_qflia || chars.base.is_qfnra {
+            theory_count += 1;
+        }
+        if chars.has_arrays {
+            theory_count += 1;
+        }
+        if chars.has_strings {
+            theory_count += 1;
+        }
+        if chars.has_inductive_datatypes {
+            theory_count += 1;
+        }
+        if chars.base.has_quantifiers {
+            theory_count += 1;
+        }
         theory_count >= 2
     }
 
@@ -589,7 +598,10 @@ impl CapabilityRouter {
         } else if chars.needs_optimization {
             "requires MaxSMT optimization (Z3-only feature)".into()
         } else if chars.bv_max_width > 32 {
-            format!("large bit-vectors (width={}); Z3 bit-blasting preferred", chars.bv_max_width)
+            format!(
+                "large bit-vectors (width={}); Z3 bit-blasting preferred",
+                chars.bv_max_width
+            )
         } else if chars.has_arrays {
             "array theory; Z3's McCarthy engine preferred".into()
         } else if chars.has_patterns {
@@ -784,7 +796,10 @@ mod tests {
         chars.has_sequences = true;
         match router.route(&chars) {
             SolverChoice::Cvc5Only { confidence, .. } => {
-                assert_eq!(confidence, 1.0, "sequences should have perfect confidence (Z3 has none)");
+                assert_eq!(
+                    confidence, 1.0,
+                    "sequences should have perfect confidence (Z3 has none)"
+                );
             }
             other => panic!("expected Cvc5Only with 1.0 confidence, got {:?}", other),
         }
@@ -824,7 +839,10 @@ mod tests {
         chars.is_security_critical = true;
         match router.route(&chars) {
             SolverChoice::CrossValidate { .. } => {}
-            other => panic!("expected CrossValidate for security-critical, got {:?}", other),
+            other => panic!(
+                "expected CrossValidate for security-critical, got {:?}",
+                other
+            ),
         }
     }
 
@@ -917,7 +935,10 @@ mod tests {
             SolverChoice::Cvc5Only { confidence, .. } => {
                 assert!(confidence >= 0.85);
             }
-            other => panic!("expected Cvc5Only for inductive+quantifiers, got {:?}", other),
+            other => panic!(
+                "expected Cvc5Only for inductive+quantifiers, got {:?}",
+                other
+            ),
         }
     }
 }

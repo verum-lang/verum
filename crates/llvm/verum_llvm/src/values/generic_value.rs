@@ -1,7 +1,7 @@
 use libc::c_void;
 use verum_llvm_sys::execution_engine::{
-    LLVMCreateGenericValueOfPointer, LLVMDisposeGenericValue, LLVMGenericValueIntWidth, LLVMGenericValueRef,
-    LLVMGenericValueToFloat, LLVMGenericValueToInt, LLVMGenericValueToPointer,
+    LLVMCreateGenericValueOfPointer, LLVMDisposeGenericValue, LLVMGenericValueIntWidth,
+    LLVMGenericValueRef, LLVMGenericValueToFloat, LLVMGenericValueToInt, LLVMGenericValueToPointer,
 };
 
 use crate::types::{AsTypeRef, FloatType};

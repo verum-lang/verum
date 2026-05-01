@@ -280,9 +280,12 @@ impl InteractiveProver {
             tracing::info!(
                 "interactive prover: applying {:?} to goal #{} of {}",
                 tactic,
-                self.goals.len() - self.goals.iter().position(|g| {
-                    std::ptr::eq(g, &current_goal)
-                }).unwrap_or(0),
+                self.goals.len()
+                    - self
+                        .goals
+                        .iter()
+                        .position(|g| { std::ptr::eq(g, &current_goal) })
+                        .unwrap_or(0),
                 self.goals.len()
             );
         }

@@ -2,12 +2,12 @@ mod region_like;
 
 pub use self::region_like::RegionLike;
 use super::Block;
-use verum_mlir_sys::{MlirRegion, mlirRegionCreate, mlirRegionDestroy, mlirRegionEqual};
 use std::{
     marker::PhantomData,
     mem::{forget, transmute},
     ops::Deref,
 };
+use verum_mlir_sys::{MlirRegion, mlirRegionCreate, mlirRegionDestroy, mlirRegionEqual};
 
 /// A region.
 #[derive(Debug)]

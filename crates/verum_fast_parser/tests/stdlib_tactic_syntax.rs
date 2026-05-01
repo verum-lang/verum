@@ -34,8 +34,7 @@ fn tactic_refl_zero_arg() {
 
 #[test]
 fn tactic_trivial_with_first_combinator() {
-    parse_ok("tactic trivial() { first { refl; assumption; simp } }")
-        .unwrap();
+    parse_ok("tactic trivial() { first { refl; assumption; simp } }").unwrap();
 }
 
 #[test]
@@ -64,8 +63,7 @@ fn tactic_witness_with_expr_arg() {
 
 #[test]
 fn tactic_induction_with_hypothesis_param() {
-    parse_ok("tactic induction(var: Hypothesis) { induction(var) }")
-        .unwrap();
+    parse_ok("tactic induction(var: Hypothesis) { induction(var) }").unwrap();
 }
 
 #[test]
@@ -86,18 +84,14 @@ fn tactic_rewrite_with_expr() {
 
 #[test]
 fn tactic_simp_with_lemmas() {
-    parse_ok(
-        "tactic simp_with(lemmas: List<Expr>) { simp_with(lemmas) }",
-    )
-    .unwrap();
+    parse_ok("tactic simp_with(lemmas: List<Expr>) { simp_with(lemmas) }").unwrap();
 }
 
 // -- core.proof.tactics.combinators --------------------------------
 
 #[test]
 fn tactic_seq_with_two_tactic_params() {
-    parse_ok("tactic seq(first: Tactic, then: Tactic) { first; then }")
-        .unwrap();
+    parse_ok("tactic seq(first: Tactic, then: Tactic) { first; then }").unwrap();
 }
 
 #[test]
@@ -131,8 +125,7 @@ fn tactic_first_of_with_list_arg() {
     // `first(expr)` — dynamic form dispatched through the generic
     // Named-tactic path; needed by `tactic first_of(alternatives:
     // List<Tactic>) { first(alternatives) }`.
-    parse_ok("tactic first_of(alternatives: List<Tactic>) { first(alternatives) }")
-        .unwrap();
+    parse_ok("tactic first_of(alternatives: List<Tactic>) { first(alternatives) }").unwrap();
 }
 
 // -- core.proof.tactics.meta ---------------------------------------

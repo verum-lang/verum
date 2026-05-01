@@ -218,7 +218,10 @@ impl CrossFormatReport {
         required
             .iter()
             .filter(|f| {
-                !self.formats.iter().any(|(fmt, st)| *fmt == **f && st.is_passed())
+                !self
+                    .formats
+                    .iter()
+                    .any(|(fmt, st)| *fmt == **f && st.is_passed())
             })
             .copied()
             .collect()
@@ -323,8 +326,10 @@ mod tests {
     #[test]
     fn empty_report_does_not_pass_gate() {
         let r = CrossFormatReport::new("theorem_X");
-        assert!(!r.all_passed(),
-            "Empty report must not satisfy the hard gate (every format must be checked)");
+        assert!(
+            !r.all_passed(),
+            "Empty report must not satisfy the hard gate (every format must be checked)"
+        );
     }
 
     #[test]
@@ -378,7 +383,10 @@ mod tests {
         r.record(ExportFormat::Lean4, passed("ok"));
         let s = r.summary();
         assert!(s.contains("2/2 passed"));
-        assert!(s.contains("RED"), "Gate must be RED until all 4 formats pass");
+        assert!(
+            s.contains("RED"),
+            "Gate must be RED until all 4 formats pass"
+        );
     }
 
     // ----- Replay command -----
@@ -388,8 +396,11 @@ mod tests {
         for fmt in ExportFormat::full_list() {
             let cmd = format_replay_command(fmt, "theorem_5_1");
             assert!(cmd.contains("theorem_5_1"));
-            assert!(cmd.contains(fmt.extension()),
-                "Command for {:?} must reference its extension", fmt);
+            assert!(
+                cmd.contains(fmt.extension()),
+                "Command for {:?} must reference its extension",
+                fmt
+            );
         }
     }
 

@@ -280,10 +280,7 @@ fn merge_with_manifest(cli: ProfileConfig) -> ProfileConfig {
         out.distributed_cache = v.distributed_cache.as_ref().map(|t| t.to_string());
     }
     if out.distributed_cache_trust.is_none() {
-        out.distributed_cache_trust = v
-            .distributed_cache_trust
-            .as_ref()
-            .map(|t| t.to_string());
+        out.distributed_cache_trust = v.distributed_cache_trust.as_ref().map(|t| t.to_string());
     }
     out
 }
@@ -306,7 +303,9 @@ pub fn parse_duration(s: &str) -> std::result::Result<Duration, String> {
         .parse()
         .map_err(|_| format!("invalid duration number: '{s}'"))?;
     if !n.is_finite() || n < 0.0 {
-        return Err(format!("duration must be a non-negative finite number: '{s}'"));
+        return Err(format!(
+            "duration must be a non-negative finite number: '{s}'"
+        ));
     }
 
     let secs = match unit_part.trim() {
@@ -533,7 +532,8 @@ fn verify_file_proof(
         // `closure_cache_enabled = true`; an explicit `--closure-cache`
         // without a root falls back to the default
         // `<input.parent>/target/.verum_cache/closure-hashes/`.
-        closure_cache_enabled: profile.closure_cache_enabled || profile.closure_cache_root.is_some(),
+        closure_cache_enabled: profile.closure_cache_enabled
+            || profile.closure_cache_root.is_some(),
         closure_cache_root: profile.closure_cache_root.clone(),
         ..Default::default()
     };
@@ -839,11 +839,7 @@ fn execute_runtime_mode() -> Result<VerificationStats> {
         match verify_file_check_only(source) {
             Ok(true) => {
                 stats.files_runtime += 1;
-                println!(
-                    "  {} {} (runtime checks)",
-                    "⚡".yellow(),
-                    display_path
-                );
+                println!("  {} {} (runtime checks)", "⚡".yellow(), display_path);
             }
             Ok(false) | Err(_) => {
                 stats.files_failed += 1;
@@ -905,7 +901,13 @@ fn execute_interactive_impl(timeout: u64) -> Result<()> {
 
     for source in &sources {
         let display_path = source.display().to_string();
-        match verify_file_proof(source, timeout, false, SolverChoice::Z3, &ProfileConfig::default()) {
+        match verify_file_proof(
+            source,
+            timeout,
+            false,
+            SolverChoice::Z3,
+            &ProfileConfig::default(),
+        ) {
             Ok(false) => {
                 problem_files.push((display_path, "Verification failed".to_string()));
             }
@@ -1015,7 +1017,13 @@ fn investigate_file(path: &str, timeout: u64) {
 
     let file_path = PathBuf::from(path);
     let start = Instant::now();
-    match verify_file_proof(&file_path, timeout * 2, true, SolverChoice::Z3, &ProfileConfig::default()) {
+    match verify_file_proof(
+        &file_path,
+        timeout * 2,
+        true,
+        SolverChoice::Z3,
+        &ProfileConfig::default(),
+    ) {
         Ok(true) => {
             let elapsed = start.elapsed();
             ui::success(&format!(
@@ -1023,7 +1031,10 @@ fn investigate_file(path: &str, timeout: u64) {
                 elapsed.as_secs_f64()
             ));
             println!();
-            println!("  Suggestion: increase your default timeout to at least {}s", (elapsed.as_secs() + 5));
+            println!(
+                "  Suggestion: increase your default timeout to at least {}s",
+                (elapsed.as_secs() + 5)
+            );
         }
         Ok(false) => {
             ui::warn("Verification still fails with extended timeout.");
@@ -1060,26 +1071,14 @@ fn print_summary(stats: &VerificationStats) {
     println!();
 
     println!("  Total files:    {}", stats.total_files);
-    println!(
-        "  {} Verified:     {}",
-        "✓".green(),
-        stats.files_verified
-    );
+    println!("  {} Verified:     {}", "✓".green(), stats.files_verified);
 
     if stats.files_runtime > 0 {
-        println!(
-            "  {} Runtime:      {}",
-            "⚡".yellow(),
-            stats.files_runtime
-        );
+        println!("  {} Runtime:      {}", "⚡".yellow(), stats.files_runtime);
     }
 
     if stats.files_failed > 0 {
-        println!(
-            "  {} Failed:       {}",
-            "✗".red(),
-            stats.files_failed
-        );
+        println!("  {} Failed:       {}", "✗".red(), stats.files_failed);
     }
 
     println!();
@@ -1139,8 +1138,7 @@ mod tests {
     fn diff_filter_with_bogus_ref_returns_err_not_panic() {
         // The --diff flag must never panic on a ref that doesn't exist
         // — CI should degrade to full verification rather than crash.
-        let res =
-            compute_diff_filter("definitely-not-a-real-git-ref-xyzzy-42");
+        let res = compute_diff_filter("definitely-not-a-real-git-ref-xyzzy-42");
         // Either Err (expected — ref doesn't resolve) or Ok with empty
         // (some git versions may succeed silently); both are
         // degrade-gracefully paths. What we're locking in is "no panic".

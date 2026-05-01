@@ -16,7 +16,7 @@
 // Migrated from src/lockfile.rs per CLAUDE.md standards
 
 use verum_cli::registry::lockfile::*;
-use verum_cli::{List, Map, CogSource, Text};
+use verum_cli::{CogSource, List, Map, Text};
 
 #[test]
 fn test_lockfile_creation() {

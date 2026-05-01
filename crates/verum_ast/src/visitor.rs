@@ -65,29 +65,10 @@
 //! Implements the visitor pattern for traversing all AST node types.
 
 use crate::decl::{
-    AxiomDecl,
-    ContextDecl,
-    ContextGroupDecl,
-    FunctionBody,
-    FunctionDecl,
-    FunctionParam,
-    FunctionParamKind,
-    ImplDecl,
-    ImplItemKind,
-    ImplKind,
-    Item,
-    ItemKind,
-    PredicateDecl,
-    ProofBody,
-    ProofStepKind,
-    ProtocolDecl,
-    ProtocolItemKind,
-    TacticDecl,
-    TacticExpr,
-    TheoremDecl,
-    TypeDecl,
-    TypeDeclBody,
-    VariantData,
+    AxiomDecl, ContextDecl, ContextGroupDecl, FunctionBody, FunctionDecl, FunctionParam,
+    FunctionParamKind, ImplDecl, ImplItemKind, ImplKind, Item, ItemKind, PredicateDecl, ProofBody,
+    ProofStepKind, ProtocolDecl, ProtocolItemKind, TacticDecl, TacticExpr, TheoremDecl, TypeDecl,
+    TypeDeclBody, VariantData,
 };
 use crate::expr::{
     ArrayExpr, Block, ComprehensionClause, ComprehensionClauseKind, ConditionKind, Expr, ExprKind,
@@ -721,7 +702,9 @@ impl<V: Visitor> Visitor for IterativeVisitor<V> {
         // SAFETY: The lifetime downgrade is safe because the stack is managed
         // internally and cleared before any references could escape.
         Some(unsafe {
-            std::mem::transmute::<&mut Vec<WorkItem<'static>>, &mut Vec<WorkItem<'_>>>(&mut self.stack)
+            std::mem::transmute::<&mut Vec<WorkItem<'static>>, &mut Vec<WorkItem<'_>>>(
+                &mut self.stack,
+            )
         })
     }
 
@@ -1205,7 +1188,11 @@ pub fn walk_expr<V: Visitor>(visitor: &mut V, expr: &Expr) {
         ExprKind::NamedArg { value, .. } => {
             visit_child!(visitor, value.as_ref(), Expr);
         }
-        ExprKind::Call { func, type_args, args } => {
+        ExprKind::Call {
+            func,
+            type_args,
+            args,
+        } => {
             visit_child!(visitor, func.as_ref(), Expr);
             for type_arg in type_args.iter() {
                 match type_arg {
@@ -1272,10 +1259,7 @@ pub fn walk_expr<V: Visitor>(visitor: &mut V, expr: &Expr) {
         ExprKind::TryBlock(inner) => {
             visit_child!(visitor, inner.as_ref(), Expr);
         }
-        ExprKind::TryRecover {
-            try_block,
-            recover,
-        } => {
+        ExprKind::TryRecover { try_block, recover } => {
             visit_child!(visitor, try_block.as_ref(), Expr);
             match recover {
                 RecoverBody::MatchArms { arms, .. } => {
@@ -1345,10 +1329,22 @@ pub fn walk_expr<V: Visitor>(visitor: &mut V, expr: &Expr) {
                 visit_child!(visitor, count.as_ref(), Expr);
             }
         },
-        ExprKind::Comprehension { expr: inner, clauses }
-        | ExprKind::StreamComprehension { expr: inner, clauses }
-        | ExprKind::SetComprehension { expr: inner, clauses }
-        | ExprKind::GeneratorComprehension { expr: inner, clauses } => {
+        ExprKind::Comprehension {
+            expr: inner,
+            clauses,
+        }
+        | ExprKind::StreamComprehension {
+            expr: inner,
+            clauses,
+        }
+        | ExprKind::SetComprehension {
+            expr: inner,
+            clauses,
+        }
+        | ExprKind::GeneratorComprehension {
+            expr: inner,
+            clauses,
+        } => {
             visit_child!(visitor, inner.as_ref(), Expr);
             for clause in clauses.iter() {
                 walk_comprehension_clause_internal(visitor, clause);
@@ -1536,7 +1532,10 @@ pub fn walk_expr<V: Visitor>(visitor: &mut V, expr: &Expr) {
         ExprKind::Inject { type_path } => {
             visitor.visit_path(type_path);
         }
-        ExprKind::Spawn { expr: inner, contexts } => {
+        ExprKind::Spawn {
+            expr: inner,
+            contexts,
+        } => {
             for context in contexts {
                 visitor.visit_path(&context.path);
                 for ty in &context.args {
@@ -1609,7 +1608,11 @@ pub fn walk_expr<V: Visitor>(visitor: &mut V, expr: &Expr) {
         ExprKind::Paren(inner) => {
             visit_child!(visitor, inner.as_ref(), Expr);
         }
-        ExprKind::Is { expr: inner, pattern, .. } => {
+        ExprKind::Is {
+            expr: inner,
+            pattern,
+            ..
+        } => {
             visit_child!(visitor, inner.as_ref(), Expr);
             visit_child!(visitor, pattern, Pattern);
         }
@@ -1636,7 +1639,13 @@ pub fn walk_expr<V: Visitor>(visitor: &mut V, expr: &Expr) {
                 visit_child!(visitor, arg, Expr);
             }
         }
-        ExprKind::Nursery { options, body, on_cancel, recover, .. } => {
+        ExprKind::Nursery {
+            options,
+            body,
+            on_cancel,
+            recover,
+            ..
+        } => {
             // Visit timeout expression if present
             if let Maybe::Some(timeout) = &options.timeout {
                 visit_child!(visitor, timeout, Expr);
@@ -1693,7 +1702,9 @@ pub fn walk_expr<V: Visitor>(visitor: &mut V, expr: &Expr) {
                     crate::expr::AsmOperandKind::InOut { place, .. } => {
                         visit_child!(visitor, place.as_ref(), Expr);
                     }
-                    crate::expr::AsmOperandKind::InLateOut { in_expr, out_place, .. } => {
+                    crate::expr::AsmOperandKind::InLateOut {
+                        in_expr, out_place, ..
+                    } => {
                         visit_child!(visitor, in_expr.as_ref(), Expr);
                         visit_child!(visitor, out_place.as_ref(), Expr);
                     }
@@ -1709,21 +1720,19 @@ pub fn walk_expr<V: Visitor>(visitor: &mut V, expr: &Expr) {
         }
         // Stream literal expression: stream[1, 2, 3, ...] or stream[0..100]
         // Stream comprehension expressions
-        ExprKind::StreamLiteral(stream_lit) => {
-            match &stream_lit.kind {
-                crate::expr::StreamLiteralKind::Elements { elements, .. } => {
-                    for elem in elements.iter() {
-                        visit_child!(visitor, elem, Expr);
-                    }
-                }
-                crate::expr::StreamLiteralKind::Range { start, end, .. } => {
-                    visit_child!(visitor, start.as_ref(), Expr);
-                    if let Maybe::Some(end_expr) = end {
-                        visit_child!(visitor, end_expr.as_ref(), Expr);
-                    }
+        ExprKind::StreamLiteral(stream_lit) => match &stream_lit.kind {
+            crate::expr::StreamLiteralKind::Elements { elements, .. } => {
+                for elem in elements.iter() {
+                    visit_child!(visitor, elem, Expr);
                 }
             }
-        }
+            crate::expr::StreamLiteralKind::Range { start, end, .. } => {
+                visit_child!(visitor, start.as_ref(), Expr);
+                if let Maybe::Some(end_expr) = end {
+                    visit_child!(visitor, end_expr.as_ref(), Expr);
+                }
+            }
+        },
         // Destructuring assignment: (a, b) = expr
         // Algebraic effect handler expression (experimental)
         ExprKind::DestructuringAssign { pattern, value, .. } => {
@@ -1856,14 +1865,19 @@ pub fn walk_pattern<V: Visitor>(visitor: &mut V, pattern: &Pattern) {
         }
         PatternKind::Reference { inner, .. } => visit_child!(visitor, inner.as_ref(), Pattern),
         PatternKind::Range { .. } => {}
-        PatternKind::Paren(pat) => visit_child!(visitor, pat.as_ref(), Pattern),        PatternKind::View {
+        PatternKind::Paren(pat) => visit_child!(visitor, pat.as_ref(), Pattern),
+        PatternKind::View {
             view_function,
             pattern,
         } => {
             visit_child!(visitor, view_function, Expr);
             visit_child!(visitor, pattern.as_ref(), Pattern);
         }
-        PatternKind::Active { name, params, bindings } => {
+        PatternKind::Active {
+            name,
+            params,
+            bindings,
+        } => {
             visitor.visit_ident(name);
             for arg in params {
                 visit_child!(visitor, arg, Expr);
@@ -1883,7 +1897,10 @@ pub fn walk_pattern<V: Visitor>(visitor: &mut V, pattern: &Pattern) {
         }
         // Stream pattern: stream[first, second, ...rest]
         // Stream pattern matching for lazy iterator destructuring
-        PatternKind::Stream { head_patterns, rest } => {
+        PatternKind::Stream {
+            head_patterns,
+            rest,
+        } => {
             for pat in head_patterns.iter() {
                 visit_child!(visitor, pat, Pattern);
             }
@@ -1925,7 +1942,10 @@ pub fn walk_type<V: Visitor>(visitor: &mut V, ty: &Type) {
             visit_child!(visitor, lhs.as_ref(), Expr);
             visit_child!(visitor, rhs.as_ref(), Expr);
         }
-        TypeKind::DependentApp { carrier, value_args } => {
+        TypeKind::DependentApp {
+            carrier,
+            value_args,
+        } => {
             visit_child!(visitor, carrier.as_ref(), Type);
             for arg in value_args.iter() {
                 visit_child!(visitor, arg, Expr);
@@ -2376,7 +2396,11 @@ pub fn walk_tactic_expr<V: Visitor>(visitor: &mut V, tactic_expr: &TacticExpr) {
             }
         }
 
-        TacticExpr::Named { name, generic_args, args } => {
+        TacticExpr::Named {
+            name,
+            generic_args,
+            args,
+        } => {
             visitor.visit_ident(name);
             for ty in generic_args {
                 visitor.visit_type(ty);
@@ -2409,7 +2433,11 @@ pub fn walk_tactic_expr<V: Visitor>(visitor: &mut V, tactic_expr: &TacticExpr) {
             visit_child!(visitor, message.as_ref(), Expr);
         }
 
-        TacticExpr::If { cond, then_branch, else_branch } => {
+        TacticExpr::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
             visit_child!(visitor, cond.as_ref(), Expr);
             visit_child!(visitor, then_branch.as_ref(), TacticExpr);
             if let Maybe::Some(e) = else_branch {
@@ -2620,7 +2648,11 @@ pub fn walk_view_constructor<V: Visitor>(
 /// Walk a function parameter.
 pub fn walk_function_param<V: Visitor>(visitor: &mut V, param: &FunctionParam) {
     match &param.kind {
-        FunctionParamKind::Regular { pattern, ty, default_value } => {
+        FunctionParamKind::Regular {
+            pattern,
+            ty,
+            default_value,
+        } => {
             visit_child!(visitor, pattern, Pattern);
             visit_child!(visitor, ty, Type);
             if let Maybe::Some(default_expr) = default_value {

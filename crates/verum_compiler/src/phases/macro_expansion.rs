@@ -56,8 +56,8 @@ use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
 use super::{CompilationPhase, PhaseData, PhaseInput, PhaseMetrics, PhaseOutput};
 use crate::derives::{DeriveError, DeriveRegistry};
 use crate::literal_registry::{LiteralRegistry, ParsedLiteral};
-use crate::meta::{ConstValue, MetaContext, MetaRegistry};
 use crate::meta::linter::MetaLinter;
+use crate::meta::{ConstValue, MetaContext, MetaRegistry};
 
 /// Phase 3: Macro Expansion
 ///
@@ -395,36 +395,32 @@ impl MacroExpansionPhase {
     ) -> Result<List<Item>, Diagnostic> {
         // Gate: [meta].compile_time_functions must be enabled for meta fn.
         if func.is_meta && !self.compile_time_enabled {
-            return Err(
-                verum_diagnostics::DiagnosticBuilder::error()
-                    .message(format!(
-                        "`meta fn {}` is not allowed: `[meta] compile_time_functions` is disabled",
-                        func.name.name
-                    ))
-                    .span(super::ast_span_to_diagnostic_span(func.span, None))
-                    .help(
-                        "set `compile_time_functions = true` under `[meta]` in Verum.toml, \
+            return Err(verum_diagnostics::DiagnosticBuilder::error()
+                .message(format!(
+                    "`meta fn {}` is not allowed: `[meta] compile_time_functions` is disabled",
+                    func.name.name
+                ))
+                .span(super::ast_span_to_diagnostic_span(func.span, None))
+                .help(
+                    "set `compile_time_functions = true` under `[meta]` in Verum.toml, \
                          or remove `-Z meta.compile_time_functions=false`",
-                    )
-                    .build(),
-            );
+                )
+                .build());
         }
 
         // Gate: [meta].max_stage_level limits staging depth.
         if func.is_meta && func.stage_level > self.max_stage_level {
-            return Err(
-                verum_diagnostics::DiagnosticBuilder::error()
-                    .message(format!(
-                        "`meta({}) fn {}` exceeds [meta] max_stage_level = {}",
-                        func.stage_level, func.name.name, self.max_stage_level
-                    ))
-                    .span(super::ast_span_to_diagnostic_span(func.span, None))
-                    .help(format!(
-                        "increase `max_stage_level` to at least {} under `[meta]` in Verum.toml",
-                        func.stage_level
-                    ))
-                    .build(),
-            );
+            return Err(verum_diagnostics::DiagnosticBuilder::error()
+                .message(format!(
+                    "`meta({}) fn {}` exceeds [meta] max_stage_level = {}",
+                    func.stage_level, func.name.name, self.max_stage_level
+                ))
+                .span(super::ast_span_to_diagnostic_span(func.span, None))
+                .help(format!(
+                    "increase `max_stage_level` to at least {} under `[meta]` in Verum.toml",
+                    func.stage_level
+                ))
+                .build());
         }
 
         // Lint meta functions before any processing
@@ -622,8 +618,10 @@ impl MacroExpansionPhase {
 
             ExprKind::Call { func, args, .. } => {
                 let processed_func = self.process_expr(func)?;
-                let processed_args: List<Expr> =
-                    args.iter().map(|a| self.process_expr(a)).collect::<Result<_, _>>()?;
+                let processed_args: List<Expr> = args
+                    .iter()
+                    .map(|a| self.process_expr(a))
+                    .collect::<Result<_, _>>()?;
 
                 // Try to desugar `format("fmt", args...)` into an f-string
                 // InterpolatedString expression so runtime/codegen can share the
@@ -791,8 +789,7 @@ impl MacroExpansionPhase {
                         // Closes #239 for tagged-literal handlers.
                         let prev_call_site = self.meta_context.call_site_span;
                         self.meta_context.call_site_span = span;
-                        let exec_result =
-                            self.meta_context.execute_user_meta_fn(&meta_fn, args);
+                        let exec_result = self.meta_context.execute_user_meta_fn(&meta_fn, args);
                         self.meta_context.call_site_span = prev_call_site;
                         match exec_result {
                             Ok(result) => self.const_value_to_expr(result, span),
@@ -880,7 +877,12 @@ impl MacroExpansionPhase {
             ParsedLiteral::Json(json) => LiteralKind::Text(StringLit::Regular(json.into())),
             ParsedLiteral::Xml(xml) => LiteralKind::Text(StringLit::Regular(xml.into())),
             ParsedLiteral::Yaml(yaml) => LiteralKind::Text(StringLit::Regular(yaml.into())),
-            ParsedLiteral::Sql { sql, dialect, param_count: _, fingerprint: _ } => {
+            ParsedLiteral::Sql {
+                sql,
+                dialect,
+                param_count: _,
+                fingerprint: _,
+            } => {
                 // Preserve the dialect tag; the runtime adapter reads
                 // the normalised SQL from `content`. PreparedQuery<R, P>
                 // construction (with the fingerprint + param_count
@@ -925,22 +927,24 @@ impl MacroExpansionPhase {
     /// Plain literals with no interpolations collapse to `sh("text")`.
     fn lower_shell_cmd(
         &self,
-        parts:  verum_common::List<(u8, verum_common::Text)>,
+        parts: verum_common::List<(u8, verum_common::Text)>,
         source: &verum_common::Text,
-        span:   Span,
+        span: Span,
     ) -> Result<Expr, Diagnostic> {
         use verum_ast::expr::{BinOp, ExprKind as EK, UnOp};
         use verum_ast::literal::{Literal as AstLit, LiteralKind, StringLit};
         use verum_ast::ty::{Ident, Path};
 
         // Helper: literal Text expression.
-        let mk_lit = |s: verum_common::Text| Expr::new(
-            EK::Literal(AstLit {
-                kind: LiteralKind::Text(StringLit::Regular(s)),
+        let mk_lit = |s: verum_common::Text| {
+            Expr::new(
+                EK::Literal(AstLit {
+                    kind: LiteralKind::Text(StringLit::Regular(s)),
+                    span,
+                }),
                 span,
-            }),
-            span,
-        );
+            )
+        };
 
         // Helper: parse expression source via VerumParser. Errors map to a
         // structured Diagnostic pinning the literal location. We pass the
@@ -950,29 +954,32 @@ impl MacroExpansionPhase {
         let file_id = verum_common::FileId::dummy();
         let parse_expr = |src: &verum_common::Text| -> Result<Expr, Diagnostic> {
             let parser = verum_fast_parser::VerumParser::new();
-            parser.parse_expr_str(src.as_str(), file_id).map_err(|errs| {
-                verum_diagnostics::DiagnosticBuilder::error()
-                    .message(verum_common::Text::from(format!(
-                        "failed to parse interpolation in sh#\"{}\": {:?}",
-                        source.as_str(), errs,
-                    )))
-                    .build()
-            })
+            parser
+                .parse_expr_str(src.as_str(), file_id)
+                .map_err(|errs| {
+                    verum_diagnostics::DiagnosticBuilder::error()
+                        .message(verum_common::Text::from(format!(
+                            "failed to parse interpolation in sh#\"{}\": {:?}",
+                            source.as_str(),
+                            errs,
+                        )))
+                        .build()
+                })
         };
 
         // Helper: Escaper.posix(&<expr>)
         let mk_escape = |inner: Expr| -> Expr {
-            let escaper = Expr::new(
-                EK::Path(Path::single(Ident::new("Escaper", span))),
-                span,
-            );
+            let escaper = Expr::new(EK::Path(Path::single(Ident::new("Escaper", span))), span);
             let posix_method = Expr::new(
                 EK::MethodCall {
                     receiver: Box::new(escaper),
-                    method:   Ident::new("posix", span),
+                    method: Ident::new("posix", span),
                     type_args: verum_common::List::new(),
                     args: verum_common::List::from(vec![Expr::new(
-                        EK::Unary { op: UnOp::Ref, expr: Box::new(inner) },
+                        EK::Unary {
+                            op: UnOp::Ref,
+                            expr: Box::new(inner),
+                        },
                         span,
                     )]),
                 },
@@ -993,7 +1000,7 @@ impl MacroExpansionPhase {
                     Expr::new(
                         EK::MethodCall {
                             receiver: Box::new(inner),
-                            method:   Ident::new("to_text", span),
+                            method: Ident::new("to_text", span),
                             type_args: verum_common::List::new(),
                             args: verum_common::List::new(),
                         },
@@ -1006,8 +1013,8 @@ impl MacroExpansionPhase {
                 None => part_expr,
                 Some(prev) => Expr::new(
                     EK::Binary {
-                        op:    BinOp::Add,
-                        left:  Box::new(prev),
+                        op: BinOp::Add,
+                        left: Box::new(prev),
                         right: Box::new(part_expr),
                     },
                     span,
@@ -1017,10 +1024,7 @@ impl MacroExpansionPhase {
         let text_expr = acc.unwrap_or_else(|| mk_lit(verum_common::Text::from("")));
 
         // Wrap in `sh(text_expr)` — relies on `core.shell.exec.sh` being in scope.
-        let sh_path = Expr::new(
-            EK::Path(Path::single(Ident::new("sh", span))),
-            span,
-        );
+        let sh_path = Expr::new(EK::Path(Path::single(Ident::new("sh", span))), span);
         Ok(Expr::new(
             EK::Call {
                 func: Box::new(sh_path),
@@ -1037,11 +1041,7 @@ impl MacroExpansionPhase {
     /// This is used when a user-defined tagged literal handler or interpolation
     /// handler returns a compile-time value that needs to be spliced back into
     /// the AST.
-    fn const_value_to_expr(
-        &self,
-        value: ConstValue,
-        span: Span,
-    ) -> Result<Expr, Diagnostic> {
+    fn const_value_to_expr(&self, value: ConstValue, span: Span) -> Result<Expr, Diagnostic> {
         let lit_kind = match value {
             ConstValue::Int(n) => LiteralKind::Int(verum_ast::literal::IntLit {
                 value: n,
@@ -1078,9 +1078,7 @@ impl MacroExpansionPhase {
             other => {
                 // For complex types (Map, Tuple, etc.), convert to a text representation
                 // and emit as a string literal. User handlers should return simple types.
-                LiteralKind::Text(StringLit::Regular(
-                    Text::from(format!("{}", other)),
-                ))
+                LiteralKind::Text(StringLit::Regular(Text::from(format!("{}", other))))
             }
         };
 
@@ -1184,8 +1182,7 @@ impl MacroExpansionPhase {
                         // interpolation handlers.
                         let prev_call_site = self.meta_context.call_site_span;
                         self.meta_context.call_site_span = span;
-                        let exec_result =
-                            self.meta_context.execute_user_meta_fn(&meta_fn, args);
+                        let exec_result = self.meta_context.execute_user_meta_fn(&meta_fn, args);
                         self.meta_context.call_site_span = prev_call_site;
                         match exec_result {
                             Ok(result) => self.const_value_to_expr(result, span),
@@ -1433,14 +1430,8 @@ impl MacroExpansionPhase {
         // Generate SqlQuery.with_params(template, [params...])
         let sql_query_path = verum_ast::ty::Path {
             segments: smallvec::smallvec![
-                verum_ast::ty::PathSegment::Name(verum_ast::Ident::new(
-                    "SqlQuery",
-                    span,
-                )),
-                verum_ast::ty::PathSegment::Name(verum_ast::Ident::new(
-                    "with_params",
-                    span,
-                )),
+                verum_ast::ty::PathSegment::Name(verum_ast::Ident::new("SqlQuery", span,)),
+                verum_ast::ty::PathSegment::Name(verum_ast::Ident::new("with_params", span,)),
             ],
             span,
         };
@@ -1497,14 +1488,8 @@ impl MacroExpansionPhase {
         // Generate HtmlBuilder with escaped values
         let html_builder_path = verum_ast::ty::Path {
             segments: smallvec::smallvec![
-                verum_ast::ty::PathSegment::Name(verum_ast::Ident::new(
-                    "HtmlBuilder",
-                    span,
-                )),
-                verum_ast::ty::PathSegment::Name(verum_ast::Ident::new(
-                    "from_template",
-                    span,
-                )),
+                verum_ast::ty::PathSegment::Name(verum_ast::Ident::new("HtmlBuilder", span,)),
+                verum_ast::ty::PathSegment::Name(verum_ast::Ident::new("from_template", span,)),
             ],
             span,
         };
@@ -1604,19 +1589,21 @@ impl MacroExpansionPhase {
         // When off, any @derive attribute is an error pointing at the
         // config key — no impls are silently skipped.
         if !self.derive_enabled {
-            return Err(
-                verum_diagnostics::DiagnosticBuilder::error()
-                    .message(format!(
-                        "`@derive({})` is not allowed: `[meta] derive` is disabled",
-                        derives.iter().map(|d| d.as_str()).collect::<Vec<_>>().join(", ")
-                    ))
-                    .span(super::ast_span_to_diagnostic_span(item.span, None))
-                    .help(
-                        "set `derive = true` under `[meta]` in Verum.toml, \
+            return Err(verum_diagnostics::DiagnosticBuilder::error()
+                .message(format!(
+                    "`@derive({})` is not allowed: `[meta] derive` is disabled",
+                    derives
+                        .iter()
+                        .map(|d| d.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
+                .span(super::ast_span_to_diagnostic_span(item.span, None))
+                .help(
+                    "set `derive = true` under `[meta]` in Verum.toml, \
                          or remove `-Z meta.derive=false` from the command line",
-                    )
-                    .build(),
-            );
+                )
+                .build());
         }
 
         tracing::debug!(
@@ -1680,8 +1667,13 @@ impl MacroExpansionPhase {
     fn derive_error_to_diagnostic(&self, err: &DeriveError) -> Diagnostic {
         match err {
             DeriveError::UnknownDerive { name, .. } => DiagnosticBuilder::error()
-                .message(Text::from(format!("Unknown derive macro: `{}`", name.as_str())))
-                .help(Text::from("Available derives: Debug, Clone, PartialEq, Default, Serialize, Deserialize"))
+                .message(Text::from(format!(
+                    "Unknown derive macro: `{}`",
+                    name.as_str()
+                )))
+                .help(Text::from(
+                    "Available derives: Debug, Clone, PartialEq, Default, Serialize, Deserialize",
+                ))
                 .build(),
             DeriveError::UnsupportedTypeKind { kind, hint, .. } => DiagnosticBuilder::error()
                 .message(Text::from(format!("Cannot derive for {}", kind.as_str())))
@@ -1702,7 +1694,9 @@ impl MacroExpansionPhase {
                     protocol.as_str()
                 )))
                 .build(),
-            _ => DiagnosticBuilder::error().message(Text::from(err.to_string())).build(),
+            _ => DiagnosticBuilder::error()
+                .message(Text::from(err.to_string()))
+                .build(),
         }
     }
 
@@ -1735,7 +1729,9 @@ impl CompilationPhase for MacroExpansionPhase {
             PhaseData::AstModules(modules) => modules,
             _ => {
                 let diag = DiagnosticBuilder::error()
-                    .message(Text::from("Invalid input for macro expansion phase: expected AST modules"))
+                    .message(Text::from(
+                        "Invalid input for macro expansion phase: expected AST modules",
+                    ))
                     .build();
                 return Err(List::from(vec![diag]));
             }
@@ -1829,7 +1825,7 @@ impl CompilationPhase for MacroExpansionPhase {
 /// `where` clauses) so a quote in any reachable position is
 /// caught.
 fn find_first_quote_in_module(module: &Module) -> Option<Span> {
-    use verum_ast::visitor::{walk_expr, walk_item, Visitor};
+    use verum_ast::visitor::{Visitor, walk_expr, walk_item};
 
     struct Finder {
         first: Option<Span>,
@@ -2041,8 +2037,7 @@ mod tests {
 
         // Gate closed → expand_module rejects with a quote-syntax
         // diagnostic that names the manifest knob.
-        let mut phase_off = MacroExpansionPhase::new()
-            .with_quote_syntax_enabled(false);
+        let mut phase_off = MacroExpansionPhase::new().with_quote_syntax_enabled(false);
         let result = phase_off.expand_module(&module);
         let diags = result.expect_err("quote_syntax=false must reject module with quote");
         assert_eq!(diags.len(), 1, "exactly one diagnostic for the first quote");

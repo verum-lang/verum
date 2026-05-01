@@ -45,8 +45,8 @@ use z3::{
     ast::{Bool, Int},
 };
 
-use verum_common::{List, Map, Maybe, Set, Text};
 use verum_common::ToText;
+use verum_common::{List, Map, Maybe, Set, Text};
 
 use crate::gpu_memory_model::{BlockId, MemoryAccess, ThreadId};
 

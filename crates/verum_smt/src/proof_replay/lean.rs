@@ -19,9 +19,7 @@
 use verum_common::Text;
 use verum_kernel::SmtCertificate;
 
-use super::{
-    DeclarationHeader, DeclKind, ProofReplayBackend, ReplayError, TargetTactic,
-};
+use super::{DeclKind, DeclarationHeader, ProofReplayBackend, ReplayError, TargetTactic};
 
 #[derive(Debug, Default)]
 pub struct LeanProofReplay;
@@ -115,7 +113,10 @@ fn lower_z3_trace(trace: &verum_common::List<u8>, decl: &DeclarationHeader) -> S
     if s.contains("(refl") {
         tactics.push("  rfl");
     }
-    if matches!(decl.kind, DeclKind::Lemma | DeclKind::Theorem | DeclKind::Corollary) {
+    if matches!(
+        decl.kind,
+        DeclKind::Lemma | DeclKind::Theorem | DeclKind::Corollary
+    ) {
         tactics.push("  tauto");
     }
     if tactics.is_empty() {
@@ -148,7 +149,10 @@ fn lower_cvc5_trace(trace: &verum_common::List<u8>, decl: &DeclarationHeader) ->
     if s.contains(":rule refl") {
         tactics.push("  rfl");
     }
-    if matches!(decl.kind, DeclKind::Lemma | DeclKind::Theorem | DeclKind::Corollary) {
+    if matches!(
+        decl.kind,
+        DeclKind::Lemma | DeclKind::Theorem | DeclKind::Corollary
+    ) {
         tactics.push("  tauto");
     }
     if tactics.is_empty() {
@@ -266,7 +270,10 @@ mod tests {
         let mut c = cert("z3", "(asserted)");
         c.schema_version = 99;
         let result = LeanProofReplay::new().lower(&c, &theorem("v")).err();
-        assert!(matches!(result, Some(ReplayError::UnsupportedSchema { .. })));
+        assert!(matches!(
+            result,
+            Some(ReplayError::UnsupportedSchema { .. })
+        ));
     }
 
     #[test]

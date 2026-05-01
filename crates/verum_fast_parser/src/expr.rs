@@ -34,7 +34,8 @@
 //! 16. Postfix `.`, `?.`, `()`, `[]`, `?`, `as`, `::` - BP 16
 
 use verum_ast::{
-    BinOp, Block, Expr, ExprKind, Literal, Path, PathSegment, Span, Type, TypeKind, UnOp, expr::*,
+    BinOp, Block, Expr, ExprKind, Literal, Path, PathSegment, Span, Type, TypeKind, UnOp,
+    expr::*,
     pattern::{FieldPattern, MatchArm, Pattern, PatternKind},
     ty::Ident,
 };
@@ -142,7 +143,7 @@ const DECLARATION_ONLY_ATTRIBUTES: &[&str] = &[
     // NOTE: "intrinsic" is NOT here — @intrinsic("name", arg1, arg2) is a valid
     // expression-level meta-function call (used in stdlib intrinsic definitions).
     // @intrinsic("name") as a declaration attribute is handled by the attribute parser.
-    "extern",    // @extern("C") is attribute on fn declarations
+    "extern", // @extern("C") is attribute on fn declarations
     "inline",
     "cold",
     "hot",
@@ -584,12 +585,8 @@ impl<'a> RecursiveParser<'a> {
                     || self.stream.check(&TokenKind::LBrace)
                     || (self.comprehension_depth > 0
                         && self.stream.peek().is_some_and(|t| {
-                            matches!(
-                                t.kind,
-                                TokenKind::If | TokenKind::For | TokenKind::Let
-                            )
-                        }))
-                {
+                            matches!(t.kind, TokenKind::If | TokenKind::For | TokenKind::Let)
+                        })) {
                     Maybe::None
                 } else {
                     Maybe::Some(Box::new(self.parse_expr_bp_no_struct(right_bp)?))
@@ -669,7 +666,8 @@ impl<'a> RecursiveParser<'a> {
                 }
 
                 // E041: Check for missing RHS (x =;)
-                if self.stream.check(&TokenKind::Semicolon) || self.stream.check(&TokenKind::RBrace) {
+                if self.stream.check(&TokenKind::Semicolon) || self.stream.check(&TokenKind::RBrace)
+                {
                     return Err(ParseError::let_missing_value(self.stream.current_span())
                         .with_help("assignment requires a value on the right-hand side"));
                 }
@@ -810,13 +808,14 @@ impl<'a> RecursiveParser<'a> {
             // ─────────────────────────────────────────────────────────────────
             // COMPOUND PATTERNS: Recursively convert nested structures
             // ─────────────────────────────────────────────────────────────────
-            ExprKind::Tuple(elements) => {
-                Self::elements_to_tuple_pattern(elements, expr.span)
-            }
+            ExprKind::Tuple(elements) => Self::elements_to_tuple_pattern(elements, expr.span),
 
             ExprKind::Paren(inner) => {
                 let inner_pattern = Self::expr_to_assignment_pattern(inner)?;
-                Ok(Pattern::new(PatternKind::Paren(Heap::new(inner_pattern)), expr.span))
+                Ok(Pattern::new(
+                    PatternKind::Paren(Heap::new(inner_pattern)),
+                    expr.span,
+                ))
             }
 
             ExprKind::Array(ArrayExpr::List(elements)) => {
@@ -830,9 +829,11 @@ impl<'a> RecursiveParser<'a> {
             // ─────────────────────────────────────────────────────────────────
             // REST PATTERNS: Handle `..` and `..rest` in arrays
             // ─────────────────────────────────────────────────────────────────
-            ExprKind::Range { start: Maybe::None, end, inclusive: false } => {
-                Self::range_to_rest_pattern(end, expr.span)
-            }
+            ExprKind::Range {
+                start: Maybe::None,
+                end,
+                inclusive: false,
+            } => Self::range_to_rest_pattern(end, expr.span),
 
             // ─────────────────────────────────────────────────────────────────
             // PLACE EXPRESSIONS: Allow field/index/deref as assignment targets
@@ -843,19 +844,17 @@ impl<'a> RecursiveParser<'a> {
             ExprKind::Field { .. }
             | ExprKind::Index { .. }
             | ExprKind::TupleIndex { .. }
-            | ExprKind::Unary { op: UnOp::Deref, .. } => {
-                Ok(Pattern::wildcard(expr.span))
-            }
+            | ExprKind::Unary {
+                op: UnOp::Deref, ..
+            } => Ok(Pattern::wildcard(expr.span)),
 
             // ─────────────────────────────────────────────────────────────────
             // INVALID PATTERNS: Specific error messages for common mistakes
             // ─────────────────────────────────────────────────────────────────
-            ExprKind::Literal(_) => {
-                Err(ParseError::assignment_invalid(
-                    "literals cannot be assignment targets; use an identifier to bind the value",
-                    expr.span,
-                ))
-            }
+            ExprKind::Literal(_) => Err(ParseError::assignment_invalid(
+                "literals cannot be assignment targets; use an identifier to bind the value",
+                expr.span,
+            )),
 
             ExprKind::Call { .. } | ExprKind::MethodCall { .. } => {
                 Err(ParseError::assignment_invalid(
@@ -871,12 +870,10 @@ impl<'a> RecursiveParser<'a> {
                 ))
             }
 
-            ExprKind::Unary { .. } => {
-                Err(ParseError::assignment_invalid(
-                    "unary expressions cannot be assignment targets",
-                    expr.span,
-                ))
-            }
+            ExprKind::Unary { .. } => Err(ParseError::assignment_invalid(
+                "unary expressions cannot be assignment targets",
+                expr.span,
+            )),
 
             ExprKind::If { .. } | ExprKind::Match { .. } | ExprKind::Loop { .. } => {
                 Err(ParseError::assignment_invalid(
@@ -885,12 +882,10 @@ impl<'a> RecursiveParser<'a> {
                 ))
             }
 
-            ExprKind::Closure { .. } => {
-                Err(ParseError::assignment_invalid(
-                    "closures cannot be assignment targets",
-                    expr.span,
-                ))
-            }
+            ExprKind::Closure { .. } => Err(ParseError::assignment_invalid(
+                "closures cannot be assignment targets",
+                expr.span,
+            )),
 
             // ─────────────────────────────────────────────────────────────────
             // CATCH-ALL: All other expressions are invalid targets
@@ -1155,21 +1150,16 @@ impl<'a> RecursiveParser<'a> {
                 self.stream.consume(&TokenKind::DotDot);
             }
 
-            let end =
-                if self.stream.at_end()
-                    || !self.stream.peek().is_some_and(|t| t.starts_expr())
-                    || (self.comprehension_depth > 0
-                        && self.stream.peek().is_some_and(|t| {
-                            matches!(
-                                t.kind,
-                                TokenKind::If | TokenKind::For | TokenKind::Let
-                            )
-                        }))
-                {
-                    Maybe::None
-                } else {
-                    Maybe::Some(Box::new(self.parse_expr_bp_no_struct(15)?))
-                };
+            let end = if self.stream.at_end()
+                || !self.stream.peek().is_some_and(|t| t.starts_expr())
+                || (self.comprehension_depth > 0
+                    && self.stream.peek().is_some_and(|t| {
+                        matches!(t.kind, TokenKind::If | TokenKind::For | TokenKind::Let)
+                    })) {
+                Maybe::None
+            } else {
+                Maybe::Some(Box::new(self.parse_expr_bp_no_struct(15)?))
+            };
 
             let span = self.stream.make_span(start_pos);
             return Ok(Expr::new(
@@ -1258,7 +1248,9 @@ impl<'a> RecursiveParser<'a> {
                     // No colon after 'x - this is likely an unterminated character literal
                     // Consume the token and report E001
                     let span = self.stream.current_span();
-                    let token = self.stream.advance()
+                    let token = self
+                        .stream
+                        .advance()
                         .ok_or_else(|| ParseError::unterminated_char(span))?;
                     Err(ParseError::unterminated_char(token.span))
                 }
@@ -1332,8 +1324,16 @@ impl<'a> RecursiveParser<'a> {
             //  `identifier` production for escape contexts).
             Some(TokenKind::Forall) => {
                 let next = self.stream.peek_nth_kind(1);
-                if matches!(next, Some(TokenKind::LParen) | Some(TokenKind::Ident(_)) | Some(TokenKind::Mut)
-                    | Some(TokenKind::Some) | Some(TokenKind::None) | Some(TokenKind::Ok) | Some(TokenKind::Err)) {
+                if matches!(
+                    next,
+                    Some(TokenKind::LParen)
+                        | Some(TokenKind::Ident(_))
+                        | Some(TokenKind::Mut)
+                        | Some(TokenKind::Some)
+                        | Some(TokenKind::None)
+                        | Some(TokenKind::Ok)
+                        | Some(TokenKind::Err)
+                ) {
                     self.parse_forall_expr()
                 } else if matches!(next, Some(TokenKind::Dot)) {
                     self.stream.advance(); // consume `forall`
@@ -1341,7 +1341,8 @@ impl<'a> RecursiveParser<'a> {
                     Err(ParseError::invalid_syntax(
                         "`forall` requires at least one binder before `.`",
                         span,
-                    ).with_help(
+                    )
+                    .with_help(
                         "Add a binder: `forall x: T . body`, `forall x in xs . body`,\n\
                          or `forall x . body` (type inferred). Empty `forall . body`\n\
                          is not valid Verum.",
@@ -1353,8 +1354,16 @@ impl<'a> RecursiveParser<'a> {
             }
             Some(TokenKind::Exists) => {
                 let next = self.stream.peek_nth_kind(1);
-                if matches!(next, Some(TokenKind::LParen) | Some(TokenKind::Ident(_)) | Some(TokenKind::Mut)
-                    | Some(TokenKind::Some) | Some(TokenKind::None) | Some(TokenKind::Ok) | Some(TokenKind::Err)) {
+                if matches!(
+                    next,
+                    Some(TokenKind::LParen)
+                        | Some(TokenKind::Ident(_))
+                        | Some(TokenKind::Mut)
+                        | Some(TokenKind::Some)
+                        | Some(TokenKind::None)
+                        | Some(TokenKind::Ok)
+                        | Some(TokenKind::Err)
+                ) {
                     self.parse_exists_expr()
                 } else if matches!(next, Some(TokenKind::Dot)) {
                     self.stream.advance(); // consume `exists`
@@ -1362,7 +1371,8 @@ impl<'a> RecursiveParser<'a> {
                     Err(ParseError::invalid_syntax(
                         "`exists` requires at least one binder before `.`",
                         span,
-                    ).with_help(
+                    )
+                    .with_help(
                         "Add a binder: `exists x: T . body`, `exists x in xs . body`,\n\
                          or `exists x . body` (type inferred). Empty `exists . body`\n\
                          is not valid Verum.",
@@ -1406,9 +1416,7 @@ impl<'a> RecursiveParser<'a> {
             }
             // Select expression for async multiplexing
             // Disambiguate: `select { }` or `select biased { }` is expression, `select(...)` is function call
-            Some(TokenKind::Select) if self.is_select_expr_lookahead() => {
-                self.parse_select_expr()
-            }
+            Some(TokenKind::Select) if self.is_select_expr_lookahead() => self.parse_select_expr(),
             // select followed by ( or . or other - treat as path/function call
             // Use single-segment parsing to leave `.` for postfix processing
             Some(TokenKind::Select) => {
@@ -1461,12 +1469,21 @@ impl<'a> RecursiveParser<'a> {
             }
             // Contextual keywords used as identifiers in expressions
             // Note: Only add keywords NOT already handled elsewhere in this match
-            Some(TokenKind::Stage) | Some(TokenKind::By) | Some(TokenKind::Field)
-            | Some(TokenKind::Layer) | Some(TokenKind::Extends) | Some(TokenKind::Throws)
+            Some(TokenKind::Stage)
+            | Some(TokenKind::By)
+            | Some(TokenKind::Field)
+            | Some(TokenKind::Layer)
+            | Some(TokenKind::Extends)
+            | Some(TokenKind::Throws)
             | Some(TokenKind::Requires)
-            | Some(TokenKind::Linear) | Some(TokenKind::Ffi) | Some(TokenKind::Mount)
-            | Some(TokenKind::Inductive) | Some(TokenKind::Cofix) | Some(TokenKind::Implies)
-            | Some(TokenKind::Volatile) | Some(TokenKind::View) => {
+            | Some(TokenKind::Linear)
+            | Some(TokenKind::Ffi)
+            | Some(TokenKind::Mount)
+            | Some(TokenKind::Inductive)
+            | Some(TokenKind::Cofix)
+            | Some(TokenKind::Implies)
+            | Some(TokenKind::Volatile)
+            | Some(TokenKind::View) => {
                 let path = self.parse_simple_expr_path()?;
                 Ok(Expr::path(path))
             }
@@ -1656,12 +1673,8 @@ impl<'a> RecursiveParser<'a> {
                     || !self.stream.peek().is_some_and(|t| t.starts_expr())
                     || (self.comprehension_depth > 0
                         && self.stream.peek().is_some_and(|t| {
-                            matches!(
-                                t.kind,
-                                TokenKind::If | TokenKind::For | TokenKind::Let
-                            )
-                        }))
-                {
+                            matches!(t.kind, TokenKind::If | TokenKind::For | TokenKind::Let)
+                        })) {
                     Maybe::None
                 } else {
                     Maybe::Some(Box::new(self.parse_expr_bp(right_bp)?))
@@ -1741,7 +1754,8 @@ impl<'a> RecursiveParser<'a> {
                 }
 
                 // E041: Check for missing RHS (x =;)
-                if self.stream.check(&TokenKind::Semicolon) || self.stream.check(&TokenKind::RBrace) {
+                if self.stream.check(&TokenKind::Semicolon) || self.stream.check(&TokenKind::RBrace)
+                {
                     return Err(ParseError::let_missing_value(self.stream.current_span())
                         .with_help("assignment requires a value on the right-hand side"));
                 }
@@ -1814,9 +1828,11 @@ impl<'a> RecursiveParser<'a> {
             ExprKind::While { body, .. } => body.expr.is_none(),
             ExprKind::Loop { body, .. } => body.expr.is_none(),
             // If without else clause doesn't return a value
-            ExprKind::If { then_branch, else_branch, .. } => {
-                else_branch.is_none() || then_branch.expr.is_none()
-            }
+            ExprKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => else_branch.is_none() || then_branch.expr.is_none(),
             // Match with all arms not returning values
             ExprKind::Match { arms, .. } => {
                 arms.iter().all(|arm| {
@@ -2054,45 +2070,41 @@ impl<'a> RecursiveParser<'a> {
         let range_start_pos = self.stream.position();
 
         // Check for range with no start: ..end or ..=end
-        let mut expr = if self.stream.check(&TokenKind::DotDot) || self.stream.check(&TokenKind::DotDotEq) {
-            let inclusive = self.stream.consume(&TokenKind::DotDotEq).is_some();
-            if !inclusive {
-                self.stream.consume(&TokenKind::DotDot);
-            }
+        let mut expr =
+            if self.stream.check(&TokenKind::DotDot) || self.stream.check(&TokenKind::DotDotEq) {
+                let inclusive = self.stream.consume(&TokenKind::DotDotEq).is_some();
+                if !inclusive {
+                    self.stream.consume(&TokenKind::DotDot);
+                }
 
-            // Parse optional end - use parse_prefix_expr recursively for the range end.
-            // This is safe because we've already consumed all the prefix operators
-            // before the range operator, so this is a fresh prefix expression.
-            // Inside comprehensions, `if`/`for`/`let` are clause keywords.
-            let end =
-                if self.stream.at_end()
+                // Parse optional end - use parse_prefix_expr recursively for the range end.
+                // This is safe because we've already consumed all the prefix operators
+                // before the range operator, so this is a fresh prefix expression.
+                // Inside comprehensions, `if`/`for`/`let` are clause keywords.
+                let end = if self.stream.at_end()
                     || !self.stream.peek().is_some_and(|t| t.starts_expr())
                     || (self.comprehension_depth > 0
                         && self.stream.peek().is_some_and(|t| {
-                            matches!(
-                                t.kind,
-                                TokenKind::If | TokenKind::For | TokenKind::Let
-                            )
-                        }))
-                {
+                            matches!(t.kind, TokenKind::If | TokenKind::For | TokenKind::Let)
+                        })) {
                     Maybe::None
                 } else {
                     Maybe::Some(Box::new(self.parse_prefix_expr()?))
                 };
 
-            let span = self.stream.make_span(range_start_pos);
-            Expr::new(
-                ExprKind::Range {
-                    start: Maybe::None,
-                    end,
-                    inclusive,
-                },
-                span,
-            )
-        } else {
-            // Otherwise, parse a primary expression
-            self.parse_primary_expr()?
-        };
+                let span = self.stream.make_span(range_start_pos);
+                Expr::new(
+                    ExprKind::Range {
+                        start: Maybe::None,
+                        end,
+                        inclusive,
+                    },
+                    span,
+                )
+            } else {
+                // Otherwise, parse a primary expression
+                self.parse_primary_expr()?
+            };
 
         // CRITICAL FIX: Parse postfix operators (field access, method calls, index)
         // BEFORE applying prefix operators. This ensures correct precedence:
@@ -2184,7 +2196,9 @@ impl<'a> RecursiveParser<'a> {
                     // No colon after 'x - this is likely an unterminated character literal
                     // Consume the token and report E001
                     let span = self.stream.current_span();
-                    let token = self.stream.advance()
+                    let token = self
+                        .stream
+                        .advance()
                         .ok_or_else(|| ParseError::unterminated_char(span))?;
                     Err(ParseError::unterminated_char(token.span))
                 }
@@ -2269,8 +2283,16 @@ impl<'a> RecursiveParser<'a> {
             // the full rationale.
             Some(TokenKind::Forall) => {
                 let next = self.stream.peek_nth_kind(1);
-                if matches!(next, Some(TokenKind::LParen) | Some(TokenKind::Ident(_)) | Some(TokenKind::Mut)
-                    | Some(TokenKind::Some) | Some(TokenKind::None) | Some(TokenKind::Ok) | Some(TokenKind::Err)) {
+                if matches!(
+                    next,
+                    Some(TokenKind::LParen)
+                        | Some(TokenKind::Ident(_))
+                        | Some(TokenKind::Mut)
+                        | Some(TokenKind::Some)
+                        | Some(TokenKind::None)
+                        | Some(TokenKind::Ok)
+                        | Some(TokenKind::Err)
+                ) {
                     self.parse_forall_expr()
                 } else if matches!(next, Some(TokenKind::Dot)) {
                     self.stream.advance(); // consume `forall`
@@ -2278,7 +2300,8 @@ impl<'a> RecursiveParser<'a> {
                     Err(ParseError::invalid_syntax(
                         "`forall` requires at least one binder before `.`",
                         span,
-                    ).with_help(
+                    )
+                    .with_help(
                         "Add a binder: `forall x: T . body`, `forall x in xs . body`,\n\
                          or `forall x . body` (type inferred). Empty `forall . body`\n\
                          is not valid Verum.",
@@ -2290,8 +2313,16 @@ impl<'a> RecursiveParser<'a> {
             }
             Some(TokenKind::Exists) => {
                 let next = self.stream.peek_nth_kind(1);
-                if matches!(next, Some(TokenKind::LParen) | Some(TokenKind::Ident(_)) | Some(TokenKind::Mut)
-                    | Some(TokenKind::Some) | Some(TokenKind::None) | Some(TokenKind::Ok) | Some(TokenKind::Err)) {
+                if matches!(
+                    next,
+                    Some(TokenKind::LParen)
+                        | Some(TokenKind::Ident(_))
+                        | Some(TokenKind::Mut)
+                        | Some(TokenKind::Some)
+                        | Some(TokenKind::None)
+                        | Some(TokenKind::Ok)
+                        | Some(TokenKind::Err)
+                ) {
                     self.parse_exists_expr()
                 } else if matches!(next, Some(TokenKind::Dot)) {
                     self.stream.advance(); // consume `exists`
@@ -2299,7 +2330,8 @@ impl<'a> RecursiveParser<'a> {
                     Err(ParseError::invalid_syntax(
                         "`exists` requires at least one binder before `.`",
                         span,
-                    ).with_help(
+                    )
+                    .with_help(
                         "Add a binder: `exists x: T . body`, `exists x in xs . body`,\n\
                          or `exists x . body` (type inferred). Empty `exists . body`\n\
                          is not valid Verum.",
@@ -2366,16 +2398,14 @@ impl<'a> RecursiveParser<'a> {
                 let type_path = self.parse_path()?;
                 let span = self.stream.make_span(start_pos);
                 Ok(Expr::new(ExprKind::Inject { type_path }, span))
-            },
+            }
 
             // Spawn expression
             Some(TokenKind::Spawn) => self.parse_spawn_expr(),
 
             // Select expression for async multiplexing
             // Disambiguate: `select { }` or `select biased { }` is expression, `select(...)` is function call
-            Some(TokenKind::Select) if self.is_select_expr_lookahead() => {
-                self.parse_select_expr()
-            }
+            Some(TokenKind::Select) if self.is_select_expr_lookahead() => self.parse_select_expr(),
             // select followed by ( or . or other - treat as path/function call
             // Use single-segment parsing to leave `.` for postfix processing
             Some(TokenKind::Select) => {
@@ -2391,9 +2421,7 @@ impl<'a> RecursiveParser<'a> {
                 self.parse_nursery_expr()
             }
             // nursery followed by =, ., or other - treat as identifier
-            Some(TokenKind::Nursery) => {
-                self.parse_path_or_record()
-            }
+            Some(TokenKind::Nursery) => self.parse_path_or_record(),
 
             // Anonymous function expression: fn(params) [using [...]] [-> Type] { body }
             Some(TokenKind::Fn)
@@ -2406,14 +2434,10 @@ impl<'a> RecursiveParser<'a> {
             }
 
             // Context system keywords used as identifiers in expressions
-            Some(TokenKind::Context) | Some(TokenKind::Recover) => {
-                self.parse_path_or_record()
-            }
+            Some(TokenKind::Context) | Some(TokenKind::Recover) => self.parse_path_or_record(),
 
             // Pattern matching keyword used as identifier in expressions
-            Some(TokenKind::ActivePattern) => {
-                self.parse_path_or_record()
-            }
+            Some(TokenKind::ActivePattern) => self.parse_path_or_record(),
 
             // Protocol, Internal, and Protected keywords used as identifiers in expressions
             // (e.g., socket(domain, sock_type, protocol), internal/protected field access)
@@ -2423,14 +2447,21 @@ impl<'a> RecursiveParser<'a> {
 
             // Contextual keywords used as identifiers in expressions
             // Note: Only add keywords NOT already handled elsewhere in this match
-            Some(TokenKind::Stage) | Some(TokenKind::By) | Some(TokenKind::Field)
-            | Some(TokenKind::Layer) | Some(TokenKind::Extends) | Some(TokenKind::Throws)
+            Some(TokenKind::Stage)
+            | Some(TokenKind::By)
+            | Some(TokenKind::Field)
+            | Some(TokenKind::Layer)
+            | Some(TokenKind::Extends)
+            | Some(TokenKind::Throws)
             | Some(TokenKind::Requires)
-            | Some(TokenKind::Linear) | Some(TokenKind::Ffi) | Some(TokenKind::Mount)
-            | Some(TokenKind::Inductive) | Some(TokenKind::Cofix) | Some(TokenKind::Implies)
-            | Some(TokenKind::Volatile) | Some(TokenKind::View) => {
-                self.parse_path_or_record()
-            }
+            | Some(TokenKind::Linear)
+            | Some(TokenKind::Ffi)
+            | Some(TokenKind::Mount)
+            | Some(TokenKind::Inductive)
+            | Some(TokenKind::Cofix)
+            | Some(TokenKind::Implies)
+            | Some(TokenKind::Volatile)
+            | Some(TokenKind::View) => self.parse_path_or_record(),
 
             // Keywords that start expressions
             Some(TokenKind::Break) => self.parse_break_expr(),
@@ -2484,9 +2515,7 @@ impl<'a> RecursiveParser<'a> {
             | Some(TokenKind::Induction)
             | Some(TokenKind::Contradiction)
             | Some(TokenKind::Link)
-            | Some(TokenKind::With) => {
-                self.parse_path_or_record()
-            }
+            | Some(TokenKind::With) => self.parse_path_or_record(),
 
             Some(kind) => {
                 let span = self.stream.current_span();
@@ -2683,9 +2712,13 @@ impl<'a> RecursiveParser<'a> {
                             // Check if next token is not valid for field/method access
                             match self.stream.peek_kind() {
                                 // These indicate incomplete float literal, not field access
-                                Some(TokenKind::Semicolon) | Some(TokenKind::Comma) |
-                                Some(TokenKind::RParen) | Some(TokenKind::RBracket) |
-                                Some(TokenKind::RBrace) | Some(TokenKind::Eof) | None => {
+                                Some(TokenKind::Semicolon)
+                                | Some(TokenKind::Comma)
+                                | Some(TokenKind::RParen)
+                                | Some(TokenKind::RBracket)
+                                | Some(TokenKind::RBrace)
+                                | Some(TokenKind::Eof)
+                                | None => {
                                     let span = lhs_span.merge(self.stream.make_span(start_pos));
                                     return Err(ParseError::invalid_number(
                                         "incomplete float literal: digit required after decimal point",
@@ -2700,9 +2733,13 @@ impl<'a> RecursiveParser<'a> {
                     // E048: Check for incomplete field access: expr. followed by terminator
                     // This catches patterns like `obj.;` which should error as E048
                     match self.stream.peek_kind() {
-                        Some(TokenKind::Semicolon) | Some(TokenKind::Comma) |
-                        Some(TokenKind::RParen) | Some(TokenKind::RBracket) |
-                        Some(TokenKind::RBrace) | Some(TokenKind::Eof) | None => {
+                        Some(TokenKind::Semicolon)
+                        | Some(TokenKind::Comma)
+                        | Some(TokenKind::RParen)
+                        | Some(TokenKind::RBracket)
+                        | Some(TokenKind::RBrace)
+                        | Some(TokenKind::Eof)
+                        | None => {
                             let span = lhs_span.merge(self.stream.make_span(start_pos));
                             return Err(ParseError::expr_stmt_invalid(
                                 "incomplete field access: expected field name after '.'",
@@ -2715,8 +2752,7 @@ impl<'a> RecursiveParser<'a> {
                     // Turbofish syntax without method name: expr.<Type, N>(args)
                     // This is used for explicit generic arguments on function calls.
                     // Example: fill.<Int, 8>(0) or identity.<3>()
-                    if self.stream.check(&TokenKind::Lt)
-                        && self.is_generic_method_call_lookahead()
+                    if self.stream.check(&TokenKind::Lt) && self.is_generic_method_call_lookahead()
                     {
                         let generic_args = self.parse_generic_args()?;
                         // Must be followed by `(`
@@ -2769,18 +2805,20 @@ impl<'a> RecursiveParser<'a> {
                         // Special handling for .attenuate() method with Capability.X syntax
                         // Only use CapabilitySet syntax if the argument starts with "Capability"
                         // Otherwise treat as regular method call (allows UInt16 constants like CAP_READ_WRITE)
-                        if field_name.as_str() == "attenuate" && self.stream.check(&TokenKind::LParen) {
+                        if field_name.as_str() == "attenuate"
+                            && self.stream.check(&TokenKind::LParen)
+                        {
                             // Look ahead to check if first argument is "Capability" identifier
-                            let first_arg_name = self.stream.peek_nth_kind(1)
-                                .and_then(|kind| {
-                                    if let TokenKind::Ident(name) = kind {
-                                        Some(name.clone())
-                                    } else {
-                                        None
-                                    }
-                                });
+                            let first_arg_name = self.stream.peek_nth_kind(1).and_then(|kind| {
+                                if let TokenKind::Ident(name) = kind {
+                                    Some(name.clone())
+                                } else {
+                                    None
+                                }
+                            });
 
-                            let is_capability_set_syntax = first_arg_name.as_ref()
+                            let is_capability_set_syntax = first_arg_name
+                                .as_ref()
                                 .map(|n| n.as_str() == "Capability")
                                 .unwrap_or(false);
 
@@ -2797,13 +2835,17 @@ impl<'a> RecursiveParser<'a> {
                             }
 
                             // Reject empty attenuate() - at least one capability required
-                            if self.stream.peek_nth_kind(1)
+                            if self
+                                .stream
+                                .peek_nth_kind(1)
                                 .map(|kind| matches!(kind, TokenKind::RParen))
                                 .unwrap_or(false)
                             {
                                 return Err(crate::ParseError::new(
                                     crate::error::ParseErrorKind::InvalidSyntax {
-                                        message: "attenuate() requires at least one capability argument".into(),
+                                        message:
+                                            "attenuate() requires at least one capability argument"
+                                                .into(),
                                     },
                                     self.stream.make_span(start_pos),
                                 ));
@@ -2887,10 +2929,15 @@ impl<'a> RecursiveParser<'a> {
                                 // Check for struct update/rest syntax: ..base or just ..
                                 if self.stream.consume(&TokenKind::DotDot).is_some() {
                                     // Check if this is rest-only (..) or struct update (..base)
-                                    if self.stream.check(&TokenKind::RBrace) || self.stream.check(&TokenKind::Comma) {
+                                    if self.stream.check(&TokenKind::RBrace)
+                                        || self.stream.check(&TokenKind::Comma)
+                                    {
                                         // Rest-only pattern: { x, y, .. }
                                         let rest_span = self.stream.current_span();
-                                        base = Maybe::Some(Box::new(Expr::new(ExprKind::Tuple(List::new()), rest_span)));
+                                        base = Maybe::Some(Box::new(Expr::new(
+                                            ExprKind::Tuple(List::new()),
+                                            rest_span,
+                                        )));
                                     } else {
                                         // Struct update: { x, y, ..base }
                                         base = Maybe::Some(Box::new(self.parse_expr()?));
@@ -2919,7 +2966,14 @@ impl<'a> RecursiveParser<'a> {
                         let span = lhs_span.merge(end_span);
 
                         Ok((
-                            Expr::new(ExprKind::Record { path, fields: fields.into(), base }, span),
+                            Expr::new(
+                                ExprKind::Record {
+                                    path,
+                                    fields: fields.into(),
+                                    base,
+                                },
+                                span,
+                            ),
                             true,
                         ))
                     } else {
@@ -2984,7 +3038,10 @@ impl<'a> RecursiveParser<'a> {
 
             // Generic function call: func<T, U>(args)
             // Detect when < followed by valid type args and then >()
-            Some(TokenKind::Lt) if matches!(&lhs.kind, ExprKind::Path(_)) && self.is_generic_func_call_lookahead() => {
+            Some(TokenKind::Lt)
+                if matches!(&lhs.kind, ExprKind::Path(_))
+                    && self.is_generic_func_call_lookahead() =>
+            {
                 // Parse generic type arguments: <T, U>
                 let type_args = self.parse_generic_args()?;
 
@@ -3016,9 +3073,7 @@ impl<'a> RecursiveParser<'a> {
             // We refuse with a precise diagnostic so the user can mechanically
             // remove the `::` (this is the most common case) instead of
             // chasing a downstream parse error.
-            Some(TokenKind::ColonColon)
-                if self.stream.peek_nth_kind(1) == Some(&TokenKind::Lt) =>
-            {
+            Some(TokenKind::ColonColon) if self.stream.peek_nth_kind(1) == Some(&TokenKind::Lt) => {
                 let span = self.stream.current_span();
                 Err(ParseError::invalid_syntax(
                     "Rust-style turbofish `::<T>` is not valid Verum",
@@ -3099,15 +3154,19 @@ impl<'a> RecursiveParser<'a> {
             // Index: [index]
             Some(TokenKind::LBracket) => {
                 let current_span = self.stream.current_span();
-                let bracket_span = self.stream.advance()
-                    .ok_or_else(|| ParseError::unexpected_eof(&[TokenKind::LBracket], current_span))?
+                let bracket_span = self
+                    .stream
+                    .advance()
+                    .ok_or_else(|| {
+                        ParseError::unexpected_eof(&[TokenKind::LBracket], current_span)
+                    })?
                     .span;
 
                 // E013: Check for immediately unclosed index (arr[;)
-                if self.stream.check(&TokenKind::Semicolon) || self.stream.check(&TokenKind::RBrace) {
-                    return Err(ParseError::stmt_unclosed_index(
-                        bracket_span,
-                    ).with_help("missing closing ']' for index access"));
+                if self.stream.check(&TokenKind::Semicolon) || self.stream.check(&TokenKind::RBrace)
+                {
+                    return Err(ParseError::stmt_unclosed_index(bracket_span)
+                        .with_help("missing closing ']' for index access"));
                 }
 
                 let first_index = self.parse_expr()?;
@@ -3132,9 +3191,8 @@ impl<'a> RecursiveParser<'a> {
                 // E013: Check for unclosed index after expression
                 if !self.stream.check(&TokenKind::RBracket) {
                     if self.stream.check(&TokenKind::Semicolon) || self.stream.at_end() {
-                        return Err(ParseError::stmt_unclosed_index(
-                            bracket_span,
-                        ).with_help("missing closing ']' for index access"));
+                        return Err(ParseError::stmt_unclosed_index(bracket_span)
+                            .with_help("missing closing ']' for index access"));
                     }
                 }
 
@@ -3232,7 +3290,12 @@ impl<'a> RecursiveParser<'a> {
         use verum_lexer::IntegerLiteral;
         match self.stream.advance() {
             Some(Token {
-                kind: TokenKind::Integer(IntegerLiteral { raw_value, base, suffix }),
+                kind:
+                    TokenKind::Integer(IntegerLiteral {
+                        raw_value,
+                        base,
+                        suffix,
+                    }),
                 span,
             }) => {
                 // Parse the integer value, supporting arbitrary precision via i128
@@ -3425,7 +3488,8 @@ impl<'a> RecursiveParser<'a> {
                     };
 
                     // Validate format-tagged literals at parse time
-                    if let Some(validation_err) = validate_format_tag(tag.as_str(), &inner_content) {
+                    if let Some(validation_err) = validate_format_tag(tag.as_str(), &inner_content)
+                    {
                         return Err(ParseError::invalid_syntax(
                             &format!("invalid {} literal: {}", tag, validation_err) as &str,
                             *span,
@@ -3662,9 +3726,15 @@ impl<'a> RecursiveParser<'a> {
             Some(TokenKind::LParen) => true,
             // These tokens indicate `nursery` is used as an identifier:
             // `nursery = ...`, `nursery.field`, `nursery:`, etc.
-            Some(TokenKind::Eq | TokenKind::Dot | TokenKind::Colon
-                | TokenKind::Comma | TokenKind::RParen | TokenKind::RBracket
-                | TokenKind::RBrace) => false,
+            Some(
+                TokenKind::Eq
+                | TokenKind::Dot
+                | TokenKind::Colon
+                | TokenKind::Comma
+                | TokenKind::RParen
+                | TokenKind::RBracket
+                | TokenKind::RBrace,
+            ) => false,
             // Semicolon or EOF after nursery — likely a missing block (E0D4)
             Some(TokenKind::Semicolon) | None => true,
             // Any other token (|, number, identifier, keyword) after nursery
@@ -3766,11 +3836,16 @@ impl<'a> RecursiveParser<'a> {
                     // Check for struct update/rest syntax: ..base or just ..
                     if self.stream.consume(&TokenKind::DotDot).is_some() {
                         // Check if this is rest-only (..) or struct update (..base)
-                        if self.stream.check(&TokenKind::RBrace) || self.stream.check(&TokenKind::Comma) {
+                        if self.stream.check(&TokenKind::RBrace)
+                            || self.stream.check(&TokenKind::Comma)
+                        {
                             // Rest-only pattern: { x, y, .. }
                             // Use ExprKind::Unit as a sentinel for "rest without base"
                             let rest_span = self.stream.current_span();
-                            base = Maybe::Some(Box::new(Expr::new(ExprKind::Tuple(List::new()), rest_span)));
+                            base = Maybe::Some(Box::new(Expr::new(
+                                ExprKind::Tuple(List::new()),
+                                rest_span,
+                            )));
                         } else {
                             // Struct update: { x, y, ..base }
                             base = Maybe::Some(Box::new(self.parse_expr()?));
@@ -3798,7 +3873,14 @@ impl<'a> RecursiveParser<'a> {
             let end_span = self.stream.expect(TokenKind::RBrace)?.span;
             let span = path.span.merge(end_span);
 
-            Ok(Expr::new(ExprKind::Record { path, fields: fields.into(), base }, span))
+            Ok(Expr::new(
+                ExprKind::Record {
+                    path,
+                    fields: fields.into(),
+                    base,
+                },
+                span,
+            ))
         } else {
             Ok(Expr::path(path))
         }
@@ -3820,7 +3902,10 @@ impl<'a> RecursiveParser<'a> {
             PathSegment::SelfValue
         } else if self.stream.consume(&TokenKind::SelfType).is_some() {
             // SelfType (Self) is a type reference, create as Name("Self") not SelfValue
-            PathSegment::Name(verum_ast::ty::Ident::new(Text::from("Self"), self.stream.current_span()))
+            PathSegment::Name(verum_ast::ty::Ident::new(
+                Text::from("Self"),
+                self.stream.current_span(),
+            ))
         } else if self.stream.consume(&TokenKind::Super).is_some() {
             // Handle super keyword token
             PathSegment::Super
@@ -3849,18 +3934,35 @@ impl<'a> RecursiveParser<'a> {
         // the postfix arm earlier in this file with its own diagnostic.
         while self.stream.check(&TokenKind::ColonColon) {
             // Peek at what follows `::` - only consume if it's an identifier-like token
-            let next_is_ident = self.stream.peek_nth(1).map(|t| matches!(t.kind,
-                TokenKind::Ident(_) | TokenKind::Some | TokenKind::None
-                | TokenKind::Ok | TokenKind::Err | TokenKind::Result
-                | TokenKind::SelfValue | TokenKind::SelfType
-                | TokenKind::Super | TokenKind::Cog
-                | TokenKind::By | TokenKind::Field | TokenKind::Stage
-            )).unwrap_or(false);
+            let next_is_ident = self
+                .stream
+                .peek_nth(1)
+                .map(|t| {
+                    matches!(
+                        t.kind,
+                        TokenKind::Ident(_)
+                            | TokenKind::Some
+                            | TokenKind::None
+                            | TokenKind::Ok
+                            | TokenKind::Err
+                            | TokenKind::Result
+                            | TokenKind::SelfValue
+                            | TokenKind::SelfType
+                            | TokenKind::Super
+                            | TokenKind::Cog
+                            | TokenKind::By
+                            | TokenKind::Field
+                            | TokenKind::Stage
+                    )
+                })
+                .unwrap_or(false);
             if next_is_ident {
                 self.stream.advance(); // consume `::`
                 let seg_name = self.consume_ident_or_keyword()?;
                 let seg_span = self.stream.current_span();
-                segments.push(PathSegment::Name(verum_ast::ty::Ident::new(seg_name, seg_span)));
+                segments.push(PathSegment::Name(verum_ast::ty::Ident::new(
+                    seg_name, seg_span,
+                )));
             } else {
                 break;
             }
@@ -4013,7 +4115,10 @@ impl<'a> RecursiveParser<'a> {
 
             self.stream.expect(TokenKind::RBracket)?;
             let span = self.stream.make_span(start_pos);
-            Ok(Expr::new(ExprKind::Array(ArrayExpr::List(elements.into())), span))
+            Ok(Expr::new(
+                ExprKind::Array(ArrayExpr::List(elements.into())),
+                span,
+            ))
         }
     }
 
@@ -4091,7 +4196,12 @@ impl<'a> RecursiveParser<'a> {
                 self.stream.expect(TokenKind::RBracket)?;
                 let span = self.stream.make_span(start_pos);
                 Ok(Expr::new(
-                    ExprKind::StreamLiteral(StreamLiteralExpr::range(first_expr, Maybe::Some(end), true, span)),
+                    ExprKind::StreamLiteral(StreamLiteralExpr::range(
+                        first_expr,
+                        Maybe::Some(end),
+                        true,
+                        span,
+                    )),
                     span,
                 ))
             }
@@ -4118,7 +4228,11 @@ impl<'a> RecursiveParser<'a> {
                 self.stream.expect(TokenKind::RBracket)?;
                 let span = self.stream.make_span(start_pos);
                 Ok(Expr::new(
-                    ExprKind::StreamLiteral(StreamLiteralExpr::elements(elements.into(), cycles, span)),
+                    ExprKind::StreamLiteral(StreamLiteralExpr::elements(
+                        elements.into(),
+                        cycles,
+                        span,
+                    )),
                     span,
                 ))
             }
@@ -4128,7 +4242,11 @@ impl<'a> RecursiveParser<'a> {
                 self.stream.advance();
                 let span = self.stream.make_span(start_pos);
                 Ok(Expr::new(
-                    ExprKind::StreamLiteral(StreamLiteralExpr::elements(vec![first_expr].into(), false, span)),
+                    ExprKind::StreamLiteral(StreamLiteralExpr::elements(
+                        vec![first_expr].into(),
+                        false,
+                        span,
+                    )),
                     span,
                 ))
             }
@@ -4450,7 +4568,12 @@ impl<'a> RecursiveParser<'a> {
 
         self.stream.expect(TokenKind::RBrace)?;
         let span = self.stream.make_span(start_pos);
-        Ok(Expr::new(ExprKind::MapLiteral { entries: entries.into() }, span))
+        Ok(Expr::new(
+            ExprKind::MapLiteral {
+                entries: entries.into(),
+            },
+            span,
+        ))
     }
 
     /// Parse a set literal: { elem1, elem2, ... }
@@ -4495,7 +4618,12 @@ impl<'a> RecursiveParser<'a> {
 
         self.stream.expect(TokenKind::RBrace)?;
         let span = self.stream.make_span(start_pos);
-        Ok(Expr::new(ExprKind::SetLiteral { elements: elements.into() }, span))
+        Ok(Expr::new(
+            ExprKind::SetLiteral {
+                elements: elements.into(),
+            },
+            span,
+        ))
     }
 
     // parse_block is defined in stmt.rs
@@ -4512,8 +4640,8 @@ impl<'a> RecursiveParser<'a> {
         let method_span = self.stream.current_span();
 
         // Check for generic type arguments: .method<T>()
-        let is_generic = self.stream.check(&TokenKind::Lt)
-            && self.is_generic_method_call_lookahead();
+        let is_generic =
+            self.stream.check(&TokenKind::Lt) && self.is_generic_method_call_lookahead();
 
         let type_args = if is_generic {
             self.parse_generic_args()?
@@ -4541,9 +4669,8 @@ impl<'a> RecursiveParser<'a> {
 
         // E012: Check for immediately unclosed call (foo(;)
         if self.stream.check(&TokenKind::Semicolon) {
-            return Err(ParseError::stmt_unclosed_call(
-                open_paren_span,
-            ).with_help("missing closing ')' for function call"));
+            return Err(ParseError::stmt_unclosed_call(open_paren_span)
+                .with_help("missing closing ')' for function call"));
         }
 
         if self.stream.check(&TokenKind::RParen) {
@@ -4556,9 +4683,8 @@ impl<'a> RecursiveParser<'a> {
         // E012: Check for unclosed call after args
         if !self.stream.check(&TokenKind::RParen) {
             if self.stream.check(&TokenKind::Semicolon) || self.stream.at_end() {
-                return Err(ParseError::stmt_unclosed_call(
-                    open_paren_span,
-                ).with_help("missing closing ')' for function call"));
+                return Err(ParseError::stmt_unclosed_call(open_paren_span)
+                    .with_help("missing closing ')' for function call"));
             }
         }
 
@@ -4577,7 +4703,11 @@ impl<'a> RecursiveParser<'a> {
     fn parse_call_arg(&mut self) -> ParseResult<Expr> {
         // Check for named argument pattern: Ident followed by Colon (not ColonColon)
         // We use lookahead to avoid consuming tokens prematurely
-        if let Some(Token { kind: TokenKind::Ident(_), .. }) = self.stream.peek() {
+        if let Some(Token {
+            kind: TokenKind::Ident(_),
+            ..
+        }) = self.stream.peek()
+        {
             if self.stream.peek_nth_kind(1) == Some(&TokenKind::Colon) {
                 // This is a named argument: name: value
                 let start_pos = self.stream.position();
@@ -4788,7 +4918,11 @@ impl<'a> RecursiveParser<'a> {
 
                     // Check for `&&` to chain additional conditions
                     let mut guard_result = is_expr;
-                    while self.stream.consume(&TokenKind::AmpersandAmpersand).is_some() {
+                    while self
+                        .stream
+                        .consume(&TokenKind::AmpersandAmpersand)
+                        .is_some()
+                    {
                         let rhs = self.parse_expr_bp(4)?;
                         let combined_span = guard_result.span.merge(rhs.span);
                         guard_result = Expr::new(
@@ -4802,18 +4936,18 @@ impl<'a> RecursiveParser<'a> {
                     }
                     Maybe::Some(Box::new(guard_result))
                 } else {
-                // Parse guard expression with min binding power 4 to stop before `=>` (bp=3)
-                // This prevents the guard from consuming the match arm separator.
-                // Converting errors to E086
-                match self.parse_expr_bp(4) {
-                    Ok(expr) => Maybe::Some(Box::new(expr)),
-                    Err(_) => {
-                        return Err(ParseError::pattern_invalid_guard(
-                            "invalid guard expression",
-                            self.stream.current_span(),
-                        ));
+                    // Parse guard expression with min binding power 4 to stop before `=>` (bp=3)
+                    // This prevents the guard from consuming the match arm separator.
+                    // Converting errors to E086
+                    match self.parse_expr_bp(4) {
+                        Ok(expr) => Maybe::Some(Box::new(expr)),
+                        Err(_) => {
+                            return Err(ParseError::pattern_invalid_guard(
+                                "invalid guard expression",
+                                self.stream.current_span(),
+                            ));
+                        }
                     }
-                }
                 }
             } else if self.stream.consume(&TokenKind::Where).is_some() {
                 // Support Verum-style WHERE guards: match x { y where y > 0 => ... }
@@ -5020,7 +5154,11 @@ impl<'a> RecursiveParser<'a> {
             // Support let-chains: `while let Some(x) = iter.next() && x > 0 { ... }`
             // Also: `while let Some(a) = iter1.next() && let Some(b) = iter2.next() { ... }`
             let mut result = is_expr;
-            while self.stream.consume(&TokenKind::AmpersandAmpersand).is_some() {
+            while self
+                .stream
+                .consume(&TokenKind::AmpersandAmpersand)
+                .is_some()
+            {
                 let rhs = if self.stream.check(&TokenKind::Let) {
                     // Another let binding in the chain
                     let chain_start = self.stream.position();
@@ -5086,40 +5224,30 @@ impl<'a> RecursiveParser<'a> {
 
         // E089: Check for missing pattern (for in items)
         if self.stream.check(&TokenKind::In) {
-            return Err(ParseError::pattern_empty_or(
-                self.stream.current_span(),
-            ));
+            return Err(ParseError::pattern_empty_or(self.stream.current_span()));
         }
 
         let pattern = self.parse_pattern()?;
 
         // E089: Check for guard in for pattern (guards not allowed)
         if self.stream.check(&TokenKind::If) {
-            return Err(ParseError::pattern_empty_or(
-                self.stream.current_span(),
-            ));
+            return Err(ParseError::pattern_empty_or(self.stream.current_span()));
         }
 
         // E089: Check for or-pattern in for
         if self.stream.check(&TokenKind::Pipe) {
-            return Err(ParseError::pattern_empty_or(
-                self.stream.current_span(),
-            ));
+            return Err(ParseError::pattern_empty_or(self.stream.current_span()));
         }
 
         // E089: Check for missing 'in' keyword
         if !self.stream.check(&TokenKind::In) {
-            return Err(ParseError::pattern_empty_or(
-                self.stream.current_span(),
-            ));
+            return Err(ParseError::pattern_empty_or(self.stream.current_span()));
         }
         self.stream.advance(); // consume 'in'
 
         // E089: Check for double 'in' keyword
         if self.stream.check(&TokenKind::In) {
-            return Err(ParseError::pattern_empty_or(
-                self.stream.current_span(),
-            ));
+            return Err(ParseError::pattern_empty_or(self.stream.current_span()));
         }
         // Use parse_expr_no_struct to prevent `items { }` from being parsed as a record literal
         let iter = self.parse_expr_no_struct()?;
@@ -5205,7 +5333,9 @@ impl<'a> RecursiveParser<'a> {
                         RecoverBody::MatchArms { arms, .. } => {
                             all_arms.extend(arms.to_vec());
                         }
-                        RecoverBody::Closure { param, body, span, .. } => {
+                        RecoverBody::Closure {
+                            param, body, span, ..
+                        } => {
                             all_arms.push(MatchArm {
                                 pattern: param.pattern,
                                 guard: Maybe::None,
@@ -5219,7 +5349,10 @@ impl<'a> RecursiveParser<'a> {
                 }
 
                 let span = self.stream.make_span(start_pos);
-                RecoverBody::MatchArms { arms: all_arms.into(), span }
+                RecoverBody::MatchArms {
+                    arms: all_arms.into(),
+                    span,
+                }
             } else {
                 recover
             };
@@ -5290,7 +5423,10 @@ impl<'a> RecursiveParser<'a> {
             let arms = self.parse_match_arms()?;
             self.stream.expect(TokenKind::RBrace)?;
             let span = self.stream.make_span(start_pos);
-            Ok(RecoverBody::MatchArms { arms: arms.into(), span })
+            Ok(RecoverBody::MatchArms {
+                arms: arms.into(),
+                span,
+            })
         } else if self.stream.check(&TokenKind::Pipe) {
             // recover_closure: |param| body
             self.stream.expect(TokenKind::Pipe)?;
@@ -5339,7 +5475,10 @@ impl<'a> RecursiveParser<'a> {
                     span: arm_span,
                 };
                 let span = self.stream.make_span(start_pos);
-                return Ok(RecoverBody::MatchArms { arms: List::from(vec![arm]), span });
+                return Ok(RecoverBody::MatchArms {
+                    arms: List::from(vec![arm]),
+                    span,
+                });
             }
 
             let ty = if self.stream.consume(&TokenKind::Colon).is_some() {
@@ -5405,7 +5544,10 @@ impl<'a> RecursiveParser<'a> {
     ///
 
     /// Quantifier bindings support pattern, optional type, optional domain, and optional guard.
-    fn parse_quantifier_binding(&mut self, delimited: bool) -> ParseResult<verum_ast::expr::QuantifierBinding> {
+    fn parse_quantifier_binding(
+        &mut self,
+        delimited: bool,
+    ) -> ParseResult<verum_ast::expr::QuantifierBinding> {
         use crate::error::ParseErrorKind;
         let start_pos = self.stream.position();
         let pattern = self.parse_pattern()?;
@@ -5457,7 +5599,9 @@ impl<'a> RecursiveParser<'a> {
         // The type checker will resolve shared type annotations.
 
         let span = self.stream.make_span(start_pos);
-        Ok(verum_ast::expr::QuantifierBinding::full(pattern, ty, domain, guard, span))
+        Ok(verum_ast::expr::QuantifierBinding::full(
+            pattern, ty, domain, guard, span,
+        ))
     }
 
     /// Parse a primary expression with optional prefix operators, but WITHOUT postfix operators.
@@ -5575,9 +5719,9 @@ impl<'a> RecursiveParser<'a> {
 
             match self.stream.peek_kind() {
                 // Stop at quantifier delimiters
-                Some(TokenKind::Comma) => break,      // Next binding
-                Some(TokenKind::FatArrow) => break,   // Alternative body separator
-                Some(TokenKind::Where) => break,      // Guard clause
+                Some(TokenKind::Comma) => break,    // Next binding
+                Some(TokenKind::FatArrow) => break, // Alternative body separator
+                Some(TokenKind::Where) => break,    // Guard clause
 
                 // Special handling for `.` - could be body separator or member access
                 Some(TokenKind::Dot) => {
@@ -5644,7 +5788,9 @@ impl<'a> RecursiveParser<'a> {
                         {
                             Maybe::None
                         } else {
-                            Maybe::Some(Box::new(self.parse_quantifier_restricted_expr(allow_comparisons)?))
+                            Maybe::Some(Box::new(
+                                self.parse_quantifier_restricted_expr(allow_comparisons)?,
+                            ))
                         };
                         let span = lhs.span.merge(self.stream.make_span(start_pos));
                         lhs = Expr::new(
@@ -5711,11 +5857,17 @@ impl<'a> RecursiveParser<'a> {
                         // - `||`, `&&`: it's the body expression with logical operators
                         // - comparison operators: it's the body expression
                         match after_call {
-                            TokenKind::Semicolon | TokenKind::RBrace | TokenKind::RParen |
-                            TokenKind::PipePipe | TokenKind::AmpersandAmpersand |
-                            TokenKind::EqEq | TokenKind::BangEq |
-                            TokenKind::Lt | TokenKind::LtEq |
-                            TokenKind::Gt | TokenKind::GtEq => {
+                            TokenKind::Semicolon
+                            | TokenKind::RBrace
+                            | TokenKind::RParen
+                            | TokenKind::PipePipe
+                            | TokenKind::AmpersandAmpersand
+                            | TokenKind::EqEq
+                            | TokenKind::BangEq
+                            | TokenKind::Lt
+                            | TokenKind::LtEq
+                            | TokenKind::Gt
+                            | TokenKind::GtEq => {
                                 return true; // Body separator
                             }
                             // If followed by `.` it's likely a method chain continuation
@@ -5739,19 +5891,29 @@ impl<'a> RecursiveParser<'a> {
                     Some(TokenKind::Dot) => true,
 
                     // `.x + y` - expression with operator, likely body
-                    Some(TokenKind::Plus) | Some(TokenKind::Minus) |
-                    Some(TokenKind::Star) | Some(TokenKind::Slash) |
-                    Some(TokenKind::Percent) | Some(TokenKind::Caret) |
-                    Some(TokenKind::Ampersand) | Some(TokenKind::Pipe) |
-                    Some(TokenKind::AmpersandAmpersand) | Some(TokenKind::PipePipe) |
-                    Some(TokenKind::Eq) | Some(TokenKind::EqEq) | Some(TokenKind::BangEq) |
-                    Some(TokenKind::Lt) | Some(TokenKind::LtEq) |
-                    Some(TokenKind::Gt) | Some(TokenKind::GtEq) => true,
+                    Some(TokenKind::Plus)
+                    | Some(TokenKind::Minus)
+                    | Some(TokenKind::Star)
+                    | Some(TokenKind::Slash)
+                    | Some(TokenKind::Percent)
+                    | Some(TokenKind::Caret)
+                    | Some(TokenKind::Ampersand)
+                    | Some(TokenKind::Pipe)
+                    | Some(TokenKind::AmpersandAmpersand)
+                    | Some(TokenKind::PipePipe)
+                    | Some(TokenKind::Eq)
+                    | Some(TokenKind::EqEq)
+                    | Some(TokenKind::BangEq)
+                    | Some(TokenKind::Lt)
+                    | Some(TokenKind::LtEq)
+                    | Some(TokenKind::Gt)
+                    | Some(TokenKind::GtEq) => true,
 
                     // `.x == y` - comparison, likely body
                     // But `.x,` or `.x where` could be field access followed by delimiter
-                    Some(TokenKind::Comma) | Some(TokenKind::Where) |
-                    Some(TokenKind::FatArrow) => false,
+                    Some(TokenKind::Comma) | Some(TokenKind::Where) | Some(TokenKind::FatArrow) => {
+                        false
+                    }
 
                     // `.x` at end - could be body with just identifier
                     None => true,
@@ -5823,7 +5985,9 @@ impl<'a> RecursiveParser<'a> {
     ///
 
     /// Returns the list of bindings.
-    fn parse_quantifier_bindings(&mut self) -> ParseResult<List<verum_ast::expr::QuantifierBinding>> {
+    fn parse_quantifier_bindings(
+        &mut self,
+    ) -> ParseResult<List<verum_ast::expr::QuantifierBinding>> {
         let mut bindings = List::new();
 
         // Check for parenthesized bindings: (x: T, y: U)
@@ -6057,10 +6221,13 @@ impl<'a> RecursiveParser<'a> {
             if self.stream.check(&TokenKind::At) {
                 if matches!(self.stream.peek_nth_kind(1), Some(&TokenKind::Ident(_))) {
                     // Check if the token after @ident is invariant or decreases
-                    if matches!(self.stream.peek_nth_kind(2), Some(&TokenKind::Invariant) | Some(&TokenKind::Decreases)) {
+                    if matches!(
+                        self.stream.peek_nth_kind(2),
+                        Some(&TokenKind::Invariant) | Some(&TokenKind::Decreases)
+                    ) {
                         self.stream.advance(); // consume @
                         self.stream.advance(); // consume ghost/ident
-                        // Fall through to normal invariant/decreases parsing
+                    // Fall through to normal invariant/decreases parsing
                     } else {
                         break;
                     }
@@ -6166,12 +6333,20 @@ impl<'a> RecursiveParser<'a> {
             let mut ctx_list = Vec::new();
             if !self.stream.check(&TokenKind::RBracket) {
                 loop {
-                    if !self.tick() || self.is_aborted() { break; }
+                    if !self.tick() || self.is_aborted() {
+                        break;
+                    }
                     let ctx_start = self.stream.position();
                     let path = self.parse_path()?;
                     let ctx_span = self.stream.make_span(ctx_start);
-                    ctx_list.push(verum_ast::decl::ContextRequirement::simple(path, List::new(), ctx_span));
-                    if self.stream.consume(&TokenKind::Comma).is_none() { break; }
+                    ctx_list.push(verum_ast::decl::ContextRequirement::simple(
+                        path,
+                        List::new(),
+                        ctx_span,
+                    ));
+                    if self.stream.consume(&TokenKind::Comma).is_none() {
+                        break;
+                    }
                 }
             }
             self.stream.expect(TokenKind::RBracket)?;
@@ -6240,10 +6415,18 @@ impl<'a> RecursiveParser<'a> {
             let mut depth = 1u32;
             while depth > 0 {
                 match self.stream.peek_kind() {
-                    Some(TokenKind::Lt) => { depth += 1; self.stream.advance(); }
-                    Some(TokenKind::Gt) => { depth -= 1; self.stream.advance(); }
+                    Some(TokenKind::Lt) => {
+                        depth += 1;
+                        self.stream.advance();
+                    }
+                    Some(TokenKind::Gt) => {
+                        depth -= 1;
+                        self.stream.advance();
+                    }
                     None => break,
-                    _ => { self.stream.advance(); }
+                    _ => {
+                        self.stream.advance();
+                    }
                 }
             }
         }
@@ -6251,10 +6434,14 @@ impl<'a> RecursiveParser<'a> {
         let mut params = Vec::new();
         if !self.stream.check(&TokenKind::RParen) {
             loop {
-                if !self.tick() || self.is_aborted() { break; }
+                if !self.tick() || self.is_aborted() {
+                    break;
+                }
                 let param = self.parse_closure_param()?;
                 params.push(param);
-                if self.stream.consume(&TokenKind::Comma).is_none() { break; }
+                if self.stream.consume(&TokenKind::Comma).is_none() {
+                    break;
+                }
             }
         }
         self.stream.expect(TokenKind::RParen)?;
@@ -6263,14 +6450,20 @@ impl<'a> RecursiveParser<'a> {
             let mut ctx_list = Vec::new();
             if !self.stream.check(&TokenKind::RBracket) {
                 loop {
-                    if !self.tick() || self.is_aborted() { break; }
+                    if !self.tick() || self.is_aborted() {
+                        break;
+                    }
                     let ctx_start = self.stream.position();
                     let path = self.parse_path()?;
                     let ctx_span = self.stream.make_span(ctx_start);
                     ctx_list.push(verum_ast::decl::ContextRequirement::simple(
-                        path, List::new(), ctx_span,
+                        path,
+                        List::new(),
+                        ctx_span,
                     ));
-                    if self.stream.consume(&TokenKind::Comma).is_none() { break; }
+                    if self.stream.consume(&TokenKind::Comma).is_none() {
+                        break;
+                    }
                 }
             }
             self.stream.expect(TokenKind::RBracket)?;
@@ -6298,11 +6491,10 @@ impl<'a> RecursiveParser<'a> {
         } else if self.stream.consume(&TokenKind::RArrow).is_some() {
             let after_arrow = self.stream.position();
             let speculative_type = self.parse_type_no_refinement();
-            let type_parsed_cleanly = speculative_type.is_ok()
-                && self.stream.check(&TokenKind::LBrace);
+            let type_parsed_cleanly =
+                speculative_type.is_ok() && self.stream.check(&TokenKind::LBrace);
             if type_parsed_cleanly {
-                let ty = speculative_type
-                    .expect("ok branch ensured by check above");
+                let ty = speculative_type.expect("ok branch ensured by check above");
                 (Maybe::Some(ty), self.parse_block_expr()?)
             } else {
                 // Rewind to the first token after `->` and re-parse the
@@ -6321,8 +6513,11 @@ impl<'a> RecursiveParser<'a> {
         let span = self.stream.make_span(start_pos);
         Ok(Expr::new(
             ExprKind::Closure {
-                async_: false, move_: false,
-                params: params.into(), contexts, return_type,
+                async_: false,
+                move_: false,
+                params: params.into(),
+                contexts,
+                return_type,
                 body: Box::new(body),
             },
             span,
@@ -6438,17 +6633,15 @@ impl<'a> RecursiveParser<'a> {
             return Err(ParseError::invalid_syntax(
                 "select expression must have at least one arm",
                 brace_span,
-            ).with_code(crate::error::ErrorCode::UnclosedSelect));
+            )
+            .with_code(crate::error::ErrorCode::UnclosedSelect));
         }
 
         let arms = self.parse_select_arms()?;
         self.stream.expect(TokenKind::RBrace)?;
 
         let span = self.stream.make_span(start_pos);
-        Ok(Expr::new(
-            ExprKind::Select { biased, arms, span },
-            span,
-        ))
+        Ok(Expr::new(ExprKind::Select { biased, arms, span }, span))
     }
 
     /// Parse select arms inside a select expression.
@@ -6680,16 +6873,25 @@ impl<'a> RecursiveParser<'a> {
             if self.stream.check(&TokenKind::LParen) {
                 let mut depth = 0_i32;
                 loop {
-                    if !self.tick() || self.is_aborted() { break; }
+                    if !self.tick() || self.is_aborted() {
+                        break;
+                    }
                     match self.stream.peek_kind() {
-                        Some(TokenKind::LParen) => { depth += 1; self.stream.advance(); }
+                        Some(TokenKind::LParen) => {
+                            depth += 1;
+                            self.stream.advance();
+                        }
                         Some(TokenKind::RParen) => {
                             depth -= 1;
                             self.stream.advance();
-                            if depth == 0 { break; }
+                            if depth == 0 {
+                                break;
+                            }
                         }
                         None => break,
-                        _ => { self.stream.advance(); }
+                        _ => {
+                            self.stream.advance();
+                        }
                     }
                 }
             }
@@ -6698,7 +6900,10 @@ impl<'a> RecursiveParser<'a> {
         // GRAMMAR: nursery_expr = 'nursery' , [ nursery_options ] , block_expr , [ nursery_handlers ] ;
         // Block expression is REQUIRED after nursery keyword (and optional options).
         if !self.stream.check(&TokenKind::LBrace) {
-            return Err(ParseError::missing_block_expr("nursery", self.stream.current_span()));
+            return Err(ParseError::missing_block_expr(
+                "nursery",
+                self.stream.current_span(),
+            ));
         }
 
         // Parse the body block
@@ -6758,15 +6963,16 @@ impl<'a> RecursiveParser<'a> {
                 "on_error" => {
                     // Parse error behavior: cancel_all | wait_all | fail_fast
                     let behavior_span = self.stream.current_span();
-                    let behavior_name = if let Some(TokenKind::Ident(name)) = self.stream.peek_kind().cloned() {
-                        self.stream.advance();
-                        name
-                    } else {
-                        return Err(ParseError::invalid_syntax(
-                            "expected error behavior: `cancel_all`, `wait_all`, or `fail_fast`",
-                            behavior_span,
-                        ));
-                    };
+                    let behavior_name =
+                        if let Some(TokenKind::Ident(name)) = self.stream.peek_kind().cloned() {
+                            self.stream.advance();
+                            name
+                        } else {
+                            return Err(ParseError::invalid_syntax(
+                                "expected error behavior: `cancel_all`, `wait_all`, or `fail_fast`",
+                                behavior_span,
+                            ));
+                        };
 
                     options.on_error = match behavior_name.as_str() {
                         "cancel_all" => NurseryErrorBehavior::CancelAll,
@@ -6815,7 +7021,10 @@ impl<'a> RecursiveParser<'a> {
     ///  nursery_recover = 'recover' , recover_body ;
     fn parse_nursery_handlers(
         &mut self,
-    ) -> ParseResult<(Maybe<verum_ast::expr::Block>, Maybe<verum_ast::expr::RecoverBody>)> {
+    ) -> ParseResult<(
+        Maybe<verum_ast::expr::Block>,
+        Maybe<verum_ast::expr::RecoverBody>,
+    )> {
         let mut on_cancel = Maybe::None;
         let mut recover = Maybe::None;
 
@@ -6894,7 +7103,7 @@ impl<'a> RecursiveParser<'a> {
                     return Err(ParseError::invalid_syntax(
                         "expected stage number in quote(N)".to_string(),
                         self.stream.current_span(),
-                    ))
+                    ));
                 }
             };
 
@@ -6918,7 +7127,13 @@ impl<'a> RecursiveParser<'a> {
         self.stream.expect(TokenKind::RBrace)?;
 
         let span = self.stream.make_span(start_pos);
-        Ok(Expr::new(ExprKind::Quote { target_stage, tokens }, span))
+        Ok(Expr::new(
+            ExprKind::Quote {
+                target_stage,
+                tokens,
+            },
+            span,
+        ))
     }
 
     /// Parse a stage escape expression: $(stage N){ expr }
@@ -6957,7 +7172,7 @@ impl<'a> RecursiveParser<'a> {
                 return Err(ParseError::invalid_syntax(
                     "expected stage number in $(stage N)".to_string(),
                     self.stream.current_span(),
-                ))
+                ));
             }
         };
 
@@ -7002,7 +7217,12 @@ impl<'a> RecursiveParser<'a> {
         self.stream.expect(TokenKind::RParen)?;
 
         let span = self.stream.make_span(start_pos);
-        Ok(Expr::new(ExprKind::Lift { expr: Heap::new(expr) }, span))
+        Ok(Expr::new(
+            ExprKind::Lift {
+                expr: Heap::new(expr),
+            },
+            span,
+        ))
     }
 
     /// Parse a meta-function expression: @file, @line, @cfg(cond), @const expr, etc.
@@ -7276,7 +7496,8 @@ impl<'a> RecursiveParser<'a> {
         let value = if self.stream.at_end()
             || self.stream.check(&TokenKind::Semicolon)
             || self.stream.check(&TokenKind::RBrace)
-            || self.stream.check(&TokenKind::Comma) // Match arm: `Ok(_) => return,`
+            || self.stream.check(&TokenKind::Comma)
+        // Match arm: `Ok(_) => return,`
         {
             Maybe::None
         } else if self.stream.peek().is_some_and(|t| t.starts_expr()) {
@@ -7482,7 +7703,10 @@ impl<'a> RecursiveParser<'a> {
             }
 
             let span = self.stream.make_span(start_pos);
-            Ok(Expr::new(ExprKind::Array(ArrayExpr::List(elements.into())), span))
+            Ok(Expr::new(
+                ExprKind::Array(ArrayExpr::List(elements.into())),
+                span,
+            ))
         } else {
             // Single element or scalar - return as-is
             Ok(first)
@@ -7578,7 +7802,10 @@ impl<'a> RecursiveParser<'a> {
             PathSegment::SelfValue
         } else if self.stream.consume(&TokenKind::SelfType).is_some() {
             // SelfType (Self) is a type reference, create as Name("Self") not SelfValue
-            PathSegment::Name(verum_ast::ty::Ident::new(Text::from("Self"), self.stream.current_span()))
+            PathSegment::Name(verum_ast::ty::Ident::new(
+                Text::from("Self"),
+                self.stream.current_span(),
+            ))
         } else {
             let name = self.consume_ident_or_keyword()?;
             let span = self.stream.current_span();
@@ -7643,9 +7870,17 @@ impl<'a> RecursiveParser<'a> {
         let mut depth: usize = 1;
         while depth > 0 {
             match self.stream.peek_kind() {
-                Some(k) if *k == open => { depth += 1; self.stream.advance(); }
-                Some(k) if *k == close => { depth -= 1; self.stream.advance(); }
-                Some(_) => { self.stream.advance(); }
+                Some(k) if *k == open => {
+                    depth += 1;
+                    self.stream.advance();
+                }
+                Some(k) if *k == close => {
+                    depth -= 1;
+                    self.stream.advance();
+                }
+                Some(_) => {
+                    self.stream.advance();
+                }
                 None => break, // EOF — bail rather than loop forever
             }
         }
@@ -7875,10 +8110,16 @@ impl<'a> RecursiveParser<'a> {
 
             // Character literals
             TokenKind::Char(c) => (TokenTreeKind::CharLiteral, Text::from(format!("'{}'", c))),
-            TokenKind::ByteChar(b) => (TokenTreeKind::CharLiteral, Text::from(format!("b'{}'", *b as char))),
+            TokenKind::ByteChar(b) => (
+                TokenTreeKind::CharLiteral,
+                Text::from(format!("b'{}'", *b as char)),
+            ),
             TokenKind::ByteString(bytes) => {
                 let escaped: String = bytes.iter().map(|b| format!("\\x{:02x}", b)).collect();
-                (TokenTreeKind::StringLiteral, Text::from(format!("b\"{}\"", escaped)))
+                (
+                    TokenTreeKind::StringLiteral,
+                    Text::from(format!("b\"{}\"", escaped)),
+                )
             }
 
             // Boolean literals
@@ -8169,7 +8410,13 @@ impl<'a> RecursiveParser<'a> {
                 // Apply PascalCase heuristic: only treat as type if name starts with uppercase
                 let looks_like_type = if path.segments.len() == 1 {
                     if let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0] {
-                        ident.name.as_str().chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+                        ident
+                            .name
+                            .as_str()
+                            .chars()
+                            .next()
+                            .map(|c| c.is_uppercase())
+                            .unwrap_or(false)
                     } else {
                         false
                     }
@@ -8186,9 +8433,7 @@ impl<'a> RecursiveParser<'a> {
             }
 
             // Parenthesized expression: (T), (&T)
-            ExprKind::Paren(inner) => {
-                self.expr_to_type_for_property(inner)
-            }
+            ExprKind::Paren(inner) => self.expr_to_type_for_property(inner),
 
             // Reference expression: &T, &mut T
             ExprKind::Unary { op, expr: inner } => {
@@ -8265,7 +8510,10 @@ impl<'a> RecursiveParser<'a> {
 
             // Index expression: List<Int> parsed as Index(Path("List"), Path("Int"))
             // This handles generic type syntax in expression context
-            ExprKind::Index { expr: base_expr, index } => {
+            ExprKind::Index {
+                expr: base_expr,
+                index,
+            } => {
                 // Get the base type
                 if let Some(base_ty) = self.expr_to_type_for_property(base_expr) {
                     // Try to convert the index to a type argument
@@ -8287,10 +8535,12 @@ impl<'a> RecursiveParser<'a> {
             // Slice expression: [T]
             ExprKind::Array(verum_ast::expr::ArrayExpr::List(elements)) if elements.len() == 1 => {
                 // Try to convert single element as slice type [T]
-                self.expr_to_type_for_property(&elements[0]).map(|elem_ty| Type::new(
+                self.expr_to_type_for_property(&elements[0]).map(|elem_ty| {
+                    Type::new(
                         verum_ast::ty::TypeKind::Slice(Heap::new(elem_ty)),
                         expr.span,
-                    ))
+                    )
+                })
             }
 
             _ => None,
@@ -8393,7 +8643,7 @@ pub fn block_parser_recursive(parser: &mut RecursiveParser) -> ParseResult<Block
 fn validate_format_tag(tag: &str, content: &Text) -> Option<String> {
     match tag {
         "json" => validate_json_content(content.as_str()),
-        "sh"   => validate_sh_content(content.as_str()),
+        "sh" => validate_sh_content(content.as_str()),
         _ => None, // Other tags are not validated at parse time
     }
 }
@@ -8426,8 +8676,11 @@ fn validate_sh_content(content: &str) -> Option<String> {
             let mut depth = 1;
             i += 2;
             while i < bytes.len() && depth > 0 {
-                if bytes[i] == b'{' { depth += 1; }
-                else if bytes[i] == b'}' { depth -= 1; }
+                if bytes[i] == b'{' {
+                    depth += 1;
+                } else if bytes[i] == b'}' {
+                    depth -= 1;
+                }
                 i += 1;
             }
             continue;
@@ -8440,13 +8693,29 @@ fn validate_sh_content(content: &str) -> Option<String> {
     let mut double = false;
     let mut prev_backslash = false;
     for ch in stripped.chars() {
-        if prev_backslash { prev_backslash = false; continue; }
-        if ch == '\\' && !single { prev_backslash = true; continue; }
-        if ch == '\'' && !double { single = !single; continue; }
-        if ch == '"'  && !single { double = !double; continue; }
+        if prev_backslash {
+            prev_backslash = false;
+            continue;
+        }
+        if ch == '\\' && !single {
+            prev_backslash = true;
+            continue;
+        }
+        if ch == '\'' && !double {
+            single = !single;
+            continue;
+        }
+        if ch == '"' && !single {
+            double = !double;
+            continue;
+        }
     }
-    if single { return Some("unbalanced single quote in sh# literal".to_string()); }
-    if double { return Some("unbalanced double quote in sh# literal".to_string()); }
+    if single {
+        return Some("unbalanced single quote in sh# literal".to_string());
+    }
+    if double {
+        return Some("unbalanced double quote in sh# literal".to_string());
+    }
     if prev_backslash {
         return Some("trailing backslash in sh# literal".to_string());
     }
@@ -8522,10 +8791,7 @@ fn validate_json_content(content: &str) -> Option<String> {
         return Some("unterminated string in JSON".to_string());
     }
     if brace_depth != 0 {
-        return Some(format!(
-            "unbalanced braces: {} unclosed '{{'",
-            brace_depth
-        ));
+        return Some(format!("unbalanced braces: {} unclosed '{{'", brace_depth));
     }
     if bracket_depth != 0 {
         return Some(format!(
@@ -8568,7 +8834,9 @@ mod tests {
             ExprKind::TupleIndex { expr: inner, index } => {
                 assert_eq!(*index, 0, "outer index should be 0");
                 match &inner.kind {
-                    ExprKind::TupleIndex { index: inner_idx, .. } => {
+                    ExprKind::TupleIndex {
+                        index: inner_idx, ..
+                    } => {
                         assert_eq!(*inner_idx, 0, "inner index should be 0");
                     }
                     other => panic!("Expected inner TupleIndex, got {:?}", other),
@@ -8585,7 +8853,9 @@ mod tests {
             ExprKind::TupleIndex { expr: inner, index } => {
                 assert_eq!(*index, 2, "outer index should be 2");
                 match &inner.kind {
-                    ExprKind::TupleIndex { index: inner_idx, .. } => {
+                    ExprKind::TupleIndex {
+                        index: inner_idx, ..
+                    } => {
                         assert_eq!(*inner_idx, 1, "inner index should be 1");
                     }
                     other => panic!("Expected inner TupleIndex, got {:?}", other),
@@ -8606,10 +8876,15 @@ mod tests {
             ExprKind::TupleIndex { expr: mid, index } => {
                 assert_eq!(*index, 2, "outermost index should be 2");
                 match &mid.kind {
-                    ExprKind::TupleIndex { expr: inner, index: mid_idx } => {
+                    ExprKind::TupleIndex {
+                        expr: inner,
+                        index: mid_idx,
+                    } => {
                         assert_eq!(*mid_idx, 1, "middle index should be 1");
                         match &inner.kind {
-                            ExprKind::TupleIndex { index: inner_idx, .. } => {
+                            ExprKind::TupleIndex {
+                                index: inner_idx, ..
+                            } => {
                                 assert_eq!(*inner_idx, 0, "innermost index should be 0");
                             }
                             other => panic!("Expected innermost TupleIndex, got {:?}", other),

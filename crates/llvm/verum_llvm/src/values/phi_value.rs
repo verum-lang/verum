@@ -1,6 +1,8 @@
-use verum_llvm_sys::core::{LLVMAddIncoming, LLVMCountIncoming, LLVMGetIncomingBlock, LLVMGetIncomingValue};
-use verum_llvm_sys::prelude::{LLVMBasicBlockRef, LLVMValueRef};
 use std::convert::TryFrom;
+use verum_llvm_sys::core::{
+    LLVMAddIncoming, LLVMCountIncoming, LLVMGetIncomingBlock, LLVMGetIncomingValue,
+};
+use verum_llvm_sys::prelude::{LLVMBasicBlockRef, LLVMValueRef};
 
 use std::ffi::CStr;
 use std::fmt::{self, Display};
@@ -62,9 +64,12 @@ impl<'ctx> PhiValue<'ctx> {
             return None;
         }
 
-        let basic_block =
-            unsafe { BasicBlock::new(LLVMGetIncomingBlock(self.as_value_ref(), index)).expect("Invalid BasicBlock") };
-        let value = unsafe { BasicValueEnum::new(LLVMGetIncomingValue(self.as_value_ref(), index)) };
+        let basic_block = unsafe {
+            BasicBlock::new(LLVMGetIncomingBlock(self.as_value_ref(), index))
+                .expect("Invalid BasicBlock")
+        };
+        let value =
+            unsafe { BasicValueEnum::new(LLVMGetIncomingValue(self.as_value_ref(), index)) };
 
         Some((value, basic_block))
     }
@@ -73,10 +78,16 @@ impl<'ctx> PhiValue<'ctx> {
     ///
 
     /// The index must be smaller [PhiValue::count_incoming].
-    pub unsafe fn get_incoming_unchecked(self, index: u32) -> (BasicValueEnum<'ctx>, BasicBlock<'ctx>) {
-        let basic_block =
-            unsafe { BasicBlock::new(LLVMGetIncomingBlock(self.as_value_ref(), index)).expect("Invalid BasicBlock") };
-        let value = unsafe { BasicValueEnum::new(LLVMGetIncomingValue(self.as_value_ref(), index)) };
+    pub unsafe fn get_incoming_unchecked(
+        self,
+        index: u32,
+    ) -> (BasicValueEnum<'ctx>, BasicBlock<'ctx>) {
+        let basic_block = unsafe {
+            BasicBlock::new(LLVMGetIncomingBlock(self.as_value_ref(), index))
+                .expect("Invalid BasicBlock")
+        };
+        let value =
+            unsafe { BasicValueEnum::new(LLVMGetIncomingValue(self.as_value_ref(), index)) };
 
         (value, basic_block)
     }

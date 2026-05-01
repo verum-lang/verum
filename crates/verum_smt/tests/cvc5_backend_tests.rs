@@ -32,7 +32,7 @@
 #![cfg(feature = "cvc5")]
 
 use verum_smt::{
-    Cvc5Backend, Cvc5Config, Cvc5Error, QuantifierMode, Cvc5SmtLogic, create_cvc5_backend,
+    Cvc5Backend, Cvc5Config, Cvc5Error, Cvc5SmtLogic, QuantifierMode, create_cvc5_backend,
     create_cvc5_backend_for_logic,
 };
 

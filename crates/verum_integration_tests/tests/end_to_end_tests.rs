@@ -24,9 +24,9 @@
 // Spec: All components from TIER 0-4
 
 use verum_ast::{expr::*, literal::*, pattern::Pattern, span::Span, ty::*};
+use verum_common::{List, Text};
 use verum_lexer::{Lexer, Token, TokenKind};
 use verum_parser::Parser;
-use verum_common::{List, Text};
 use verum_types::{Type, TypeChecker};
 
 // ============================================================================

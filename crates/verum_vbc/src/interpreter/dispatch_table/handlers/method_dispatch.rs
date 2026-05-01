@@ -9,32 +9,32 @@
 //! - dispatch_variant_method: methods on variant types
 //! - Helper functions: call_closure_sync, call_function_sync, alloc_list_from_values, etc.
 
-use crate::instruction::{Reg, RegRange};
-use crate::module::FunctionId;
-use crate::types::{TypeId, StringId};
-use crate::interpreter::state::GeneratorId;
-use crate::value::Value;
-use verum_common::well_known_types::WellKnownType as WKT;
-use crate::interpreter::error::{InterpreterError, InterpreterResult};
-use crate::interpreter::state::InterpreterState;
-use crate::interpreter::heap;
-use crate::value::{ThinRef, Capabilities};
 use super::super::DispatchResult;
+use crate::instruction::{Reg, RegRange};
+use crate::interpreter::error::{InterpreterError, InterpreterResult};
+use crate::interpreter::heap;
+use crate::interpreter::state::GeneratorId;
+use crate::interpreter::state::InterpreterState;
+use crate::module::FunctionId;
+use crate::types::{StringId, TypeId};
+use crate::value::Value;
+use crate::value::{Capabilities, ThinRef};
+use verum_common::well_known_types::WellKnownType as WKT;
 
 // Re-import bytecode I/O functions
-use super::bytecode_io::{read_reg, read_varint, read_reg_range};
+use super::bytecode_io::{read_reg, read_reg_range, read_varint};
 
 // Re-import string helper functions
-use super::string_helpers::{extract_string, alloc_string_value, is_heap_string};
+use super::string_helpers::{alloc_string_value, extract_string, is_heap_string};
 
 // Re-import CBGR helper functions
-use super::cbgr_helpers::{is_cbgr_ref, decode_cbgr_ref, is_cbgr_ref_mutable};
+use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref, is_cbgr_ref_mutable};
 
 // Re-import debug helpers
 use super::debug::format_value_for_print;
 
 // Import helper functions that remain in dispatch_table/mod.rs
-use super::super::{deep_value_eq, value_hash, value_eq, dispatch_loop_table_with_entry_depth};
+use super::super::{deep_value_eq, dispatch_loop_table_with_entry_depth, value_eq, value_hash};
 
 // ── Iterator type constants ──
 const ITER_TYPE_LIST: i64 = 0;
@@ -47,7 +47,9 @@ const ITER_TYPE_RANGE: i64 = 3;
 // ============================================================================
 
 /// Call method: `dst = receiver.method(args...)`
-pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_call_method(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let receiver_reg = read_reg(state)?;
     let method_id = read_varint(state)? as u32;
@@ -63,7 +65,10 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
     // a `"Shared.foo"` name to `"AtomicInt.foo"` (or whatever
     // the inner type is) so the qualified-lookup walker finds
     // the user-compiled body on the inner type.
-    let mut method_name = state.module.strings.get(StringId(method_id))
+    let mut method_name = state
+        .module
+        .strings
+        .get(StringId(method_id))
         .unwrap_or("")
         .to_string();
     // Extract bare method name by stripping type prefix (e.g., "List.pop" -> "pop").
@@ -108,8 +113,11 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
 
                 // Check generator status
                 let (func_id, status, reg_count) = {
-                    let generator = state.generators.get(gen_id)
-                        .ok_or(InterpreterError::InvalidGeneratorId { generator_id: gen_id })?;
+                    let generator = state.generators.get(gen_id).ok_or(
+                        InterpreterError::InvalidGeneratorId {
+                            generator_id: gen_id,
+                        },
+                    )?;
 
                     if generator.is_completed() {
                         // Return None - generator exhausted
@@ -121,25 +129,41 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
                 };
 
                 // Get function info
-                let func = state.module.get_function(func_id)
+                let func = state
+                    .module
+                    .get_function(func_id)
                     .ok_or(InterpreterError::FunctionNotFound(func_id))?;
                 let bytecode_offset = func.bytecode_offset;
 
                 use crate::interpreter::state::GeneratorStatus;
 
                 // Check if we need to restore state from a previous yield
-                let (resume_pc, restore_registers, restore_contexts): (u32, Vec<Value>, Vec<crate::interpreter::state::ContextEntry>) = match status {
+                let (resume_pc, restore_registers, restore_contexts): (
+                    u32,
+                    Vec<Value>,
+                    Vec<crate::interpreter::state::ContextEntry>,
+                ) = match status {
                     GeneratorStatus::Created => {
                         // First resume - restore initial arguments
-                        let generator = state.generators.get(gen_id)
-                            .ok_or(InterpreterError::InvalidGeneratorId { generator_id: gen_id })?;
+                        let generator = state.generators.get(gen_id).ok_or(
+                            InterpreterError::InvalidGeneratorId {
+                                generator_id: gen_id,
+                            },
+                        )?;
                         let initial_args = generator.saved_registers.clone();
                         (bytecode_offset, initial_args, Vec::new())
                     }
                     GeneratorStatus::Yielded => {
-                        let generator = state.generators.get(gen_id)
-                            .ok_or(InterpreterError::InvalidGeneratorId { generator_id: gen_id })?;
-                        let resume_pc = if generator.saved_pc > 0 { generator.saved_pc } else { bytecode_offset };
+                        let generator = state.generators.get(gen_id).ok_or(
+                            InterpreterError::InvalidGeneratorId {
+                                generator_id: gen_id,
+                            },
+                        )?;
+                        let resume_pc = if generator.saved_pc > 0 {
+                            generator.saved_pc
+                        } else {
+                            bytecode_offset
+                        };
                         let restore_registers = generator.saved_registers.clone();
                         let restore_contexts = generator.saved_contexts.clone();
                         (resume_pc, restore_registers, restore_contexts)
@@ -157,7 +181,9 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
                 };
 
                 // Push generator frame
-                state.call_stack.push_frame(func_id, reg_count, resume_pc, dst)?;
+                state
+                    .call_stack
+                    .push_frame(func_id, reg_count, resume_pc, dst)?;
                 state.registers.push_frame(reg_count);
 
                 // Restore registers
@@ -182,8 +208,13 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
             }
             "has_next" => {
                 // Generator.has_next() -> Bool
-                let generator = state.generators.get(gen_id)
-                    .ok_or(InterpreterError::InvalidGeneratorId { generator_id: gen_id })?;
+                let generator =
+                    state
+                        .generators
+                        .get(gen_id)
+                        .ok_or(InterpreterError::InvalidGeneratorId {
+                            generator_id: gen_id,
+                        })?;
                 let has_more = generator.can_resume();
                 state.set_reg(dst, Value::from_bool(has_more));
                 return Ok(DispatchResult::Continue);
@@ -197,26 +228,44 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
 
                 loop {
                     // Check if generator can resume
-                    if !state.generators.get(gen_id).map(|g| g.can_resume()).unwrap_or(false) {
+                    if !state
+                        .generators
+                        .get(gen_id)
+                        .map(|g| g.can_resume())
+                        .unwrap_or(false)
+                    {
                         break;
                     }
 
                     let (func_id, status, reg_count) = {
-                        let generator = state.generators.get(gen_id)
-                            .ok_or(InterpreterError::InvalidGeneratorId { generator_id: gen_id })?;
+                        let generator = state.generators.get(gen_id).ok_or(
+                            InterpreterError::InvalidGeneratorId {
+                                generator_id: gen_id,
+                            },
+                        )?;
                         (generator.func_id, generator.status, generator.reg_count)
                     };
 
                     let (resume_pc, restore_regs, restore_contexts) = match status {
                         GeneratorStatus::Created => {
-                            let generator = state.generators.get(gen_id)
-                                .ok_or(InterpreterError::InvalidGeneratorId { generator_id: gen_id })?;
+                            let generator = state.generators.get(gen_id).ok_or(
+                                InterpreterError::InvalidGeneratorId {
+                                    generator_id: gen_id,
+                                },
+                            )?;
                             (0u32, generator.saved_registers.clone(), Vec::new())
                         }
                         GeneratorStatus::Yielded => {
-                            let generator = state.generators.get(gen_id)
-                                .ok_or(InterpreterError::InvalidGeneratorId { generator_id: gen_id })?;
-                            (generator.saved_pc, generator.saved_registers.clone(), generator.saved_contexts.clone())
+                            let generator = state.generators.get(gen_id).ok_or(
+                                InterpreterError::InvalidGeneratorId {
+                                    generator_id: gen_id,
+                                },
+                            )?;
+                            (
+                                generator.saved_pc,
+                                generator.saved_registers.clone(),
+                                generator.saved_contexts.clone(),
+                            )
                         }
                         _ => break,
                     };
@@ -228,7 +277,9 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
 
                     // Set up the generator's frame (mirroring IterNext generator path)
                     let return_pc = state.pc();
-                    state.call_stack.push_frame(func_id, reg_count, return_pc, dst)?;
+                    state
+                        .call_stack
+                        .push_frame(func_id, reg_count, return_pc, dst)?;
                     state.registers.push_frame(reg_count);
 
                     let new_reg_base = state.reg_base();
@@ -264,12 +315,13 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
                 let header_size = 3 * std::mem::size_of::<i64>();
                 let obj = state.heap.alloc(TypeId::LIST, header_size)?;
                 state.record_allocation();
-                let data_ptr = unsafe {
-                    (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut i64
-                };
+                let data_ptr =
+                    unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut i64 };
                 let backing_layout = std::alloc::Layout::from_size_align(
-                    count.max(1) * std::mem::size_of::<Value>(), 8
-                ).map_err(|_| InterpreterError::Panic {
+                    count.max(1) * std::mem::size_of::<Value>(),
+                    8,
+                )
+                .map_err(|_| InterpreterError::Panic {
                     message: "collect list layout overflow".into(),
                 })?;
                 let backing_ptr = unsafe { std::alloc::alloc_zeroed(backing_layout) };
@@ -297,10 +349,11 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
     // `is_valid` operate on the reference metadata, not the referent. Unwrapping
     // to the referent would hide the mutability bit and break the dispatch.
     if is_cbgr_ref(&receiver)
-        && let Some(result) = dispatch_primitive_method(state, &receiver, &method_name, &args)? {
-            state.set_reg(dst, result);
-            return Ok(DispatchResult::Continue);
-        }
+        && let Some(result) = dispatch_primitive_method(state, &receiver, &method_name, &args)?
+    {
+        state.set_reg(dst, result);
+        return Ok(DispatchResult::Continue);
+    }
 
     // Deref CBGR references to get the actual value for builtin dispatch.
     // RefMut creates register-based refs for &mut self method calls.
@@ -322,17 +375,21 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
     // inspect the type prefix (e.g., "Stats.add") and skip builtin dispatch
     // when the prefix refers to a user-defined type. The builtin handlers
     // internally strip the prefix to match the bare method name.
-    if let Some(result) = dispatch_primitive_method(state, &dispatch_receiver, &method_name, &args)? {
+    if let Some(result) = dispatch_primitive_method(state, &dispatch_receiver, &method_name, &args)?
+    {
         state.set_reg(dst, result);
         return Ok(DispatchResult::Continue);
     }
 
     // Try built-in array/list methods (map, filter, fold, etc.)
-    if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil()
-        && let Some(result) = dispatch_array_method(state, dispatch_receiver, &bare_method_name, &args)? {
-            state.set_reg(dst, result);
-            return Ok(DispatchResult::Continue);
-        }
+    if dispatch_receiver.is_ptr()
+        && !dispatch_receiver.is_nil()
+        && let Some(result) =
+            dispatch_array_method(state, dispatch_receiver, &bare_method_name, &args)?
+    {
+        state.set_reg(dst, result);
+        return Ok(DispatchResult::Continue);
+    }
 
     // Try variant methods (unwrap, is_ok, is_err, etc.) on heap-allocated variants.
     //
@@ -359,11 +416,19 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
     let prefer_user_compiled = method_name != bare_method_name
         && state.module.find_function_by_name(&method_name).is_some();
     if !prefer_user_compiled
-        && dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil()
-        && let Some(result) = dispatch_variant_method(state, dispatch_receiver, &bare_method_name, &args, &method_name)? {
-            state.set_reg(dst, result);
-            return Ok(DispatchResult::Continue);
-        }
+        && dispatch_receiver.is_ptr()
+        && !dispatch_receiver.is_nil()
+        && let Some(result) = dispatch_variant_method(
+            state,
+            dispatch_receiver,
+            &bare_method_name,
+            &args,
+            &method_name,
+        )?
+    {
+        state.set_reg(dst, result);
+        return Ok(DispatchResult::Continue);
+    }
 
     // Try Shared<T> instance methods (borrow, borrow_mut, clone)
     if receiver.is_ptr() && !receiver.is_nil() {
@@ -454,16 +519,11 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
                             // objects begin with an ObjectHeader.
                             let inner_header =
                                 unsafe { &*(inner_ptr as *const heap::ObjectHeader) };
-                            if let Some(td) =
-                                state.module.get_type(inner_header.type_id)
-                                && let Some(inner_type_name) =
-                                    state.module.strings.get(td.name)
+                            if let Some(td) = state.module.get_type(inner_header.type_id)
+                                && let Some(inner_type_name) = state.module.strings.get(td.name)
                                 && !inner_type_name.is_empty()
                             {
-                                method_name = format!(
-                                    "{}.{}",
-                                    inner_type_name, base_method
-                                );
+                                method_name = format!("{}.{}", inner_type_name, base_method);
                                 // `bare_method_name` already equals
                                 // `base_method`, so no recompute
                                 // needed.
@@ -507,28 +567,30 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
     // intrinsic path instead of falling through to compiled method lookup.
     if bare_method_name == "new"
         && let Some(ref name) = receiver_type_name
-            && WKT::Shared.matches(name) {
-                let caller_base = state.reg_base();
-                let value = if args.count > 0 {
-                    state.registers.get(caller_base, Reg(args.start.0))
-                } else {
-                    Value::unit()
-                };
+        && WKT::Shared.matches(name)
+    {
+        let caller_base = state.reg_base();
+        let value = if args.count > 0 {
+            state.registers.get(caller_base, Reg(args.start.0))
+        } else {
+            Value::unit()
+        };
 
-                // Allocate Shared object: [ObjectHeader][refcount: i64][value: Value]
-                // We store the inner value directly for simplicity
-                let obj = state.heap.alloc(TypeId::SHARED, 2 * std::mem::size_of::<Value>())?;
-                state.record_allocation();
-                let data_ptr = unsafe {
-                    (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                };
-                unsafe {
-                    *data_ptr = Value::from_i64(1); // refcount = 1
-                    *data_ptr.add(1) = value; // inner value
-                }
-                state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
-                return Ok(DispatchResult::Continue);
-            }
+        // Allocate Shared object: [ObjectHeader][refcount: i64][value: Value]
+        // We store the inner value directly for simplicity
+        let obj = state
+            .heap
+            .alloc(TypeId::SHARED, 2 * std::mem::size_of::<Value>())?;
+        state.record_allocation();
+        let data_ptr =
+            unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+        unsafe {
+            *data_ptr = Value::from_i64(1); // refcount = 1
+            *data_ptr.add(1) = value; // inner value
+        }
+        state.set_reg(dst, Value::from_ptr(obj.as_ptr() as *mut u8));
+        return Ok(DispatchResult::Continue);
+    }
 
     // Handle Heap.new(value) - CBGR allocation
     // Check for both bare receiver (receiver_type_name = "Heap") and qualified method name (dyn:Heap.new).
@@ -561,11 +623,12 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
                 const CBGR_HEADER_SIZE: usize = 32;
                 let data_size = std::mem::size_of::<Value>() as u32;
                 let alloc_size = CBGR_HEADER_SIZE + data_size as usize;
-                let layout = std::alloc::Layout::from_size_align(alloc_size, 32)
-                    .map_err(|_| InterpreterError::OutOfMemory {
+                let layout = std::alloc::Layout::from_size_align(alloc_size, 32).map_err(|_| {
+                    InterpreterError::OutOfMemory {
                         requested: alloc_size,
                         available: 0,
-                    })?;
+                    }
+                })?;
                 let raw_ptr = unsafe { std::alloc::alloc_zeroed(layout) };
                 if raw_ptr.is_null() {
                     return Err(InterpreterError::OutOfMemory {
@@ -613,34 +676,31 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
     if bare_method_name == "from"
         && args.count > 0
         && let Some(ref name) = receiver_type_name
-            && WKT::Text.matches(name) {
-                let caller_base = state.reg_base();
-                let value = state.registers.get(caller_base, Reg(args.start.0));
-                // Only short-circuit when the arg is already a Text
-                // representation. Anything else (Char, Int, raw byte slice,
-                // user-defined type) must go through the compiled stdlib
-                // `From<T>::from` body.
-                let is_already_text = value.is_small_string() || {
-                    value.is_ptr()
-                        && !value.is_nil()
-                        && !value.is_boxed_int()
-                        && {
-                            let p = value.as_ptr::<u8>();
-                            if p.is_null() {
-                                false
-                            } else {
-                                let header = unsafe { &*(p as *const heap::ObjectHeader) };
-                                header.type_id == TypeId::TEXT
-                                    || header.type_id == TypeId(0x0001)
-                            }
-                        }
-                };
-                if is_already_text {
-                    state.set_reg(dst, value);
-                    return Ok(DispatchResult::Continue);
+        && WKT::Text.matches(name)
+    {
+        let caller_base = state.reg_base();
+        let value = state.registers.get(caller_base, Reg(args.start.0));
+        // Only short-circuit when the arg is already a Text
+        // representation. Anything else (Char, Int, raw byte slice,
+        // user-defined type) must go through the compiled stdlib
+        // `From<T>::from` body.
+        let is_already_text = value.is_small_string() || {
+            value.is_ptr() && !value.is_nil() && !value.is_boxed_int() && {
+                let p = value.as_ptr::<u8>();
+                if p.is_null() {
+                    false
+                } else {
+                    let header = unsafe { &*(p as *const heap::ObjectHeader) };
+                    header.type_id == TypeId::TEXT || header.type_id == TypeId(0x0001)
                 }
-                // Otherwise fall through to user-function lookup.
             }
+        };
+        if is_already_text {
+            state.set_reg(dst, value);
+            return Ok(DispatchResult::Continue);
+        }
+        // Otherwise fall through to user-function lookup.
+    }
 
     // Handle static constructor methods (e.g., List.new(), Set.new(), Map.new())
     // ALWAYS use builtin handlers for collection types. The stdlib user-defined
@@ -658,11 +718,12 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
         if is_list {
             // Create empty List: [len, cap, backing_ptr] with TypeId::LIST
             const DEFAULT_CAP: usize = 16;
-            let obj = state.heap.alloc(TypeId::LIST, 3 * std::mem::size_of::<Value>())?;
+            let obj = state
+                .heap
+                .alloc(TypeId::LIST, 3 * std::mem::size_of::<Value>())?;
             state.record_allocation();
-            let data_ptr = unsafe {
-                (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
-            };
+            let data_ptr =
+                unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             let backing = state.heap.alloc_array(TypeId::LIST, DEFAULT_CAP)?;
             state.record_allocation();
             unsafe {
@@ -676,19 +737,20 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
             // Create empty Set/Map: [count, capacity, entries_ptr]
             const DEFAULT_CAP: usize = 16;
             let type_id = if is_set { TypeId::SET } else { TypeId::MAP };
-            let obj = state.heap.alloc(type_id, 3 * std::mem::size_of::<Value>())?;
+            let obj = state
+                .heap
+                .alloc(type_id, 3 * std::mem::size_of::<Value>())?;
             state.record_allocation();
-            let header_ptr = unsafe {
-                (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
-            };
+            let header_ptr =
+                unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             let entries = state.heap.alloc_array(TypeId::UNIT, DEFAULT_CAP * 2)?;
             state.record_allocation();
             let entries_ptr = entries.as_ptr() as *mut u8;
-            let entries_data = unsafe {
-                entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-            };
+            let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             for i in 0..(DEFAULT_CAP * 2) {
-                unsafe { *entries_data.add(i) = Value::unit(); }
+                unsafe {
+                    *entries_data.add(i) = Value::unit();
+                }
             }
             unsafe {
                 *header_ptr = Value::from_i64(0);
@@ -701,19 +763,20 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
             // Create empty Deque: [data(0), head(1), len(2), cap(3)]
             // Layout matches stdlib: type Deque<T> is { data, head, len, cap }
             const DEFAULT_CAP: usize = 16;
-            let obj = state.heap.alloc(TypeId::DEQUE, 4 * std::mem::size_of::<Value>())?;
+            let obj = state
+                .heap
+                .alloc(TypeId::DEQUE, 4 * std::mem::size_of::<Value>())?;
             state.record_allocation();
-            let header_ptr = unsafe {
-                (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
-            };
+            let header_ptr =
+                unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             let buffer = state.heap.alloc_array(TypeId::UNIT, DEFAULT_CAP)?;
             state.record_allocation();
             let buffer_ptr = buffer.as_ptr() as *mut u8;
-            let buf_data = unsafe {
-                buffer_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-            };
+            let buf_data = unsafe { buffer_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             for i in 0..DEFAULT_CAP {
-                unsafe { *buf_data.add(i) = Value::unit(); }
+                unsafe {
+                    *buf_data.add(i) = Value::unit();
+                }
             }
             unsafe {
                 *header_ptr = Value::from_ptr(buffer_ptr); // data (index 0)
@@ -727,23 +790,28 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
             // Create bounded Channel: [len, cap, head, buffer_ptr, closed]
             let caller_base = state.reg_base();
             let cap = if args.count > 0 {
-                state.registers.get(caller_base, Reg(args.start.0)).as_i64().max(1) as usize
+                state
+                    .registers
+                    .get(caller_base, Reg(args.start.0))
+                    .as_i64()
+                    .max(1) as usize
             } else {
                 16
             };
-            let obj = state.heap.alloc(TypeId::CHANNEL, 5 * std::mem::size_of::<Value>())?;
+            let obj = state
+                .heap
+                .alloc(TypeId::CHANNEL, 5 * std::mem::size_of::<Value>())?;
             state.record_allocation();
-            let header_ptr = unsafe {
-                (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
-            };
+            let header_ptr =
+                unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             let buffer = state.heap.alloc_array(TypeId::UNIT, cap)?;
             state.record_allocation();
             let buffer_ptr = buffer.as_ptr() as *mut u8;
-            let buf_data = unsafe {
-                buffer_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-            };
+            let buf_data = unsafe { buffer_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             for i in 0..cap {
-                unsafe { *buf_data.add(i) = Value::unit(); }
+                unsafe {
+                    *buf_data.add(i) = Value::unit();
+                }
             }
             unsafe {
                 *header_ptr = Value::from_i64(0);
@@ -767,11 +835,12 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
             let actual_cap = if capacity == 0 { 16 } else { capacity };
 
             // Create List: [len, cap, backing_ptr] with TypeId::LIST
-            let obj = state.heap.alloc(TypeId::LIST, 3 * std::mem::size_of::<Value>())?;
+            let obj = state
+                .heap
+                .alloc(TypeId::LIST, 3 * std::mem::size_of::<Value>())?;
             state.record_allocation();
-            let data_ptr = unsafe {
-                (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
-            };
+            let data_ptr =
+                unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             let backing = state.heap.alloc_array(TypeId::LIST, actual_cap)?;
             state.record_allocation();
             unsafe {
@@ -787,41 +856,42 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
     // Handle Numeric protocol static methods (Float.zero(), Float.one(), Int.zero(), etc.)
     // These are commonly used in generic code like Vector<T>.zeros() which calls T.zero()
     if (bare_method_name == "zero" || bare_method_name == "one" || bare_method_name == "epsilon")
-        && let Some(ref name) = receiver_type_name {
-            match name.as_str() {
-                "Float" | "Float64" | "f64" => {
-                    let value = match bare_method_name.as_str() {
-                        "zero" => 0.0,
-                        "one" => 1.0,
-                        "epsilon" => f64::EPSILON,
-                        _ => 0.0,
-                    };
-                    state.set_reg(dst, Value::from_f64(value));
-                    return Ok(DispatchResult::Continue);
-                }
-                "Float32" | "f32" => {
-                    let value = match bare_method_name.as_str() {
-                        "zero" => 0.0f32 as f64,
-                        "one" => 1.0f32 as f64,
-                        "epsilon" => f32::EPSILON as f64,
-                        _ => 0.0,
-                    };
-                    state.set_reg(dst, Value::from_f64(value));
-                    return Ok(DispatchResult::Continue);
-                }
-                "Int" | "Int64" | "i64" => {
-                    let value = match bare_method_name.as_str() {
-                        "zero" => 0,
-                        "one" => 1,
-                        "epsilon" => 0, // integers don't have epsilon
-                        _ => 0,
-                    };
-                    state.set_reg(dst, Value::from_i64(value));
-                    return Ok(DispatchResult::Continue);
-                }
-                _ => {}
+        && let Some(ref name) = receiver_type_name
+    {
+        match name.as_str() {
+            "Float" | "Float64" | "f64" => {
+                let value = match bare_method_name.as_str() {
+                    "zero" => 0.0,
+                    "one" => 1.0,
+                    "epsilon" => f64::EPSILON,
+                    _ => 0.0,
+                };
+                state.set_reg(dst, Value::from_f64(value));
+                return Ok(DispatchResult::Continue);
             }
+            "Float32" | "f32" => {
+                let value = match bare_method_name.as_str() {
+                    "zero" => 0.0f32 as f64,
+                    "one" => 1.0f32 as f64,
+                    "epsilon" => f32::EPSILON as f64,
+                    _ => 0.0,
+                };
+                state.set_reg(dst, Value::from_f64(value));
+                return Ok(DispatchResult::Continue);
+            }
+            "Int" | "Int64" | "i64" => {
+                let value = match bare_method_name.as_str() {
+                    "zero" => 0,
+                    "one" => 1,
+                    "epsilon" => 0, // integers don't have epsilon
+                    _ => 0,
+                };
+                state.set_reg(dst, Value::from_i64(value));
+                return Ok(DispatchResult::Continue);
+            }
+            _ => {}
         }
+    }
 
     // Handle static from_le_bytes / from_be_bytes (e.g., Int.from_le_bytes(bytes))
     if bare_method_name == "from_le_bytes" || bare_method_name == "from_be_bytes" {
@@ -862,48 +932,43 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
     }
     if let Some(ref name) = receiver_type_name {
         match name.as_str() {
-            "Runtime" => {
-                match bare_method_name.as_str() {
-                    "current_epoch" => {
-                        state.set_reg(dst, Value::from_i64(state.cbgr_epoch as i64));
-                        return Ok(DispatchResult::Continue);
-                    }
-                    "advance_epoch" => {
-                        state.cbgr_epoch = state.cbgr_epoch.wrapping_add(1);
-                        state.set_reg(dst, Value::unit());
-                        return Ok(DispatchResult::Continue);
-                    }
-                    _ => {}
-                }
-            }
-            "Epoch" => {
-                match bare_method_name.as_str() {
-                    "current" => {
-                        state.set_reg(dst, Value::from_i64(state.cbgr_epoch as i64));
-                        return Ok(DispatchResult::Continue);
-                    }
-                    "advance" => {
-                        state.cbgr_epoch = state.cbgr_epoch.wrapping_add(1);
-                        state.set_reg(dst, Value::unit());
-                        return Ok(DispatchResult::Continue);
-                    }
-                    "max_value" => {
-                        state.set_reg(dst, Value::from_i64(u32::MAX as i64));
-                        return Ok(DispatchResult::Continue);
-                    }
-                    _ => {}
-                }
-            }
-            "Time"
-                if method_name.as_str() == "now" => {
-                    // Return current time in nanoseconds since epoch
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_nanos() as i64;
-                    state.set_reg(dst, Value::from_i64(now));
+            "Runtime" => match bare_method_name.as_str() {
+                "current_epoch" => {
+                    state.set_reg(dst, Value::from_i64(state.cbgr_epoch as i64));
                     return Ok(DispatchResult::Continue);
                 }
+                "advance_epoch" => {
+                    state.cbgr_epoch = state.cbgr_epoch.wrapping_add(1);
+                    state.set_reg(dst, Value::unit());
+                    return Ok(DispatchResult::Continue);
+                }
+                _ => {}
+            },
+            "Epoch" => match bare_method_name.as_str() {
+                "current" => {
+                    state.set_reg(dst, Value::from_i64(state.cbgr_epoch as i64));
+                    return Ok(DispatchResult::Continue);
+                }
+                "advance" => {
+                    state.cbgr_epoch = state.cbgr_epoch.wrapping_add(1);
+                    state.set_reg(dst, Value::unit());
+                    return Ok(DispatchResult::Continue);
+                }
+                "max_value" => {
+                    state.set_reg(dst, Value::from_i64(u32::MAX as i64));
+                    return Ok(DispatchResult::Continue);
+                }
+                _ => {}
+            },
+            "Time" if method_name.as_str() == "now" => {
+                // Return current time in nanoseconds since epoch
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos() as i64;
+                state.set_reg(dst, Value::from_i64(now));
+                return Ok(DispatchResult::Continue);
+            }
             _ => {}
         }
     }
@@ -911,8 +976,8 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
     // Handle eq/ne for Text strings - must be before function search to avoid incorrect
     // dispatch to Maybe.eq or other imported type's eq methods
     if (bare_method_name == "eq" || bare_method_name == "ne") && args.count == 1 {
-        let is_string_receiver = receiver.is_small_string() ||
-            (receiver.is_ptr() && !receiver.is_nil() && {
+        let is_string_receiver = receiver.is_small_string()
+            || (receiver.is_ptr() && !receiver.is_nil() && {
                 let ptr = receiver.as_ptr::<u8>();
                 if !ptr.is_null() {
                     let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
@@ -942,7 +1007,11 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
             };
 
             let result = deep_value_eq(&recv, &other, state);
-            let final_result = if bare_method_name == "eq" { result } else { !result };
+            let final_result = if bare_method_name == "eq" {
+                result
+            } else {
+                !result
+            };
             state.set_reg(dst, Value::from_bool(final_result));
             return Ok(DispatchResult::Continue);
         }
@@ -955,9 +1024,12 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
     let is_builtin_collection = if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() {
         let ptr = dispatch_receiver.as_ptr::<u8>();
         let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
-        
-        header.type_id == TypeId::MAP || header.type_id == TypeId::SET || header.type_id == TypeId::LIST
-            || header.type_id == TypeId::DEQUE || header.type_id == TypeId::CHANNEL
+
+        header.type_id == TypeId::MAP
+            || header.type_id == TypeId::SET
+            || header.type_id == TypeId::LIST
+            || header.type_id == TypeId::DEQUE
+            || header.type_id == TypeId::CHANNEL
     } else {
         false
     };
@@ -1006,21 +1078,24 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
             // SAFETY: pointer alignment verified; every heap object begins with
             // an ObjectHeader, read-only.
             unsafe { (*(ptr as *const heap::ObjectHeader)).type_id.0 }
-        } else { 0 }
-    } else { 0 };
+        } else {
+            0
+        }
+    } else {
+        0
+    };
     let cache_key = (method_id, receiver_type_id_for_cache);
 
     // For builtin collections (List/Map/Set/Deque/Channel), NEVER use compiled
     // functions because the interpreter has its own optimized handlers with
     // correct memory layout. The is_already_qualified flag is irrelevant for
     // builtin collections.
-    if !is_builtin_collection
-        && let Some(&cached_fid) = state.method_cache.get(&cache_key) {
-            // Verify the cached function still exists (should always be true within a module)
-            if state.module.get_function(cached_fid).is_some() {
-                found_func_id = Some(cached_fid);
-            }
+    if !is_builtin_collection && let Some(&cached_fid) = state.method_cache.get(&cache_key) {
+        // Verify the cached function still exists (should always be true within a module)
+        if state.module.get_function(cached_fid).is_some() {
+            found_func_id = Some(cached_fid);
         }
+    }
 
     // Skip user-defined method lookup for builtin collections (Map, Set, List).
     // The interpreter has optimized builtin handlers for these types with correct
@@ -1071,28 +1146,29 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
             // method. Pre-fix this saw `TypeId::SHARED` and
             // produced no type name, falling through to the
             // catch-all panic.
-            let receiver_type: Option<String> =
-                if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil() && !is_already_qualified {
-                    let ptr = dispatch_receiver.as_ptr::<u8>();
-                    if ptr.is_null() {
-                        None
-                    } else if (ptr as usize)
-                        .is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
-                    {
-                        // SAFETY: alignment verified; every heap object
-                        // begins with an ObjectHeader.
-                        let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
-                        state
-                            .module
-                            .get_type(header.type_id)
-                            .map(|td| state.module.strings.get(td.name).unwrap_or("").to_string())
-                            .filter(|s| !s.is_empty())
-                    } else {
-                        None
-                    }
+            let receiver_type: Option<String> = if dispatch_receiver.is_ptr()
+                && !dispatch_receiver.is_nil()
+                && !is_already_qualified
+            {
+                let ptr = dispatch_receiver.as_ptr::<u8>();
+                if ptr.is_null() {
+                    None
+                } else if (ptr as usize).is_multiple_of(std::mem::align_of::<heap::ObjectHeader>())
+                {
+                    // SAFETY: alignment verified; every heap object
+                    // begins with an ObjectHeader.
+                    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+                    state
+                        .module
+                        .get_type(header.type_id)
+                        .map(|td| state.module.strings.get(td.name).unwrap_or("").to_string())
+                        .filter(|s| !s.is_empty())
                 } else {
                     None
-                };
+                }
+            } else {
+                None
+            };
 
             // First pass: look for an exact receiver-type match
             // (e.g., receiver is FlexItem → prefer "FlexItem.min" over any
@@ -1107,8 +1183,7 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
                     let func_name = state.module.strings.get(func.name).unwrap_or("");
                     let type_match = func_name == bare || func_name.ends_with(&dotted);
                     if type_match
-                        && (func.params.len() == expected_param_count
-                            || func.register_count > 0)
+                        && (func.params.len() == expected_param_count || func.register_count > 0)
                     {
                         found_func_id = Some(func.id);
                         break;
@@ -1134,9 +1209,7 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
                     };
                     if matches {
                         // Prefer exact parameter count match
-                        if func.params.len() == expected_param_count
-                            || func.register_count > 0
-                        {
+                        if func.params.len() == expected_param_count || func.register_count > 0 {
                             found_func_id = Some(func.id);
                             break;
                         }
@@ -1164,12 +1237,17 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
             // intended tag>" symptoms. Detect by inspecting the callee's
             // first param name: if it's not `self`, copy args directly into
             // r0+ without prepending the receiver.
-            let takes_self = func.params.first()
+            let takes_self = func
+                .params
+                .first()
                 .and_then(|p| state.module.strings.get(p.name))
                 .map(|n| n == "self")
                 .unwrap_or(true);
 
-            let new_base = state.call_stack.push_frame(target_func_id, reg_count, return_pc, dst)?;
+            let new_base =
+                state
+                    .call_stack
+                    .push_frame(target_func_id, reg_count, return_pc, dst)?;
             state.registers.push_frame(reg_count);
 
             if takes_self {
@@ -1177,14 +1255,18 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
                 state.registers.set(new_base, Reg(0), receiver);
                 // Copy remaining arguments
                 for i in 0..args.count {
-                    let arg_value = state.registers.get(caller_base, Reg(args.start.0 + i as u16));
+                    let arg_value = state
+                        .registers
+                        .get(caller_base, Reg(args.start.0 + i as u16));
                     state.registers.set(new_base, Reg(i as u16 + 1), arg_value);
                 }
             } else {
                 // Static method dispatched via CallM (e.g., context method
                 // with no `self`). Skip the receiver and copy args into r0+.
                 for i in 0..args.count {
-                    let arg_value = state.registers.get(caller_base, Reg(args.start.0 + i as u16));
+                    let arg_value = state
+                        .registers
+                        .get(caller_base, Reg(args.start.0 + i as u16));
                     state.registers.set(new_base, Reg(i as u16), arg_value);
                 }
             }
@@ -1254,12 +1336,20 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
 
     #[cfg(debug_assertions)]
     if method_name.contains("ensure_capacity") {
-        eprintln!("DEBUG: Looking for method '{}', is_builtin_collection={}", method_name, is_builtin_collection);
+        eprintln!(
+            "DEBUG: Looking for method '{}', is_builtin_collection={}",
+            method_name, is_builtin_collection
+        );
         eprintln!("DEBUG: All Map-related functions in module:");
         for func in &state.module.functions {
             let func_name = state.module.strings.get(func.name).unwrap_or("");
             if func_name.contains("Map") || func_name.contains("map") {
-                eprintln!("  - {} (id={}, params={})", func_name, func.id.0, func.params.len());
+                eprintln!(
+                    "  - {} (id={}, params={})",
+                    func_name,
+                    func.id.0,
+                    func.params.len()
+                );
             }
         }
     }
@@ -1278,7 +1368,8 @@ pub(in super::super) fn handle_call_method(state: &mut InterpreterState) -> Inte
     // — the variant layout is type-erased and the closure carries
     // the type-specific work — so it is sound to retry here as a
     // safety net before panicking.
-    if dispatch_receiver.is_ptr() && !dispatch_receiver.is_nil()
+    if dispatch_receiver.is_ptr()
+        && !dispatch_receiver.is_nil()
         && let Some(result) = dispatch_variant_method(
             state,
             dispatch_receiver,
@@ -1356,8 +1447,10 @@ pub(super) fn dispatch_primitive_method(
         if !ptr.is_null() {
             let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
             // Builtin collection types always use builtin dispatch regardless of static prefix.
-            let is_builtin_collection = header.type_id == TypeId::MAP || header.type_id == TypeId::SET
-                || header.type_id == TypeId::LIST || header.type_id == TypeId::DEQUE
+            let is_builtin_collection = header.type_id == TypeId::MAP
+                || header.type_id == TypeId::SET
+                || header.type_id == TypeId::LIST
+                || header.type_id == TypeId::DEQUE
                 || header.type_id == TypeId::CHANNEL;
             // Iterator objects (UNIT type_id, 4-value layout) have builtin iterator methods
             // (next, fold, map, filter, collect, etc.) that must be dispatched even when
@@ -1378,9 +1471,17 @@ pub(super) fn dispatch_primitive_method(
         // Additional interpreter-specific aliases (String, Byte, numeric variants,
         // timer types) that are not in WKT are also checked.
         let is_builtin_prefix = WKT::from_name(type_prefix).is_some()
-            || matches!(type_prefix,
-                "String" | "Byte" | "UInt64" | "Int32" | "Float32" | "Float64"
-                | "Stopwatch" | "PerfCounter" | "DeadlineTimer"
+            || matches!(
+                type_prefix,
+                "String"
+                    | "Byte"
+                    | "UInt64"
+                    | "Int32"
+                    | "Float32"
+                    | "Float64"
+                    | "Stopwatch"
+                    | "PerfCounter"
+                    | "DeadlineTimer"
             );
         if !is_builtin_prefix && !receiver_is_actually_builtin {
             // User-defined type and not a builtin collection - let user method be called
@@ -1391,9 +1492,17 @@ pub(super) fn dispatch_primitive_method(
     if let Some(pos) = method.rfind("::") {
         let type_prefix = &method[..pos];
         let is_builtin_prefix = WKT::from_name(type_prefix).is_some()
-            || matches!(type_prefix,
-                "String" | "Byte" | "UInt64" | "Int32" | "Float32" | "Float64"
-                | "Stopwatch" | "PerfCounter" | "DeadlineTimer"
+            || matches!(
+                type_prefix,
+                "String"
+                    | "Byte"
+                    | "UInt64"
+                    | "Int32"
+                    | "Float32"
+                    | "Float64"
+                    | "Stopwatch"
+                    | "PerfCounter"
+                    | "DeadlineTimer"
             );
         if !is_builtin_prefix && !receiver_is_actually_builtin {
             return Ok(None);
@@ -1522,13 +1631,17 @@ pub(super) fn dispatch_primitive_method(
                 }
                 "epoch" => {
                     // Return the reference creation epoch if tracked, else fallback to header
-                    let epoch = state.cbgr_ref_creation_epoch.get(&data_ptr)
+                    let epoch = state
+                        .cbgr_ref_creation_epoch
+                        .get(&data_ptr)
                         .map(|&e| e as u32)
                         .unwrap_or_else(|| unsafe { *((header_addr + 12) as *const u16) as u32 });
                     return Ok(Some(Value::from_i64(epoch as i64)));
                 }
                 "is_epoch_valid" => {
-                    let ref_epoch = state.cbgr_ref_creation_epoch.get(&data_ptr)
+                    let ref_epoch = state
+                        .cbgr_ref_creation_epoch
+                        .get(&data_ptr)
                         .map(|&e| e as u32)
                         .unwrap_or_else(|| unsafe { *((header_addr + 12) as *const u16) as u32 });
                     let current = state.cbgr_epoch as u32;
@@ -1536,7 +1649,9 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(Value::from_bool(diff < 1_000_000)));
                 }
                 "capabilities" | "epoch_caps" => {
-                    let ref_epoch = state.cbgr_ref_creation_epoch.get(&data_ptr)
+                    let ref_epoch = state
+                        .cbgr_ref_creation_epoch
+                        .get(&data_ptr)
                         .map(|&e| e as u32)
                         .unwrap_or_else(|| unsafe { *((header_addr + 12) as *const u16) as u32 });
                     let is_mut = state.cbgr_mutable_ptrs.contains(&data_ptr);
@@ -1548,7 +1663,9 @@ pub(super) fn dispatch_primitive_method(
                     return Ok(Some(Value::from_i64(data_ptr as i64)));
                 }
                 "epoch_caps_raw" | "raw_epoch_caps" => {
-                    let ref_epoch = state.cbgr_ref_creation_epoch.get(&data_ptr)
+                    let ref_epoch = state
+                        .cbgr_ref_creation_epoch
+                        .get(&data_ptr)
                         .map(|&e| e as u32)
                         .unwrap_or_else(|| unsafe { *((header_addr + 12) as *const u16) as u32 });
                     let is_mut = state.cbgr_mutable_ptrs.contains(&data_ptr);
@@ -1691,15 +1808,24 @@ pub(super) fn dispatch_primitive_method(
             }
             "byte$checked_add" => {
                 let other = state.get_reg(Reg(args.start.0)).as_i64();
-                return Ok(Some(make_maybe_int(state, (v as u8).checked_add(other as u8).map(|r| r as i64))?));
+                return Ok(Some(make_maybe_int(
+                    state,
+                    (v as u8).checked_add(other as u8).map(|r| r as i64),
+                )?));
             }
             "byte$checked_sub" => {
                 let other = state.get_reg(Reg(args.start.0)).as_i64();
-                return Ok(Some(make_maybe_int(state, (v as u8).checked_sub(other as u8).map(|r| r as i64))?));
+                return Ok(Some(make_maybe_int(
+                    state,
+                    (v as u8).checked_sub(other as u8).map(|r| r as i64),
+                )?));
             }
             "byte$checked_mul" => {
                 let other = state.get_reg(Reg(args.start.0)).as_i64();
-                return Ok(Some(make_maybe_int(state, (v as u8).checked_mul(other as u8).map(|r| r as i64))?));
+                return Ok(Some(make_maybe_int(
+                    state,
+                    (v as u8).checked_mul(other as u8).map(|r| r as i64),
+                )?));
             }
             "saturating_add" => {
                 let other = state.get_reg(Reg(args.start.0)).as_i64();
@@ -1797,52 +1923,79 @@ pub(super) fn dispatch_primitive_method(
             "byte$is_ascii" => Value::from_bool((0..=127).contains(&v)),
             "byte$to_ascii_lowercase" => Value::from_i64((v as u8).to_ascii_lowercase() as i64),
             "byte$to_ascii_uppercase" => Value::from_i64((v as u8).to_ascii_uppercase() as i64),
-            "byte$to_int" => Value::from_i64(v),  // Byte -> Int conversion
+            "byte$to_int" => Value::from_i64(v), // Byte -> Int conversion
             // Char (Unicode) methods — chars stored as i64 codepoints
             "is_alphabetic" => {
-                if let Some(c) = char::from_u32(v as u32) { Value::from_bool(c.is_alphabetic()) }
-                else { Value::from_bool(false) }
+                if let Some(c) = char::from_u32(v as u32) {
+                    Value::from_bool(c.is_alphabetic())
+                } else {
+                    Value::from_bool(false)
+                }
             }
             "is_numeric" => {
-                if let Some(c) = char::from_u32(v as u32) { Value::from_bool(c.is_numeric()) }
-                else { Value::from_bool(false) }
+                if let Some(c) = char::from_u32(v as u32) {
+                    Value::from_bool(c.is_numeric())
+                } else {
+                    Value::from_bool(false)
+                }
             }
             "is_alphanumeric" => {
-                if let Some(c) = char::from_u32(v as u32) { Value::from_bool(c.is_alphanumeric()) }
-                else { Value::from_bool(false) }
+                if let Some(c) = char::from_u32(v as u32) {
+                    Value::from_bool(c.is_alphanumeric())
+                } else {
+                    Value::from_bool(false)
+                }
             }
             "is_whitespace" => {
-                if let Some(c) = char::from_u32(v as u32) { Value::from_bool(c.is_whitespace()) }
-                else { Value::from_bool(false) }
+                if let Some(c) = char::from_u32(v as u32) {
+                    Value::from_bool(c.is_whitespace())
+                } else {
+                    Value::from_bool(false)
+                }
             }
             "is_uppercase" => {
-                if let Some(c) = char::from_u32(v as u32) { Value::from_bool(c.is_uppercase()) }
-                else { Value::from_bool(false) }
+                if let Some(c) = char::from_u32(v as u32) {
+                    Value::from_bool(c.is_uppercase())
+                } else {
+                    Value::from_bool(false)
+                }
             }
             "is_lowercase" => {
-                if let Some(c) = char::from_u32(v as u32) { Value::from_bool(c.is_lowercase()) }
-                else { Value::from_bool(false) }
+                if let Some(c) = char::from_u32(v as u32) {
+                    Value::from_bool(c.is_lowercase())
+                } else {
+                    Value::from_bool(false)
+                }
             }
             "is_control" => {
-                if let Some(c) = char::from_u32(v as u32) { Value::from_bool(c.is_control()) }
-                else { Value::from_bool(false) }
+                if let Some(c) = char::from_u32(v as u32) {
+                    Value::from_bool(c.is_control())
+                } else {
+                    Value::from_bool(false)
+                }
             }
             "to_uppercase" => {
                 if let Some(c) = char::from_u32(v as u32) {
                     // Return first char of uppercase mapping
                     let upper: char = c.to_uppercase().next().unwrap_or(c);
                     Value::from_i64(upper as i64)
-                } else { Value::from_i64(v) }
+                } else {
+                    Value::from_i64(v)
+                }
             }
             "to_lowercase" => {
                 if let Some(c) = char::from_u32(v as u32) {
                     let lower: char = c.to_lowercase().next().unwrap_or(c);
                     Value::from_i64(lower as i64)
-                } else { Value::from_i64(v) }
+                } else {
+                    Value::from_i64(v)
+                }
             }
             "to_digit" => {
                 let radix = state.get_reg(Reg(args.start.0)).as_i64() as u32;
-                let digit_opt = char::from_u32(v as u32).and_then(|c| c.to_digit(radix)).map(|d| d as i64);
+                let digit_opt = char::from_u32(v as u32)
+                    .and_then(|c| c.to_digit(radix))
+                    .map(|d| d as i64);
                 return Ok(Some(make_maybe_int(state, digit_opt)?));
             }
             "from_digit" => {
@@ -1851,19 +2004,27 @@ pub(super) fn dispatch_primitive_method(
                 let radix = state.get_reg(Reg(args.start.0 + 1)).as_i64() as u32;
                 let ch_opt = char::from_digit(digit, radix).map(|c| {
                     // Verum convention: hex digits are uppercase (A-F, not a-f)
-                    if c.is_ascii_lowercase() { c.to_ascii_uppercase() as i64 } else { c as i64 }
+                    if c.is_ascii_lowercase() {
+                        c.to_ascii_uppercase() as i64
+                    } else {
+                        c as i64
+                    }
                 });
                 return Ok(Some(make_maybe_int(state, ch_opt)?));
             }
             "len_utf8" => {
                 if let Some(c) = char::from_u32(v as u32) {
                     Value::from_i64(c.len_utf8() as i64)
-                } else { Value::from_i64(0) }
+                } else {
+                    Value::from_i64(0)
+                }
             }
             "len_utf16" => {
                 if let Some(c) = char::from_u32(v as u32) {
                     Value::from_i64(c.len_utf16() as i64)
-                } else { Value::from_i64(0) }
+                } else {
+                    Value::from_i64(0)
+                }
             }
             // Byte conversion methods
             "to_le_bytes" => {
@@ -2114,9 +2275,7 @@ pub(super) fn dispatch_primitive_method(
                 let other = state.get_reg(Reg(args.start.0)).as_i64();
                 Value::from_i64((v - other).max(0))
             }
-            "elapsed" => {
-                Value::from_i64((monotonic_nanos_shared() - v).max(0))
-            }
+            "elapsed" => Value::from_i64((monotonic_nanos_shared() - v).max(0)),
 
             // PerfCounter methods
             "elapsed_since" => {
@@ -2241,10 +2400,15 @@ pub(super) fn dispatch_primitive_method(
             "exp2" => Value::from_f64(v.exp2()),
             "signum" => {
                 // Verum semantics: NaN→NaN, >0→1.0, <0→-1.0, 0→0.0
-                if v.is_nan() { Value::from_f64(f64::NAN) }
-                else if v > 0.0 { Value::from_f64(1.0) }
-                else if v < 0.0 { Value::from_f64(-1.0) }
-                else { Value::from_f64(0.0) }
+                if v.is_nan() {
+                    Value::from_f64(f64::NAN)
+                } else if v > 0.0 {
+                    Value::from_f64(1.0)
+                } else if v < 0.0 {
+                    Value::from_f64(-1.0)
+                } else {
+                    Value::from_f64(0.0)
+                }
             }
             "is_nan" => Value::from_bool(v.is_nan()),
             "is_infinite" => Value::from_bool(v.is_infinite()),
@@ -2371,9 +2535,12 @@ pub(super) fn dispatch_primitive_method(
             }
         }
 
-        let is_value_array = header.type_id != TypeId::U8 && header.type_id != TypeId::LIST
-            && header.type_id != TypeId::MAP && header.type_id != TypeId::SET
-            && header.type_id != TypeId::DEQUE && header.type_id != TypeId::CHANNEL
+        let is_value_array = header.type_id != TypeId::U8
+            && header.type_id != TypeId::LIST
+            && header.type_id != TypeId::MAP
+            && header.type_id != TypeId::SET
+            && header.type_id != TypeId::DEQUE
+            && header.type_id != TypeId::CHANNEL
             && !is_heap_string;
         let is_list = header.type_id == TypeId::LIST;
 
@@ -2385,8 +2552,8 @@ pub(super) fn dispatch_primitive_method(
         // - 16-255: user-defined types (FIRST_USER to before meta types)
         // - 256-511: meta system types
         // - 512+: well-known collection types (LIST, MAP, SET, etc.)
-        let is_user_defined_struct = header.type_id.0 >= crate::types::TypeId::FIRST_USER
-            && header.type_id.0 < 256;
+        let is_user_defined_struct =
+            header.type_id.0 >= crate::types::TypeId::FIRST_USER && header.type_id.0 < 256;
 
         if (is_value_array && !is_user_defined_struct) || is_list {
             match method {
@@ -2422,10 +2589,16 @@ pub(super) fn dispatch_primitive_method(
                 "iter" => {
                     // Create an iterator object for arrays/lists
                     // Iterator layout: [source_ptr, front_idx, back_idx, iter_type] - 4 values for double-ended
-                    let iter_type = if is_list { ITER_TYPE_LIST } else { ITER_TYPE_ARRAY };
+                    let iter_type = if is_list {
+                        ITER_TYPE_LIST
+                    } else {
+                        ITER_TYPE_ARRAY
+                    };
                     let len = get_array_length(ptr, header)?;
 
-                    let iter_obj = state.heap.alloc(TypeId::UNIT, 4 * std::mem::size_of::<Value>())?;
+                    let iter_obj = state
+                        .heap
+                        .alloc(TypeId::UNIT, 4 * std::mem::size_of::<Value>())?;
                     state.record_allocation();
 
                     let iter_ptr = unsafe {
@@ -2444,10 +2617,16 @@ pub(super) fn dispatch_primitive_method(
                 }
                 "iter_mut" => {
                     // Create a mutable iterator object for arrays/lists
-                    let iter_type = if is_list { ITER_TYPE_LIST } else { ITER_TYPE_ARRAY };
+                    let iter_type = if is_list {
+                        ITER_TYPE_LIST
+                    } else {
+                        ITER_TYPE_ARRAY
+                    };
                     let len = get_array_length(ptr, header)?;
 
-                    let iter_obj = state.heap.alloc(TypeId::UNIT, 4 * std::mem::size_of::<Value>())?;
+                    let iter_obj = state
+                        .heap
+                        .alloc(TypeId::UNIT, 4 * std::mem::size_of::<Value>())?;
                     state.record_allocation();
 
                     let iter_ptr = unsafe {
@@ -2470,15 +2649,17 @@ pub(super) fn dispatch_primitive_method(
 
         // Iterator methods - detect iterator objects by checking for 4-value layout with iter_type
         // Iterator layout: [source_ptr, front_idx, back_idx, iter_type]
-        if header.type_id == TypeId::UNIT && header.size as usize == 4 * std::mem::size_of::<Value>() {
-            let iter_data = unsafe {
-                ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-            };
+        if header.type_id == TypeId::UNIT
+            && header.size as usize == 4 * std::mem::size_of::<Value>()
+        {
+            let iter_data = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             let iter_type = unsafe { (*iter_data.add(3)).as_i64() };
 
             // Strip the type prefix if present (e.g., "ListIter.fold" -> "fold") so that
             // user-defined iterator type prefixes dispatch to the builtin iterator methods.
-            let iter_method = method.rsplit('.').next()
+            let iter_method = method
+                .rsplit('.')
+                .next()
                 .or_else(|| method.rsplit("::").next())
                 .unwrap_or(method);
 
@@ -2506,9 +2687,8 @@ pub(super) fn dispatch_primitive_method(
                                 let header = unsafe { &*(source_ptr as *const heap::ObjectHeader) };
                                 header.type_id == TypeId::SET
                             };
-                            let map_header = unsafe {
-                                source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                            };
+                            let map_header =
+                                unsafe { source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                             let capacity = unsafe { (*map_header.add(1)).as_i64() } as usize;
                             let entries_ptr = unsafe { (*map_header.add(2)).as_ptr::<u8>() };
                             let entries_data = unsafe {
@@ -2519,7 +2699,9 @@ pub(super) fn dispatch_primitive_method(
                             while idx < scan_end {
                                 let entry_key = unsafe { *entries_data.add(idx * 2) };
                                 if !entry_key.is_unit() {
-                                    unsafe { *iter_data.add(1) = Value::from_i64((idx + 1) as i64); }
+                                    unsafe {
+                                        *iter_data.add(1) = Value::from_i64((idx + 1) as i64);
+                                    }
                                     let element = if source_is_set {
                                         entry_key
                                     } else {
@@ -2529,7 +2711,9 @@ pub(super) fn dispatch_primitive_method(
                                             2 * std::mem::size_of::<Value>(),
                                         )?;
                                         let tuple_data = unsafe {
-                                            (tuple_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
+                                            (tuple_obj.as_ptr() as *mut u8)
+                                                .add(heap::OBJECT_HEADER_SIZE)
+                                                as *mut Value
                                         };
                                         unsafe {
                                             *tuple_data = entry_key;
@@ -2541,7 +2725,9 @@ pub(super) fn dispatch_primitive_method(
                                 }
                                 idx += 1;
                             }
-                            unsafe { *iter_data.add(1) = Value::from_i64(scan_end as i64); }
+                            unsafe {
+                                *iter_data.add(1) = Value::from_i64(scan_end as i64);
+                            }
                             return Ok(Some(make_none_value(state)?));
                         }
 
@@ -2573,7 +2759,9 @@ pub(super) fn dispatch_primitive_method(
                         let ref_val = Value::from_thin_ref(thin_ref);
 
                         // Advance front index
-                        unsafe { *iter_data.add(1) = Value::from_i64((front_idx + 1) as i64); }
+                        unsafe {
+                            *iter_data.add(1) = Value::from_i64((front_idx + 1) as i64);
+                        }
 
                         return Ok(Some(make_some_value(state, ref_val)?));
                     }
@@ -2618,7 +2806,9 @@ pub(super) fn dispatch_primitive_method(
                         let ref_val = Value::from_thin_ref(thin_ref);
 
                         // Update back index
-                        unsafe { *iter_data.add(2) = Value::from_i64(new_back_idx as i64); }
+                        unsafe {
+                            *iter_data.add(2) = Value::from_i64(new_back_idx as i64);
+                        }
 
                         return Ok(Some(make_some_value(state, ref_val)?));
                     }
@@ -2629,7 +2819,9 @@ pub(super) fn dispatch_primitive_method(
 
                         let remaining = back_idx.saturating_sub(front_idx);
                         // Consume the iterator (set front_idx to back_idx)
-                        unsafe { *iter_data.add(1) = Value::from_i64(back_idx as i64); }
+                        unsafe {
+                            *iter_data.add(1) = Value::from_i64(back_idx as i64);
+                        }
                         return Ok(Some(Value::from_i64(remaining as i64)));
                     }
                     "fold" => {
@@ -2648,7 +2840,8 @@ pub(super) fn dispatch_primitive_method(
                                     let list_header = unsafe {
                                         source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
                                     };
-                                    let backing_ptr = unsafe { (*list_header.add(2)).as_ptr::<u8>() };
+                                    let backing_ptr =
+                                        unsafe { (*list_header.add(2)).as_ptr::<u8>() };
                                     let elem_ptr = (backing_ptr as usize)
                                         + heap::OBJECT_HEADER_SIZE
                                         + i * std::mem::size_of::<Value>();
@@ -2666,7 +2859,9 @@ pub(super) fn dispatch_primitive_method(
                             acc = call_closure_sync(state, closure_val, &[acc, elem])?;
                         }
                         // Consume the iterator
-                        unsafe { *iter_data.add(1) = Value::from_i64(back_idx as i64); }
+                        unsafe {
+                            *iter_data.add(1) = Value::from_i64(back_idx as i64);
+                        }
                         return Ok(Some(acc));
                     }
                     "map" => {
@@ -2684,7 +2879,8 @@ pub(super) fn dispatch_primitive_method(
                                     let list_header = unsafe {
                                         source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
                                     };
-                                    let backing_ptr = unsafe { (*list_header.add(2)).as_ptr::<u8>() };
+                                    let backing_ptr =
+                                        unsafe { (*list_header.add(2)).as_ptr::<u8>() };
                                     let elem_ptr = (backing_ptr as usize)
                                         + heap::OBJECT_HEADER_SIZE
                                         + i * std::mem::size_of::<Value>();
@@ -2702,7 +2898,9 @@ pub(super) fn dispatch_primitive_method(
                             results.push(mapped);
                         }
                         // Consume the iterator
-                        unsafe { *iter_data.add(1) = Value::from_i64(back_idx as i64); }
+                        unsafe {
+                            *iter_data.add(1) = Value::from_i64(back_idx as i64);
+                        }
                         let list_val = alloc_list_from_values(state, results)?;
                         return Ok(Some(list_val));
                     }
@@ -2721,7 +2919,8 @@ pub(super) fn dispatch_primitive_method(
                                     let list_header = unsafe {
                                         source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
                                     };
-                                    let backing_ptr = unsafe { (*list_header.add(2)).as_ptr::<u8>() };
+                                    let backing_ptr =
+                                        unsafe { (*list_header.add(2)).as_ptr::<u8>() };
                                     let elem_ptr = (backing_ptr as usize)
                                         + heap::OBJECT_HEADER_SIZE
                                         + i * std::mem::size_of::<Value>();
@@ -2741,7 +2940,9 @@ pub(super) fn dispatch_primitive_method(
                             }
                         }
                         // Consume the iterator
-                        unsafe { *iter_data.add(1) = Value::from_i64(back_idx as i64); }
+                        unsafe {
+                            *iter_data.add(1) = Value::from_i64(back_idx as i64);
+                        }
                         let list_val = alloc_list_from_values(state, results)?;
                         return Ok(Some(list_val));
                     }
@@ -2760,7 +2961,8 @@ pub(super) fn dispatch_primitive_method(
                                     let list_header = unsafe {
                                         source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
                                     };
-                                    let backing_ptr = unsafe { (*list_header.add(2)).as_ptr::<u8>() };
+                                    let backing_ptr =
+                                        unsafe { (*list_header.add(2)).as_ptr::<u8>() };
                                     let elem_ptr = (backing_ptr as usize)
                                         + heap::OBJECT_HEADER_SIZE
                                         + i * std::mem::size_of::<Value>();
@@ -2777,7 +2979,9 @@ pub(super) fn dispatch_primitive_method(
                             results.push(elem);
                         }
                         // Consume the iterator
-                        unsafe { *iter_data.add(1) = Value::from_i64(back_idx as i64); }
+                        unsafe {
+                            *iter_data.add(1) = Value::from_i64(back_idx as i64);
+                        }
                         let list_val = alloc_list_from_values(state, results)?;
                         return Ok(Some(list_val));
                     }
@@ -2796,7 +3000,8 @@ pub(super) fn dispatch_primitive_method(
                                     let list_header = unsafe {
                                         source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
                                     };
-                                    let backing_ptr = unsafe { (*list_header.add(2)).as_ptr::<u8>() };
+                                    let backing_ptr =
+                                        unsafe { (*list_header.add(2)).as_ptr::<u8>() };
                                     (backing_ptr as usize)
                                         + heap::OBJECT_HEADER_SIZE
                                         + i * std::mem::size_of::<Value>()
@@ -2822,7 +3027,9 @@ pub(super) fn dispatch_primitive_method(
                             }
                         }
                         // Consume the iterator
-                        unsafe { *iter_data.add(1) = Value::from_i64(back_idx as i64); }
+                        unsafe {
+                            *iter_data.add(1) = Value::from_i64(back_idx as i64);
+                        }
                         return Ok(Some(Value::from_bool(result)));
                     }
                     "any" => {
@@ -2840,7 +3047,8 @@ pub(super) fn dispatch_primitive_method(
                                     let list_header = unsafe {
                                         source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
                                     };
-                                    let backing_ptr = unsafe { (*list_header.add(2)).as_ptr::<u8>() };
+                                    let backing_ptr =
+                                        unsafe { (*list_header.add(2)).as_ptr::<u8>() };
                                     (backing_ptr as usize)
                                         + heap::OBJECT_HEADER_SIZE
                                         + i * std::mem::size_of::<Value>()
@@ -2866,7 +3074,9 @@ pub(super) fn dispatch_primitive_method(
                             }
                         }
                         // Consume the iterator
-                        unsafe { *iter_data.add(1) = Value::from_i64(back_idx as i64); }
+                        unsafe {
+                            *iter_data.add(1) = Value::from_i64(back_idx as i64);
+                        }
                         return Ok(Some(Value::from_bool(result)));
                     }
                     "for_each" => {
@@ -2883,7 +3093,8 @@ pub(super) fn dispatch_primitive_method(
                                     let list_header = unsafe {
                                         source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
                                     };
-                                    let backing_ptr = unsafe { (*list_header.add(2)).as_ptr::<u8>() };
+                                    let backing_ptr =
+                                        unsafe { (*list_header.add(2)).as_ptr::<u8>() };
                                     (backing_ptr as usize)
                                         + heap::OBJECT_HEADER_SIZE
                                         + i * std::mem::size_of::<Value>()
@@ -2905,7 +3116,9 @@ pub(super) fn dispatch_primitive_method(
                             call_closure_sync(state, closure, &[elem_ref])?;
                         }
                         // Consume the iterator
-                        unsafe { *iter_data.add(1) = Value::from_i64(back_idx as i64); }
+                        unsafe {
+                            *iter_data.add(1) = Value::from_i64(back_idx as i64);
+                        }
                         return Ok(Some(Value::unit()));
                     }
                     _ => {} // fall through
@@ -2919,9 +3132,7 @@ pub(super) fn dispatch_primitive_method(
         if is_map || is_set {
             match method {
                 "len" => {
-                    let data_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let count = unsafe { (*data_ptr).as_i64() } as usize;
                     return Ok(Some(Value::from_i64(count as i64)));
                 }
@@ -2942,11 +3153,11 @@ pub(super) fn dispatch_primitive_method(
                     // `back_idx` is set to `capacity` (not `len`) because
                     // Map/Set iteration scans the raw `entries` array and
                     // `next` on an iterator-blob skips empty slots.
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() };
-                    let iter_obj = state.heap.alloc(TypeId::UNIT, 4 * std::mem::size_of::<Value>())?;
+                    let iter_obj = state
+                        .heap
+                        .alloc(TypeId::UNIT, 4 * std::mem::size_of::<Value>())?;
                     state.record_allocation();
                     let iter_ptr = unsafe {
                         (iter_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
@@ -2962,24 +3173,28 @@ pub(super) fn dispatch_primitive_method(
                 "contains" | "contains_key" if is_map => {
                     let caller_base = state.reg_base();
                     let key = state.registers.get(caller_base, Reg(args.start.0));
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let hash = value_hash(key);
                     let mut idx = hash % capacity;
                     let start = idx;
                     let mut found = false;
                     loop {
                         let entry_key = unsafe { *entries_data.add(idx * 2) };
-                        if entry_key.is_unit() { break; }
-                        if value_eq(entry_key, key) { found = true; break; }
+                        if entry_key.is_unit() {
+                            break;
+                        }
+                        if value_eq(entry_key, key) {
+                            found = true;
+                            break;
+                        }
                         idx = (idx + 1) % capacity;
-                        if idx == start { break; }
+                        if idx == start {
+                            break;
+                        }
                     }
                     return Ok(Some(Value::from_bool(found)));
                 }
@@ -2988,15 +3203,12 @@ pub(super) fn dispatch_primitive_method(
                     let val = state.registers.get(caller_base, Reg(args.start.0));
                     // Set uses same layout as Map: [count, capacity, entries_ptr]
                     // entries are [key, Value::unit()] pairs
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let mut count = unsafe { (*header_ptr).as_i64() } as usize;
                     let mut capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let mut entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let mut entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
                     // Resize if load factor >= 75%
                     if count * 4 >= capacity * 3 {
@@ -3004,12 +3216,13 @@ pub(super) fn dispatch_primitive_method(
                         let new_entries = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
                         state.record_allocation();
                         let new_entries_ptr = new_entries.as_ptr() as *mut u8;
-                        let new_entries_data = unsafe {
-                            new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                        };
+                        let new_entries_data =
+                            unsafe { new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                         // Initialize all slots to unit
                         for i in 0..(new_cap * 2) {
-                            unsafe { *new_entries_data.add(i) = Value::unit(); }
+                            unsafe {
+                                *new_entries_data.add(i) = Value::unit();
+                            }
                         }
                         // Rehash existing entries
                         for i in 0..capacity {
@@ -3052,7 +3265,9 @@ pub(super) fn dispatch_primitive_method(
                                 *entries_data.add(idx * 2 + 1) = Value::unit();
                             }
                             count += 1;
-                            unsafe { *header_ptr = Value::from_i64(count as i64); }
+                            unsafe {
+                                *header_ptr = Value::from_i64(count as i64);
+                            }
                             break;
                         }
                         if value_eq(entry_key, val) {
@@ -3065,24 +3280,28 @@ pub(super) fn dispatch_primitive_method(
                 "contains" if is_set => {
                     let caller_base = state.reg_base();
                     let val = state.registers.get(caller_base, Reg(args.start.0));
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let hash = value_hash(val);
                     let mut idx = hash % capacity;
                     let start = idx;
                     let mut found = false;
                     loop {
                         let entry_key = unsafe { *entries_data.add(idx * 2) };
-                        if entry_key.is_unit() { break; }
-                        if value_eq(entry_key, val) { found = true; break; }
+                        if entry_key.is_unit() {
+                            break;
+                        }
+                        if value_eq(entry_key, val) {
+                            found = true;
+                            break;
+                        }
                         idx = (idx + 1) % capacity;
-                        if idx == start { break; }
+                        if idx == start {
+                            break;
+                        }
                     }
                     return Ok(Some(Value::from_bool(found)));
                 }
@@ -3092,15 +3311,12 @@ pub(super) fn dispatch_primitive_method(
                     let caller_base = state.reg_base();
                     let key = state.registers.get(caller_base, Reg(args.start.0));
                     let value = state.registers.get(caller_base, Reg(args.start.0 + 1));
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let mut count = unsafe { (*header_ptr).as_i64() } as usize;
                     let mut capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let mut entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let mut entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
                     // Resize if load factor >= 75%
                     if count * 4 >= capacity * 3 {
@@ -3108,12 +3324,13 @@ pub(super) fn dispatch_primitive_method(
                         let new_entries = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
                         state.record_allocation();
                         let new_entries_ptr = new_entries.as_ptr() as *mut u8;
-                        let new_entries_data = unsafe {
-                            new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                        };
+                        let new_entries_data =
+                            unsafe { new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                         // Initialize all slots to unit
                         for i in 0..(new_cap * 2) {
-                            unsafe { *new_entries_data.add(i) = Value::unit(); }
+                            unsafe {
+                                *new_entries_data.add(i) = Value::unit();
+                            }
                         }
                         // Rehash existing entries
                         for i in 0..capacity {
@@ -3155,13 +3372,17 @@ pub(super) fn dispatch_primitive_method(
                                 *entries_data.add(idx * 2 + 1) = value;
                             }
                             count += 1;
-                            unsafe { *header_ptr = Value::from_i64(count as i64); }
+                            unsafe {
+                                *header_ptr = Value::from_i64(count as i64);
+                            }
                             break;
                         }
                         if value_eq(entry_key, key) {
                             // Key exists - replace value
                             old_value = Some(unsafe { *entries_data.add(idx * 2 + 1) });
-                            unsafe { *entries_data.add(idx * 2 + 1) = value; }
+                            unsafe {
+                                *entries_data.add(idx * 2 + 1) = value;
+                            }
                             break;
                         }
                         idx = (idx + 1) % capacity;
@@ -3182,14 +3403,11 @@ pub(super) fn dispatch_primitive_method(
                     // Matches MapGet opcode behavior for interpreter/AOT consistency.
                     let caller_base = state.reg_base();
                     let key = state.registers.get(caller_base, Reg(args.start.0));
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let hash = value_hash(key);
                     let mut idx = hash % capacity;
                     let start = idx;
@@ -3212,9 +3430,7 @@ pub(super) fn dispatch_primitive_method(
                 "ensure_capacity" if is_map => {
                     // Map.ensure_capacity() - resize if load factor is too high
                     // This is called by user-defined Map.insert from core/collections
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let count = unsafe { (*header_ptr).as_i64() } as usize;
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
 
@@ -3224,11 +3440,12 @@ pub(super) fn dispatch_primitive_method(
                         let new_entries = state.heap.alloc_array(TypeId::UNIT, INITIAL_CAP * 2)?;
                         state.record_allocation();
                         let new_entries_ptr = new_entries.as_ptr() as *mut u8;
-                        let new_entries_data = unsafe {
-                            new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                        };
+                        let new_entries_data =
+                            unsafe { new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                         for i in 0..(INITIAL_CAP * 2) {
-                            unsafe { *new_entries_data.add(i) = Value::unit(); }
+                            unsafe {
+                                *new_entries_data.add(i) = Value::unit();
+                            }
                         }
                         unsafe {
                             *header_ptr.add(1) = Value::from_i64(INITIAL_CAP as i64);
@@ -3241,18 +3458,18 @@ pub(super) fn dispatch_primitive_method(
                     if count * 4 >= capacity * 3 {
                         let new_cap = capacity * 2;
                         let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                        let entries_data = unsafe {
-                            entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                        };
+                        let entries_data =
+                            unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                         let new_entries = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
                         state.record_allocation();
                         let new_entries_ptr = new_entries.as_ptr() as *mut u8;
-                        let new_entries_data = unsafe {
-                            new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                        };
+                        let new_entries_data =
+                            unsafe { new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                         // Initialize all slots to unit
                         for i in 0..(new_cap * 2) {
-                            unsafe { *new_entries_data.add(i) = Value::unit(); }
+                            unsafe {
+                                *new_entries_data.add(i) = Value::unit();
+                            }
                         }
                         // Rehash existing entries
                         for i in 0..capacity {
@@ -3292,22 +3509,21 @@ pub(super) fn dispatch_primitive_method(
                     // Returns Some(old_value) if key existed, None otherwise
                     let caller_base = state.reg_base();
                     let key = state.registers.get(caller_base, Reg(args.start.0));
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let mut count = unsafe { (*header_ptr).as_i64() } as usize;
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let hash = value_hash(key);
                     let mut idx = hash % capacity;
                     let start = idx;
                     let mut found_value: Option<Value> = None;
                     loop {
                         let entry_key = unsafe { *entries_data.add(idx * 2) };
-                        if entry_key.is_unit() { break; }
+                        if entry_key.is_unit() {
+                            break;
+                        }
                         if value_eq(entry_key, key) {
                             found_value = Some(unsafe { *entries_data.add(idx * 2 + 1) });
                             // Clear the slot
@@ -3316,13 +3532,17 @@ pub(super) fn dispatch_primitive_method(
                                 *entries_data.add(idx * 2 + 1) = Value::unit();
                             }
                             count -= 1;
-                            unsafe { *header_ptr = Value::from_i64(count as i64); }
+                            unsafe {
+                                *header_ptr = Value::from_i64(count as i64);
+                            }
                             // Backward-shift rehash: fix up the probe chain
                             let mut gap = idx;
                             let mut j = (idx + 1) % capacity;
                             loop {
                                 let jk = unsafe { *entries_data.add(j * 2) };
-                                if jk.is_unit() { break; }
+                                if jk.is_unit() {
+                                    break;
+                                }
                                 let jh = value_hash(jk) % capacity;
                                 // Check if j's natural slot is at or before the gap
                                 // (accounting for wraparound)
@@ -3342,12 +3562,16 @@ pub(super) fn dispatch_primitive_method(
                                     gap = j;
                                 }
                                 j = (j + 1) % capacity;
-                                if j == start { break; }
+                                if j == start {
+                                    break;
+                                }
                             }
                             break;
                         }
                         idx = (idx + 1) % capacity;
-                        if idx == start { break; }
+                        if idx == start {
+                            break;
+                        }
                     }
                     let result = match found_value {
                         None => make_none_value(state)?,
@@ -3357,14 +3581,11 @@ pub(super) fn dispatch_primitive_method(
                 }
                 "keys" if is_map => {
                     // Map.keys() -> List<K>
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let mut keys = Vec::new();
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
@@ -3377,14 +3598,11 @@ pub(super) fn dispatch_primitive_method(
                 }
                 "values" if is_map => {
                     // Map.values() -> List<V>
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let mut vals = Vec::new();
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
@@ -3397,24 +3615,24 @@ pub(super) fn dispatch_primitive_method(
                 }
                 "entries" if is_map => {
                     // Map.entries() -> List<(K, V)>
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let mut tuples = Vec::new();
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
                         if !k.is_unit() {
                             let v = unsafe { *entries_data.add(i * 2 + 1) };
                             // Allocate a 2-element tuple: [key, value]
-                            let tuple_obj = state.heap.alloc(TypeId::TUPLE, 2 * std::mem::size_of::<Value>())?;
+                            let tuple_obj = state
+                                .heap
+                                .alloc(TypeId::TUPLE, 2 * std::mem::size_of::<Value>())?;
                             state.record_allocation();
                             let tuple_data = unsafe {
-                                (tuple_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
+                                (tuple_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE)
+                                    as *mut Value
                             };
                             unsafe {
                                 *tuple_data = k;
@@ -3428,27 +3646,26 @@ pub(super) fn dispatch_primitive_method(
                 }
                 "clear" if is_map => {
                     // Map.clear() - remove all entries
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     // Set count to 0
-                    unsafe { *header_ptr = Value::from_i64(0); }
+                    unsafe {
+                        *header_ptr = Value::from_i64(0);
+                    }
                     // Clear all slots
                     for i in 0..(capacity * 2) {
-                        unsafe { *entries_data.add(i) = Value::unit(); }
+                        unsafe {
+                            *entries_data.add(i) = Value::unit();
+                        }
                     }
                     return Ok(Some(Value::unit()));
                 }
                 "is_empty" if is_map => {
                     // Map.is_empty() -> Bool
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let count = unsafe { (*header_ptr).as_i64() } as usize;
                     return Ok(Some(Value::from_bool(count == 0)));
                 }
@@ -3458,15 +3675,12 @@ pub(super) fn dispatch_primitive_method(
                     let caller_base = state.reg_base();
                     let key = state.registers.get(caller_base, Reg(args.start.0));
                     let default_value = state.registers.get(caller_base, Reg(args.start.0 + 1));
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let mut count = unsafe { (*header_ptr).as_i64() } as usize;
                     let mut capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let mut entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let mut entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
                     // Resize if load factor >= 75%
                     if count * 4 >= capacity * 3 {
@@ -3474,11 +3688,12 @@ pub(super) fn dispatch_primitive_method(
                         let new_entries = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
                         state.record_allocation();
                         let new_entries_ptr = new_entries.as_ptr() as *mut u8;
-                        let new_entries_data = unsafe {
-                            new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                        };
+                        let new_entries_data =
+                            unsafe { new_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                         for i in 0..(new_cap * 2) {
-                            unsafe { *new_entries_data.add(i) = Value::unit(); }
+                            unsafe {
+                                *new_entries_data.add(i) = Value::unit();
+                            }
                         }
                         for i in 0..capacity {
                             let old_key = unsafe { *entries_data.add(i * 2) };
@@ -3518,7 +3733,9 @@ pub(super) fn dispatch_primitive_method(
                                 *entries_data.add(idx * 2 + 1) = default_value;
                             }
                             count += 1;
-                            unsafe { *header_ptr = Value::from_i64(count as i64); }
+                            unsafe {
+                                *header_ptr = Value::from_i64(count as i64);
+                            }
                             return Ok(Some(default_value));
                         }
                         if value_eq(entry_key, key) {
@@ -3538,22 +3755,21 @@ pub(super) fn dispatch_primitive_method(
                     // Returns true if element was present, false otherwise
                     let caller_base = state.reg_base();
                     let val = state.registers.get(caller_base, Reg(args.start.0));
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let mut count = unsafe { (*header_ptr).as_i64() } as usize;
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let hash = value_hash(val);
                     let mut idx = hash % capacity;
                     let start = idx;
                     let mut found = false;
                     loop {
                         let entry_key = unsafe { *entries_data.add(idx * 2) };
-                        if entry_key.is_unit() { break; }
+                        if entry_key.is_unit() {
+                            break;
+                        }
                         if value_eq(entry_key, val) {
                             found = true;
                             // Clear the slot
@@ -3562,13 +3778,17 @@ pub(super) fn dispatch_primitive_method(
                                 *entries_data.add(idx * 2 + 1) = Value::unit();
                             }
                             count -= 1;
-                            unsafe { *header_ptr = Value::from_i64(count as i64); }
+                            unsafe {
+                                *header_ptr = Value::from_i64(count as i64);
+                            }
                             // Backward-shift rehash
                             let mut gap = idx;
                             let mut j = (idx + 1) % capacity;
                             loop {
                                 let jk = unsafe { *entries_data.add(j * 2) };
-                                if jk.is_unit() { break; }
+                                if jk.is_unit() {
+                                    break;
+                                }
                                 let jh = value_hash(jk) % capacity;
                                 let should_move = if gap <= j {
                                     jh <= gap || jh > j
@@ -3586,36 +3806,39 @@ pub(super) fn dispatch_primitive_method(
                                     gap = j;
                                 }
                                 j = (j + 1) % capacity;
-                                if j == start { break; }
+                                if j == start {
+                                    break;
+                                }
                             }
                             break;
                         }
                         idx = (idx + 1) % capacity;
-                        if idx == start { break; }
+                        if idx == start {
+                            break;
+                        }
                     }
                     return Ok(Some(Value::from_bool(found)));
                 }
                 "clear" if is_set => {
                     // Set.clear() - remove all elements
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
-                    unsafe { *header_ptr = Value::from_i64(0); }
+                    let entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+                    unsafe {
+                        *header_ptr = Value::from_i64(0);
+                    }
                     for i in 0..(capacity * 2) {
-                        unsafe { *entries_data.add(i) = Value::unit(); }
+                        unsafe {
+                            *entries_data.add(i) = Value::unit();
+                        }
                     }
                     return Ok(Some(Value::unit()));
                 }
                 "is_empty" if is_set => {
                     // Set.is_empty() -> Bool
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let count = unsafe { (*header_ptr).as_i64() } as usize;
                     return Ok(Some(Value::from_bool(count == 0)));
                 }
@@ -3625,27 +3848,22 @@ pub(super) fn dispatch_primitive_method(
                     let other_val = state.registers.get(caller_base, Reg(args.start.0));
 
                     // Read self entries
-                    let self_header = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let self_count = unsafe { (*self_header).as_i64() } as usize;
                     let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
                     let self_entries_ptr = unsafe { (*self_header.add(2)).as_ptr::<u8>() };
-                    let self_entries = unsafe {
-                        self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_entries =
+                        unsafe { self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
                     // Read other entries
                     let other_ptr = other_val.as_ptr::<u8>();
-                    let other_header = unsafe {
-                        other_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let other_header =
+                        unsafe { other_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let other_count = unsafe { (*other_header).as_i64() } as usize;
                     let other_cap = unsafe { (*other_header.add(1)).as_i64() } as usize;
                     let other_entries_ptr = unsafe { (*other_header.add(2)).as_ptr::<u8>() };
-                    let other_entries = unsafe {
-                        other_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let other_entries =
+                        unsafe { other_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
                     // Collect all unique elements
                     let mut elements = Vec::with_capacity(self_count + other_count);
@@ -3661,7 +3879,10 @@ pub(super) fn dispatch_primitive_method(
                             // Check if already in elements
                             let mut dup = false;
                             for existing in &elements {
-                                if value_eq(*existing, k) { dup = true; break; }
+                                if value_eq(*existing, k) {
+                                    dup = true;
+                                    break;
+                                }
                             }
                             if !dup {
                                 elements.push(k);
@@ -3671,16 +3892,19 @@ pub(super) fn dispatch_primitive_method(
 
                     // Allocate new set
                     let new_cap = (elements.len() * 2).max(16);
-                    let new_obj = state.heap.alloc(TypeId::SET, 3 * std::mem::size_of::<Value>())?;
+                    let new_obj = state
+                        .heap
+                        .alloc(TypeId::SET, 3 * std::mem::size_of::<Value>())?;
                     state.record_allocation();
                     let new_backing = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
                     state.record_allocation();
                     let new_backing_ptr = new_backing.as_ptr() as *mut u8;
-                    let new_data = unsafe {
-                        new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let new_data =
+                        unsafe { new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     for i in 0..(new_cap * 2) {
-                        unsafe { *new_data.add(i) = Value::unit(); }
+                        unsafe {
+                            *new_data.add(i) = Value::unit();
+                        }
                     }
                     // Insert all elements
                     for elem in &elements {
@@ -3717,25 +3941,20 @@ pub(super) fn dispatch_primitive_method(
                     let other_val = state.registers.get(caller_base, Reg(args.start.0));
 
                     // Read self entries
-                    let self_header = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
                     let self_entries_ptr = unsafe { (*self_header.add(2)).as_ptr::<u8>() };
-                    let self_entries = unsafe {
-                        self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_entries =
+                        unsafe { self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
                     // Read other entries (for lookup)
                     let other_ptr = other_val.as_ptr::<u8>();
-                    let other_header = unsafe {
-                        other_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let other_header =
+                        unsafe { other_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let other_cap = unsafe { (*other_header.add(1)).as_i64() } as usize;
                     let other_entries_ptr = unsafe { (*other_header.add(2)).as_ptr::<u8>() };
-                    let other_entries = unsafe {
-                        other_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let other_entries =
+                        unsafe { other_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
                     // Collect elements that are in both sets
                     let mut elements = Vec::new();
@@ -3749,10 +3968,17 @@ pub(super) fn dispatch_primitive_method(
                             let mut in_other = false;
                             loop {
                                 let ok = unsafe { *other_entries.add(oi * 2) };
-                                if ok.is_unit() { break; }
-                                if value_eq(ok, k) { in_other = true; break; }
+                                if ok.is_unit() {
+                                    break;
+                                }
+                                if value_eq(ok, k) {
+                                    in_other = true;
+                                    break;
+                                }
                                 oi = (oi + 1) % other_cap;
-                                if oi == ostart { break; }
+                                if oi == ostart {
+                                    break;
+                                }
                             }
                             if in_other {
                                 elements.push(k);
@@ -3762,16 +3988,19 @@ pub(super) fn dispatch_primitive_method(
 
                     // Allocate new set
                     let new_cap = (elements.len() * 2).max(16);
-                    let new_obj = state.heap.alloc(TypeId::SET, 3 * std::mem::size_of::<Value>())?;
+                    let new_obj = state
+                        .heap
+                        .alloc(TypeId::SET, 3 * std::mem::size_of::<Value>())?;
                     state.record_allocation();
                     let new_backing = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
                     state.record_allocation();
                     let new_backing_ptr = new_backing.as_ptr() as *mut u8;
-                    let new_data = unsafe {
-                        new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let new_data =
+                        unsafe { new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     for i in 0..(new_cap * 2) {
-                        unsafe { *new_data.add(i) = Value::unit(); }
+                        unsafe {
+                            *new_data.add(i) = Value::unit();
+                        }
                     }
                     for elem in &elements {
                         let h = value_hash(*elem);
@@ -3806,25 +4035,20 @@ pub(super) fn dispatch_primitive_method(
                     let other_val = state.registers.get(caller_base, Reg(args.start.0));
 
                     // Read self entries
-                    let self_header = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
                     let self_entries_ptr = unsafe { (*self_header.add(2)).as_ptr::<u8>() };
-                    let self_entries = unsafe {
-                        self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_entries =
+                        unsafe { self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
                     // Read other entries (for lookup)
                     let other_ptr = other_val.as_ptr::<u8>();
-                    let other_header = unsafe {
-                        other_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let other_header =
+                        unsafe { other_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let other_cap = unsafe { (*other_header.add(1)).as_i64() } as usize;
                     let other_entries_ptr = unsafe { (*other_header.add(2)).as_ptr::<u8>() };
-                    let other_entries = unsafe {
-                        other_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let other_entries =
+                        unsafe { other_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
                     // Collect elements in self but not in other
                     let mut elements = Vec::new();
@@ -3838,10 +4062,17 @@ pub(super) fn dispatch_primitive_method(
                             let mut in_other = false;
                             loop {
                                 let ok = unsafe { *other_entries.add(oi * 2) };
-                                if ok.is_unit() { break; }
-                                if value_eq(ok, k) { in_other = true; break; }
+                                if ok.is_unit() {
+                                    break;
+                                }
+                                if value_eq(ok, k) {
+                                    in_other = true;
+                                    break;
+                                }
                                 oi = (oi + 1) % other_cap;
-                                if oi == ostart { break; }
+                                if oi == ostart {
+                                    break;
+                                }
                             }
                             if !in_other {
                                 elements.push(k);
@@ -3851,16 +4082,19 @@ pub(super) fn dispatch_primitive_method(
 
                     // Allocate new set
                     let new_cap = (elements.len() * 2).max(16);
-                    let new_obj = state.heap.alloc(TypeId::SET, 3 * std::mem::size_of::<Value>())?;
+                    let new_obj = state
+                        .heap
+                        .alloc(TypeId::SET, 3 * std::mem::size_of::<Value>())?;
                     state.record_allocation();
                     let new_backing = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
                     state.record_allocation();
                     let new_backing_ptr = new_backing.as_ptr() as *mut u8;
-                    let new_data = unsafe {
-                        new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let new_data =
+                        unsafe { new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     for i in 0..(new_cap * 2) {
-                        unsafe { *new_data.add(i) = Value::unit(); }
+                        unsafe {
+                            *new_data.add(i) = Value::unit();
+                        }
                     }
                     for elem in &elements {
                         let h = value_hash(*elem);
@@ -3894,24 +4128,19 @@ pub(super) fn dispatch_primitive_method(
                     let caller_base = state.reg_base();
                     let other_val = state.registers.get(caller_base, Reg(args.start.0));
 
-                    let self_header = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
                     let self_entries_ptr = unsafe { (*self_header.add(2)).as_ptr::<u8>() };
-                    let self_entries = unsafe {
-                        self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_entries =
+                        unsafe { self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
                     let other_ptr = other_val.as_ptr::<u8>();
-                    let other_header = unsafe {
-                        other_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let other_header =
+                        unsafe { other_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let other_cap = unsafe { (*other_header.add(1)).as_i64() } as usize;
                     let other_entries_ptr = unsafe { (*other_header.add(2)).as_ptr::<u8>() };
-                    let other_entries = unsafe {
-                        other_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let other_entries =
+                        unsafe { other_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
                     let mut is_subset = true;
                     for i in 0..self_cap {
@@ -3923,10 +4152,17 @@ pub(super) fn dispatch_primitive_method(
                             let mut in_other = false;
                             loop {
                                 let ok = unsafe { *other_entries.add(oi * 2) };
-                                if ok.is_unit() { break; }
-                                if value_eq(ok, k) { in_other = true; break; }
+                                if ok.is_unit() {
+                                    break;
+                                }
+                                if value_eq(ok, k) {
+                                    in_other = true;
+                                    break;
+                                }
                                 oi = (oi + 1) % other_cap;
-                                if oi == ostart { break; }
+                                if oi == ostart {
+                                    break;
+                                }
                             }
                             if !in_other {
                                 is_subset = false;
@@ -3941,24 +4177,19 @@ pub(super) fn dispatch_primitive_method(
                     let caller_base = state.reg_base();
                     let other_val = state.registers.get(caller_base, Reg(args.start.0));
 
-                    let self_header = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
                     let self_entries_ptr = unsafe { (*self_header.add(2)).as_ptr::<u8>() };
-                    let self_entries = unsafe {
-                        self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_entries =
+                        unsafe { self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
                     let other_ptr = other_val.as_ptr::<u8>();
-                    let other_header = unsafe {
-                        other_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let other_header =
+                        unsafe { other_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let other_cap = unsafe { (*other_header.add(1)).as_i64() } as usize;
                     let other_entries_ptr = unsafe { (*other_header.add(2)).as_ptr::<u8>() };
-                    let other_entries = unsafe {
-                        other_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let other_entries =
+                        unsafe { other_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
                     // Check all elements in other are in self
                     let mut is_superset = true;
@@ -3971,10 +4202,17 @@ pub(super) fn dispatch_primitive_method(
                             let mut in_self = false;
                             loop {
                                 let sk = unsafe { *self_entries.add(si * 2) };
-                                if sk.is_unit() { break; }
-                                if value_eq(sk, k) { in_self = true; break; }
+                                if sk.is_unit() {
+                                    break;
+                                }
+                                if value_eq(sk, k) {
+                                    in_self = true;
+                                    break;
+                                }
                                 si = (si + 1) % self_cap;
-                                if si == sstart { break; }
+                                if si == sstart {
+                                    break;
+                                }
                             }
                             if !in_self {
                                 is_superset = false;
@@ -3989,24 +4227,19 @@ pub(super) fn dispatch_primitive_method(
                     let caller_base = state.reg_base();
                     let other_val = state.registers.get(caller_base, Reg(args.start.0));
 
-                    let self_header = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
                     let self_entries_ptr = unsafe { (*self_header.add(2)).as_ptr::<u8>() };
-                    let self_entries = unsafe {
-                        self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_entries =
+                        unsafe { self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
                     let other_ptr = other_val.as_ptr::<u8>();
-                    let other_header = unsafe {
-                        other_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let other_header =
+                        unsafe { other_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let other_cap = unsafe { (*other_header.add(1)).as_i64() } as usize;
                     let other_entries_ptr = unsafe { (*other_header.add(2)).as_ptr::<u8>() };
-                    let other_entries = unsafe {
-                        other_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let other_entries =
+                        unsafe { other_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
                     let mut elements = Vec::new();
                     // Elements in self but not in other
@@ -4019,12 +4252,21 @@ pub(super) fn dispatch_primitive_method(
                             let mut in_other = false;
                             loop {
                                 let ok = unsafe { *other_entries.add(oi * 2) };
-                                if ok.is_unit() { break; }
-                                if value_eq(ok, k) { in_other = true; break; }
+                                if ok.is_unit() {
+                                    break;
+                                }
+                                if value_eq(ok, k) {
+                                    in_other = true;
+                                    break;
+                                }
                                 oi = (oi + 1) % other_cap;
-                                if oi == ostart { break; }
+                                if oi == ostart {
+                                    break;
+                                }
                             }
-                            if !in_other { elements.push(k); }
+                            if !in_other {
+                                elements.push(k);
+                            }
                         }
                     }
                     // Elements in other but not in self
@@ -4037,26 +4279,38 @@ pub(super) fn dispatch_primitive_method(
                             let mut in_self = false;
                             loop {
                                 let sk = unsafe { *self_entries.add(si * 2) };
-                                if sk.is_unit() { break; }
-                                if value_eq(sk, k) { in_self = true; break; }
+                                if sk.is_unit() {
+                                    break;
+                                }
+                                if value_eq(sk, k) {
+                                    in_self = true;
+                                    break;
+                                }
                                 si = (si + 1) % self_cap;
-                                if si == sstart { break; }
+                                if si == sstart {
+                                    break;
+                                }
                             }
-                            if !in_self { elements.push(k); }
+                            if !in_self {
+                                elements.push(k);
+                            }
                         }
                     }
 
                     let new_cap = (elements.len() * 2).max(16);
-                    let new_obj = state.heap.alloc(TypeId::SET, 3 * std::mem::size_of::<Value>())?;
+                    let new_obj = state
+                        .heap
+                        .alloc(TypeId::SET, 3 * std::mem::size_of::<Value>())?;
                     state.record_allocation();
                     let new_backing = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
                     state.record_allocation();
                     let new_backing_ptr = new_backing.as_ptr() as *mut u8;
-                    let new_data = unsafe {
-                        new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let new_data =
+                        unsafe { new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     for i in 0..(new_cap * 2) {
-                        unsafe { *new_data.add(i) = Value::unit(); }
+                        unsafe {
+                            *new_data.add(i) = Value::unit();
+                        }
                     }
                     for elem in &elements {
                         let h = value_hash(*elem);
@@ -4090,24 +4344,19 @@ pub(super) fn dispatch_primitive_method(
                     let caller_base = state.reg_base();
                     let other_val = state.registers.get(caller_base, Reg(args.start.0));
 
-                    let self_header = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
                     let self_entries_ptr = unsafe { (*self_header.add(2)).as_ptr::<u8>() };
-                    let self_entries = unsafe {
-                        self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_entries =
+                        unsafe { self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
                     let other_ptr = other_val.as_ptr::<u8>();
-                    let other_header = unsafe {
-                        other_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let other_header =
+                        unsafe { other_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let other_cap = unsafe { (*other_header.add(1)).as_i64() } as usize;
                     let other_entries_ptr = unsafe { (*other_header.add(2)).as_ptr::<u8>() };
-                    let other_entries = unsafe {
-                        other_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let other_entries =
+                        unsafe { other_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
                     let mut disjoint = true;
                     for i in 0..self_cap {
@@ -4118,30 +4367,38 @@ pub(super) fn dispatch_primitive_method(
                             let ostart = oi;
                             loop {
                                 let ok = unsafe { *other_entries.add(oi * 2) };
-                                if ok.is_unit() { break; }
-                                if value_eq(ok, k) { disjoint = false; break; }
+                                if ok.is_unit() {
+                                    break;
+                                }
+                                if value_eq(ok, k) {
+                                    disjoint = false;
+                                    break;
+                                }
                                 oi = (oi + 1) % other_cap;
-                                if oi == ostart { break; }
+                                if oi == ostart {
+                                    break;
+                                }
                             }
-                            if !disjoint { break; }
+                            if !disjoint {
+                                break;
+                            }
                         }
                     }
                     return Ok(Some(Value::from_bool(disjoint)));
                 }
                 "to_list" if is_set => {
                     // Set.to_list() -> List<T> (collect all elements into a list)
-                    let self_header = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
                     let self_entries_ptr = unsafe { (*self_header.add(2)).as_ptr::<u8>() };
-                    let self_entries = unsafe {
-                        self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_entries =
+                        unsafe { self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let mut elems = Vec::new();
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
-                        if !k.is_unit() { elems.push(k); }
+                        if !k.is_unit() {
+                            elems.push(k);
+                        }
                     }
                     let result = alloc_list_from_values(state, elems)?;
                     return Ok(Some(result));
@@ -4150,14 +4407,11 @@ pub(super) fn dispatch_primitive_method(
                     // Set.for_each(closure) - call closure(element) for each element
                     let caller_base = state.reg_base();
                     let closure_val = state.registers.get(caller_base, Reg(args.start.0));
-                    let self_header = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
                     let self_entries_ptr = unsafe { (*self_header.add(2)).as_ptr::<u8>() };
-                    let self_entries = unsafe {
-                        self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_entries =
+                        unsafe { self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
                         if !k.is_unit() {
@@ -4170,14 +4424,11 @@ pub(super) fn dispatch_primitive_method(
                     // Set.filter(closure) -> Set (new set with elements where closure(element) is true)
                     let caller_base = state.reg_base();
                     let closure_val = state.registers.get(caller_base, Reg(args.start.0));
-                    let self_header = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
                     let self_entries_ptr = unsafe { (*self_header.add(2)).as_ptr::<u8>() };
-                    let self_entries = unsafe {
-                        self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_entries =
+                        unsafe { self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let mut kept = Vec::new();
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
@@ -4194,14 +4445,11 @@ pub(super) fn dispatch_primitive_method(
                     // Set.map(closure) -> Set (new set of closure(element) values)
                     let caller_base = state.reg_base();
                     let closure_val = state.registers.get(caller_base, Reg(args.start.0));
-                    let self_header = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
                     let self_entries_ptr = unsafe { (*self_header.add(2)).as_ptr::<u8>() };
-                    let self_entries = unsafe {
-                        self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_entries =
+                        unsafe { self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let mut mapped = Vec::new();
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
@@ -4217,14 +4465,11 @@ pub(super) fn dispatch_primitive_method(
                     let caller_base = state.reg_base();
                     let mut acc = state.registers.get(caller_base, Reg(args.start.0));
                     let closure_val = state.registers.get(caller_base, Reg(args.start.0 + 1));
-                    let self_header = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
                     let self_entries_ptr = unsafe { (*self_header.add(2)).as_ptr::<u8>() };
-                    let self_entries = unsafe {
-                        self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_entries =
+                        unsafe { self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
                         if !k.is_unit() {
@@ -4237,20 +4482,19 @@ pub(super) fn dispatch_primitive_method(
                     // Set.count_where(closure) -> Int
                     let caller_base = state.reg_base();
                     let closure_val = state.registers.get(caller_base, Reg(args.start.0));
-                    let self_header = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
                     let self_entries_ptr = unsafe { (*self_header.add(2)).as_ptr::<u8>() };
-                    let self_entries = unsafe {
-                        self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_entries =
+                        unsafe { self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let mut count: i64 = 0;
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
                         if !k.is_unit() {
                             let r = call_closure_sync(state, closure_val, &[k])?;
-                            if r.as_bool() { count += 1; }
+                            if r.as_bool() {
+                                count += 1;
+                            }
                         }
                     }
                     return Ok(Some(Value::from_i64(count)));
@@ -4259,14 +4503,11 @@ pub(super) fn dispatch_primitive_method(
                     // Set.filter_map(closure: fn(&T) -> Maybe<U>) -> Set<U>
                     let caller_base = state.reg_base();
                     let closure_val = state.registers.get(caller_base, Reg(args.start.0));
-                    let self_header = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_header = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let self_cap = unsafe { (*self_header.add(1)).as_i64() } as usize;
                     let self_entries_ptr = unsafe { (*self_header.add(2)).as_ptr::<u8>() };
-                    let self_entries = unsafe {
-                        self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let self_entries =
+                        unsafe { self_entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let mut kept = Vec::new();
                     for i in 0..self_cap {
                         let k = unsafe { *self_entries.add(i * 2) };
@@ -4284,14 +4525,11 @@ pub(super) fn dispatch_primitive_method(
                     // Map.for_each(closure) - call closure(key, value) for each entry
                     let caller_base = state.reg_base();
                     let closure_val = state.registers.get(caller_base, Reg(args.start.0));
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
                         if !k.is_unit() {
@@ -4306,14 +4544,11 @@ pub(super) fn dispatch_primitive_method(
                     let caller_base = state.reg_base();
                     let mut acc = state.registers.get(caller_base, Reg(args.start.0));
                     let closure_val = state.registers.get(caller_base, Reg(args.start.0 + 1));
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
                         if !k.is_unit() {
@@ -4327,14 +4562,11 @@ pub(super) fn dispatch_primitive_method(
                     // Map.filter(closure) -> Map (new map with entries where closure(k,v) is true)
                     let caller_base = state.reg_base();
                     let closure_val = state.registers.get(caller_base, Reg(args.start.0));
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let mut kept_keys = Vec::new();
                     let mut kept_vals = Vec::new();
                     for i in 0..capacity {
@@ -4350,16 +4582,19 @@ pub(super) fn dispatch_primitive_method(
                     }
                     // Build new map
                     let new_cap = (kept_keys.len() * 2).max(16);
-                    let new_obj = state.heap.alloc(TypeId::MAP, 3 * std::mem::size_of::<Value>())?;
+                    let new_obj = state
+                        .heap
+                        .alloc(TypeId::MAP, 3 * std::mem::size_of::<Value>())?;
                     state.record_allocation();
                     let new_backing = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
                     state.record_allocation();
                     let new_backing_ptr = new_backing.as_ptr() as *mut u8;
-                    let new_data = unsafe {
-                        new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let new_data =
+                        unsafe { new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     for j in 0..(new_cap * 2) {
-                        unsafe { *new_data.add(j) = Value::unit(); }
+                        unsafe {
+                            *new_data.add(j) = Value::unit();
+                        }
                     }
                     for j in 0..kept_keys.len() {
                         let h = value_hash(kept_keys[j]);
@@ -4389,21 +4624,21 @@ pub(super) fn dispatch_primitive_method(
                     // Map.any(closure) -> Bool (true if closure(k,v) is true for any entry)
                     let caller_base = state.reg_base();
                     let closure_val = state.registers.get(caller_base, Reg(args.start.0));
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let mut found = false;
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
                         if !k.is_unit() {
                             let v = unsafe { *entries_data.add(i * 2 + 1) };
                             let result = call_closure_sync(state, closure_val, &[k, v])?;
-                            if result.as_bool() { found = true; break; }
+                            if result.as_bool() {
+                                found = true;
+                                break;
+                            }
                         }
                     }
                     return Ok(Some(Value::from_bool(found)));
@@ -4412,21 +4647,21 @@ pub(super) fn dispatch_primitive_method(
                     // Map.all(closure) -> Bool (true if closure(k,v) is true for all entries)
                     let caller_base = state.reg_base();
                     let closure_val = state.registers.get(caller_base, Reg(args.start.0));
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let mut all_match = true;
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
                         if !k.is_unit() {
                             let v = unsafe { *entries_data.add(i * 2 + 1) };
                             let result = call_closure_sync(state, closure_val, &[k, v])?;
-                            if !result.as_bool() { all_match = false; break; }
+                            if !result.as_bool() {
+                                all_match = false;
+                                break;
+                            }
                         }
                     }
                     return Ok(Some(Value::from_bool(all_match)));
@@ -4435,14 +4670,11 @@ pub(super) fn dispatch_primitive_method(
                     // Map.find(closure) -> Maybe<(K,V)> (first entry where closure(k,v) is true)
                     let caller_base = state.reg_base();
                     let closure_val = state.registers.get(caller_base, Reg(args.start.0));
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
                         if !k.is_unit() {
@@ -4450,10 +4682,13 @@ pub(super) fn dispatch_primitive_method(
                             let result = call_closure_sync(state, closure_val, &[k, v])?;
                             if result.as_bool() {
                                 // Return Some((k, v)) - allocate tuple
-                                let tuple_obj = state.heap.alloc(TypeId::TUPLE, 2 * std::mem::size_of::<Value>())?;
+                                let tuple_obj = state
+                                    .heap
+                                    .alloc(TypeId::TUPLE, 2 * std::mem::size_of::<Value>())?;
                                 state.record_allocation();
                                 let tuple_data = unsafe {
-                                    (tuple_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
+                                    (tuple_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE)
+                                        as *mut Value
                                 };
                                 unsafe {
                                     *tuple_data = k;
@@ -4472,15 +4707,12 @@ pub(super) fn dispatch_primitive_method(
                     // Map.retain(closure) - keep only entries where closure(k,v) is true (mutating)
                     let caller_base = state.reg_base();
                     let closure_val = state.registers.get(caller_base, Reg(args.start.0));
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let mut count = unsafe { (*header_ptr).as_i64() } as usize;
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
                         if !k.is_unit() {
@@ -4496,22 +4728,21 @@ pub(super) fn dispatch_primitive_method(
                             }
                         }
                     }
-                    unsafe { *header_ptr = Value::from_i64(count as i64); }
+                    unsafe {
+                        *header_ptr = Value::from_i64(count as i64);
+                    }
                     return Ok(Some(Value::unit()));
                 }
                 "retain" if is_set => {
                     // Set.retain(closure) - keep only elements where closure(elem) is true (mutating)
                     let caller_base = state.reg_base();
                     let closure_val = state.registers.get(caller_base, Reg(args.start.0));
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let mut count = unsafe { (*header_ptr).as_i64() } as usize;
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
                         if !k.is_unit() {
@@ -4525,21 +4756,20 @@ pub(super) fn dispatch_primitive_method(
                             }
                         }
                     }
-                    unsafe { *header_ptr = Value::from_i64(count as i64); }
+                    unsafe {
+                        *header_ptr = Value::from_i64(count as i64);
+                    }
                     return Ok(Some(Value::unit()));
                 }
                 "map_values" if is_map => {
                     // Map.map_values(closure) -> Map (new map with values transformed by closure(k,v))
                     let caller_base = state.reg_base();
                     let closure_val = state.registers.get(caller_base, Reg(args.start.0));
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let mut keys = Vec::new();
                     let mut new_vals = Vec::new();
                     for i in 0..capacity {
@@ -4552,16 +4782,19 @@ pub(super) fn dispatch_primitive_method(
                         }
                     }
                     let new_cap = (keys.len() * 2).max(16);
-                    let new_obj = state.heap.alloc(TypeId::MAP, 3 * std::mem::size_of::<Value>())?;
+                    let new_obj = state
+                        .heap
+                        .alloc(TypeId::MAP, 3 * std::mem::size_of::<Value>())?;
                     state.record_allocation();
                     let new_backing = state.heap.alloc_array(TypeId::UNIT, new_cap * 2)?;
                     state.record_allocation();
                     let new_backing_ptr = new_backing.as_ptr() as *mut u8;
-                    let new_data = unsafe {
-                        new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let new_data =
+                        unsafe { new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     for j in 0..(new_cap * 2) {
-                        unsafe { *new_data.add(j) = Value::unit(); }
+                        unsafe {
+                            *new_data.add(j) = Value::unit();
+                        }
                     }
                     for j in 0..keys.len() {
                         let h = value_hash(keys[j]);
@@ -4591,29 +4824,27 @@ pub(super) fn dispatch_primitive_method(
                     // Map.contains_value(val) -> Bool (check if any entry has this value)
                     let caller_base = state.reg_base();
                     let target = state.registers.get(caller_base, Reg(args.start.0));
-                    let header_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let capacity = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let entries_ptr = unsafe { (*header_ptr.add(2)).as_ptr::<u8>() };
-                    let entries_data = unsafe {
-                        entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let entries_data =
+                        unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let mut found = false;
                     for i in 0..capacity {
                         let k = unsafe { *entries_data.add(i * 2) };
                         if !k.is_unit() {
                             let v = unsafe { *entries_data.add(i * 2 + 1) };
-                            if value_eq(v, target) { found = true; break; }
+                            if value_eq(v, target) {
+                                found = true;
+                                break;
+                            }
                         }
                     }
                     return Ok(Some(Value::from_bool(found)));
                 }
                 "count" if is_map || is_set => {
                     // Alias for len()
-                    let data_ptr = unsafe {
-                        ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let count = unsafe { (*data_ptr).as_i64() } as usize;
                     return Ok(Some(Value::from_i64(count as i64)));
                 }
@@ -4627,9 +4858,7 @@ pub(super) fn dispatch_primitive_method(
         // ============================================================
         let is_deque = header.type_id == TypeId::DEQUE;
         if is_deque {
-            let header_ptr = unsafe {
-                ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-            };
+            let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             // Field indices matching stdlib layout
             const DEQUE_DATA: usize = 0;
             const DEQUE_HEAD: usize = 1;
@@ -4651,9 +4880,8 @@ pub(super) fn dispatch_primitive_method(
                     let cap = unsafe { (*header_ptr.add(DEQUE_CAP)).as_i64() } as usize;
                     let head = unsafe { (*header_ptr.add(DEQUE_HEAD)).as_i64() } as usize;
                     let buf_ptr = unsafe { (*header_ptr.add(DEQUE_DATA)).as_ptr::<u8>() };
-                    let mut buf_data = unsafe {
-                        buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let mut buf_data =
+                        unsafe { buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
                     // Grow if full
                     if len >= cap {
@@ -4661,15 +4889,18 @@ pub(super) fn dispatch_primitive_method(
                         let new_buf = state.heap.alloc_array(TypeId::UNIT, new_cap)?;
                         state.record_allocation();
                         let new_buf_ptr = new_buf.as_ptr() as *mut u8;
-                        let new_buf_data = unsafe {
-                            new_buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                        };
+                        let new_buf_data =
+                            unsafe { new_buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                         for i in 0..len {
                             let src_idx = (head + i) % cap;
-                            unsafe { *new_buf_data.add(i) = *buf_data.add(src_idx); }
+                            unsafe {
+                                *new_buf_data.add(i) = *buf_data.add(src_idx);
+                            }
                         }
                         for i in len..new_cap {
-                            unsafe { *new_buf_data.add(i) = Value::unit(); }
+                            unsafe {
+                                *new_buf_data.add(i) = Value::unit();
+                            }
                         }
                         buf_data = new_buf_data;
                         unsafe {
@@ -4678,13 +4909,19 @@ pub(super) fn dispatch_primitive_method(
                             *header_ptr.add(DEQUE_DATA) = Value::from_ptr(new_buf_ptr);
                         }
                         let tail = len;
-                        unsafe { *buf_data.add(tail) = val; }
+                        unsafe {
+                            *buf_data.add(tail) = val;
+                        }
                     } else {
                         let tail = (head + len) % cap;
-                        unsafe { *buf_data.add(tail) = val; }
+                        unsafe {
+                            *buf_data.add(tail) = val;
+                        }
                     }
                     len += 1;
-                    unsafe { *header_ptr.add(DEQUE_LEN) = Value::from_i64(len as i64); }
+                    unsafe {
+                        *header_ptr.add(DEQUE_LEN) = Value::from_i64(len as i64);
+                    }
                     return Ok(Some(Value::unit()));
                 }
                 "push_front" => {
@@ -4694,9 +4931,8 @@ pub(super) fn dispatch_primitive_method(
                     let mut cap = unsafe { (*header_ptr.add(DEQUE_CAP)).as_i64() } as usize;
                     let mut head = unsafe { (*header_ptr.add(DEQUE_HEAD)).as_i64() } as usize;
                     let buf_ptr = unsafe { (*header_ptr.add(DEQUE_DATA)).as_ptr::<u8>() };
-                    let mut buf_data = unsafe {
-                        buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let mut buf_data =
+                        unsafe { buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
                     // Grow if full
                     if len >= cap {
@@ -4704,15 +4940,18 @@ pub(super) fn dispatch_primitive_method(
                         let new_buf = state.heap.alloc_array(TypeId::UNIT, new_cap)?;
                         state.record_allocation();
                         let new_buf_ptr = new_buf.as_ptr() as *mut u8;
-                        let new_buf_data = unsafe {
-                            new_buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                        };
+                        let new_buf_data =
+                            unsafe { new_buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                         for i in 0..len {
                             let src_idx = (head + i) % cap;
-                            unsafe { *new_buf_data.add(i) = *buf_data.add(src_idx); }
+                            unsafe {
+                                *new_buf_data.add(i) = *buf_data.add(src_idx);
+                            }
                         }
                         for i in len..new_cap {
-                            unsafe { *new_buf_data.add(i) = Value::unit(); }
+                            unsafe {
+                                *new_buf_data.add(i) = Value::unit();
+                            }
                         }
                         cap = new_cap;
                         buf_data = new_buf_data;
@@ -4740,9 +4979,7 @@ pub(super) fn dispatch_primitive_method(
                     let cap = unsafe { (*header_ptr.add(DEQUE_CAP)).as_i64() } as usize;
                     let head = unsafe { (*header_ptr.add(DEQUE_HEAD)).as_i64() } as usize;
                     let buf_ptr = unsafe { (*header_ptr.add(DEQUE_DATA)).as_ptr::<u8>() };
-                    let buf_data = unsafe {
-                        buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let buf_data = unsafe { buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let tail_idx = (head + len - 1) % cap;
                     let val = unsafe { *buf_data.add(tail_idx) };
                     unsafe {
@@ -4761,9 +4998,7 @@ pub(super) fn dispatch_primitive_method(
                     let cap = unsafe { (*header_ptr.add(DEQUE_CAP)).as_i64() } as usize;
                     let head = unsafe { (*header_ptr.add(DEQUE_HEAD)).as_i64() } as usize;
                     let buf_ptr = unsafe { (*header_ptr.add(DEQUE_DATA)).as_ptr::<u8>() };
-                    let buf_data = unsafe {
-                        buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let buf_data = unsafe { buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let val = unsafe { *buf_data.add(head) };
                     let new_head = (head + 1) % cap;
                     unsafe {
@@ -4782,9 +5017,7 @@ pub(super) fn dispatch_primitive_method(
                     }
                     let head = unsafe { (*header_ptr.add(DEQUE_HEAD)).as_i64() } as usize;
                     let buf_ptr = unsafe { (*header_ptr.add(DEQUE_DATA)).as_ptr::<u8>() };
-                    let buf_data = unsafe {
-                        buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let buf_data = unsafe { buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let val = unsafe { *buf_data.add(head) };
                     let result = make_some_value(state, val)?;
                     return Ok(Some(result));
@@ -4798,9 +5031,7 @@ pub(super) fn dispatch_primitive_method(
                     let cap = unsafe { (*header_ptr.add(DEQUE_CAP)).as_i64() } as usize;
                     let head = unsafe { (*header_ptr.add(DEQUE_HEAD)).as_i64() } as usize;
                     let buf_ptr = unsafe { (*header_ptr.add(DEQUE_DATA)).as_ptr::<u8>() };
-                    let buf_data = unsafe {
-                        buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let buf_data = unsafe { buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let tail_idx = (head + len - 1) % cap;
                     let val = unsafe { *buf_data.add(tail_idx) };
                     let result = make_some_value(state, val)?;
@@ -4817,9 +5048,7 @@ pub(super) fn dispatch_primitive_method(
                     let cap = unsafe { (*header_ptr.add(DEQUE_CAP)).as_i64() } as usize;
                     let head = unsafe { (*header_ptr.add(DEQUE_HEAD)).as_i64() } as usize;
                     let buf_ptr = unsafe { (*header_ptr.add(DEQUE_DATA)).as_ptr::<u8>() };
-                    let buf_data = unsafe {
-                        buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let buf_data = unsafe { buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let actual_idx = (head + idx) % cap;
                     let val = unsafe { *buf_data.add(actual_idx) };
                     let result = make_some_value(state, val)?;
@@ -4828,11 +5057,11 @@ pub(super) fn dispatch_primitive_method(
                 "clear" => {
                     let cap = unsafe { (*header_ptr.add(DEQUE_CAP)).as_i64() } as usize;
                     let buf_ptr = unsafe { (*header_ptr.add(DEQUE_DATA)).as_ptr::<u8>() };
-                    let buf_data = unsafe {
-                        buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let buf_data = unsafe { buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     for i in 0..cap {
-                        unsafe { *buf_data.add(i) = Value::unit(); }
+                        unsafe {
+                            *buf_data.add(i) = Value::unit();
+                        }
                     }
                     unsafe {
                         *header_ptr.add(DEQUE_LEN) = Value::from_i64(0);
@@ -4845,9 +5074,7 @@ pub(super) fn dispatch_primitive_method(
                     let cap = unsafe { (*header_ptr.add(DEQUE_CAP)).as_i64() } as usize;
                     let head = unsafe { (*header_ptr.add(DEQUE_HEAD)).as_i64() } as usize;
                     let buf_ptr = unsafe { (*header_ptr.add(DEQUE_DATA)).as_ptr::<u8>() };
-                    let buf_data = unsafe {
-                        buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
+                    let buf_data = unsafe { buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                     let mut elems = Vec::with_capacity(len);
                     for i in 0..len {
                         let actual_idx = (head + i) % cap;
@@ -4865,9 +5092,7 @@ pub(super) fn dispatch_primitive_method(
         // ============================================================
         let is_channel = header.type_id == TypeId::CHANNEL;
         if is_channel {
-            let header_ptr = unsafe {
-                ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-            };
+            let header_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             match method {
                 "send" => {
                     // Channel.send(val) -> Bool (true if sent, false if closed/full)
@@ -4884,9 +5109,7 @@ pub(super) fn dispatch_primitive_method(
                     }
                     let head = unsafe { (*header_ptr.add(2)).as_i64() } as usize;
                     let buf_ptr = unsafe { (*header_ptr.add(3)).as_ptr::<u8>() };
-                    let buf_data = unsafe {
-                        buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let buf_data = unsafe { buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let tail = (head + len) % cap;
                     unsafe {
                         *buf_data.add(tail) = val;
@@ -4904,9 +5127,7 @@ pub(super) fn dispatch_primitive_method(
                     let cap = unsafe { (*header_ptr.add(1)).as_i64() } as usize;
                     let head = unsafe { (*header_ptr.add(2)).as_i64() } as usize;
                     let buf_ptr = unsafe { (*header_ptr.add(3)).as_ptr::<u8>() };
-                    let buf_data = unsafe {
-                        buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
+                    let buf_data = unsafe { buf_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                     let val = unsafe { *buf_data.add(head) };
                     let new_head = (head + 1) % cap;
                     unsafe {
@@ -4919,7 +5140,9 @@ pub(super) fn dispatch_primitive_method(
                 }
                 "close" => {
                     // Channel.close() - mark channel as closed
-                    unsafe { *header_ptr.add(4) = Value::from_i64(1); }
+                    unsafe {
+                        *header_ptr.add(4) = Value::from_i64(1);
+                    }
                     return Ok(Some(Value::unit()));
                 }
                 "is_closed" => {
@@ -4953,14 +5176,14 @@ pub(super) fn dispatch_primitive_method(
         match method {
             "elapsed" if field_count == 3 => {
                 // Stopwatch.elapsed(): if running: accumulated + (now - start), else: accumulated
-                let start_val = unsafe {
-                    *(ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value)
-                };
+                let start_val = unsafe { *(ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value) };
                 let running_val = unsafe {
-                    *(ptr.add(heap::OBJECT_HEADER_SIZE + std::mem::size_of::<Value>()) as *const Value)
+                    *(ptr.add(heap::OBJECT_HEADER_SIZE + std::mem::size_of::<Value>())
+                        as *const Value)
                 };
                 let acc_val = unsafe {
-                    *(ptr.add(heap::OBJECT_HEADER_SIZE + 2 * std::mem::size_of::<Value>()) as *const Value)
+                    *(ptr.add(heap::OBJECT_HEADER_SIZE + 2 * std::mem::size_of::<Value>())
+                        as *const Value)
                 };
                 let acc = acc_val.as_i64();
                 if running_val.as_bool() {
@@ -4973,14 +5196,14 @@ pub(super) fn dispatch_primitive_method(
             }
             "stop" if field_count == 3 => {
                 // Stopwatch.stop(): if running: accumulated += (now - start), running = false
-                let start_val = unsafe {
-                    *(ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value)
-                };
+                let start_val = unsafe { *(ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value) };
                 let running_val = unsafe {
-                    *(ptr.add(heap::OBJECT_HEADER_SIZE + std::mem::size_of::<Value>()) as *const Value)
+                    *(ptr.add(heap::OBJECT_HEADER_SIZE + std::mem::size_of::<Value>())
+                        as *const Value)
                 };
                 let acc_val = unsafe {
-                    *(ptr.add(heap::OBJECT_HEADER_SIZE + 2 * std::mem::size_of::<Value>()) as *const Value)
+                    *(ptr.add(heap::OBJECT_HEADER_SIZE + 2 * std::mem::size_of::<Value>())
+                        as *const Value)
                 };
                 if running_val.as_bool() {
                     let start = start_val.as_i64();
@@ -4988,11 +5211,13 @@ pub(super) fn dispatch_primitive_method(
                     let new_acc = acc_val.as_i64() + (now - start).max(0);
                     // Update accumulated (field 2)
                     unsafe {
-                        *(ptr.add(heap::OBJECT_HEADER_SIZE + 2 * std::mem::size_of::<Value>()) as *mut Value) = Value::from_i64(new_acc);
+                        *(ptr.add(heap::OBJECT_HEADER_SIZE + 2 * std::mem::size_of::<Value>())
+                            as *mut Value) = Value::from_i64(new_acc);
                     }
                     // Set running = false (field 1)
                     unsafe {
-                        *(ptr.add(heap::OBJECT_HEADER_SIZE + std::mem::size_of::<Value>()) as *mut Value) = Value::from_bool(false);
+                        *(ptr.add(heap::OBJECT_HEADER_SIZE + std::mem::size_of::<Value>())
+                            as *mut Value) = Value::from_bool(false);
                     }
                 }
                 return Ok(Some(Value::unit()));
@@ -5000,7 +5225,8 @@ pub(super) fn dispatch_primitive_method(
             "start" if field_count == 3 => {
                 // Stopwatch.start(): if !running: start = now, running = true
                 let running_val = unsafe {
-                    *(ptr.add(heap::OBJECT_HEADER_SIZE + std::mem::size_of::<Value>()) as *const Value)
+                    *(ptr.add(heap::OBJECT_HEADER_SIZE + std::mem::size_of::<Value>())
+                        as *const Value)
                 };
                 if !running_val.as_bool() {
                     let now = monotonic_nanos_shared();
@@ -5010,7 +5236,8 @@ pub(super) fn dispatch_primitive_method(
                     }
                     // Set running = true (field 1)
                     unsafe {
-                        *(ptr.add(heap::OBJECT_HEADER_SIZE + std::mem::size_of::<Value>()) as *mut Value) = Value::from_bool(true);
+                        *(ptr.add(heap::OBJECT_HEADER_SIZE + std::mem::size_of::<Value>())
+                            as *mut Value) = Value::from_bool(true);
                     }
                 }
                 return Ok(Some(Value::unit()));
@@ -5019,24 +5246,22 @@ pub(super) fn dispatch_primitive_method(
                 // Stopwatch.reset(): start = 0, running = false, accumulated = 0
                 unsafe {
                     *(ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value) = Value::from_i64(0);
-                    *(ptr.add(heap::OBJECT_HEADER_SIZE + std::mem::size_of::<Value>()) as *mut Value) = Value::from_bool(false);
-                    *(ptr.add(heap::OBJECT_HEADER_SIZE + 2 * std::mem::size_of::<Value>()) as *mut Value) = Value::from_i64(0);
+                    *(ptr.add(heap::OBJECT_HEADER_SIZE + std::mem::size_of::<Value>())
+                        as *mut Value) = Value::from_bool(false);
+                    *(ptr.add(heap::OBJECT_HEADER_SIZE + 2 * std::mem::size_of::<Value>())
+                        as *mut Value) = Value::from_i64(0);
                 }
                 return Ok(Some(Value::unit()));
             }
             "is_expired" if field_count == 2 => {
                 // DeadlineTimer.is_expired(): now >= deadline
-                let deadline_val = unsafe {
-                    *(ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value)
-                };
+                let deadline_val = unsafe { *(ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value) };
                 let now = monotonic_nanos_shared();
                 return Ok(Some(Value::from_bool(now >= deadline_val.as_i64())));
             }
             "remaining" if field_count == 2 => {
                 // DeadlineTimer.remaining(): max(deadline - now, 0)
-                let deadline_val = unsafe {
-                    *(ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value)
-                };
+                let deadline_val = unsafe { *(ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value) };
                 let now = monotonic_nanos_shared();
                 return Ok(Some(Value::from_i64((deadline_val.as_i64() - now).max(0))));
             }
@@ -5071,7 +5296,9 @@ pub(super) fn dispatch_primitive_method(
             }
             "write" => {
                 let val = state.get_reg(Reg(args.start.0));
-                unsafe { *(ptr_addr as *mut Value) = val; }
+                unsafe {
+                    *(ptr_addr as *mut Value) = val;
+                }
                 return Ok(Some(Value::unit()));
             }
             "generation" | "stored_generation" => {
@@ -5223,13 +5450,18 @@ pub(super) fn dispatch_primitive_method(
                         start_clamped
                     } else {
                         // Scan forward to next char boundary
-                        (start_clamped..=end_clamped).find(|&i| text.is_char_boundary(i)).unwrap_or(end_clamped)
+                        (start_clamped..=end_clamped)
+                            .find(|&i| text.is_char_boundary(i))
+                            .unwrap_or(end_clamped)
                     };
                     let actual_end = if text.is_char_boundary(end_clamped) {
                         end_clamped
                     } else {
                         // Scan backward to previous char boundary
-                        (actual_start..=end_clamped).rev().find(|&i| text.is_char_boundary(i)).unwrap_or(actual_start)
+                        (actual_start..=end_clamped)
+                            .rev()
+                            .find(|&i| text.is_char_boundary(i))
+                            .unwrap_or(actual_start)
                     };
                     let sub = &text[actual_start..actual_end];
                     return Ok(Some(alloc_string_value(state, sub)?));
@@ -5290,7 +5522,8 @@ pub(super) fn dispatch_primitive_method(
                 if char_count >= width {
                     return Ok(Some(alloc_string_value(state, &text)?));
                 } else {
-                    let padding: String = std::iter::repeat_n(pad_char, width - char_count).collect();
+                    let padding: String =
+                        std::iter::repeat_n(pad_char, width - char_count).collect();
                     let padded = format!("{}{}", padding, text);
                     return Ok(Some(alloc_string_value(state, &padded)?));
                 }
@@ -5308,31 +5541,28 @@ pub(super) fn dispatch_primitive_method(
                 if char_count >= width {
                     return Ok(Some(alloc_string_value(state, &text)?));
                 } else {
-                    let padding: String = std::iter::repeat_n(pad_char, width - char_count).collect();
+                    let padding: String =
+                        std::iter::repeat_n(pad_char, width - char_count).collect();
                     let padded = format!("{}{}", text, padding);
                     return Ok(Some(alloc_string_value(state, &padded)?));
                 }
             }
-            "to_int" => {
-                match text.trim().parse::<i64>() {
-                    Ok(n) => {
-                        return Ok(Some(make_some_value(state, Value::from_i64(n))?));
-                    }
-                    Err(_) => {
-                        return Ok(Some(make_none_value(state)?));
-                    }
+            "to_int" => match text.trim().parse::<i64>() {
+                Ok(n) => {
+                    return Ok(Some(make_some_value(state, Value::from_i64(n))?));
                 }
-            }
-            "to_float" => {
-                match text.trim().parse::<f64>() {
-                    Ok(f) => {
-                        return Ok(Some(make_some_value(state, Value::from_f64(f))?));
-                    }
-                    Err(_) => {
-                        return Ok(Some(make_none_value(state)?));
-                    }
+                Err(_) => {
+                    return Ok(Some(make_none_value(state)?));
                 }
-            }
+            },
+            "to_float" => match text.trim().parse::<f64>() {
+                Ok(f) => {
+                    return Ok(Some(make_some_value(state, Value::from_f64(f))?));
+                }
+                Err(_) => {
+                    return Ok(Some(make_none_value(state)?));
+                }
+            },
             "reverse" => {
                 let reversed: String = text.chars().rev().collect();
                 return Ok(Some(alloc_string_value(state, &reversed)?));
@@ -5458,7 +5688,10 @@ pub(super) fn dispatch_primitive_method(
 }
 
 /// Get the length of an array (Value array or List).
-pub(super) fn get_array_length(ptr: *const u8, header: &heap::ObjectHeader) -> InterpreterResult<usize> {
+pub(super) fn get_array_length(
+    ptr: *const u8,
+    header: &heap::ObjectHeader,
+) -> InterpreterResult<usize> {
     if header.type_id == TypeId::LIST {
         let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
         Ok(unsafe { (*data_ptr).as_i64() } as usize)
@@ -5468,12 +5701,17 @@ pub(super) fn get_array_length(ptr: *const u8, header: &heap::ObjectHeader) -> I
 }
 
 /// Get element at index from an array (Value array or List).
-pub(super) fn get_array_element(ptr: *const u8, header: &heap::ObjectHeader, index: usize) -> InterpreterResult<Value> {
+pub(super) fn get_array_element(
+    ptr: *const u8,
+    header: &heap::ObjectHeader,
+    index: usize,
+) -> InterpreterResult<Value> {
     if header.type_id == TypeId::LIST {
         let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
         let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
         let elem_offset = index * std::mem::size_of::<Value>();
-        let elem_ptr = unsafe { backing.add(heap::OBJECT_HEADER_SIZE + elem_offset) as *const Value };
+        let elem_ptr =
+            unsafe { backing.add(heap::OBJECT_HEADER_SIZE + elem_offset) as *const Value };
         Ok(unsafe { *elem_ptr })
     } else {
         let elem_offset = index * std::mem::size_of::<Value>();
@@ -5509,30 +5747,35 @@ pub(crate) fn call_closure_sync(
     let func = state
         .module
         .get_function(func_id)
-        .ok_or({
-            InterpreterError::FunctionNotFound(func_id)
-        })?;
+        .ok_or({ InterpreterError::FunctionNotFound(func_id) })?;
 
     let reg_count = func.register_count;
     let return_pc = state.pc();
     let entry_depth = state.call_stack.depth();
 
     // Use Reg(0) as a dummy dst — the return value comes from dispatch_loop_table_with_entry_depth
-    let new_base = state.call_stack.push_frame(func_id, reg_count, return_pc, Reg(0))?;
+    let new_base = state
+        .call_stack
+        .push_frame(func_id, reg_count, return_pc, Reg(0))?;
     state.registers.push_frame(reg_count);
 
     // Copy captured values (registers [0..capture_count))
     unsafe {
         let captures_offset = header_offset + 8;
         for i in 0..capture_count {
-            let cap_ptr = base_ptr.add(captures_offset + i * std::mem::size_of::<Value>()) as *const Value;
-            state.registers.set(new_base, Reg(i as u16), std::ptr::read(cap_ptr));
+            let cap_ptr =
+                base_ptr.add(captures_offset + i * std::mem::size_of::<Value>()) as *const Value;
+            state
+                .registers
+                .set(new_base, Reg(i as u16), std::ptr::read(cap_ptr));
         }
     }
 
     // Copy arguments (registers [capture_count..capture_count+args.len()))
     for (i, val) in args.iter().enumerate() {
-        state.registers.set(new_base, Reg((capture_count + i) as u16), *val);
+        state
+            .registers
+            .set(new_base, Reg((capture_count + i) as u16), *val);
     }
 
     state.set_pc(0);
@@ -5572,7 +5815,9 @@ pub(super) fn call_function_sync(
     let entry_depth = state.call_stack.depth();
 
     // Push frame with Reg(0) as dummy dst
-    let new_base = state.call_stack.push_frame(func_id, reg_count, return_pc, Reg(0))?;
+    let new_base = state
+        .call_stack
+        .push_frame(func_id, reg_count, return_pc, Reg(0))?;
     state.registers.push_frame(reg_count);
 
     // Copy arguments
@@ -5588,12 +5833,17 @@ pub(super) fn call_function_sync(
 }
 
 /// Allocate a new List from a Vec of Values, returning a pointer Value.
-pub(crate) fn alloc_list_from_values(state: &mut InterpreterState, values: Vec<Value>) -> InterpreterResult<Value> {
+pub(crate) fn alloc_list_from_values(
+    state: &mut InterpreterState,
+    values: Vec<Value>,
+) -> InterpreterResult<Value> {
     let len = values.len();
     let cap = len.max(1); // at least 1 to avoid zero-size backing
 
     // Allocate List header: [len, cap, backing_ptr]
-    let obj = state.heap.alloc(TypeId::LIST, 3 * std::mem::size_of::<Value>())?;
+    let obj = state
+        .heap
+        .alloc(TypeId::LIST, 3 * std::mem::size_of::<Value>())?;
     state.record_allocation();
 
     // Allocate backing array
@@ -5601,17 +5851,14 @@ pub(crate) fn alloc_list_from_values(state: &mut InterpreterState, values: Vec<V
     state.record_allocation();
 
     // Write elements to backing
-    let backing_data = unsafe {
-        (backing.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let backing_data =
+        unsafe { (backing.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
     for (i, val) in values.into_iter().enumerate() {
         unsafe { *backing_data.add(i) = val };
     }
 
     // Initialize List header
-    let data_ptr = unsafe {
-        (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let data_ptr = unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
     unsafe {
         *data_ptr = Value::from_i64(len as i64); // len
         *data_ptr.add(1) = Value::from_i64(cap as i64); // cap
@@ -5630,17 +5877,19 @@ pub(super) fn build_set_from_values(
     elements: Vec<Value>,
 ) -> InterpreterResult<Value> {
     let initial_cap = (elements.len() * 2).max(16);
-    let obj = state.heap.alloc(TypeId::SET, 3 * std::mem::size_of::<Value>())?;
+    let obj = state
+        .heap
+        .alloc(TypeId::SET, 3 * std::mem::size_of::<Value>())?;
     state.record_allocation();
     let backing = state.heap.alloc_array(TypeId::UNIT, initial_cap * 2)?;
     state.record_allocation();
     let backing_ptr = backing.as_ptr() as *mut u8;
-    let data = unsafe {
-        backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let data = unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
     // Initialise every slot to unit (empty-slot marker).
     for i in 0..(initial_cap * 2) {
-        unsafe { *data.add(i) = Value::unit(); }
+        unsafe {
+            *data.add(i) = Value::unit();
+        }
     }
     // Probe-insert each element, skipping duplicates.
     let mut live: usize = 0;
@@ -5662,12 +5911,12 @@ pub(super) fn build_set_from_values(
                 break; // dedup
             }
             idx = (idx + 1) % initial_cap;
-            if idx == start { break; }
+            if idx == start {
+                break;
+            }
         }
     }
-    let header = unsafe {
-        (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let header = unsafe { (obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
     unsafe {
         *header = Value::from_i64(live as i64);
         *header.add(1) = Value::from_i64(initial_cap as i64);
@@ -5685,24 +5934,26 @@ pub(super) fn unwrap_maybe_some(value: Value) -> Option<Value> {
         return None;
     }
     let ptr = value.as_ptr::<u8>();
-    if ptr.is_null() { return None; }
+    if ptr.is_null() {
+        return None;
+    }
     let tag = unsafe { *(ptr.add(heap::OBJECT_HEADER_SIZE) as *const u32) };
     if tag == 0 {
         return None;
     }
-    let payload = unsafe {
-        *(ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value)
-    };
+    let payload = unsafe { *(ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value) };
     Some(payload)
 }
 
 /// Push a value onto a List.
 /// List layout: [len: Value(i64), cap: Value(i64), backing: Value(ptr)]
-pub(super) fn list_push(state: &mut InterpreterState, list_val: Value, new_val: Value) -> InterpreterResult<()> {
+pub(super) fn list_push(
+    state: &mut InterpreterState,
+    list_val: Value,
+    new_val: Value,
+) -> InterpreterResult<()> {
     let list_ptr = list_val.as_ptr::<u8>();
-    let data_ptr = unsafe {
-        list_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let data_ptr = unsafe { list_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
     let len = unsafe { (*data_ptr).as_i64() } as usize;
     let cap = unsafe { (*data_ptr.add(1)).as_i64() } as usize;
     let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
@@ -5714,9 +5965,7 @@ pub(super) fn list_push(state: &mut InterpreterState, list_val: Value, new_val: 
         state.record_allocation();
 
         // Copy old elements
-        let old_data = unsafe {
-            backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-        };
+        let old_data = unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
         let new_data = unsafe {
             (new_backing.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
         };
@@ -5735,9 +5984,7 @@ pub(super) fn list_push(state: &mut InterpreterState, list_val: Value, new_val: 
         }
     } else {
         // Write directly
-        let backing_data = unsafe {
-            backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-        };
+        let backing_data = unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
         unsafe { *backing_data.add(len) = new_val };
         // Update len
         unsafe { *data_ptr = Value::from_i64((len + 1) as i64) };
@@ -5802,8 +6049,8 @@ pub(super) fn dispatch_variant_method(
         // indistinguishable purely from the data (type_id = 0x8000 + tag
         // for every `MakeVariant`), so `is_some` can't reject Result.Err
         // — callers that need disambiguation should pattern-match.
-        "is_ok"   => Ok(Some(Value::from_bool(tag == 0 && field_count > 0))),
-        "is_err"  => Ok(Some(Value::from_bool(tag != 0))),
+        "is_ok" => Ok(Some(Value::from_bool(tag == 0 && field_count > 0))),
+        "is_err" => Ok(Some(Value::from_bool(tag != 0))),
         "is_some" => Ok(Some(Value::from_bool(field_count > 0))),
         "is_none" => Ok(Some(Value::from_bool(field_count == 0))),
 
@@ -5836,9 +6083,8 @@ pub(super) fn dispatch_variant_method(
             if is_result {
                 // Result semantics: tag 0 = Ok, tag != 0 = Err.
                 if tag == 0 && field_count > 0 {
-                    let payload_ptr = unsafe {
-                        base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value
-                    };
+                    let payload_ptr =
+                        unsafe { base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value };
                     Ok(Some(unsafe { *payload_ptr }))
                 } else {
                     Err(InterpreterError::Panic {
@@ -5848,9 +6094,8 @@ pub(super) fn dispatch_variant_method(
             } else if is_maybe {
                 // Maybe semantics: payload extraction iff fc > 0.
                 if field_count > 0 {
-                    let payload_ptr = unsafe {
-                        base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value
-                    };
+                    let payload_ptr =
+                        unsafe { base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value };
                     Ok(Some(unsafe { *payload_ptr }))
                 } else {
                     Err(InterpreterError::Panic {
@@ -5859,9 +6104,8 @@ pub(super) fn dispatch_variant_method(
                 }
             } else if field_count > 0 {
                 // Bare-name dispatch (no type prefix). Historic behaviour.
-                let payload_ptr = unsafe {
-                    base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value
-                };
+                let payload_ptr =
+                    unsafe { base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value };
                 Ok(Some(unsafe { *payload_ptr }))
             } else {
                 Err(InterpreterError::Panic {
@@ -5873,9 +6117,8 @@ pub(super) fn dispatch_variant_method(
         // payload if present (tag != 0), panics on Ok.
         "unwrap_err" => {
             if tag != 0 && field_count > 0 {
-                let payload_ptr = unsafe {
-                    base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value
-                };
+                let payload_ptr =
+                    unsafe { base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value };
                 Ok(Some(unsafe { *payload_ptr }))
             } else {
                 Err(InterpreterError::Panic {
@@ -5887,9 +6130,8 @@ pub(super) fn dispatch_variant_method(
         // Mirrors `unwrap`'s `fc > 0` convention (see comment above).
         "unwrap_or" => {
             if field_count > 0 {
-                let payload_ptr = unsafe {
-                    base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value
-                };
+                let payload_ptr =
+                    unsafe { base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value };
                 Ok(Some(unsafe { *payload_ptr }))
             } else if args.count > 0 {
                 let caller_base = state.reg_base();
@@ -6013,9 +6255,7 @@ pub(super) fn dispatch_variant_method(
                 // Defensive fall-through: malformed variant data.
                 return Ok(None);
             }
-            let payload_ptr = unsafe {
-                base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value
-            };
+            let payload_ptr = unsafe { base_ptr.add(heap::OBJECT_HEADER_SIZE + 8) as *const Value };
             let payload = unsafe { *payload_ptr };
 
             // Invoke the closure synchronously with the payload.
@@ -6187,12 +6427,8 @@ pub(super) fn dispatch_array_method(
             Ok(Some(acc))
         }
         // ===== Length / emptiness =====
-        "len" | "count" => {
-            Ok(Some(Value::from_i64(len as i64)))
-        }
-        "is_empty" => {
-            Ok(Some(Value::from_bool(len == 0)))
-        }
+        "len" | "count" => Ok(Some(Value::from_i64(len as i64))),
+        "is_empty" => Ok(Some(Value::from_bool(len == 0))),
 
         // ===== Element access =====
         "get" => {
@@ -6256,12 +6492,13 @@ pub(super) fn dispatch_array_method(
                 Ok(Some(result))
             } else {
                 let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
-                let backing_data = unsafe {
-                    backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                };
+                let backing_data =
+                    unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                 let last_elem = unsafe { *backing_data.add(current_len - 1) };
                 // Decrement length
-                unsafe { *data_ptr = Value::from_i64((current_len - 1) as i64); }
+                unsafe {
+                    *data_ptr = Value::from_i64((current_len - 1) as i64);
+                }
                 let result = make_some_value(state, last_elem)?;
                 Ok(Some(result))
             }
@@ -6278,16 +6515,18 @@ pub(super) fn dispatch_array_method(
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             let current_len = unsafe { (*data_ptr).as_i64() } as usize; // already incremented by push
             let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
-            let backing_data = unsafe {
-                backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-            };
+            let backing_data = unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             let idx = idx.min(current_len - 1);
             // Shift elements right from end down to idx
             for i in (idx + 1..current_len).rev() {
-                unsafe { *backing_data.add(i) = *backing_data.add(i - 1); }
+                unsafe {
+                    *backing_data.add(i) = *backing_data.add(i - 1);
+                }
             }
             // Write the new element at idx
-            unsafe { *backing_data.add(idx) = new_val; }
+            unsafe {
+                *backing_data.add(idx) = new_val;
+            }
             Ok(Some(Value::unit()))
         }
         "remove" => {
@@ -6305,16 +6544,18 @@ pub(super) fn dispatch_array_method(
                 });
             }
             let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
-            let backing_data = unsafe {
-                backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-            };
+            let backing_data = unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             let removed = unsafe { *backing_data.add(idx) };
             // Shift elements left
             for i in idx..current_len - 1 {
-                unsafe { *backing_data.add(i) = *backing_data.add(i + 1); }
+                unsafe {
+                    *backing_data.add(i) = *backing_data.add(i + 1);
+                }
             }
             // Decrement length
-            unsafe { *data_ptr = Value::from_i64((current_len - 1) as i64); }
+            unsafe {
+                *data_ptr = Value::from_i64((current_len - 1) as i64);
+            }
             Ok(Some(removed))
         }
         "clear" => {
@@ -6322,12 +6563,17 @@ pub(super) fn dispatch_array_method(
                 return Ok(None);
             }
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-            unsafe { *data_ptr = Value::from_i64(0); }
+            unsafe {
+                *data_ptr = Value::from_i64(0);
+            }
             Ok(Some(Value::unit()))
         }
         "swap" => {
             let idx_a = state.registers.get(caller_base, Reg(args.start.0)).as_i64() as usize;
-            let idx_b = state.registers.get(caller_base, Reg(args.start.0 + 1)).as_i64() as usize;
+            let idx_b = state
+                .registers
+                .get(caller_base, Reg(args.start.0 + 1))
+                .as_i64() as usize;
             if idx_a >= len || idx_b >= len {
                 return Err(InterpreterError::TypeMismatch {
                     expected: "valid indices",
@@ -6338,9 +6584,8 @@ pub(super) fn dispatch_array_method(
             if header.type_id == TypeId::LIST {
                 let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                 let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
-                let backing_data = unsafe {
-                    backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                };
+                let backing_data =
+                    unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                 unsafe {
                     let tmp = *backing_data.add(idx_a);
                     *backing_data.add(idx_a) = *backing_data.add(idx_b);
@@ -6361,9 +6606,8 @@ pub(super) fn dispatch_array_method(
             if header.type_id == TypeId::LIST {
                 let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                 let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
-                let backing_data = unsafe {
-                    backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                };
+                let backing_data =
+                    unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                 let mut lo = 0usize;
                 let mut hi = if len > 0 { len - 1 } else { 0 };
                 while lo < hi {
@@ -6402,7 +6646,9 @@ pub(super) fn dispatch_array_method(
                 if a.is_int() && !a.is_bool() && b.is_int() && !b.is_bool() {
                     a.as_i64().cmp(&b.as_i64())
                 } else if a.is_float() && b.is_float() {
-                    a.as_f64().partial_cmp(&b.as_f64()).unwrap_or(std::cmp::Ordering::Equal)
+                    a.as_f64()
+                        .partial_cmp(&b.as_f64())
+                        .unwrap_or(std::cmp::Ordering::Equal)
                 } else {
                     a.to_bits().cmp(&b.to_bits())
                 }
@@ -6411,16 +6657,19 @@ pub(super) fn dispatch_array_method(
             if header.type_id == TypeId::LIST {
                 let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                 let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
-                let backing_data = unsafe {
-                    backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                };
+                let backing_data =
+                    unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                 for (i, v) in elems.into_iter().enumerate() {
-                    unsafe { *backing_data.add(i) = v; }
+                    unsafe {
+                        *backing_data.add(i) = v;
+                    }
                 }
             } else {
                 let base = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                 for (i, v) in elems.into_iter().enumerate() {
-                    unsafe { *base.add(i) = v; }
+                    unsafe {
+                        *base.add(i) = v;
+                    }
                 }
             }
             Ok(Some(Value::unit()))
@@ -6456,16 +6705,19 @@ pub(super) fn dispatch_array_method(
             if header.type_id == TypeId::LIST {
                 let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                 let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
-                let backing_data = unsafe {
-                    backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-                };
+                let backing_data =
+                    unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                 for (i, v) in elems.into_iter().enumerate() {
-                    unsafe { *backing_data.add(i) = v; }
+                    unsafe {
+                        *backing_data.add(i) = v;
+                    }
                 }
             } else {
                 let base = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
                 for (i, v) in elems.into_iter().enumerate() {
-                    unsafe { *base.add(i) = v; }
+                    unsafe {
+                        *base.add(i) = v;
+                    }
                 }
             }
             Ok(Some(Value::unit()))
@@ -6611,7 +6863,10 @@ pub(super) fn dispatch_array_method(
         }
         "slice" => {
             let start = state.registers.get(caller_base, Reg(args.start.0)).as_i64() as usize;
-            let end = state.registers.get(caller_base, Reg(args.start.0 + 1)).as_i64() as usize;
+            let end = state
+                .registers
+                .get(caller_base, Reg(args.start.0 + 1))
+                .as_i64() as usize;
             let start = start.min(len);
             let end = end.min(len);
             let end = end.max(start); // ensure end >= start
@@ -6655,7 +6910,8 @@ pub(super) fn dispatch_array_method(
                 let elem = get_array_element(ptr, header, i)?;
                 let is_less = if elem.is_float() && min_val.is_float() {
                     elem.as_f64() < min_val.as_f64()
-                } else if elem.is_int() && !elem.is_bool() && min_val.is_int() && !min_val.is_bool() {
+                } else if elem.is_int() && !elem.is_bool() && min_val.is_int() && !min_val.is_bool()
+                {
                     elem.as_i64() < min_val.as_i64()
                 } else {
                     elem.to_bits() < min_val.to_bits()
@@ -6677,7 +6933,8 @@ pub(super) fn dispatch_array_method(
                 let elem = get_array_element(ptr, header, i)?;
                 let is_greater = if elem.is_float() && max_val.is_float() {
                     elem.as_f64() > max_val.as_f64()
-                } else if elem.is_int() && !elem.is_bool() && max_val.is_int() && !max_val.is_bool() {
+                } else if elem.is_int() && !elem.is_bool() && max_val.is_int() && !max_val.is_bool()
+                {
                     elem.as_i64() > max_val.as_i64()
                 } else {
                     elem.to_bits() > max_val.to_bits()
@@ -6722,20 +6979,22 @@ pub(super) fn dispatch_array_method(
             }
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
-            let backing_data = unsafe {
-                backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-            };
+            let backing_data = unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             let mut write_idx = 1usize;
             let mut prev = unsafe { *backing_data };
             for read_idx in 1..len {
                 let current = unsafe { *backing_data.add(read_idx) };
                 if !value_eq(current, prev) {
-                    unsafe { *backing_data.add(write_idx) = current; }
+                    unsafe {
+                        *backing_data.add(write_idx) = current;
+                    }
                     write_idx += 1;
                     prev = current;
                 }
             }
-            unsafe { *data_ptr = Value::from_i64(write_idx as i64); }
+            unsafe {
+                *data_ptr = Value::from_i64(write_idx as i64);
+            }
             Ok(Some(Value::unit()))
         }
         "retain" => {
@@ -6759,13 +7018,15 @@ pub(super) fn dispatch_array_method(
             let ptr = receiver.as_ptr::<u8>();
             let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
-            let backing_data = unsafe {
-                backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-            };
+            let backing_data = unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
             for (i, v) in kept.iter().enumerate() {
-                unsafe { *backing_data.add(i) = *v; }
+                unsafe {
+                    *backing_data.add(i) = *v;
+                }
             }
-            unsafe { *data_ptr = Value::from_i64(kept.len() as i64); }
+            unsafe {
+                *data_ptr = Value::from_i64(kept.len() as i64);
+            }
             Ok(Some(Value::unit()))
         }
 
@@ -6776,11 +7037,10 @@ pub(super) fn dispatch_array_method(
                 let elem = get_array_element(ptr, header, i)?;
                 // Allocate a 2-element tuple: (index, element)
                 let tuple_size = 2 * std::mem::size_of::<Value>();
-                let tuple_obj = state.heap.alloc_with_init(
-                    TypeId::TUPLE,
-                    tuple_size,
-                    |_data| {},
-                )?;
+                let tuple_obj =
+                    state
+                        .heap
+                        .alloc_with_init(TypeId::TUPLE, tuple_size, |_data| {})?;
                 state.record_allocation();
                 let tuple_data = tuple_obj.data_ptr() as *mut Value;
                 unsafe {
@@ -6816,11 +7076,10 @@ pub(super) fn dispatch_array_method(
             let mut results = Vec::with_capacity(zip_len);
             for i in 0..zip_len {
                 let tuple_size = 2 * std::mem::size_of::<Value>();
-                let tuple_obj = state.heap.alloc_with_init(
-                    TypeId::TUPLE,
-                    tuple_size,
-                    |_data| {},
-                )?;
+                let tuple_obj =
+                    state
+                        .heap
+                        .alloc_with_init(TypeId::TUPLE, tuple_size, |_data| {})?;
                 state.record_allocation();
                 let tuple_data = tuple_obj.data_ptr() as *mut Value;
                 unsafe {
@@ -6879,23 +7138,22 @@ pub(super) fn dispatch_array_method(
 /// Maybe variant tags follow declaration order: `type Maybe<T> is None | Some(T);`
 /// so None=0 and Some=1. Must agree with register_type_constructors and the
 /// hard-coded constant/variant tables in codegen/mod.rs.
-pub(super) fn make_maybe_int(state: &mut InterpreterState, opt: Option<i64>) -> InterpreterResult<Value> {
+pub(super) fn make_maybe_int(
+    state: &mut InterpreterState,
+    opt: Option<i64>,
+) -> InterpreterResult<Value> {
     match opt {
         Some(v) => {
             // MakeVariant tag=1 (Some), field_count=1, then set field 0
             let data_size = 8 + std::mem::size_of::<Value>();
             let type_id = TypeId(0x8001); // tag 1
-            let obj = state.heap.alloc_with_init(
-                type_id,
-                data_size,
-                |data| {
-                    let tag_ptr = data.as_mut_ptr() as *mut u32;
-                    unsafe {
-                        *tag_ptr = 1; // Some tag
-                        *tag_ptr.add(1) = 1; // field_count = 1
-                    }
-                },
-            )?;
+            let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
+                let tag_ptr = data.as_mut_ptr() as *mut u32;
+                unsafe {
+                    *tag_ptr = 1; // Some tag
+                    *tag_ptr.add(1) = 1; // field_count = 1
+                }
+            })?;
             // Set payload
             unsafe {
                 let base = obj.as_ptr() as *mut u8;
@@ -6909,17 +7167,13 @@ pub(super) fn make_maybe_int(state: &mut InterpreterState, opt: Option<i64>) -> 
             // MakeVariant tag=0 (None), field_count=0
             let data_size = 8 + std::mem::size_of::<Value>(); // min 1 field
             let type_id = TypeId(0x8000); // tag 0
-            let obj = state.heap.alloc_with_init(
-                type_id,
-                data_size,
-                |data| {
-                    let tag_ptr = data.as_mut_ptr() as *mut u32;
-                    unsafe {
-                        *tag_ptr = 0; // None tag
-                        *tag_ptr.add(1) = 0; // field_count = 0
-                    }
-                },
-            )?;
+            let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
+                let tag_ptr = data.as_mut_ptr() as *mut u32;
+                unsafe {
+                    *tag_ptr = 0; // None tag
+                    *tag_ptr.add(1) = 0; // field_count = 0
+                }
+            })?;
             state.record_allocation();
             Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
         }
@@ -6928,20 +7182,19 @@ pub(super) fn make_maybe_int(state: &mut InterpreterState, opt: Option<i64>) -> 
 
 /// Create a Some variant wrapping any value.
 /// Maybe is declared `None | Some(T)`, so Some gets tag=1.
-pub(super) fn make_some_value(state: &mut InterpreterState, value: Value) -> InterpreterResult<Value> {
+pub(super) fn make_some_value(
+    state: &mut InterpreterState,
+    value: Value,
+) -> InterpreterResult<Value> {
     let data_size = 8 + std::mem::size_of::<Value>();
     let type_id = TypeId(0x8001); // tag 1 for Some
-    let obj = state.heap.alloc_with_init(
-        type_id,
-        data_size,
-        |data| {
-            let tag_ptr = data.as_mut_ptr() as *mut u32;
-            unsafe {
-                *tag_ptr = 1; // Some tag
-                *tag_ptr.add(1) = 1; // field_count = 1
-            }
-        },
-    )?;
+    let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
+        let tag_ptr = data.as_mut_ptr() as *mut u32;
+        unsafe {
+            *tag_ptr = 1; // Some tag
+            *tag_ptr.add(1) = 1; // field_count = 1
+        }
+    })?;
     // Set payload
     unsafe {
         let base = obj.as_ptr() as *mut u8;
@@ -6957,17 +7210,13 @@ pub(super) fn make_some_value(state: &mut InterpreterState, value: Value) -> Int
 pub(super) fn make_none_value(state: &mut InterpreterState) -> InterpreterResult<Value> {
     let data_size = 8;
     let type_id = TypeId(0x8000); // tag 0 for None
-    let obj = state.heap.alloc_with_init(
-        type_id,
-        data_size,
-        |data| {
-            let tag_ptr = data.as_mut_ptr() as *mut u32;
-            unsafe {
-                *tag_ptr = 0; // None tag
-                *tag_ptr.add(1) = 0; // field_count = 0
-            }
-        },
-    )?;
+    let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
+        let tag_ptr = data.as_mut_ptr() as *mut u32;
+        unsafe {
+            *tag_ptr = 0; // None tag
+            *tag_ptr.add(1) = 0; // field_count = 0
+        }
+    })?;
     state.record_allocation();
     Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
 }
@@ -6988,17 +7237,13 @@ fn make_result_variant(
 ) -> InterpreterResult<Value> {
     let data_size = 8 + std::mem::size_of::<Value>();
     let type_id = TypeId(0x8000 + tag);
-    let obj = state.heap.alloc_with_init(
-        type_id,
-        data_size,
-        |data| {
-            let tag_ptr = data.as_mut_ptr() as *mut u32;
-            unsafe {
-                *tag_ptr = tag;
-                *tag_ptr.add(1) = 1; // field_count = 1 (Ok(T) / Err(E))
-            }
-        },
-    )?;
+    let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
+        let tag_ptr = data.as_mut_ptr() as *mut u32;
+        unsafe {
+            *tag_ptr = tag;
+            *tag_ptr.add(1) = 1; // field_count = 1 (Ok(T) / Err(E))
+        }
+    })?;
     unsafe {
         let base = obj.as_ptr() as *mut u8;
         let payload_ptr = base.add(heap::OBJECT_HEADER_SIZE + 8) as *mut Value;
@@ -7009,7 +7254,10 @@ fn make_result_variant(
 }
 
 /// Create an Ordering variant: Less (tag 0), Equal (tag 1), or Greater (tag 2)
-pub(super) fn make_ordering(state: &mut InterpreterState, ord: std::cmp::Ordering) -> InterpreterResult<Value> {
+pub(super) fn make_ordering(
+    state: &mut InterpreterState,
+    ord: std::cmp::Ordering,
+) -> InterpreterResult<Value> {
     let tag = match ord {
         std::cmp::Ordering::Less => 0u32,
         std::cmp::Ordering::Equal => 1u32,
@@ -7018,15 +7266,12 @@ pub(super) fn make_ordering(state: &mut InterpreterState, ord: std::cmp::Orderin
     // Ordering variants are unit types (no payload), but allocate min 8 bytes for tag storage
     let data_size = 8;
     let type_id = TypeId(0x8000 + tag);
-    let obj = state.heap.alloc_with_init(
-        type_id,
-        data_size,
-        |data| {
-            let tag_ptr = data.as_mut_ptr() as *mut u32;
-            unsafe { *tag_ptr = tag; }
-        },
-    )?;
+    let obj = state.heap.alloc_with_init(type_id, data_size, |data| {
+        let tag_ptr = data.as_mut_ptr() as *mut u32;
+        unsafe {
+            *tag_ptr = tag;
+        }
+    })?;
     state.record_allocation();
     Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
 }
-

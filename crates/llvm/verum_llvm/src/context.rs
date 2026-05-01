@@ -13,40 +13,45 @@ use verum_llvm_sys::core::LLVMMetadataTypeInContext;
 use verum_llvm_sys::core::LLVMPointerTypeInContext;
 use verum_llvm_sys::core::{
     LLVMAppendBasicBlockInContext, LLVMConstStructInContext, LLVMContextCreate, LLVMContextDispose,
-    LLVMContextSetDiagnosticHandler, LLVMCreateBuilderInContext, LLVMCreateEnumAttribute, LLVMCreateStringAttribute,
-    LLVMDoubleTypeInContext, LLVMFP128TypeInContext, LLVMFloatTypeInContext, LLVMGetGlobalContext,
-    LLVMGetMDKindIDInContext, LLVMHalfTypeInContext, LLVMInsertBasicBlockInContext, LLVMInt16TypeInContext,
-    LLVMInt1TypeInContext, LLVMInt32TypeInContext, LLVMInt64TypeInContext, LLVMInt8TypeInContext, LLVMIntTypeInContext,
-    LLVMModuleCreateWithNameInContext, LLVMPPCFP128TypeInContext, LLVMStructCreateNamed, LLVMStructTypeInContext,
-    LLVMVoidTypeInContext, LLVMX86FP80TypeInContext,
+    LLVMContextSetDiagnosticHandler, LLVMCreateBuilderInContext, LLVMCreateEnumAttribute,
+    LLVMCreateStringAttribute, LLVMDoubleTypeInContext, LLVMFP128TypeInContext,
+    LLVMFloatTypeInContext, LLVMGetGlobalContext, LLVMGetMDKindIDInContext, LLVMHalfTypeInContext,
+    LLVMInsertBasicBlockInContext, LLVMInt1TypeInContext, LLVMInt8TypeInContext,
+    LLVMInt16TypeInContext, LLVMInt32TypeInContext, LLVMInt64TypeInContext, LLVMIntTypeInContext,
+    LLVMModuleCreateWithNameInContext, LLVMPPCFP128TypeInContext, LLVMStructCreateNamed,
+    LLVMStructTypeInContext, LLVMVoidTypeInContext, LLVMX86FP80TypeInContext,
 };
 
 use verum_llvm_sys::core::LLVMConstStringInContext2;
 
-use verum_llvm_sys::core::{LLVMMDNodeInContext2, LLVMMDStringInContext2, LLVMMetadataAsValue, LLVMValueAsMetadata};
+use once_cell::sync::Lazy;
+use std::sync::{Mutex, MutexGuard};
+use verum_llvm_sys::core::{
+    LLVMMDNodeInContext2, LLVMMDStringInContext2, LLVMMetadataAsValue, LLVMValueAsMetadata,
+};
 use verum_llvm_sys::ir_reader::LLVMParseIRInContext;
 use verum_llvm_sys::prelude::{LLVMContextRef, LLVMDiagnosticInfoRef, LLVMTypeRef, LLVMValueRef};
 use verum_llvm_sys::target::{LLVMIntPtrTypeForASInContext, LLVMIntPtrTypeInContext};
-use once_cell::sync::Lazy;
-use std::sync::{Mutex, MutexGuard};
 
 use crate::attributes::Attribute;
 use crate::basic_block::BasicBlock;
 use crate::builder::Builder;
 use crate::memory_buffer::MemoryBuffer;
 use crate::module::Module;
-use crate::support::{to_c_str, LLVMString};
+use crate::support::{LLVMString, to_c_str};
 use crate::targets::TargetData;
 
+use crate::AddressSpace;
 use crate::types::AnyTypeEnum;
 use crate::types::MetadataType;
 use crate::types::PointerType;
-use crate::types::{AsTypeRef, BasicTypeEnum, FloatType, FunctionType, IntType, StructType, VoidType};
-use crate::values::{
-    ArrayValue, AsValueRef, BasicMetadataValueEnum, BasicValueEnum, FunctionValue, MetadataValue, PointerValue,
-    StructValue,
+use crate::types::{
+    AsTypeRef, BasicTypeEnum, FloatType, FunctionType, IntType, StructType, VoidType,
 };
-use crate::AddressSpace;
+use crate::values::{
+    ArrayValue, AsValueRef, BasicMetadataValueEnum, BasicValueEnum, FunctionValue, MetadataValue,
+    PointerValue, StructValue,
+};
 
 use std::marker::PhantomData;
 use std::mem::forget;
@@ -60,7 +65,8 @@ use std::thread_local;
 // This is still technically unsafe because another program in the same process
 // could also be accessing the global context via the C API. `get_global` has been
 // marked unsafe for this reason. Iff this isn't the case then this should be fully safe.
-static GLOBAL_CTX: Lazy<Mutex<Context>> = Lazy::new(|| unsafe { Mutex::new(Context::new(LLVMGetGlobalContext())) });
+static GLOBAL_CTX: Lazy<Mutex<Context>> =
+    Lazy::new(|| unsafe { Mutex::new(Context::new(LLVMGetGlobalContext())) });
 
 thread_local! {
     pub(crate) static GLOBAL_CTX_LOCK: Lazy<MutexGuard<'static, Context>> = Lazy::new(|| {
@@ -88,11 +94,21 @@ impl ContextImpl {
         unsafe { Module::new(LLVMModuleCreateWithNameInContext(c_string.as_ptr(), self.0)) }
     }
 
-    fn create_module_from_ir<'ctx>(&self, memory_buffer: MemoryBuffer) -> Result<Module<'ctx>, LLVMString> {
+    fn create_module_from_ir<'ctx>(
+        &self,
+        memory_buffer: MemoryBuffer,
+    ) -> Result<Module<'ctx>, LLVMString> {
         let mut module = ptr::null_mut();
         let mut err_str = ptr::null_mut();
 
-        let code = unsafe { LLVMParseIRInContext(self.0, memory_buffer.memory_buffer, &mut module, &mut err_str) };
+        let code = unsafe {
+            LLVMParseIRInContext(
+                self.0,
+                memory_buffer.memory_buffer,
+                &mut module,
+                &mut err_str,
+            )
+        };
 
         forget(memory_buffer);
 
@@ -170,7 +186,11 @@ impl ContextImpl {
         unsafe { MetadataType::new(LLVMMetadataTypeInContext(self.0)) }
     }
 
-    fn ptr_sized_int_type<'ctx>(&self, target_data: &TargetData, address_space: Option<AddressSpace>) -> IntType<'ctx> {
+    fn ptr_sized_int_type<'ctx>(
+        &self,
+        target_data: &TargetData,
+        address_space: Option<AddressSpace>,
+    ) -> IntType<'ctx> {
         let int_type_ptr = match address_space {
             Some(address_space) => unsafe {
                 LLVMIntPtrTypeForASInContext(self.0, target_data.target_data, address_space.0)
@@ -214,7 +234,8 @@ impl ContextImpl {
     }
 
     fn struct_type<'ctx>(&self, field_types: &[BasicTypeEnum], packed: bool) -> StructType<'ctx> {
-        let mut field_types: Vec<LLVMTypeRef> = field_types.iter().map(|val| val.as_type_ref()).collect();
+        let mut field_types: Vec<LLVMTypeRef> =
+            field_types.iter().map(|val| val.as_type_ref()).collect();
         unsafe {
             StructType::new(LLVMStructTypeInContext(
                 self.0,
@@ -231,7 +252,6 @@ impl ContextImpl {
         unsafe { StructType::new(LLVMStructCreateNamed(self.0, c_string.as_ptr())) }
     }
 
-    
     fn get_struct_type<'ctx>(&self, name: &str) -> Option<StructType<'ctx>> {
         let c_string = to_c_str(name);
 
@@ -255,7 +275,11 @@ impl ContextImpl {
         }
     }
 
-    fn append_basic_block<'ctx>(&self, function: FunctionValue<'ctx>, name: &str) -> BasicBlock<'ctx> {
+    fn append_basic_block<'ctx>(
+        &self,
+        function: FunctionValue<'ctx>,
+        name: &str,
+    ) -> BasicBlock<'ctx> {
         let c_string = to_c_str(name);
 
         unsafe {
@@ -268,18 +292,26 @@ impl ContextImpl {
         }
     }
 
-    fn insert_basic_block_after<'ctx>(&self, basic_block: BasicBlock<'ctx>, name: &str) -> BasicBlock<'ctx> {
+    fn insert_basic_block_after<'ctx>(
+        &self,
+        basic_block: BasicBlock<'ctx>,
+        name: &str,
+    ) -> BasicBlock<'ctx> {
         match basic_block.get_next_basic_block() {
             Some(next_basic_block) => self.prepend_basic_block(next_basic_block, name),
             None => {
                 let parent_fn = basic_block.get_parent().unwrap();
 
                 self.append_basic_block(parent_fn, name)
-            },
+            }
         }
     }
 
-    fn prepend_basic_block<'ctx>(&self, basic_block: BasicBlock<'ctx>, name: &str) -> BasicBlock<'ctx> {
+    fn prepend_basic_block<'ctx>(
+        &self,
+        basic_block: BasicBlock<'ctx>,
+        name: &str,
+    ) -> BasicBlock<'ctx> {
         let c_string = to_c_str(name);
 
         unsafe {
@@ -294,8 +326,10 @@ impl ContextImpl {
 
     fn metadata_node<'ctx>(&self, values: &[BasicMetadataValueEnum<'ctx>]) -> MetadataValue<'ctx> {
         // Convert values to metadata refs
-        let mut md_values: Vec<verum_llvm_sys::prelude::LLVMMetadataRef> =
-            values.iter().map(|val| unsafe { LLVMValueAsMetadata(val.as_value_ref()) }).collect();
+        let mut md_values: Vec<verum_llvm_sys::prelude::LLVMMetadataRef> = values
+            .iter()
+            .map(|val| unsafe { LLVMValueAsMetadata(val.as_value_ref()) })
+            .collect();
         unsafe {
             let md = LLVMMDNodeInContext2(self.0, md_values.as_mut_ptr(), md_values.len());
             MetadataValue::new(LLVMMetadataAsValue(self.0, md))
@@ -312,7 +346,13 @@ impl ContextImpl {
     }
 
     fn get_kind_id(&self, key: &str) -> u32 {
-        unsafe { LLVMGetMDKindIDInContext(self.0, key.as_ptr() as *const ::libc::c_char, key.len() as u32) }
+        unsafe {
+            LLVMGetMDKindIDInContext(
+                self.0,
+                key.as_ptr() as *const ::libc::c_char,
+                key.len() as u32,
+            )
+        }
     }
 
     fn create_enum_attribute(&self, kind_id: u32, val: u64) -> Attribute {
@@ -331,12 +371,16 @@ impl ContextImpl {
         }
     }
 
-    
     fn create_type_attribute(&self, kind_id: u32, type_ref: AnyTypeEnum) -> Attribute {
-        unsafe { Attribute::new(LLVMCreateTypeAttribute(self.0, kind_id, type_ref.as_type_ref())) }
+        unsafe {
+            Attribute::new(LLVMCreateTypeAttribute(
+                self.0,
+                kind_id,
+                type_ref.as_type_ref(),
+            ))
+        }
     }
 
-    
     fn const_string<'ctx>(&self, string: &[u8], null_terminated: bool) -> ArrayValue<'ctx> {
         unsafe {
             ArrayValue::new(LLVMConstStringInContext2(
@@ -518,7 +562,10 @@ impl Context {
     // a double free in valgrind when the MemoryBuffer drops so we are `forget`ting MemoryBuffer here
     // for now until we can confirm this is the correct thing to do
     #[inline]
-    pub fn create_module_from_ir(&self, memory_buffer: MemoryBuffer) -> Result<Module<'_>, LLVMString> {
+    pub fn create_module_from_ir(
+        &self,
+        memory_buffer: MemoryBuffer,
+    ) -> Result<Module<'_>, LLVMString> {
         self.context.create_module_from_ir(memory_buffer)
     }
 
@@ -797,7 +844,11 @@ impl Context {
     /// let int_type = context.ptr_sized_int_type(&target_data, None);
     /// ```
     #[inline]
-    pub fn ptr_sized_int_type(&self, target_data: &TargetData, address_space: Option<AddressSpace>) -> IntType<'_> {
+    pub fn ptr_sized_int_type(
+        &self,
+        target_data: &TargetData,
+        address_space: Option<AddressSpace>,
+    ) -> IntType<'_> {
         self.context.ptr_sized_int_type(target_data, address_space)
     }
 
@@ -1011,7 +1062,11 @@ impl Context {
     /// ```
     // REVIEW: AnyType but VoidType? FunctionType?
     #[inline]
-    pub fn struct_type<'ctx>(&'ctx self, field_types: &[BasicTypeEnum], packed: bool) -> StructType<'ctx> {
+    pub fn struct_type<'ctx>(
+        &'ctx self,
+        field_types: &[BasicTypeEnum],
+        packed: bool,
+    ) -> StructType<'ctx> {
         self.context.struct_type(field_types, packed)
     }
 
@@ -1085,7 +1140,11 @@ impl Context {
     /// assert_eq!(const_struct.get_type().get_field_types(), &[i16_type.into(), f32_type.into()]);
     /// ```
     #[inline]
-    pub fn const_struct<'ctx>(&'ctx self, values: &[BasicValueEnum], packed: bool) -> StructValue<'ctx> {
+    pub fn const_struct<'ctx>(
+        &'ctx self,
+        values: &[BasicValueEnum],
+        packed: bool,
+    ) -> StructValue<'ctx> {
         self.context.const_struct(values, packed)
     }
 
@@ -1118,7 +1177,11 @@ impl Context {
     /// assert_eq!(fn_value.get_last_basic_block().unwrap(), last_basic_block);
     /// ```
     #[inline]
-    pub fn append_basic_block<'ctx>(&'ctx self, function: FunctionValue<'ctx>, name: &str) -> BasicBlock<'ctx> {
+    pub fn append_basic_block<'ctx>(
+        &'ctx self,
+        function: FunctionValue<'ctx>,
+        name: &str,
+    ) -> BasicBlock<'ctx> {
         self.context.append_basic_block(function, name)
     }
 
@@ -1154,7 +1217,11 @@ impl Context {
     // Should they be callable at all? Needs testing to see what LLVM will do, I suppose. See below unwrap.
     // Maybe need SubTypes: BasicBlock<HasParent>, BasicBlock<Orphan>?
     #[inline]
-    pub fn insert_basic_block_after<'ctx>(&'ctx self, basic_block: BasicBlock<'ctx>, name: &str) -> BasicBlock<'ctx> {
+    pub fn insert_basic_block_after<'ctx>(
+        &'ctx self,
+        basic_block: BasicBlock<'ctx>,
+        name: &str,
+    ) -> BasicBlock<'ctx> {
         self.context.insert_basic_block_after(basic_block, name)
     }
 
@@ -1187,7 +1254,11 @@ impl Context {
     /// assert_eq!(fn_value.get_last_basic_block().unwrap(), entry_basic_block);
     /// ```
     #[inline]
-    pub fn prepend_basic_block<'ctx>(&'ctx self, basic_block: BasicBlock<'ctx>, name: &str) -> BasicBlock<'ctx> {
+    pub fn prepend_basic_block<'ctx>(
+        &'ctx self,
+        basic_block: BasicBlock<'ctx>,
+        name: &str,
+    ) -> BasicBlock<'ctx> {
         self.context.prepend_basic_block(basic_block, name)
     }
 
@@ -1232,7 +1303,10 @@ impl Context {
     // REVIEW: Maybe more helpful to beginners to call this metadata_tuple?
     // REVIEW: Seems to be unassgned to anything
     #[inline]
-    pub fn metadata_node<'ctx>(&'ctx self, values: &[BasicMetadataValueEnum<'ctx>]) -> MetadataValue<'ctx> {
+    pub fn metadata_node<'ctx>(
+        &'ctx self,
+        values: &[BasicMetadataValueEnum<'ctx>],
+    ) -> MetadataValue<'ctx> {
         self.context.metadata_node(values)
     }
 
@@ -1404,7 +1478,11 @@ impl Context {
     /// ```
     // SubTypes: Should return ArrayValue<IntValue<i8>>
     #[inline]
-    pub fn const_string<'ctx>(&'ctx self, string: &[u8], null_terminated: bool) -> ArrayValue<'ctx> {
+    pub fn const_string<'ctx>(
+        &'ctx self,
+        string: &[u8],
+        null_terminated: bool,
+    ) -> ArrayValue<'ctx> {
         self.context.const_string(string, null_terminated)
     }
 
@@ -1528,7 +1606,10 @@ impl<'ctx> ContextRef<'ctx> {
     // a double free in valgrind when the MemoryBuffer drops so we are `forget`ting MemoryBuffer here
     // for now until we can confirm this is the correct thing to do
     #[inline]
-    pub fn create_module_from_ir(&self, memory_buffer: MemoryBuffer) -> Result<Module<'ctx>, LLVMString> {
+    pub fn create_module_from_ir(
+        &self,
+        memory_buffer: MemoryBuffer,
+    ) -> Result<Module<'ctx>, LLVMString> {
         self.context.create_module_from_ir(memory_buffer)
     }
 
@@ -1807,7 +1888,11 @@ impl<'ctx> ContextRef<'ctx> {
     /// let int_type = context.ptr_sized_int_type(&target_data, None);
     /// ```
     #[inline]
-    pub fn ptr_sized_int_type(&self, target_data: &TargetData, address_space: Option<AddressSpace>) -> IntType<'ctx> {
+    pub fn ptr_sized_int_type(
+        &self,
+        target_data: &TargetData,
+        address_space: Option<AddressSpace>,
+    ) -> IntType<'ctx> {
         self.context.ptr_sized_int_type(target_data, address_space)
     }
 
@@ -2021,7 +2106,11 @@ impl<'ctx> ContextRef<'ctx> {
     /// ```
     // REVIEW: AnyType but VoidType? FunctionType?
     #[inline]
-    pub fn struct_type(&self, field_types: &[BasicTypeEnum<'ctx>], packed: bool) -> StructType<'ctx> {
+    pub fn struct_type(
+        &self,
+        field_types: &[BasicTypeEnum<'ctx>],
+        packed: bool,
+    ) -> StructType<'ctx> {
         self.context.struct_type(field_types, packed)
     }
 
@@ -2128,7 +2217,11 @@ impl<'ctx> ContextRef<'ctx> {
     /// assert_eq!(fn_value.get_last_basic_block().unwrap(), last_basic_block);
     /// ```
     #[inline]
-    pub fn append_basic_block(&self, function: FunctionValue<'ctx>, name: &str) -> BasicBlock<'ctx> {
+    pub fn append_basic_block(
+        &self,
+        function: FunctionValue<'ctx>,
+        name: &str,
+    ) -> BasicBlock<'ctx> {
         self.context.append_basic_block(function, name)
     }
 
@@ -2164,7 +2257,11 @@ impl<'ctx> ContextRef<'ctx> {
     // Should they be callable at all? Needs testing to see what LLVM will do, I suppose. See below unwrap.
     // Maybe need SubTypes: BasicBlock<HasParent>, BasicBlock<Orphan>?
     #[inline]
-    pub fn insert_basic_block_after(&self, basic_block: BasicBlock<'ctx>, name: &str) -> BasicBlock<'ctx> {
+    pub fn insert_basic_block_after(
+        &self,
+        basic_block: BasicBlock<'ctx>,
+        name: &str,
+    ) -> BasicBlock<'ctx> {
         self.context.insert_basic_block_after(basic_block, name)
     }
 
@@ -2197,7 +2294,11 @@ impl<'ctx> ContextRef<'ctx> {
     /// assert_eq!(fn_value.get_last_basic_block().unwrap(), entry_basic_block);
     /// ```
     #[inline]
-    pub fn prepend_basic_block(&self, basic_block: BasicBlock<'ctx>, name: &str) -> BasicBlock<'ctx> {
+    pub fn prepend_basic_block(
+        &self,
+        basic_block: BasicBlock<'ctx>,
+        name: &str,
+    ) -> BasicBlock<'ctx> {
         self.context.prepend_basic_block(basic_block, name)
     }
 

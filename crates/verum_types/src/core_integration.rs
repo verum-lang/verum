@@ -35,9 +35,9 @@
 
 use verum_common::{List, Text};
 
+use crate::core_metadata::{CoreMetadata, ImplementationDescriptor};
 use crate::method_resolution::{DefaultMethodResolver, MethodInfo, MethodResolver};
 use crate::protocol::{MethodSignature, ProtocolChecker};
-use crate::core_metadata::{ImplementationDescriptor, CoreMetadata};
 use crate::ty::Type;
 
 /// A stdlib-agnostic wrapper around ProtocolChecker
@@ -139,8 +139,12 @@ impl StdlibAgnosticChecker {
         method_name: &str,
         signature: Type,
     ) {
-        self.inner
-            .register_protocol_method_public(protocol_name, type_name, method_name, signature);
+        self.inner.register_protocol_method_public(
+            protocol_name,
+            type_name,
+            method_name,
+            signature,
+        );
     }
 
     /// Resolve a method call on a type
@@ -240,7 +244,12 @@ impl ProtocolCheckerExt for ProtocolChecker {
         // in stdlib-agnostic mode. Full protocol impl wiring requires
         // access to ProtocolImpl::methods which is not exposed here.
         use crate::protocol::{MethodSignature as Sig, ReceiverKind};
-        let (params, return_type) = if let Type::Function { params, return_type, .. } = &signature {
+        let (params, return_type) = if let Type::Function {
+            params,
+            return_type,
+            ..
+        } = &signature
+        {
             (params.clone(), (**return_type).clone())
         } else {
             (verum_common::List::new(), signature.clone())

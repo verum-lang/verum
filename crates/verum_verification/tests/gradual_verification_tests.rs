@@ -467,8 +467,8 @@ fn test_verification_pipeline() {
     use verum_ast::span::Span;
     use verum_ast::ty::{Ident, Path, Type as AstType, TypeKind};
     use verum_ast::{Item, Module};
-    use verum_common::Maybe;
     use verum_common::List;
+    use verum_common::Maybe;
 
     // Create a test module with a simple function:
     // fn increment(x: Int) -> Int { x + 1 }

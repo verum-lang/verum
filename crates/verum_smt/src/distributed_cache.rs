@@ -99,7 +99,6 @@ use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use verum_common::{Map, Maybe, Text};
 
-
 #[cfg(feature = "distributed-cache")]
 use {
     hmac::{Hmac, Mac},
@@ -399,7 +398,8 @@ impl CacheStats {
             self.uploads,
             self.avg_download_time_ms(),
             self.avg_upload_time_ms()
-        ).into()
+        )
+        .into()
     }
 }
 
@@ -985,7 +985,8 @@ impl DistributedCache {
                         "Failed to create cache directory '{}': {}",
                         parent.display(),
                         e
-                    ).into(),
+                    )
+                    .into(),
                 )
             })?;
         }

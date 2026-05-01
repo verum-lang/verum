@@ -505,7 +505,10 @@ impl<'ctx> WpEngine<'ctx> {
     }
 
     /// Translate an if condition to Z3
-    fn translate_if_condition(&self, condition: &verum_common::Heap<IfCondition>) -> WpResult<Bool> {
+    fn translate_if_condition(
+        &self,
+        condition: &verum_common::Heap<IfCondition>,
+    ) -> WpResult<Bool> {
         if condition.conditions.is_empty() {
             return Err(WpError::UnsupportedExpression(Text::from(
                 "empty condition in if",

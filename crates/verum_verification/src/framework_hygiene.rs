@@ -38,9 +38,9 @@ use crate::context::VerificationContext;
 use crate::level::VerificationLevel;
 use crate::passes::{VerificationError, VerificationPass, VerificationResult};
 use std::time::Instant;
+use verum_ast::Module;
 use verum_ast::attr::Attribute;
 use verum_ast::decl::ItemKind;
-use verum_ast::Module;
 use verum_common::{List, Text};
 
 // =============================================================================
@@ -81,13 +81,7 @@ pub struct HygieneDiagnostic {
 
 /// Brand-prefix denylist. Mirrors
 /// `core/meta/framework_hygiene.vr::name_has_brand_prefix`.
-const BRAND_PREFIXES: &[&str] = &[
-    "diakrisis_",
-    "actic_",
-    "msfs_",
-    "uhm_",
-    "noesis_",
-];
+const BRAND_PREFIXES: &[&str] = &["diakrisis_", "actic_", "msfs_", "uhm_", "noesis_"];
 
 /// True iff the declaration name embeds a corpus brand identifier
 /// at any segment-prefix position. Corpus identifiers belong in
@@ -165,9 +159,7 @@ pub fn validate_epsilon_canonicalisable(epsilon: &str) -> Option<HygieneDiagnost
 /// AND ship ≥ 5 axioms (the structural meta-classifier signature
 /// per `framework_hygiene.vr`); returns Error when more than one
 /// candidate is found.
-pub fn validate_meta_classifier_uniqueness(
-    candidates: &[Text],
-) -> Option<HygieneDiagnostic> {
+pub fn validate_meta_classifier_uniqueness(candidates: &[Text]) -> Option<HygieneDiagnostic> {
     if candidates.len() <= 1 {
         return None;
     }
@@ -246,9 +238,7 @@ pub fn enact_epsilon(attr: &Attribute) -> Option<Text> {
 /// for the variants that can carry @framework / @enact. Returns
 /// None when the item kind doesn't expose attributes (Mount /
 /// Module / FFIBoundary etc.).
-fn item_name_and_attrs<'a>(
-    kind: &'a ItemKind,
-) -> Option<(Text, &'a List<Attribute>)> {
+fn item_name_and_attrs<'a>(kind: &'a ItemKind) -> Option<(Text, &'a List<Attribute>)> {
     // Const/Static decls don't expose attributes in the current
     // AST, so they aren't covered by R1/R2 — those rules apply to
     // declarations that can carry @framework / @enact, which in
@@ -415,28 +405,20 @@ impl VerificationPass for HygieneRecheckPass {
             std::collections::HashMap::new();
 
         for item in &module.items {
-            self.check_one_item_kind(
-                &item.kind,
-                &mut framework_corpus_axiom_count,
-            );
+            self.check_one_item_kind(&item.kind, &mut framework_corpus_axiom_count);
             // descend into impl blocks. Methods inside
             // `implement Foo { fn method(...) { ... } }` can carry
             // @framework / @enact attributes; these were invisible
             // to the V0 walker.
             if let ItemKind::Impl(impl_decl) = &item.kind {
                 for impl_item in impl_decl.items.iter() {
-                    if let verum_ast::decl::ImplItemKind::Function(func) =
-                        &impl_item.kind
-                    {
+                    if let verum_ast::decl::ImplItemKind::Function(func) = &impl_item.kind {
                         // Pretend the impl-item is a top-level
                         // Function for the purposes of the
                         // hygiene walker — we want the same
                         // R1/R2/R3 treatment.
                         let inner_kind = ItemKind::Function(func.clone());
-                        self.check_one_item_kind(
-                            &inner_kind,
-                            &mut framework_corpus_axiom_count,
-                        );
+                        self.check_one_item_kind(&inner_kind, &mut framework_corpus_axiom_count);
                     }
                 }
             }
@@ -474,10 +456,7 @@ impl VerificationPass for HygieneRecheckPass {
         // pipeline fail-fast contract halts the build (a known-
         // inconsistent axiom bundle derives False, breaking every
         // downstream theorem).
-        let all_corpora: Vec<Text> = framework_corpus_axiom_count
-            .keys()
-            .cloned()
-            .collect();
+        let all_corpora: Vec<Text> = framework_corpus_axiom_count.keys().cloned().collect();
         let conflicts = crate::framework_compat::audit_framework_set(&all_corpora);
         for d in conflicts {
             self.diagnostics.push(d);
@@ -519,7 +498,9 @@ mod tests {
 
     #[test]
     fn clean_names_pass_r1() {
-        assert!(!name_has_brand_prefix("articulation_enactment_morita_duality"));
+        assert!(!name_has_brand_prefix(
+            "articulation_enactment_morita_duality"
+        ));
         assert!(!name_has_brand_prefix("classify"));
         assert!(!name_has_brand_prefix("translate"));
         // Substring (not prefix) is fine — only prefix matches.
@@ -589,7 +570,10 @@ mod tests {
     #[test]
     fn pass_uses_default_threshold_unless_overridden() {
         let p = HygieneRecheckPass::new();
-        assert_eq!(p.meta_classifier_threshold(), DEFAULT_META_CLASSIFIER_THRESHOLD);
+        assert_eq!(
+            p.meta_classifier_threshold(),
+            DEFAULT_META_CLASSIFIER_THRESHOLD
+        );
     }
 
     #[test]

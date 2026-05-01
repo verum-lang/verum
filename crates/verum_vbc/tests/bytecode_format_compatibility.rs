@@ -46,10 +46,8 @@ fn empty_archive_bytes() -> Vec<u8> {
 fn round_trip_preserves_header() {
     let bytes = empty_archive_bytes();
     assert_eq!(&bytes[0..4], &MAGIC, "magic must be VBC1 on the wire");
-    let major =
-        u16::from_le_bytes(bytes[4..6].try_into().expect("4..6 is 2 bytes"));
-    let minor =
-        u16::from_le_bytes(bytes[6..8].try_into().expect("6..8 is 2 bytes"));
+    let major = u16::from_le_bytes(bytes[4..6].try_into().expect("4..6 is 2 bytes"));
+    let minor = u16::from_le_bytes(bytes[6..8].try_into().expect("6..8 is 2 bytes"));
     assert_eq!(major, VERSION_MAJOR, "encoded major matches consumer");
     assert_eq!(minor, VERSION_MINOR, "encoded minor matches consumer");
 
@@ -206,10 +204,8 @@ fn header_layout_offsets_pinned() {
     let bytes = empty_archive_bytes();
     assert!(bytes.len() >= HEADER_SIZE);
     assert_eq!(&bytes[0..4], &MAGIC, "magic at 0..4");
-    let major =
-        u16::from_le_bytes(bytes[4..6].try_into().expect("layout: major @ 4"));
-    let minor =
-        u16::from_le_bytes(bytes[6..8].try_into().expect("layout: minor @ 6"));
+    let major = u16::from_le_bytes(bytes[4..6].try_into().expect("layout: major @ 4"));
+    let minor = u16::from_le_bytes(bytes[6..8].try_into().expect("layout: minor @ 6"));
     assert_eq!(major, VERSION_MAJOR);
     assert_eq!(minor, VERSION_MINOR);
 }

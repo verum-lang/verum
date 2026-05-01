@@ -235,7 +235,11 @@ pub fn find_similar_items(query: &str, available: &[Text]) -> List<Text> {
             let score = normalized_score.max(raw_score);
 
             // Check for prefix match (user typing partial name)
-            let prefix_bonus = if item.as_str().to_lowercase().starts_with(&query.to_lowercase()) {
+            let prefix_bonus = if item
+                .as_str()
+                .to_lowercase()
+                .starts_with(&query.to_lowercase())
+            {
                 0.2
             } else {
                 0.0
@@ -440,9 +444,11 @@ mod tests {
 
         assert!(!suggestions.is_empty());
         // HashMap should be suggested
-        assert!(suggestions
-            .iter()
-            .any(|p| p.to_string().contains("HashMap")));
+        assert!(
+            suggestions
+                .iter()
+                .any(|p| p.to_string().contains("HashMap"))
+        );
     }
 
     #[test]
@@ -467,8 +473,10 @@ mod tests {
         let suggestions = find_similar("test", candidates);
 
         // "completely_different_name" should be filtered out
-        assert!(suggestions
-            .iter()
-            .all(|s| s.value.as_str() != "completely_different_name"));
+        assert!(
+            suggestions
+                .iter()
+                .all(|s| s.value.as_str() != "completely_different_name")
+        );
     }
 }

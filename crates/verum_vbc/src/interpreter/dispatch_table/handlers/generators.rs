@@ -1,18 +1,20 @@
 //! Generator instruction handlers for VBC interpreter.
 
+use super::super::super::error::{InterpreterError, InterpreterResult};
+use super::super::super::state::{GeneratorId, GeneratorStatus, InterpreterState};
+use super::super::DispatchResult;
+use super::bytecode_io::*;
 use crate::instruction::Reg;
 use crate::module::FunctionId;
 use crate::value::Value;
-use super::super::super::error::{InterpreterError, InterpreterResult};
-use super::super::super::state::{InterpreterState, GeneratorId, GeneratorStatus};
-use super::super::DispatchResult;
-use super::bytecode_io::*;
 
 // ============================================================================
 // Generator Operations
 // ============================================================================
 
-pub(in super::super) fn handle_generator_create(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_generator_create(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     // Create generator: dst = gen_create(func_id, args...)
     //
 
@@ -32,17 +34,23 @@ pub(in super::super) fn handle_generator_create(state: &mut InterpreterState) ->
     }
 
     // Create the generator in the registry with initial arguments
-    let func = state.module.get_function(func_id)
+    let func = state
+        .module
+        .get_function(func_id)
         .ok_or(InterpreterError::FunctionNotFound(func_id))?;
     let reg_count = func.register_count;
-    let gen_id = state.generators.create_with_args(func_id, reg_count, initial_args);
+    let gen_id = state
+        .generators
+        .create_with_args(func_id, reg_count, initial_args);
 
     // Return generator as a Value
     state.set_reg(dst, Value::from_generator(gen_id.0));
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_generator_yield(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_generator_yield(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     // Yield from generator: yield value
     //
 
@@ -59,17 +67,16 @@ pub(in super::super) fn handle_generator_yield(state: &mut InterpreterState) -> 
         let saved_contexts = state.context_stack.clone_entries();
 
         // Get register count from generator (read-only first)
-        let reg_count = state.generators.get(gen_id)
+        let reg_count = state
+            .generators
+            .get(gen_id)
             .map(|g| g.reg_count as usize)
             .unwrap_or(0);
 
         // Save all registers
         let mut saved_registers = Vec::with_capacity(reg_count);
         for i in 0..reg_count {
-            let reg_value = state.registers.get(
-                saved_reg_base,
-                Reg(i as u16),
-            );
+            let reg_value = state.registers.get(saved_reg_base, Reg(i as u16));
             saved_registers.push(reg_value);
         }
 
@@ -101,7 +108,9 @@ pub(in super::super) fn handle_generator_yield(state: &mut InterpreterState) -> 
     })
 }
 
-pub(in super::super) fn handle_generator_next(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_generator_next(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     // Get next value: dst = gen_next(generator)
     //
 
@@ -123,8 +132,13 @@ pub(in super::super) fn handle_generator_next(state: &mut InterpreterState) -> I
 
     // Check generator status
     let (func_id, status, reg_count) = {
-        let generator = state.generators.get(gen_id)
-            .ok_or(InterpreterError::InvalidGeneratorId { generator_id: gen_id })?;
+        let generator =
+            state
+                .generators
+                .get(gen_id)
+                .ok_or(InterpreterError::InvalidGeneratorId {
+                    generator_id: gen_id,
+                })?;
 
         if generator.is_completed() {
             // Return None - generator exhausted
@@ -136,25 +150,45 @@ pub(in super::super) fn handle_generator_next(state: &mut InterpreterState) -> I
     };
 
     // Get function info
-    let func = state.module.get_function(func_id)
+    let func = state
+        .module
+        .get_function(func_id)
         .ok_or(InterpreterError::FunctionNotFound(func_id))?;
     let bytecode_offset = func.bytecode_offset;
 
     // Check if we need to restore state from a previous yield
-    let (resume_pc, restore_registers, restore_contexts): (u32, Vec<Value>, Vec<super::super::super::state::ContextEntry>) = match status {
+    let (resume_pc, restore_registers, restore_contexts): (
+        u32,
+        Vec<Value>,
+        Vec<super::super::super::state::ContextEntry>,
+    ) = match status {
         GeneratorStatus::Created => {
             // First resume - start at function beginning
             // Restore initial arguments that were passed to the generator at creation time
-            let generator = state.generators.get(gen_id)
-                .ok_or(InterpreterError::InvalidGeneratorId { generator_id: gen_id })?;
+            let generator =
+                state
+                    .generators
+                    .get(gen_id)
+                    .ok_or(InterpreterError::InvalidGeneratorId {
+                        generator_id: gen_id,
+                    })?;
             let initial_args = generator.saved_registers.clone();
             (bytecode_offset, initial_args, Vec::new())
         }
         GeneratorStatus::Yielded => {
             // Resume from saved state
-            let generator = state.generators.get(gen_id)
-                .ok_or(InterpreterError::InvalidGeneratorId { generator_id: gen_id })?;
-            let resume_pc = if generator.saved_pc > 0 { generator.saved_pc } else { bytecode_offset };
+            let generator =
+                state
+                    .generators
+                    .get(gen_id)
+                    .ok_or(InterpreterError::InvalidGeneratorId {
+                        generator_id: gen_id,
+                    })?;
+            let resume_pc = if generator.saved_pc > 0 {
+                generator.saved_pc
+            } else {
+                bytecode_offset
+            };
             let restore_registers = generator.saved_registers.clone();
             let restore_contexts = generator.saved_contexts.clone();
             (resume_pc, restore_registers, restore_contexts)
@@ -173,7 +207,9 @@ pub(in super::super) fn handle_generator_next(state: &mut InterpreterState) -> I
     };
 
     // Push generator frame
-    state.call_stack.push_frame(func_id, reg_count, resume_pc, dst)?;
+    state
+        .call_stack
+        .push_frame(func_id, reg_count, resume_pc, dst)?;
     state.registers.push_frame(reg_count);
 
     // Restore registers if resuming from yield
@@ -193,7 +229,9 @@ pub(in super::super) fn handle_generator_next(state: &mut InterpreterState) -> I
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_generator_has_next(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_generator_has_next(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     // Check if generator has more: dst = gen_has_next(generator)
     //
 
@@ -211,11 +249,12 @@ pub(in super::super) fn handle_generator_has_next(state: &mut InterpreterState) 
     }
 
     let gen_id = GeneratorId(gen_val.as_generator_id());
-    let has_next = state.generators.get(gen_id)
+    let has_next = state
+        .generators
+        .get(gen_id)
         .map(|g| g.can_resume())
         .unwrap_or(false);
 
     state.set_reg(dst, Value::from_bool(has_next));
     Ok(DispatchResult::Continue)
 }
-

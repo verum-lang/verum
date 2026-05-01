@@ -1,10 +1,10 @@
 //! Text extended opcode handler for VBC interpreter dispatch.
 
-use crate::value::Value;
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
+use crate::value::Value;
 
 /// TextExtended (0x79) - Text parsing and conversion operations.
 ///
@@ -25,7 +25,9 @@ use super::bytecode_io::*;
 ///
 
 /// Performance: ~2ns dispatch via Rust match (vs ~15ns for LibraryCall)
-pub(in super::super) fn handle_text_extended(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_text_extended(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     use crate::instruction::TextSubOpcode;
 
     let sub_op_byte = read_u8(state)?;
@@ -117,7 +119,10 @@ pub(in super::super) fn handle_text_extended(state: &mut InterpreterState) -> In
             } else {
                 // Truncate for small string (numbers up to 6 digits)
                 let truncated = if s.len() > 6 { &s[..6] } else { &s };
-                state.set_reg(dst, Value::from_small_string(truncated).unwrap_or(Value::nil()));
+                state.set_reg(
+                    dst,
+                    Value::from_small_string(truncated).unwrap_or(Value::nil()),
+                );
             }
         }
         Some(TextSubOpcode::FloatToText) => {
@@ -138,7 +143,10 @@ pub(in super::super) fn handle_text_extended(state: &mut InterpreterState) -> In
             } else {
                 // Truncate for small string
                 let truncated = if s.len() > 6 { &s[..6] } else { &s };
-                state.set_reg(dst, Value::from_small_string(truncated).unwrap_or(Value::nil()));
+                state.set_reg(
+                    dst,
+                    Value::from_small_string(truncated).unwrap_or(Value::nil()),
+                );
             }
         }
         Some(TextSubOpcode::ByteLen) => {
@@ -196,10 +204,10 @@ pub(in super::super) fn handle_text_extended(state: &mut InterpreterState) -> In
             // deref to reach the underlying Text value.
             let text_reg = read_reg(state)?;
             let mut text = state.get_reg(text_reg);
-            use crate::value::{FatRef, Capabilities};
-            use crate::types::TypeId;
             use super::super::super::heap;
-            use super::super::handlers::cbgr_helpers::{is_cbgr_ref, decode_cbgr_ref};
+            use super::super::handlers::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
+            use crate::types::TypeId;
+            use crate::value::{Capabilities, FatRef};
 
             // Auto-deref: CBGR register-ref → absolute register, ThinRef → pointee.
             if is_cbgr_ref(&text) {

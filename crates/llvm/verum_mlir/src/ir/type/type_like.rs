@@ -1,6 +1,8 @@
 use super::TypeId;
 use crate::{context::ContextRef, dialect::Dialect};
-use verum_mlir_sys::{MlirType, mlirTypeDump, mlirTypeGetContext, mlirTypeGetDialect, mlirTypeGetTypeID};
+use verum_mlir_sys::{
+    MlirType, mlirTypeDump, mlirTypeGetContext, mlirTypeGetDialect, mlirTypeGetTypeID,
+};
 
 /// A trait for type-like types.
 pub trait TypeLike<'c> {

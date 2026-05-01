@@ -178,9 +178,9 @@ pub type Heap<T> = Box<T>;
 // Core modules
 pub mod cbgr; // CBGR runtime types (headers, validation, allocation)
 pub mod const_value; // Unified compile-time constant values
-pub mod mls; // Multi-Level Security classification lattice (#282 Phase 2a)
 pub mod conversions; // Type conversions (std ↔ verum)
 pub mod formatting; // Centralized formatting utilities
+pub mod mls; // Multi-Level Security classification lattice (#282 Phase 2a)
 pub mod promotion; // Unified reference promotion system
 pub mod semantic_types; // Complete semantic types with full API
 pub mod shared; // Thread-safe reference counting (Shared<T>, Weak<T>)
@@ -243,9 +243,9 @@ pub use error::{CbgrViolation, CbgrViolationKind};
 // Re-export CBGR runtime types
 // These provide runtime header validation for the interpreter (Tier 0 execution)
 pub use cbgr::{
-    AllocationHeader, Capability, CbgrErrorCode, CbgrHeader, TrackedAllocation,
-    advance_epoch, caps, current_epoch, tracked_alloc_zeroed, tracked_dealloc,
-    GEN_INITIAL, GEN_MAX, GEN_PERMANENT, GEN_UNALLOCATED,
+    AllocationHeader, Capability, CbgrErrorCode, CbgrHeader, GEN_INITIAL, GEN_MAX, GEN_PERMANENT,
+    GEN_UNALLOCATED, TrackedAllocation, advance_epoch, caps, current_epoch, tracked_alloc_zeroed,
+    tracked_dealloc,
 };
 
 // Re-export convenience macros for semantic types

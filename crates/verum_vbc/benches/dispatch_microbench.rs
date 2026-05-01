@@ -54,9 +54,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use verum_vbc::bytecode::encode_instructions_with_fixup;
-use verum_vbc::instruction::{
-    BinaryFloatOp, BinaryIntOp, CompareOp, Instruction, Reg, UnaryIntOp,
-};
+use verum_vbc::instruction::{BinaryFloatOp, BinaryIntOp, CompareOp, Instruction, Reg, UnaryIntOp};
 use verum_vbc::interpreter::{InterpreterState, execute_table};
 use verum_vbc::module::{
     CallingConvention, FunctionDescriptor, FunctionId, OptimizationHints, VbcModule,

@@ -49,8 +49,7 @@ fn workspace_root() -> PathBuf {
 }
 
 fn read_file(path: PathBuf) -> String {
-    fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("could not read {}: {}", path.display(), e))
+    fs::read_to_string(&path).unwrap_or_else(|e| panic!("could not read {}: {}", path.display(), e))
 }
 
 /// Extract `Instruction::<Name>` variant names from the VBC enum
@@ -94,9 +93,10 @@ fn parse_vbc_variants(src: &str) -> BTreeSet<String> {
         // 1.
         if depth_at_line_start == 1
             && let Some(name) = leading_pascal(trimmed)
-                && !name.is_empty() {
-                    set.insert(name.to_string());
-                }
+            && !name.is_empty()
+        {
+            set.insert(name.to_string());
+        }
     }
     set
 }
@@ -117,9 +117,7 @@ fn parse_lowering_arms(src: &str) -> BTreeSet<String> {
             .map(|(i, _)| i)
             .unwrap_or(rest.len());
         let name = &rest[..end];
-        if !name.is_empty()
-            && name.chars().next().unwrap().is_ascii_uppercase()
-        {
+        if !name.is_empty() && name.chars().next().unwrap().is_ascii_uppercase() {
             set.insert(name.to_string());
         }
         start = pos + end;
@@ -194,7 +192,9 @@ fn parser_finds_known_variants() {
     assert!(variants.contains("LoadK"));
     assert_eq!(variants.len(), 2);
 
-    let arms = parse_lowering_arms("match x { Instruction::Mov { dst, src } => {} Instruction::LoadK { dst, const_id } => {} _ => {} }");
+    let arms = parse_lowering_arms(
+        "match x { Instruction::Mov { dst, src } => {} Instruction::LoadK { dst, const_id } => {} _ => {} }",
+    );
     assert!(arms.contains("Mov"));
     assert!(arms.contains("LoadK"));
 }

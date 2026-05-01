@@ -35,23 +35,23 @@
 //! - Enables further optimizations (bounds check elimination)
 //! - Zero runtime overhead for eliminated checks
 
+use super::{PassResult, PassStats, VerumPass};
 use crate::mlir::dialect::{attr_names, op_names};
 use crate::mlir::error::{MlirError, Result};
-use super::{PassResult, PassStats, VerumPass};
 
 use indexmap::{IndexMap, IndexSet};
+use parking_lot::RwLock;
+use smallvec::SmallVec;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use verum_common::Text;
 use verum_mlir::ir::attribute::{IntegerAttribute, StringAttribute};
 use verum_mlir::ir::operation::OperationLike;
 use verum_mlir::ir::{
     Attribute, Block, BlockLike, Identifier, Location, Module, Operation, OperationRef, Region,
     RegionLike, Type, Value, ValueLike,
 };
-use parking_lot::RwLock;
-use smallvec::SmallVec;
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use verum_common::Text;
 
 // ============================================================================
 // Refinement Predicate Types
@@ -145,29 +145,19 @@ impl CompareOp {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Predicate {
     /// Range comparison: value op constant
-    Range {
-        op: CompareOp,
-        constant: i64,
-    },
+    Range { op: CompareOp, constant: i64 },
 
     /// Non-null check
     NonNull,
 
     /// Type refinement (is variant)
-    IsVariant {
-        variant_name: Text,
-    },
+    IsVariant { variant_name: Text },
 
     /// Value is in a set of constants
-    InSet {
-        values: Vec<i64>,
-    },
+    InSet { values: Vec<i64> },
 
     /// Range membership: value in [low, high)
-    InRange {
-        low: i64,
-        high: i64,
-    },
+    InRange { low: i64, high: i64 },
 
     /// Boolean truth value
     IsTrue,
@@ -176,9 +166,7 @@ pub enum Predicate {
     IsFalse,
 
     /// Custom predicate (opaque string)
-    Custom {
-        predicate: Text,
-    },
+    Custom { predicate: Text },
 
     /// Conjunction of predicates
     And(Vec<Predicate>),
@@ -210,9 +198,16 @@ impl Predicate {
             (Self::True, _) => false,
 
             // Range implications
-            (Self::Range { op: op1, constant: c1 }, Self::Range { op: op2, constant: c2 }) => {
-                op1.implies(op2, *c1, *c2)
-            }
+            (
+                Self::Range {
+                    op: op1,
+                    constant: c1,
+                },
+                Self::Range {
+                    op: op2,
+                    constant: c2,
+                },
+            ) => op1.implies(op2, *c1, *c2),
 
             // InRange implications
             (Self::InRange { low: l1, high: h1 }, Self::InRange { low: l2, high: h2 }) => {
@@ -395,9 +390,10 @@ impl Predicate {
                     let inclusive_high = rest.chars().nth(end) == Some(']');
                     let range_str = &rest[..end];
                     if let Some((low_str, high_str)) = range_str.split_once(',') {
-                        if let (Ok(mut low), Ok(mut high)) =
-                            (low_str.trim().parse::<i64>(), high_str.trim().parse::<i64>())
-                        {
+                        if let (Ok(mut low), Ok(mut high)) = (
+                            low_str.trim().parse::<i64>(),
+                            high_str.trim().parse::<i64>(),
+                        ) {
                             if !inclusive_low {
                                 low += 1;
                             }
@@ -656,7 +652,9 @@ impl RefinementAnalysisEngine {
             return Ok(());
         }
 
-        let value = op.operand(0).map_err(|_| MlirError::internal("no operand"))?;
+        let value = op
+            .operand(0)
+            .map_err(|_| MlirError::internal("no operand"))?;
         let value_id = self.get_or_create_value(&value);
 
         // Get the predicate from attribute
@@ -666,14 +664,12 @@ impl RefinementAnalysisEngine {
             .and_then(|attr| Some(Text::from("predicate")))
             .unwrap_or_else(|| Text::from("unknown"));
 
-        let predicate = Predicate::parse(predicate_str.as_str())
-            .unwrap_or(Predicate::Custom { predicate: predicate_str });
+        let predicate = Predicate::parse(predicate_str.as_str()).unwrap_or(Predicate::Custom {
+            predicate: predicate_str,
+        });
 
         // Check if already proven
-        let already_proven = op
-            .attribute(attr_names::REFINEMENT_PROVEN)
-            .ok()
-            .is_some();
+        let already_proven = op.attribute(attr_names::REFINEMENT_PROVEN).ok().is_some();
 
         // Create check info
         let check_id = self.new_refinement_id();
@@ -806,8 +802,9 @@ impl RefinementAnalysisEngine {
         }
 
         if self.stats.checks_found > 0 {
-            self.stats.redundancy_rate =
-                (self.stats.checks_proven_redundant as f64 / self.stats.checks_found as f64) * 100.0;
+            self.stats.redundancy_rate = (self.stats.checks_proven_redundant as f64
+                / self.stats.checks_found as f64)
+                * 100.0;
         }
     }
 

@@ -133,8 +133,8 @@ fn z3_decides_routine_formula_when_given_time() {
 fn unknown_to_err_translation_pattern() {
     fn fail_closed_translate(r: SatResult) -> Result<bool, &'static str> {
         match r {
-            SatResult::Sat => Ok(false),       // counterexample present → invalid
-            SatResult::Unsat => Ok(true),      // formula proved → valid
+            SatResult::Sat => Ok(false),          // counterexample present → invalid
+            SatResult::Unsat => Ok(true),         // formula proved → valid
             SatResult::Unknown => Err("unknown"), // CRITICAL: never silent-accept
         }
     }
@@ -159,14 +159,16 @@ fn unknown_to_keep_check_pattern_is_sound() {
         // Returns `true` when the runtime check should be kept;
         // `false` only when we have proof the check is redundant.
         match r {
-            SatResult::Unsat => true,            // proof bounds always satisfied → can elide?
-            SatResult::Sat => false,             // counterexample → keep check
-            SatResult::Unknown => false,         // can't prove → keep check (sound)
+            SatResult::Unsat => true,    // proof bounds always satisfied → can elide?
+            SatResult::Sat => false,     // counterexample → keep check
+            SatResult::Unknown => false, // can't prove → keep check (sound)
         }
     }
 
     // The "keep check" return value is `false` (do NOT elide) — pin that
     // Unknown stays at "keep the check active".
-    assert!(!keep_runtime_check(SatResult::Unknown),
-        "Unknown must result in keeping the runtime check, never silent elision.");
+    assert!(
+        !keep_runtime_check(SatResult::Unknown),
+        "Unknown must result in keeping the runtime check, never silent elision."
+    );
 }

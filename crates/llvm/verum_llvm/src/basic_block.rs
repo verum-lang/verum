@@ -1,11 +1,12 @@
 //! A `BasicBlock` is a container of instructions.
 
 use verum_llvm_sys::core::{
-    LLVMBasicBlockAsValue, LLVMBlockAddress, LLVMDeleteBasicBlock, LLVMGetBasicBlockName, LLVMGetBasicBlockParent,
-    LLVMGetBasicBlockTerminator, LLVMGetFirstInstruction, LLVMGetFirstUse, LLVMGetLastInstruction,
-    LLVMGetNextBasicBlock, LLVMGetPreviousBasicBlock, LLVMGetTypeContext, LLVMIsABasicBlock, LLVMIsConstant,
-    LLVMMoveBasicBlockAfter, LLVMMoveBasicBlockBefore, LLVMPrintTypeToString, LLVMPrintValueToString,
-    LLVMRemoveBasicBlockFromParent, LLVMReplaceAllUsesWith, LLVMSetValueName2, LLVMTypeOf,
+    LLVMBasicBlockAsValue, LLVMBlockAddress, LLVMDeleteBasicBlock, LLVMGetBasicBlockName,
+    LLVMGetBasicBlockParent, LLVMGetBasicBlockTerminator, LLVMGetFirstInstruction, LLVMGetFirstUse,
+    LLVMGetLastInstruction, LLVMGetNextBasicBlock, LLVMGetPreviousBasicBlock, LLVMGetTypeContext,
+    LLVMIsABasicBlock, LLVMIsConstant, LLVMMoveBasicBlockAfter, LLVMMoveBasicBlockBefore,
+    LLVMPrintTypeToString, LLVMPrintValueToString, LLVMRemoveBasicBlockFromParent,
+    LLVMReplaceAllUsesWith, LLVMSetValueName2, LLVMTypeOf,
 };
 use verum_llvm_sys::prelude::{LLVMBasicBlockRef, LLVMValueRef};
 
@@ -507,7 +508,11 @@ impl<'ctx> BasicBlock<'ctx> {
     /// assert_eq!(context, basic_block.get_context());
     /// ```
     pub fn get_context(self) -> ContextRef<'ctx> {
-        unsafe { ContextRef::new(LLVMGetTypeContext(LLVMTypeOf(LLVMBasicBlockAsValue(self.basic_block)))) }
+        unsafe {
+            ContextRef::new(LLVMGetTypeContext(LLVMTypeOf(LLVMBasicBlockAsValue(
+                self.basic_block,
+            ))))
+        }
     }
 
     /// Gets the name of a `BasicBlock`.
@@ -672,8 +677,13 @@ impl<'ctx> BasicBlock<'ctx> {
 
 impl fmt::Debug for BasicBlock<'_> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let llvm_value = unsafe { CStr::from_ptr(LLVMPrintValueToString(self.basic_block as LLVMValueRef)) };
-        let llvm_type = unsafe { CStr::from_ptr(LLVMPrintTypeToString(LLVMTypeOf(self.basic_block as LLVMValueRef))) };
+        let llvm_value =
+            unsafe { CStr::from_ptr(LLVMPrintValueToString(self.basic_block as LLVMValueRef)) };
+        let llvm_type = unsafe {
+            CStr::from_ptr(LLVMPrintTypeToString(LLVMTypeOf(
+                self.basic_block as LLVMValueRef,
+            )))
+        };
         let is_const = unsafe { LLVMIsConstant(self.basic_block as LLVMValueRef) == 1 };
 
         f.debug_struct("BasicBlock")

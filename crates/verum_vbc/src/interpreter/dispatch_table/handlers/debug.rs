@@ -4,13 +4,13 @@
 //! Handles: Assert (0xD6), Panic (0xD7), Unreachable (0xD8), DebugPrint (0xD9),
 //! Spec (0xD4), Guard (0xD5), Requires (0xDA), Ensures (0xDB), Invariant (0xDC)
 
-use crate::module::{ConstId, Constant};
-use crate::value::Value;
-use crate::interpreter::heap;
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
+use crate::interpreter::heap;
+use crate::module::{ConstId, Constant};
+use crate::value::Value;
 
 // ============================================================================
 // Handler Implementations - Debug and Assertions
@@ -21,7 +21,9 @@ use super::bytecode_io::*;
 
 /// Encoding: opcode + cond + message_id (varint)
 /// Effect: If `cond` is false, raises an assertion failure error.
-pub(in super::super) fn handle_assert(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_assert(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let cond_reg = read_reg(state)?;
     let message_id = read_varint(state)? as u32;
 
@@ -31,7 +33,8 @@ pub(in super::super) fn handle_assert(state: &mut InterpreterState) -> Interpret
 
     if !is_true {
         // Get message from string table
-        let message = if let Some(msg) = state.module.get_string(crate::types::StringId(message_id)) {
+        let message = if let Some(msg) = state.module.get_string(crate::types::StringId(message_id))
+        {
             msg.to_string()
         } else {
             format!("assertion failed (message_id: {})", message_id)
@@ -51,7 +54,9 @@ pub(in super::super) fn handle_assert(state: &mut InterpreterState) -> Interpret
 
 /// Encoding: opcode + message_id (varint)
 /// Effect: Raises a Panic error with the message from string pool.
-pub(in super::super) fn handle_panic(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_panic(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let message_id = read_varint(state)? as u32;
 
     // Get message from string table
@@ -69,8 +74,12 @@ pub(in super::super) fn handle_panic(state: &mut InterpreterState) -> Interprete
 
 /// Encoding: opcode (no operands)
 /// Effect: Raises an Unreachable error - indicates a code path that should never execute.
-pub(in super::super) fn handle_unreachable(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
-    Err(InterpreterError::Unreachable { pc: state.pc() as usize })
+pub(in super::super) fn handle_unreachable(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    Err(InterpreterError::Unreachable {
+        pc: state.pc() as usize,
+    })
 }
 
 /// DebugPrint (0xC5) - Print value to stdout for debugging.
@@ -78,7 +87,9 @@ pub(in super::super) fn handle_unreachable(state: &mut InterpreterState) -> Inte
 
 /// Encoding: opcode + value_reg
 /// Output: Prints the value to stdout with a newline.
-pub(in super::super) fn handle_debug_print(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_debug_print(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let value_reg = read_reg(state)?;
     let value = state.get_reg(value_reg);
 
@@ -164,7 +175,12 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
         let f = value.as_f64();
         let s = format!("{}", f);
         // Ensure whole-number floats display with ".0" (e.g., 5.0 not 5)
-        if !s.contains('.') && !s.contains('e') && !s.contains('E') && !s.contains("inf") && !s.contains("NaN") {
+        if !s.contains('.')
+            && !s.contains('e')
+            && !s.contains('E')
+            && !s.contains("inf")
+            && !s.contains("NaN")
+        {
             return format!("{}.0", s);
         }
         return s;
@@ -193,14 +209,17 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
             //  literal (see `core/text/text.vr:170`). Each field is a
             //  NaN-boxed `Value` and `header.size == 24`. Same dual-layout
             //  dispatch is mirrored in `string_helpers::format_value_for_print`.
-            if header.type_id == crate::types::TypeId::TEXT || header.type_id == crate::types::TypeId(0x0001) {
+            if header.type_id == crate::types::TypeId::TEXT
+                || header.type_id == crate::types::TypeId(0x0001)
+            {
                 unsafe {
                     // Prefer the struct layout when the header advertises
                     // exactly 24 bytes of payload and the first two fields
                     // look like well-formed Values (pointer-or-nil + integer).
                     if header.size as usize == 24 {
                         let field0 = *(base_ptr.add(data_offset) as *const crate::value::Value);
-                        let field1 = *((base_ptr.add(data_offset) as *const crate::value::Value).add(1));
+                        let field1 =
+                            *((base_ptr.add(data_offset) as *const crate::value::Value).add(1));
                         if (field0.is_ptr() || field0.is_nil()) && field1.is_int() {
                             let builder_ptr = if field0.is_nil() {
                                 std::ptr::null::<u8>()
@@ -266,8 +285,7 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
             // the global sum-type scan.
             if header.type_id.0 >= 0x8000
                 || state.module.types.iter().any(|td| {
-                    td.id == header.type_id
-                        && matches!(td.kind, crate::types::TypeKind::Sum)
+                    td.id == header.type_id && matches!(td.kind, crate::types::TypeKind::Sum)
                 })
             {
                 return format_variant_for_print_depth(state, base_ptr, depth + 1);
@@ -307,7 +325,11 @@ fn format_value_for_print_depth(state: &InterpreterState, value: Value, depth: u
 }
 
 /// Format a list value for printing: [elem1, elem2, ...]
-fn format_list_for_print_depth(state: &InterpreterState, base_ptr: *const u8, depth: usize) -> String {
+fn format_list_for_print_depth(
+    state: &InterpreterState,
+    base_ptr: *const u8,
+    depth: usize,
+) -> String {
     if depth >= MAX_PRINT_DEPTH {
         return "[...]".to_string();
     }
@@ -335,7 +357,11 @@ fn format_list_for_print_depth(state: &InterpreterState, base_ptr: *const u8, de
 }
 
 /// Format a variant value for printing: Some(value) or None etc.
-fn format_variant_for_print_depth(state: &InterpreterState, base_ptr: *const u8, depth: usize) -> String {
+fn format_variant_for_print_depth(
+    state: &InterpreterState,
+    base_ptr: *const u8,
+    depth: usize,
+) -> String {
     if depth >= MAX_PRINT_DEPTH {
         return "<...>".to_string();
     }
@@ -366,7 +392,8 @@ fn format_variant_for_print_depth(state: &InterpreterState, base_ptr: *const u8,
         // from the FFI bridge). This preserves the legacy display
         // for those edge cases without compromising correctness for
         // user-defined sum types, which always carry a real type_id.
-        let name_from_metadata = state.module
+        let name_from_metadata = state
+            .module
             .types
             .iter()
             .find(|td| td.id == type_id)
@@ -402,7 +429,10 @@ fn format_variant_for_print_depth(state: &InterpreterState, base_ptr: *const u8,
                 // of the proper "SpawnFailed(echo hello, …)" display
                 // for shell-script panics. Filter them out.
                 use crate::types::TypeKind;
-                state.module.types.iter()
+                state
+                    .module
+                    .types
+                    .iter()
                     .filter(|td| !matches!(td.kind, TypeKind::Protocol))
                     .find_map(|td| {
                         td.variants.iter().find_map(|v| {
@@ -442,7 +472,11 @@ fn format_variant_for_print_depth(state: &InterpreterState, base_ptr: *const u8,
 }
 
 /// Format a map value for printing: {key: value, ...}
-fn format_map_for_print_depth(state: &InterpreterState, base_ptr: *const u8, depth: usize) -> String {
+fn format_map_for_print_depth(
+    state: &InterpreterState,
+    base_ptr: *const u8,
+    depth: usize,
+) -> String {
     if depth >= MAX_PRINT_DEPTH {
         return "{...}".to_string();
     }
@@ -470,9 +504,11 @@ fn format_map_for_print_depth(state: &InterpreterState, base_ptr: *const u8, dep
             if hash != 0 {
                 let key = *entries_data.add(i * 4 + 1);
                 let val = *entries_data.add(i * 4 + 2);
-                parts.push(format!("{}: {}",
+                parts.push(format!(
+                    "{}: {}",
                     format_value_for_print_depth(state, key, depth + 1),
-                    format_value_for_print_depth(state, val, depth + 1)));
+                    format_value_for_print_depth(state, val, depth + 1)
+                ));
             }
         }
         format!("{{{}}}", parts.join(", "))
@@ -480,7 +516,11 @@ fn format_map_for_print_depth(state: &InterpreterState, base_ptr: *const u8, dep
 }
 
 /// Format a set value for printing: {elem1, elem2, ...}
-fn format_set_for_print_depth(state: &InterpreterState, base_ptr: *const u8, depth: usize) -> String {
+fn format_set_for_print_depth(
+    state: &InterpreterState,
+    base_ptr: *const u8,
+    depth: usize,
+) -> String {
     if depth >= MAX_PRINT_DEPTH {
         return "{...}".to_string();
     }
@@ -523,7 +563,9 @@ fn format_set_for_print_depth(state: &InterpreterState, base_ptr: *const u8, dep
 
 /// Encoding: opcode + reg + type_id (varint)
 /// Effect: No-op in interpreter (JIT optimization hint).
-pub(in super::super) fn handle_spec(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_spec(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let _reg = read_reg(state)?;
     let _type_id = read_varint(state)?;
     // JIT optimization hint - no-op in interpreter
@@ -538,7 +580,9 @@ pub(in super::super) fn handle_spec(state: &mut InterpreterState) -> Interpreter
 ///
 
 /// In interpreter, this validates type compatibility but doesn't deoptimize.
-pub(in super::super) fn handle_guard(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_guard(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let reg = read_reg(state)?;
     let _expected_type = read_varint(state)?;
     let _deopt_offset = read_signed_varint(state)?;
@@ -556,13 +600,19 @@ pub(in super::super) fn handle_guard(state: &mut InterpreterState) -> Interprete
 
 /// Encoding: opcode + cond_reg + message_const_id
 /// Effect: Panics with message if condition is false.
-pub(in super::super) fn handle_requires(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_requires(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let cond_reg = read_reg(state)?;
     let msg_const_id = read_varint(state)?;
 
     let cond = state.get_reg(cond_reg);
     if !cond.is_truthy() {
-        let message = if let Some(Constant::String(string_id)) = state.module.get_constant(ConstId(msg_const_id as u32)).cloned() {
+        let message = if let Some(Constant::String(string_id)) = state
+            .module
+            .get_constant(ConstId(msg_const_id as u32))
+            .cloned()
+        {
             let msg_str = state.module.get_string(string_id).unwrap_or("<unknown>");
             format!("precondition failed: {}", msg_str)
         } else {
@@ -578,13 +628,19 @@ pub(in super::super) fn handle_requires(state: &mut InterpreterState) -> Interpr
 
 /// Encoding: opcode + cond_reg + message_const_id
 /// Effect: Panics with message if condition is false.
-pub(in super::super) fn handle_ensures(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_ensures(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let cond_reg = read_reg(state)?;
     let msg_const_id = read_varint(state)?;
 
     let cond = state.get_reg(cond_reg);
     if !cond.is_truthy() {
-        let message = if let Some(Constant::String(string_id)) = state.module.get_constant(ConstId(msg_const_id as u32)).cloned() {
+        let message = if let Some(Constant::String(string_id)) = state
+            .module
+            .get_constant(ConstId(msg_const_id as u32))
+            .cloned()
+        {
             let msg_str = state.module.get_string(string_id).unwrap_or("<unknown>");
             format!("postcondition failed: {}", msg_str)
         } else {
@@ -600,13 +656,19 @@ pub(in super::super) fn handle_ensures(state: &mut InterpreterState) -> Interpre
 
 /// Encoding: opcode + cond_reg + message_const_id
 /// Effect: Panics with message if condition is false.
-pub(in super::super) fn handle_invariant(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_invariant(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let cond_reg = read_reg(state)?;
     let msg_const_id = read_varint(state)?;
 
     let cond = state.get_reg(cond_reg);
     if !cond.is_truthy() {
-        let message = if let Some(Constant::String(string_id)) = state.module.get_constant(ConstId(msg_const_id as u32)).cloned() {
+        let message = if let Some(Constant::String(string_id)) = state
+            .module
+            .get_constant(ConstId(msg_const_id as u32))
+            .cloned()
+        {
             let msg_str = state.module.get_string(string_id).unwrap_or("<unknown>");
             format!("invariant violated: {}", msg_str)
         } else {

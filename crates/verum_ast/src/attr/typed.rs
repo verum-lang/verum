@@ -2233,11 +2233,12 @@ impl LinkageKind {
 
     /// Returns true if this linkage allows multiple definitions.
     pub fn allows_multiple_definitions(&self) -> bool {
-        matches!(self,
-            LinkageKind::Weak |
-            LinkageKind::Linkonce |
-            LinkageKind::LinkonceOdr |
-            LinkageKind::Common
+        matches!(
+            self,
+            LinkageKind::Weak
+                | LinkageKind::Linkonce
+                | LinkageKind::LinkonceOdr
+                | LinkageKind::Common
         )
     }
 }
@@ -3512,7 +3513,11 @@ impl MultiversionVariant {
 
     /// Parse the feature list into individual features.
     pub fn feature_list(&self) -> List<&str> {
-        self.features.as_str().split(',').map(|s| s.trim()).collect()
+        self.features
+            .as_str()
+            .split(',')
+            .map(|s| s.trim())
+            .collect()
     }
 }
 
@@ -4795,7 +4800,11 @@ impl Spanned for RegisterBlockAttr {
 impl std::fmt::Display for RegisterBlockAttr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.stride {
-            Maybe::Some(s) => write!(f, "@register_block(base = 0x{:X}, stride = 0x{:X})", self.base_address, s),
+            Maybe::Some(s) => write!(
+                f,
+                "@register_block(base = 0x{:X}, stride = 0x{:X})",
+                self.base_address, s
+            ),
             Maybe::None => write!(f, "@register_block(base = 0x{:X})", self.base_address),
         }
     }
@@ -4937,19 +4946,32 @@ impl AccessMode {
 
     /// Check if this mode allows reading.
     pub fn can_read(&self) -> bool {
-        matches!(self, AccessMode::ReadOnly | AccessMode::ReadWrite |
-                 AccessMode::WriteOneToClear | AccessMode::WriteOneToSet)
+        matches!(
+            self,
+            AccessMode::ReadOnly
+                | AccessMode::ReadWrite
+                | AccessMode::WriteOneToClear
+                | AccessMode::WriteOneToSet
+        )
     }
 
     /// Check if this mode allows writing.
     pub fn can_write(&self) -> bool {
-        matches!(self, AccessMode::WriteOnly | AccessMode::ReadWrite |
-                 AccessMode::WriteOneToClear | AccessMode::WriteOneToSet)
+        matches!(
+            self,
+            AccessMode::WriteOnly
+                | AccessMode::ReadWrite
+                | AccessMode::WriteOneToClear
+                | AccessMode::WriteOneToSet
+        )
     }
 
     /// Check if this is a write-modify mode.
     pub fn is_write_modify(&self) -> bool {
-        matches!(self, AccessMode::WriteOneToClear | AccessMode::WriteOneToSet)
+        matches!(
+            self,
+            AccessMode::WriteOneToClear | AccessMode::WriteOneToSet
+        )
     }
 }
 
@@ -5024,7 +5046,10 @@ impl InterruptKind {
 
     /// Check if this requires special stack handling.
     pub fn needs_special_stack(&self) -> bool {
-        matches!(self, InterruptKind::NMI | InterruptKind::Reset | InterruptKind::Exception)
+        matches!(
+            self,
+            InterruptKind::NMI | InterruptKind::Reset | InterruptKind::Exception
+        )
     }
 }
 
@@ -5334,7 +5359,11 @@ pub struct FrameworkAttr {
 impl FrameworkAttr {
     /// Construct directly. Prefer `from_attribute` at parse time.
     pub fn new(name: Text, citation: Text, span: Span) -> Self {
-        Self { name, citation, span }
+        Self {
+            name,
+            citation,
+            span,
+        }
     }
 
     /// Try to extract a `FrameworkAttr` from a generic `Attribute`.
@@ -5360,16 +5389,20 @@ impl FrameworkAttr {
         use crate::expr::{Expr, ExprKind};
         use crate::literal::{LiteralKind, StringLit};
         let name: Option<Text> = match args.get(0) {
-            Some(Expr { kind: ExprKind::Path(path), .. }) => {
-                path.segments.last().and_then(|seg| match seg {
-                    crate::ty::PathSegment::Name(ident) => Some(ident.name.clone()),
-                    _ => None,
-                })
-            }
+            Some(Expr {
+                kind: ExprKind::Path(path),
+                ..
+            }) => path.segments.last().and_then(|seg| match seg {
+                crate::ty::PathSegment::Name(ident) => Some(ident.name.clone()),
+                _ => None,
+            }),
             _ => None,
         };
         let citation: Option<Text> = match args.get(1) {
-            Some(Expr { kind: ExprKind::Literal(lit), .. }) => match &lit.kind {
+            Some(Expr {
+                kind: ExprKind::Literal(lit),
+                ..
+            }) => match &lit.kind {
                 LiteralKind::Text(StringLit::Regular(s))
                 | LiteralKind::Text(StringLit::MultiLine(s)) => Some(s.clone()),
                 _ => None,
@@ -5611,11 +5644,19 @@ pub struct ExtractAttr {
 
 impl ExtractAttr {
     pub fn new(target: ExtractTarget, span: Span) -> Self {
-        Self { target, realize: Maybe::None, span }
+        Self {
+            target,
+            realize: Maybe::None,
+            span,
+        }
     }
 
     pub fn with_realize(target: ExtractTarget, realize: Text, span: Span) -> Self {
-        Self { target, realize: Maybe::Some(realize), span }
+        Self {
+            target,
+            realize: Maybe::Some(realize),
+            span,
+        }
     }
 
     /// Try to extract an `ExtractAttr` from a generic `Attribute`.
@@ -5647,7 +5688,12 @@ impl std::fmt::Display for ExtractAttr {
         match &self.realize {
             Maybe::None => write!(f, "@extract({})", self.target),
             Maybe::Some(name) => {
-                write!(f, "@extract({}, realize=\"{}\")", self.target, name.as_str())
+                write!(
+                    f,
+                    "@extract({}, realize=\"{}\")",
+                    self.target,
+                    name.as_str()
+                )
             }
         }
     }
@@ -5671,11 +5717,19 @@ pub struct ExtractWitnessAttr {
 
 impl ExtractWitnessAttr {
     pub fn new(target: ExtractTarget, span: Span) -> Self {
-        Self { target, realize: Maybe::None, span }
+        Self {
+            target,
+            realize: Maybe::None,
+            span,
+        }
     }
 
     pub fn with_realize(target: ExtractTarget, realize: Text, span: Span) -> Self {
-        Self { target, realize: Maybe::Some(realize), span }
+        Self {
+            target,
+            realize: Maybe::Some(realize),
+            span,
+        }
     }
 
     pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
@@ -5728,11 +5782,19 @@ pub struct ExtractContractAttr {
 
 impl ExtractContractAttr {
     pub fn new(target: ExtractTarget, span: Span) -> Self {
-        Self { target, realize: Maybe::None, span }
+        Self {
+            target,
+            realize: Maybe::None,
+            span,
+        }
     }
 
     pub fn with_realize(target: ExtractTarget, realize: Text, span: Span) -> Self {
-        Self { target, realize: Maybe::Some(realize), span }
+        Self {
+            target,
+            realize: Maybe::Some(realize),
+            span,
+        }
     }
 
     pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
@@ -5792,15 +5854,17 @@ fn parse_extract_args(attr: &Attribute) -> Maybe<(ExtractTarget, Maybe<Text>)> {
 
     fn realize_kwarg(e: &Expr) -> Option<Text> {
         match &e.kind {
-            ExprKind::Binary { op: BinOp::Assign, left, right } => {
+            ExprKind::Binary {
+                op: BinOp::Assign,
+                left,
+                right,
+            } => {
                 let key_is_realize = match &left.kind {
                     ExprKind::Path(p) => p
                         .segments
                         .last()
                         .map(|seg| match seg {
-                            crate::ty::PathSegment::Name(ident) => {
-                                ident.name.as_str() == "realize"
-                            }
+                            crate::ty::PathSegment::Name(ident) => ident.name.as_str() == "realize",
                             _ => false,
                         })
                         .unwrap_or(false),
@@ -5873,9 +5937,7 @@ fn extract_target_from_attr_args(attr: &Attribute) -> Maybe<ExtractTarget> {
                     kind: ExprKind::Path(path),
                     ..
                 }) => path.segments.last().and_then(|seg| match seg {
-                    crate::ty::PathSegment::Name(ident) => {
-                        Some(ident.name.as_str().to_string())
-                    }
+                    crate::ty::PathSegment::Name(ident) => Some(ident.name.as_str().to_string()),
                     _ => None,
                 }),
                 _ => None,
@@ -5952,17 +6014,17 @@ impl EnactAttr {
     /// parse time before any stdlib fn has been compiled.
     pub fn canonicalise_primitive(raw: &str) -> Option<&'static str> {
         match raw {
-            "ε_math"      | "epsilon_math"      => Some("ε_math"),
-            "ε_compute"   | "epsilon_compute"   => Some("ε_compute"),
-            "ε_observe"   | "epsilon_observe"   => Some("ε_observe"),
-            "ε_prove"     | "epsilon_prove"     => Some("ε_prove"),
-            "ε_decide"    | "epsilon_decide"    => Some("ε_decide"),
+            "ε_math" | "epsilon_math" => Some("ε_math"),
+            "ε_compute" | "epsilon_compute" => Some("ε_compute"),
+            "ε_observe" | "epsilon_observe" => Some("ε_observe"),
+            "ε_prove" | "epsilon_prove" => Some("ε_prove"),
+            "ε_decide" | "epsilon_decide" => Some("ε_decide"),
             "ε_translate" | "epsilon_translate" => Some("ε_translate"),
             "ε_construct" | "epsilon_construct" => Some("ε_construct"),
             // OWL 2 ontology-classification primitive (Diakrisis Actic
             // catalogue extension per the Verum cross-audit; pairs
             // with the C7+C8+C9 OWL 2 V1 ecosystem).
-            "ε_classify"  | "epsilon_classify"  => Some("ε_classify"),
+            "ε_classify" | "epsilon_classify" => Some("ε_classify"),
             _ => None,
         }
     }
@@ -5988,19 +6050,17 @@ impl EnactAttr {
     /// White-space within the string is collapsed during validation.
     /// Returns the canonical (Unicode-spelled) form on success.
     pub fn canonicalise_ordinal(raw: &str) -> Option<String> {
-        let trimmed: String = raw
-            .chars()
-            .filter(|c| !c.is_whitespace())
-            .collect();
+        let trimmed: String = raw.chars().filter(|c| !c.is_whitespace()).collect();
         if trimmed.is_empty() {
             return None;
         }
         // Atomic shapes
         match trimmed.as_str() {
-            "ω" | "omega"                       => return Some("ω".to_string()),
-            "Ω" | "Omega"                       => return Some("Ω".to_string()),
-            "ω²" | "ω^2" | "omega^2"
-                | "omega_squared" | "ω_squared" => return Some("ω²".to_string()),
+            "ω" | "omega" => return Some("ω".to_string()),
+            "Ω" | "Omega" => return Some("Ω".to_string()),
+            "ω²" | "ω^2" | "omega^2" | "omega_squared" | "ω_squared" => {
+                return Some("ω²".to_string());
+            }
             _ => {}
         }
         // Pure finite digit sequence
@@ -6008,9 +6068,7 @@ impl EnactAttr {
             return Some(trimmed);
         }
         // ω+k or ω·n+k, with ASCII fallbacks
-        let normalised = trimmed
-            .replace("omega", "ω")
-            .replace('*', "·");
+        let normalised = trimmed.replace("omega", "ω").replace('*', "·");
         // Strip a leading "ω" then look for the optional "·n" and "+k"
         let rest = normalised.strip_prefix('ω')?;
         // Case: rest is empty (handled above as pure ω)
@@ -6020,7 +6078,9 @@ impl EnactAttr {
         // Case: starts with "·" — coefficient
         let (coeff, after_coeff) = if let Some(after) = rest.strip_prefix('·') {
             // Pull a digit prefix
-            let coeff_end = after.find(|c: char| !c.is_ascii_digit()).unwrap_or(after.len());
+            let coeff_end = after
+                .find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(after.len());
             if coeff_end == 0 {
                 return None;
             }
@@ -6096,7 +6156,12 @@ impl EnactAttr {
         let raw_opt: Option<Text> = match args.get(0) {
             // Named form: `epsilon: "..."` or `epsilon = "..."`.
             Some(Expr {
-                kind: ExprKind::Binary { op: BinOp::Assign, left, right },
+                kind:
+                    ExprKind::Binary {
+                        op: BinOp::Assign,
+                        left,
+                        right,
+                    },
                 ..
             }) => {
                 let key_is_epsilon = match &left.kind {
@@ -6126,7 +6191,10 @@ impl EnactAttr {
                 }
             }
             // Positional form: bare string literal.
-            Some(Expr { kind: ExprKind::Literal(lit), .. }) => match &lit.kind {
+            Some(Expr {
+                kind: ExprKind::Literal(lit),
+                ..
+            }) => match &lit.kind {
                 LiteralKind::Text(StringLit::Regular(s))
                 | LiteralKind::Text(StringLit::MultiLine(s)) => Some(s.clone()),
                 _ => None,
@@ -6213,7 +6281,11 @@ pub struct ExtensionRequirementAttr {
 
 impl ExtensionRequirementAttr {
     pub fn new(kind: ExtensionToggleKind, extension: Text, span: Span) -> Self {
-        Self { kind, extension, span }
+        Self {
+            kind,
+            extension,
+            span,
+        }
     }
 
     /// Validate an extension identifier. Accepts `vfe_<digits>` and
@@ -6224,7 +6296,10 @@ impl ExtensionRequirementAttr {
         // Match `vfe_<digits>` or `vfe_plus_<digits>`.
         let body = lowered.strip_prefix("vfe_")?;
         // Body must be either pure digits, or `plus_<digits>`.
-        let body = body.strip_prefix("plus_").map(|t| (true, t)).unwrap_or((false, body));
+        let body = body
+            .strip_prefix("plus_")
+            .map(|t| (true, t))
+            .unwrap_or((false, body));
         let (plus, digits) = body;
         if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_digit()) {
             return None;
@@ -6258,14 +6333,17 @@ impl ExtensionRequirementAttr {
         // Accept either a bare path identifier (vfe_1) or a string
         // literal ("vfe_1"). The path form is canonical.
         let raw_opt: Option<String> = match args.get(0) {
-            Some(Expr { kind: ExprKind::Path(p), .. }) => p
-                .segments
-                .last()
-                .and_then(|seg| match seg {
-                    crate::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
-                    _ => None,
-                }),
-            Some(Expr { kind: ExprKind::Literal(lit), .. }) => match &lit.kind {
+            Some(Expr {
+                kind: ExprKind::Path(p),
+                ..
+            }) => p.segments.last().and_then(|seg| match seg {
+                crate::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
+                _ => None,
+            }),
+            Some(Expr {
+                kind: ExprKind::Literal(lit),
+                ..
+            }) => match &lit.kind {
                 crate::literal::LiteralKind::Text(crate::literal::StringLit::Regular(s))
                 | crate::literal::LiteralKind::Text(crate::literal::StringLit::MultiLine(s)) => {
                     Some(s.as_str().to_string())
@@ -6398,14 +6476,17 @@ impl AccessibilityAttr {
         }
         use crate::expr::{Expr, ExprKind};
         let raw_opt: Option<String> = match args.get(0) {
-            Some(Expr { kind: ExprKind::Path(p), .. }) => p
-                .segments
-                .last()
-                .and_then(|seg| match seg {
-                    crate::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
-                    _ => None,
-                }),
-            Some(Expr { kind: ExprKind::Literal(lit), .. }) => match &lit.kind {
+            Some(Expr {
+                kind: ExprKind::Path(p),
+                ..
+            }) => p.segments.last().and_then(|seg| match seg {
+                crate::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
+                _ => None,
+            }),
+            Some(Expr {
+                kind: ExprKind::Literal(lit),
+                ..
+            }) => match &lit.kind {
                 crate::literal::LiteralKind::Text(crate::literal::StringLit::Regular(s))
                 | crate::literal::LiteralKind::Text(crate::literal::StringLit::MultiLine(s)) => {
                     Some(s.as_str().to_string())
@@ -6488,14 +6569,14 @@ pub enum Owl2Semantics {
 impl Owl2Semantics {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::OpenWorld   => "OpenWorld",
+            Self::OpenWorld => "OpenWorld",
             Self::ClosedWorld => "ClosedWorld",
         }
     }
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
-            "OpenWorld" | "open_world" | "OWA"   => Some(Self::OpenWorld),
+            "OpenWorld" | "open_world" | "OWA" => Some(Self::OpenWorld),
             "ClosedWorld" | "closed_world" | "CWA" => Some(Self::ClosedWorld),
             _ => None,
         }
@@ -6523,7 +6604,7 @@ impl Owl2ClassAttr {
         }
         let args = match &attr.args {
             Maybe::Some(a) => a,
-            Maybe::None    => {
+            Maybe::None => {
                 // `@owl2_class` without args is valid — defaults to
                 // ClosedWorld semantics.
                 return Maybe::Some(Self::new(Maybe::None, attr.span));
@@ -6541,7 +6622,7 @@ impl Owl2ClassAttr {
             .and_then(|s| Owl2Semantics::parse(s.as_str()));
         match semantics {
             Some(sem) => Maybe::Some(Self::new(Maybe::Some(sem), attr.span)),
-            None      => Maybe::None,
+            None => Maybe::None,
         }
     }
 }
@@ -6572,7 +6653,7 @@ impl Owl2SubClassOfAttr {
         }
         let args = match &attr.args {
             Maybe::Some(a) => a,
-            Maybe::None    => return Maybe::None,
+            Maybe::None => return Maybe::None,
         };
         if args.len() != 1 {
             return Maybe::None;
@@ -6582,7 +6663,7 @@ impl Owl2SubClassOfAttr {
         let parent = parse_class_name_arg(args.get(0)?);
         match parent {
             Some(p) => Maybe::Some(Self::new(p, attr.span)),
-            None    => Maybe::None,
+            None => Maybe::None,
         }
     }
 }
@@ -6605,7 +6686,10 @@ pub struct Owl2DisjointWithAttr {
 
 impl Owl2DisjointWithAttr {
     pub fn new(disjoint_classes: Vec<Text>, span: Span) -> Self {
-        Self { disjoint_classes, span }
+        Self {
+            disjoint_classes,
+            span,
+        }
     }
 
     pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
@@ -6614,7 +6698,7 @@ impl Owl2DisjointWithAttr {
         }
         let args = match &attr.args {
             Maybe::Some(a) => a,
-            Maybe::None    => return Maybe::None,
+            Maybe::None => return Maybe::None,
         };
         // Accept two equivalent shapes:
         //  1. `@owl2_disjoint_with([Foo, Bar])` — single Array list arg
@@ -6684,26 +6768,26 @@ pub enum Owl2Characteristic {
 impl Owl2Characteristic {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Transitive        => "Transitive",
-            Self::Symmetric         => "Symmetric",
-            Self::Asymmetric        => "Asymmetric",
-            Self::Reflexive         => "Reflexive",
-            Self::Irreflexive       => "Irreflexive",
-            Self::Functional        => "Functional",
+            Self::Transitive => "Transitive",
+            Self::Symmetric => "Symmetric",
+            Self::Asymmetric => "Asymmetric",
+            Self::Reflexive => "Reflexive",
+            Self::Irreflexive => "Irreflexive",
+            Self::Functional => "Functional",
             Self::InverseFunctional => "InverseFunctional",
         }
     }
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
-            "Transitive"        => Some(Self::Transitive),
-            "Symmetric"         => Some(Self::Symmetric),
-            "Asymmetric"        => Some(Self::Asymmetric),
-            "Reflexive"         => Some(Self::Reflexive),
-            "Irreflexive"       => Some(Self::Irreflexive),
-            "Functional"        => Some(Self::Functional),
+            "Transitive" => Some(Self::Transitive),
+            "Symmetric" => Some(Self::Symmetric),
+            "Asymmetric" => Some(Self::Asymmetric),
+            "Reflexive" => Some(Self::Reflexive),
+            "Irreflexive" => Some(Self::Irreflexive),
+            "Functional" => Some(Self::Functional),
             "InverseFunctional" => Some(Self::InverseFunctional),
-            _                   => None,
+            _ => None,
         }
     }
 }
@@ -6719,7 +6803,10 @@ pub struct Owl2CharacteristicAttr {
 
 impl Owl2CharacteristicAttr {
     pub fn new(characteristic: Owl2Characteristic, span: Span) -> Self {
-        Self { characteristic, span }
+        Self {
+            characteristic,
+            span,
+        }
     }
 
     pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
@@ -6728,7 +6815,7 @@ impl Owl2CharacteristicAttr {
         }
         let args = match &attr.args {
             Maybe::Some(a) => a,
-            Maybe::None    => return Maybe::None,
+            Maybe::None => return Maybe::None,
         };
         if args.len() != 1 {
             return Maybe::None;
@@ -6740,7 +6827,7 @@ impl Owl2CharacteristicAttr {
         let parsed = name.and_then(|s| Owl2Characteristic::parse(s.as_str()));
         match parsed {
             Some(c) => Maybe::Some(Self::new(c, attr.span)),
-            None    => Maybe::None,
+            None => Maybe::None,
         }
     }
 }
@@ -6759,14 +6846,15 @@ impl Spanned for Owl2CharacteristicAttr {
 /// Binary Assign; `=` lowers the same way) where `value` is a string
 /// literal. Returns the literal text when the key matches; None
 /// otherwise.
-fn parse_named_string_arg(
-    arg: &crate::expr::Expr,
-    expected_key: &str,
-) -> Option<Text> {
+fn parse_named_string_arg(arg: &crate::expr::Expr, expected_key: &str) -> Option<Text> {
     use crate::expr::{BinOp, ExprKind};
     use crate::literal::{LiteralKind, StringLit};
     let (left, right) = match &arg.kind {
-        ExprKind::Binary { op: BinOp::Assign, left, right } => (left, right),
+        ExprKind::Binary {
+            op: BinOp::Assign,
+            left,
+            right,
+        } => (left, right),
         _ => return None,
     };
     let key_ok = match &left.kind {
@@ -6847,7 +6935,7 @@ fn parse_class_name_arg(arg: &crate::expr::Expr) -> Option<Text> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Owl2PropertyAttr {
     pub domain: Maybe<Text>,
-    pub range:  Maybe<Text>,
+    pub range: Maybe<Text>,
     pub characteristics: Vec<Owl2Characteristic>,
     pub inverse_of: Maybe<Text>,
     pub span: Span,
@@ -6861,7 +6949,13 @@ impl Owl2PropertyAttr {
         inverse_of: Maybe<Text>,
         span: Span,
     ) -> Self {
-        Self { domain, range, characteristics, inverse_of, span }
+        Self {
+            domain,
+            range,
+            characteristics,
+            inverse_of,
+            span,
+        }
     }
 
     pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
@@ -6870,13 +6964,13 @@ impl Owl2PropertyAttr {
         }
         let args = match &attr.args {
             Maybe::Some(a) => a,
-            Maybe::None    => return Maybe::None,
+            Maybe::None => return Maybe::None,
         };
         if args.is_empty() {
             return Maybe::None;
         }
         let mut domain: Maybe<Text> = Maybe::None;
-        let mut range:  Maybe<Text> = Maybe::None;
+        let mut range: Maybe<Text> = Maybe::None;
         let mut characteristics: Vec<Owl2Characteristic> = Vec::new();
         let mut inverse_of: Maybe<Text> = Maybe::None;
 
@@ -6920,7 +7014,11 @@ impl Owl2PropertyAttr {
         // attribute is meaningless without them.
         match (&domain, &range) {
             (Maybe::Some(_), Maybe::Some(_)) => Maybe::Some(Self::new(
-                domain, range, characteristics, inverse_of, attr.span,
+                domain,
+                range,
+                characteristics,
+                inverse_of,
+                attr.span,
             )),
             _ => Maybe::None,
         }
@@ -6944,7 +7042,10 @@ pub struct Owl2EquivalentClassAttr {
 
 impl Owl2EquivalentClassAttr {
     pub fn new(equivalent_to: Text, span: Span) -> Self {
-        Self { equivalent_to, span }
+        Self {
+            equivalent_to,
+            span,
+        }
     }
 
     pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
@@ -6953,7 +7054,7 @@ impl Owl2EquivalentClassAttr {
         }
         let args = match &attr.args {
             Maybe::Some(a) => a,
-            Maybe::None    => return Maybe::None,
+            Maybe::None => return Maybe::None,
         };
         if args.len() != 1 {
             return Maybe::None;
@@ -6961,7 +7062,7 @@ impl Owl2EquivalentClassAttr {
         let class = parse_class_name_arg(args.get(0).unwrap());
         match class {
             Some(c) => Maybe::Some(Self::new(c, attr.span)),
-            None    => Maybe::None,
+            None => Maybe::None,
         }
     }
 }
@@ -6991,7 +7092,10 @@ pub struct Owl2HasKeyAttr {
 
 impl Owl2HasKeyAttr {
     pub fn new(key_properties: Vec<Text>, span: Span) -> Self {
-        Self { key_properties, span }
+        Self {
+            key_properties,
+            span,
+        }
     }
 
     pub fn from_attribute(attr: &Attribute) -> Maybe<Self> {
@@ -7000,7 +7104,7 @@ impl Owl2HasKeyAttr {
         }
         let args = match &attr.args {
             Maybe::Some(a) => a,
-            Maybe::None    => return Maybe::None,
+            Maybe::None => return Maybe::None,
         };
         if args.is_empty() {
             return Maybe::None;
@@ -7054,13 +7158,14 @@ impl Spanned for Owl2HasKeyAttr {
 /// (rather than a string literal). Mirrors `parse_named_string_arg`
 /// for the typed-class-reference case used by `@owl2_property(domain
 /// = Animal)` etc.
-fn parse_named_class_arg(
-    arg: &crate::expr::Expr,
-    expected_key: &str,
-) -> Option<Text> {
+fn parse_named_class_arg(arg: &crate::expr::Expr, expected_key: &str) -> Option<Text> {
     use crate::expr::{BinOp, ExprKind};
     let (left, right) = match &arg.kind {
-        ExprKind::Binary { op: BinOp::Assign, left, right } => (left, right),
+        ExprKind::Binary {
+            op: BinOp::Assign,
+            left,
+            right,
+        } => (left, right),
         _ => return None,
     };
     let key_ok = match &left.kind {
@@ -7089,7 +7194,11 @@ fn parse_named_characteristic_list_arg(
 ) -> Option<Vec<Owl2Characteristic>> {
     use crate::expr::{ArrayExpr, BinOp, ExprKind};
     let (left, right) = match &arg.kind {
-        ExprKind::Binary { op: BinOp::Assign, left, right } => (left, right),
+        ExprKind::Binary {
+            op: BinOp::Assign,
+            left,
+            right,
+        } => (left, right),
         _ => return None,
     };
     let key_ok = match &left.kind {
@@ -7164,8 +7273,9 @@ fn parse_named_characteristic_list_arg(
 
 /// Atkey QTT quantity. Default at parse sites without an annotation
 /// is `Many` (existing code stays unchanged).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
+)]
 pub enum Quantity {
     /// `@quantity(0)` — erased (compile-time only).
     Zero,
@@ -7180,7 +7290,7 @@ impl Quantity {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Zero => "0",
-            Self::One  => "1",
+            Self::One => "1",
             Self::Many => "omega",
         }
     }
@@ -7188,7 +7298,7 @@ impl Quantity {
     pub fn surface_glyph(&self) -> &'static str {
         match self {
             Self::Zero => "0",
-            Self::One  => "1",
+            Self::One => "1",
             Self::Many => "ω",
         }
     }
@@ -7210,15 +7320,13 @@ impl Quantity {
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
-            "0"     | "Zero"     | "zero"     | "erased"   => Some(Self::Zero),
-            "1"     | "One"      | "one"      | "linear"   => Some(Self::One),
-            "omega" | "ω"        | "Many"     | "many"     | "unrestricted"
-                                                            => Some(Self::Many),
+            "0" | "Zero" | "zero" | "erased" => Some(Self::Zero),
+            "1" | "One" | "one" | "linear" => Some(Self::One),
+            "omega" | "ω" | "Many" | "many" | "unrestricted" => Some(Self::Many),
             _ => None,
         }
     }
 }
-
 
 /// `@quantity(0 | 1 | omega)` — Atkey QTT quantity annotation on a
 /// binder (function parameter, let-binding, type-level binding, etc.).
@@ -7239,7 +7347,7 @@ impl QuantityAttr {
         }
         let args = match &attr.args {
             Maybe::Some(a) => a,
-            Maybe::None    => return Maybe::None,
+            Maybe::None => return Maybe::None,
         };
         if args.len() != 1 {
             return Maybe::None;
@@ -7253,7 +7361,7 @@ impl QuantityAttr {
         let arg = args.get(0).unwrap();
         let raw: Option<Text> = match &arg.kind {
             ExprKind::Literal(lit) => match &lit.kind {
-                LiteralKind::Int(n)        => Some(Text::from(n.value.to_string().as_str())),
+                LiteralKind::Int(n) => Some(Text::from(n.value.to_string().as_str())),
                 LiteralKind::Text(StringLit::Regular(s))
                 | LiteralKind::Text(StringLit::MultiLine(s)) => Some(s.clone()),
                 _ => None,
@@ -7267,7 +7375,7 @@ impl QuantityAttr {
         let q = raw.as_deref().and_then(Quantity::parse);
         match q {
             Some(q) => Maybe::Some(Self::new(q, attr.span)),
-            None    => Maybe::None,
+            None => Maybe::None,
         }
     }
 }
@@ -7283,7 +7391,6 @@ impl std::fmt::Display for QuantityAttr {
         write!(f, "@quantity({})", self.quantity.as_str())
     }
 }
-
 
 // =============================================================================
 // DocAttr — first-class documentation attribute (#176)
@@ -7362,11 +7469,7 @@ impl DocAttr {
     }
 
     /// Construct a new language-tagged DocAttr.
-    pub fn with_language(
-        language: impl Into<Text>,
-        markdown: impl Into<Text>,
-        span: Span,
-    ) -> Self {
+    pub fn with_language(language: impl Into<Text>, markdown: impl Into<Text>, span: Span) -> Self {
         Self {
             markdown: markdown.into(),
             language: Maybe::Some(language.into()),

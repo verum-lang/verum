@@ -7,8 +7,8 @@
 
 //! Run with: cargo run --package verum_smt --example proof_export_demo
 
-use verum_smt::proof_extraction::{ProofExporter, ProofTerm};
 use verum_common::Map;
+use verum_smt::proof_extraction::{ProofExporter, ProofTerm};
 
 fn main() {
     println!("=== Verum SMT Proof Export Demo ===\n");

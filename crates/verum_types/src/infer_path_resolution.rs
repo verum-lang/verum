@@ -9,13 +9,13 @@ use crate::context::ModuleId;
 use crate::infer::{InferResult, TypeChecker};
 use crate::ty::Type;
 use crate::{Result, TypeError};
+use smallvec::SmallVec;
 use verum_ast::expr::{Expr, ExprKind};
 use verum_ast::span::Span;
 use verum_ast::ty::Path;
 use verum_common::{List, Map, Maybe, Text, ToText};
 use verum_diagnostics::Diagnostic;
 use verum_modules::resolver::NameKind;
-use smallvec::SmallVec;
 
 impl TypeChecker {
     /// Resolve a type name using module-aware resolution
@@ -42,7 +42,11 @@ impl TypeChecker {
         // Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Import Ambiguity
         if let Some(sources) = self.imported_names.get(&verum_common::Text::from(name)) {
             if sources.len() > 1 {
-                let sources_str = sources.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ");
+                let sources_str = sources
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 return Err(TypeError::AmbiguousName {
                     name: verum_common::Text::from(name),
                     sources: verum_common::Text::from(sources_str),
@@ -65,8 +69,7 @@ impl TypeChecker {
         // resolves its own types regardless of load order.
         let mod_path = self.current_module_path.clone();
         if !mod_path.as_str().is_empty() && mod_path.as_str() != "cog" {
-            let qualified: verum_common::Text =
-                format!("{}.{}", mod_path, name).into();
+            let qualified: verum_common::Text = format!("{}.{}", mod_path, name).into();
             if let Some(ty) = self.ctx.lookup_type(qualified.as_str()) {
                 return Ok(ty.clone());
             }
@@ -180,9 +183,9 @@ impl TypeChecker {
                     // test files but not explicitly imported.
                     if is_wellknown_type_name(name) {
                         Ok(Type::Named {
-                            path: verum_ast::ty::Path::single(
-                                verum_ast::ty::Ident::new(name, span),
-                            ),
+                            path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
+                                name, span,
+                            )),
                             args: List::new(),
                         })
                     } else {
@@ -197,9 +200,7 @@ impl TypeChecker {
             // No module context - for well-known types, create forward references
             if is_wellknown_type_name(name) {
                 Ok(Type::Named {
-                    path: verum_ast::ty::Path::single(
-                        verum_ast::ty::Ident::new(name, span),
-                    ),
+                    path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(name, span)),
                     args: List::new(),
                 })
             } else {
@@ -217,7 +218,10 @@ impl TypeChecker {
         use verum_ast::ty::PathSegment;
 
         if path.segments.is_empty() {
-            return Err(TypeError::Other("internal error: empty type path. This is a compiler bug — please report it.".into()));
+            return Err(TypeError::Other(
+                "internal error: empty type path. This is a compiler bug — please report it."
+                    .into(),
+            ));
         }
 
         // Single segment - handle based on segment type
@@ -261,7 +265,7 @@ impl TypeChecker {
         // These are paths starting with Self followed by an associated type name
         // They should be represented as projection types, NOT resolved via module system
         if let Some(PathSegment::SelfValue) = path.segments.first() {
-                        // #[cfg(debug_assertions)]
+            // #[cfg(debug_assertions)]
             // eprintln!("[DEBUG resolve_qualified_type] Path starts with Self, segments={}", path.segments.len());
             if path.segments.len() >= 2 {
                 // This is an associated type projection: Self.Item, Self.Output, etc.
@@ -329,7 +333,10 @@ impl TypeChecker {
                     "cog"
                 };
                 // Build path: parent + remaining segments (skip Super)
-                let remaining: Vec<String> = path.segments.iter().skip(1)
+                let remaining: Vec<String> = path
+                    .segments
+                    .iter()
+                    .skip(1)
                     .filter_map(|seg| match seg {
                         PathSegment::Name(ident) => Some(ident.name.as_str().to_string()),
                         _ => None,
@@ -342,7 +349,10 @@ impl TypeChecker {
                 }
             } else if has_crate_prefix {
                 // For crate.X.Y.Z, resolve to cog.X.Y.Z (skip the Cog segment, use cog prefix)
-                let remaining: Vec<String> = path.segments.iter().skip(1)
+                let remaining: Vec<String> = path
+                    .segments
+                    .iter()
+                    .skip(1)
                     .filter_map(|seg| match seg {
                         PathSegment::Name(ident) => Some(ident.name.as_str().to_string()),
                         _ => None,
@@ -351,7 +361,8 @@ impl TypeChecker {
                 // Return with cog prefix since inline modules are registered as "cog.X.Y"
                 format!("cog.{}", remaining.join("."))
             } else {
-                path.segments.iter()
+                path.segments
+                    .iter()
                     .filter_map(|seg| match seg {
                         PathSegment::Name(ident) => Some(ident.name.as_str().to_string()),
                         PathSegment::Super => Some("super".to_string()),
@@ -362,14 +373,24 @@ impl TypeChecker {
                     .join(".")
             };
 
-            if let Some((module_key, type_name)) = self.find_inline_module_for_import(&path_str, has_crate_prefix) {
-                if let Some(module) = self.inline_modules.get(&verum_common::Text::from(module_key.as_str())).cloned() {
+            if let Some((module_key, type_name)) =
+                self.find_inline_module_for_import(&path_str, has_crate_prefix)
+            {
+                if let Some(module) = self
+                    .inline_modules
+                    .get(&verum_common::Text::from(module_key.as_str()))
+                    .cloned()
+                {
                     if let Some(items) = &module.items {
                         for item in items.iter() {
                             if let verum_ast::ItemKind::Type(type_decl) = &item.kind {
                                 if type_decl.name.name.as_str() == type_name {
                                     if let Err(e) = self.register_type_declaration(type_decl) {
-                                        tracing::debug!("Failed to register type '{}' from inline module: {}", type_name, e);
+                                        tracing::debug!(
+                                            "Failed to register type '{}' from inline module: {}",
+                                            type_name,
+                                            e
+                                        );
                                     }
                                     if let Maybe::Some(ty) = self.ctx.lookup_type(&type_name) {
                                         return Ok(ty.clone());
@@ -396,9 +417,9 @@ impl TypeChecker {
                             }
                             // Create a forward reference for the type
                             return Ok(Type::Named {
-                                path: verum_ast::ty::Path::single(
-                                    verum_ast::ty::Ident::new(last_name, span),
-                                ),
+                                path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
+                                    last_name, span,
+                                )),
                                 args: List::new(),
                             });
                         }
@@ -459,9 +480,9 @@ impl TypeChecker {
                                 }
                                 // Create a forward reference
                                 return Ok(Type::Named {
-                                    path: verum_ast::ty::Path::single(
-                                        verum_ast::ty::Ident::new(last_name, span),
-                                    ),
+                                    path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
+                                        last_name, span,
+                                    )),
                                     args: List::new(),
                                 });
                             }
@@ -482,9 +503,9 @@ impl TypeChecker {
                     let last_name = ident.name.as_str();
                     if last_name.chars().next().is_some_and(|c| c.is_uppercase()) {
                         return Ok(Type::Named {
-                            path: verum_ast::ty::Path::single(
-                                verum_ast::ty::Ident::new(last_name, span),
-                            ),
+                            path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
+                                last_name, span,
+                            )),
                             args: List::new(),
                         });
                     }
@@ -521,7 +542,10 @@ impl TypeChecker {
                     None
                 }
             }
-            ExprKind::Field { expr: inner_expr, field: inner_field } => {
+            ExprKind::Field {
+                expr: inner_expr,
+                field: inner_field,
+            } => {
                 // Recursively extract from nested Field
                 let mut segments = self.extract_module_path_from_field(inner_expr, inner_field)?;
                 segments.push(final_field.name.as_str());
@@ -605,7 +629,11 @@ impl TypeChecker {
     /// Converts path `p.x.y` where `p` is a variable into a chain of field accesses.
     /// This handles cases like `match p.x { ... }` where the parser creates a Path
     /// but semantically it should be field access.
-    pub(crate) fn resolve_variable_field_access(&mut self, path: &Path, span: Span) -> Result<InferResult> {
+    pub(crate) fn resolve_variable_field_access(
+        &mut self,
+        path: &Path,
+        span: Span,
+    ) -> Result<InferResult> {
         use verum_ast::ty::PathSegment;
 
         // Get the first segment (variable name)
@@ -678,10 +706,12 @@ impl TypeChecker {
                                     })?
                                 }
                                 _ => {
-                                    return Err(TypeError::Other(verum_common::Text::from(format!(
-                                        "Cannot access field '{}' on type '{}'",
-                                        field_name, type_name
-                                    ))));
+                                    return Err(TypeError::Other(verum_common::Text::from(
+                                        format!(
+                                            "Cannot access field '{}' on type '{}'",
+                                            field_name, type_name
+                                        ),
+                                    )));
                                 }
                             }
                         }
@@ -710,9 +740,13 @@ impl TypeChecker {
     ///
 
     /// Module declaration: inline "module name { ... }" or file-based (foo.vr defines module foo) — Inline Modules
-    pub(crate) fn resolve_inline_module_path(&mut self, path: &Path, span: Span) -> Result<InferResult> {
-        use verum_ast::ty::PathSegment;
+    pub(crate) fn resolve_inline_module_path(
+        &mut self,
+        path: &Path,
+        span: Span,
+    ) -> Result<InferResult> {
         use verum_ast::ItemKind;
+        use verum_ast::ty::PathSegment;
 
         // Extract path segments as strings
         let segments: Vec<&str> = path
@@ -780,8 +814,13 @@ impl TypeChecker {
                                 if !matches!(func.visibility, verum_ast::decl::Visibility::Public) {
                                     return Err(TypeError::VisibilityError {
                                         name: verum_common::Text::from(segment_name),
-                                        visibility: verum_common::Text::from(format!("{:?}", func.visibility)),
-                                        module_path: verum_common::Text::from(current_module.name.name.as_str()),
+                                        visibility: verum_common::Text::from(format!(
+                                            "{:?}",
+                                            func.visibility
+                                        )),
+                                        module_path: verum_common::Text::from(
+                                            current_module.name.name.as_str(),
+                                        ),
                                         span,
                                     });
                                 }
@@ -796,20 +835,31 @@ impl TypeChecker {
                         }
 
                         // Type - return it (only for last segment)
-                        ItemKind::Type(type_decl) if type_decl.name.name.as_str() == segment_name => {
+                        ItemKind::Type(type_decl)
+                            if type_decl.name.name.as_str() == segment_name =>
+                        {
                             if is_last {
                                 // Check visibility - type must be public to access from outside
-                                if !matches!(type_decl.visibility, verum_ast::decl::Visibility::Public) {
+                                if !matches!(
+                                    type_decl.visibility,
+                                    verum_ast::decl::Visibility::Public
+                                ) {
                                     return Err(TypeError::VisibilityError {
                                         name: verum_common::Text::from(segment_name),
-                                        visibility: verum_common::Text::from(format!("{:?}", type_decl.visibility)),
-                                        module_path: verum_common::Text::from(current_module.name.name.as_str()),
+                                        visibility: verum_common::Text::from(format!(
+                                            "{:?}",
+                                            type_decl.visibility
+                                        )),
+                                        module_path: verum_common::Text::from(
+                                            current_module.name.name.as_str(),
+                                        ),
                                         span,
                                     });
                                 }
                                 // Return the type as a Named type
                                 let type_path = verum_ast::ty::Path {
-                                    segments: vec![PathSegment::Name(type_decl.name.clone())].into(),
+                                    segments: vec![PathSegment::Name(type_decl.name.clone())]
+                                        .into(),
                                     span,
                                 };
                                 return Ok(InferResult::new(Type::Named {
@@ -825,14 +875,24 @@ impl TypeChecker {
                         }
 
                         // Constant
-                        ItemKind::Const(const_decl) if const_decl.name.name.as_str() == segment_name => {
+                        ItemKind::Const(const_decl)
+                            if const_decl.name.name.as_str() == segment_name =>
+                        {
                             if is_last {
                                 // Check visibility - constant must be public to access from outside
-                                if !matches!(const_decl.visibility, verum_ast::decl::Visibility::Public) {
+                                if !matches!(
+                                    const_decl.visibility,
+                                    verum_ast::decl::Visibility::Public
+                                ) {
                                     return Err(TypeError::VisibilityError {
                                         name: verum_common::Text::from(segment_name),
-                                        visibility: verum_common::Text::from(format!("{:?}", const_decl.visibility)),
-                                        module_path: verum_common::Text::from(current_module.name.name.as_str()),
+                                        visibility: verum_common::Text::from(format!(
+                                            "{:?}",
+                                            const_decl.visibility
+                                        )),
+                                        module_path: verum_common::Text::from(
+                                            current_module.name.name.as_str(),
+                                        ),
                                         span,
                                     });
                                 }
@@ -888,7 +948,11 @@ impl TypeChecker {
     /// 2. Try to resolve as module path via NameResolver
     /// 3. Try to resolve as type with associated item
     /// 4. Report detailed error with suggestions
-    pub(crate) fn resolve_multi_segment_path(&mut self, path: &Path, span: Span) -> Result<InferResult> {
+    pub(crate) fn resolve_multi_segment_path(
+        &mut self,
+        path: &Path,
+        span: Span,
+    ) -> Result<InferResult> {
         use verum_ast::ty::PathSegment;
 
         // Handle special first segment keywords
@@ -920,7 +984,10 @@ impl TypeChecker {
                     // Check if first segment is an inline module
                     // This handles paths like `api.v2.func()` where `api` is an inline module
                     // Module declaration: inline "module name { ... }" or file-based (foo.vr defines module foo) — Inline Modules
-                    if self.inline_modules.contains_key(&verum_common::Text::from(name)) {
+                    if self
+                        .inline_modules
+                        .contains_key(&verum_common::Text::from(name))
+                    {
                         return self.resolve_inline_module_path(path, span);
                     }
 
@@ -1096,9 +1163,11 @@ impl TypeChecker {
         if segments.len() >= 2 {
             let last_name = match segments.last() {
                 Some(name) => name,
-                None => return Err(TypeError::Other(verum_common::Text::from(
-                    "path has no segments despite len >= 2 check"
-                ))),
+                None => {
+                    return Err(TypeError::Other(verum_common::Text::from(
+                        "path has no segments despite len >= 2 check",
+                    )));
+                }
             };
             let last_name_str = last_name.as_str();
             // Try looking up the last segment as a type
@@ -1110,12 +1179,17 @@ impl TypeChecker {
                 return Ok(InferResult::new(scheme.instantiate()));
             }
             // If the last segment looks like a type name, create a forward reference
-            if last_name_str.chars().next().is_some_and(|c| c.is_uppercase()) {
+            if last_name_str
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_uppercase())
+            {
                 if is_wellknown_type_name(last_name_str) {
                     return Ok(InferResult::new(Type::Named {
-                        path: verum_ast::ty::Path::single(
-                            verum_ast::ty::Ident::new(last_name_str, span),
-                        ),
+                        path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
+                            last_name_str,
+                            span,
+                        )),
                         args: List::new(),
                     }));
                 }
@@ -1124,7 +1198,10 @@ impl TypeChecker {
 
         // All strategies failed - for common module prefixes, return Never to suppress cascading
         let first_name = segments.first().map(|s| s.as_str()).unwrap_or("");
-        if matches!(first_name, "std" | "core" | "sys" | "net" | "io" | "fs" | "collections" | "sync" | "async_") {
+        if matches!(
+            first_name,
+            "std" | "core" | "sys" | "net" | "io" | "fs" | "collections" | "sync" | "async_"
+        ) {
             return Ok(InferResult::new(Type::Never));
         }
 
@@ -1147,7 +1224,11 @@ impl TypeChecker {
     }
 
     /// Resolve cog-rooted path (cog.module.item)
-    pub(crate) fn resolve_crate_rooted_path(&mut self, path: &Path, span: Span) -> Result<InferResult> {
+    pub(crate) fn resolve_crate_rooted_path(
+        &mut self,
+        path: &Path,
+        span: Span,
+    ) -> Result<InferResult> {
         use verum_ast::ty::PathSegment;
 
         // The module resolver handles crate:: resolution via resolve_path
@@ -1165,7 +1246,10 @@ impl TypeChecker {
         // Try inline module resolution: crate.X.Y.Z -> resolve via inline modules
         // Build the path without the crate prefix, using cog. prefix for inline module lookup
         {
-            let remaining: Vec<String> = path.segments.iter().skip(1)
+            let remaining: Vec<String> = path
+                .segments
+                .iter()
+                .skip(1)
                 .filter_map(|seg| match seg {
                     PathSegment::Name(ident) => Some(ident.name.as_str().to_string()),
                     _ => None,
@@ -1174,44 +1258,75 @@ impl TypeChecker {
             if !remaining.is_empty() {
                 let path_str = format!("cog.{}", remaining.join("."));
                 // Try as module.item
-                if let Some((module_key, item_name)) = self.find_inline_module_for_import(&path_str, true) {
+                if let Some((module_key, item_name)) =
+                    self.find_inline_module_for_import(&path_str, true)
+                {
                     // Build a synthetic path with only name segments for inline module resolution
-                    let synthetic_segments: List<PathSegment> = remaining.iter()
+                    let synthetic_segments: List<PathSegment> = remaining
+                        .iter()
                         .map(|s| PathSegment::Name(verum_ast::ty::Ident::new(s.as_str(), span)))
                         .collect();
                     let synthetic_path = verum_ast::ty::Path::new(synthetic_segments, span);
 
                     // First try looking up the first segment as inline module
-                    if self.inline_modules.contains_key(&verum_common::Text::from(remaining[0].as_str())) {
+                    if self
+                        .inline_modules
+                        .contains_key(&verum_common::Text::from(remaining[0].as_str()))
+                    {
                         if let Ok(result) = self.resolve_inline_module_path(&synthetic_path, span) {
                             return Ok(result);
                         }
                     }
                     // Try with cog-prefixed module key
                     let first_cog = format!("cog.{}", remaining[0]);
-                    if self.inline_modules.contains_key(&verum_common::Text::from(first_cog.as_str())) {
+                    if self
+                        .inline_modules
+                        .contains_key(&verum_common::Text::from(first_cog.as_str()))
+                    {
                         // Navigate inline modules starting from the cog-prefixed module
-                        if let Some(module) = self.inline_modules.get(&verum_common::Text::from(module_key.as_str())).cloned() {
+                        if let Some(module) = self
+                            .inline_modules
+                            .get(&verum_common::Text::from(module_key.as_str()))
+                            .cloned()
+                        {
                             if let Some(items) = &module.items {
                                 for item in items.iter() {
                                     match &item.kind {
-                                        verum_ast::ItemKind::Type(type_decl) if type_decl.name.name.as_str() == item_name => {
-                                            if let Err(e) = self.register_type_declaration(type_decl) {
-                                                tracing::debug!("Failed to register type from crate path: {}", e);
+                                        verum_ast::ItemKind::Type(type_decl)
+                                            if type_decl.name.name.as_str() == item_name =>
+                                        {
+                                            if let Err(e) =
+                                                self.register_type_declaration(type_decl)
+                                            {
+                                                tracing::debug!(
+                                                    "Failed to register type from crate path: {}",
+                                                    e
+                                                );
                                             }
-                                            if let Maybe::Some(ty) = self.ctx.lookup_type(&item_name) {
+                                            if let Maybe::Some(ty) =
+                                                self.ctx.lookup_type(&item_name)
+                                            {
                                                 return Ok(InferResult::new(ty.clone()));
                                             }
                                             return Ok(InferResult::new(Type::Named {
-                                                path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(item_name.as_str(), span)),
+                                                path: verum_ast::ty::Path::single(
+                                                    verum_ast::ty::Ident::new(
+                                                        item_name.as_str(),
+                                                        span,
+                                                    ),
+                                                ),
                                                 args: List::new(),
                                             }));
                                         }
-                                        verum_ast::ItemKind::Function(func) if func.name.name.as_str() == item_name => {
+                                        verum_ast::ItemKind::Function(func)
+                                            if func.name.name.as_str() == item_name =>
+                                        {
                                             let func_ty = self.infer_function_type(func)?;
                                             return Ok(InferResult::new(func_ty));
                                         }
-                                        verum_ast::ItemKind::Const(c) if c.name.name.as_str() == item_name => {
+                                        verum_ast::ItemKind::Const(c)
+                                            if c.name.name.as_str() == item_name =>
+                                        {
                                             let const_ty = self.ast_to_type(&c.ty)?;
                                             return Ok(InferResult::new(const_ty));
                                         }
@@ -1271,7 +1386,10 @@ impl TypeChecker {
                 "cog".to_string()
             };
             // Build remaining segments after super
-            let remaining: Vec<String> = path.segments.iter().skip(1)
+            let remaining: Vec<String> = path
+                .segments
+                .iter()
+                .skip(1)
                 .filter_map(|seg| match seg {
                     PathSegment::Name(ident) => Some(ident.name.as_str().to_string()),
                     _ => None,
@@ -1279,28 +1397,45 @@ impl TypeChecker {
                 .collect();
             if !remaining.is_empty() {
                 let resolved_path = format!("{}.{}", parent, remaining.join("."));
-                if let Some((module_key, item_name)) = self.find_inline_module_for_import(&resolved_path, false) {
-                    if let Some(module) = self.inline_modules.get(&verum_common::Text::from(module_key.as_str())).cloned() {
+                if let Some((module_key, item_name)) =
+                    self.find_inline_module_for_import(&resolved_path, false)
+                {
+                    if let Some(module) = self
+                        .inline_modules
+                        .get(&verum_common::Text::from(module_key.as_str()))
+                        .cloned()
+                    {
                         if let Some(items) = &module.items {
                             for item in items.iter() {
                                 match &item.kind {
-                                    verum_ast::ItemKind::Type(type_decl) if type_decl.name.name.as_str() == item_name => {
+                                    verum_ast::ItemKind::Type(type_decl)
+                                        if type_decl.name.name.as_str() == item_name =>
+                                    {
                                         if let Err(e) = self.register_type_declaration(type_decl) {
-                                            tracing::debug!("Failed to register type from super path: {}", e);
+                                            tracing::debug!(
+                                                "Failed to register type from super path: {}",
+                                                e
+                                            );
                                         }
                                         if let Maybe::Some(ty) = self.ctx.lookup_type(&item_name) {
                                             return Ok(InferResult::new(ty.clone()));
                                         }
                                         return Ok(InferResult::new(Type::Named {
-                                            path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(item_name.as_str(), span)),
+                                            path: verum_ast::ty::Path::single(
+                                                verum_ast::ty::Ident::new(item_name.as_str(), span),
+                                            ),
                                             args: List::new(),
                                         }));
                                     }
-                                    verum_ast::ItemKind::Function(func) if func.name.name.as_str() == item_name => {
+                                    verum_ast::ItemKind::Function(func)
+                                        if func.name.name.as_str() == item_name =>
+                                    {
                                         let func_ty = self.infer_function_type(func)?;
                                         return Ok(InferResult::new(func_ty));
                                     }
-                                    verum_ast::ItemKind::Const(c) if c.name.name.as_str() == item_name => {
+                                    verum_ast::ItemKind::Const(c)
+                                        if c.name.name.as_str() == item_name =>
+                                    {
                                         let const_ty = self.ast_to_type(&c.ty)?;
                                         return Ok(InferResult::new(const_ty));
                                     }
@@ -1317,16 +1452,21 @@ impl TypeChecker {
                         // Split parent into segments and add remaining
                         let parent_parts: Vec<&str> = parent.split('.').collect();
                         // Use only the short name (not cog-prefixed) for inline module lookup
-                        let short_parent = if parent_parts.first() == Some(&"cog") && parent_parts.len() > 1 {
-                            parent_parts[1..].to_vec()
-                        } else {
-                            parent_parts
-                        };
-                        let mut segs: Vec<PathSegment> = short_parent.iter()
+                        let short_parent =
+                            if parent_parts.first() == Some(&"cog") && parent_parts.len() > 1 {
+                                parent_parts[1..].to_vec()
+                            } else {
+                                parent_parts
+                            };
+                        let mut segs: Vec<PathSegment> = short_parent
+                            .iter()
                             .map(|s| PathSegment::Name(verum_ast::ty::Ident::new(*s, span)))
                             .collect();
                         for r in &remaining {
-                            segs.push(PathSegment::Name(verum_ast::ty::Ident::new(r.as_str(), span)));
+                            segs.push(PathSegment::Name(verum_ast::ty::Ident::new(
+                                r.as_str(),
+                                span,
+                            )));
                         }
                         segs.into()
                     };
@@ -1427,10 +1567,12 @@ impl TypeChecker {
                                             })?
                                         }
                                         _ => {
-                                            return Err(TypeError::Other(verum_common::Text::from(format!(
-                                                "Cannot access field '{}' on type '{}'",
-                                                field_name, type_name
-                                            ))));
+                                            return Err(TypeError::Other(
+                                                verum_common::Text::from(format!(
+                                                    "Cannot access field '{}' on type '{}'",
+                                                    field_name, type_name
+                                                )),
+                                            ));
                                         }
                                     }
                                 }
@@ -1448,24 +1590,24 @@ impl TypeChecker {
                                         )))
                                     })?
                                 }
-                                _ => {
-                                    match self.ctx.lookup_type(name.as_str()) {
-                                        Option::Some(Type::Record(fields)) => {
-                                            fields.get(&field_name).cloned().ok_or_else(|| {
-                                                TypeError::Other(verum_common::Text::from(format!(
-                                                    "field '{}' not found in type '{}'",
-                                                    field_name, name
-                                                )))
-                                            })?
-                                        }
-                                        _ => {
-                                            return Err(TypeError::Other(verum_common::Text::from(format!(
+                                _ => match self.ctx.lookup_type(name.as_str()) {
+                                    Option::Some(Type::Record(fields)) => {
+                                        fields.get(&field_name).cloned().ok_or_else(|| {
+                                            TypeError::Other(verum_common::Text::from(format!(
+                                                "field '{}' not found in type '{}'",
+                                                field_name, name
+                                            )))
+                                        })?
+                                    }
+                                    _ => {
+                                        return Err(TypeError::Other(verum_common::Text::from(
+                                            format!(
                                                 "Cannot access field '{}' on type '{}'",
                                                 field_name, name
-                                            ))));
-                                        }
+                                            ),
+                                        )));
                                     }
-                                }
+                                },
                             }
                         }
                         _ => {
@@ -1524,7 +1666,8 @@ pub(crate) fn is_wellknown_type_name(name: &str) -> bool {
 
     // Only match types that start with an uppercase letter (type names)
     // and are commonly used across stdlib
-    matches!(name,
+    matches!(
+        name,
         // Time/date types
         "DateTime" | "Duration" | "Instant" | "SystemTime" | "NaiveDate"
         | "FixedOffset" | "Utc" | "TimeZone" | "Date" | "Time" | "Tz"

@@ -816,7 +816,8 @@ impl HeapTrackingStatistics {
             self.definite_stores,
             self.may_stores,
             self.references_tracked
-        ).into()
+        )
+        .into()
     }
 }
 

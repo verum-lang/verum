@@ -59,10 +59,7 @@ impl Context {
     /// [`Context::check`] records a Z3-routed query into the collector
     /// — this is how the compiler's `session.routing_stats()` learns
     /// about real solver work.
-    pub fn with_routing_stats(
-        self,
-        stats: Arc<crate::routing_stats::RoutingStats>,
-    ) -> Self {
+    pub fn with_routing_stats(self, stats: Arc<crate::routing_stats::RoutingStats>) -> Self {
         let inner = ContextInner {
             config: self.inner.config.clone(),
             routing_stats: Some(stats),

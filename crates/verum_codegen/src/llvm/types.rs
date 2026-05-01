@@ -6,8 +6,8 @@
 
 use verum_llvm::context::Context;
 use verum_llvm::types::{
-    ArrayType, BasicMetadataTypeEnum, BasicTypeEnum, FloatType, FunctionType, IntType,
-    PointerType, ScalableVectorType, StructType, VectorType, VoidType,
+    ArrayType, BasicMetadataTypeEnum, BasicTypeEnum, FloatType, FunctionType, IntType, PointerType,
+    ScalableVectorType, StructType, VectorType, VoidType,
 };
 use verum_vbc::types::{TypeId, TypeRef};
 
@@ -76,10 +76,9 @@ impl<'ctx> TypeLowering<'ctx> {
             }
             TypeRef::Slice(_) => {
                 // Slices are fat pointers: { ptr, len }
-                let slice_type = self.context.struct_type(
-                    &[self.ptr_type.into(), self.i64_type.into()],
-                    false,
-                );
+                let slice_type = self
+                    .context
+                    .struct_type(&[self.ptr_type.into(), self.i64_type.into()], false);
                 Ok(slice_type.into())
             }
         }

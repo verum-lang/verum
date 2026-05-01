@@ -32,8 +32,8 @@
 use std::time::{Duration, Instant};
 
 use verum_ast::decl::{
-    CalcRelation, CalculationChain, ProofBody, ProofCase, ProofMethod,
-    ProofStep, ProofStepKind, ProofStructure, TacticExpr, TacticMatchArm, TheoremDecl,
+    CalcRelation, CalculationChain, ProofBody, ProofCase, ProofMethod, ProofStep, ProofStepKind,
+    ProofStructure, TacticExpr, TacticMatchArm, TheoremDecl,
 };
 use verum_ast::expr::ExprKind;
 use verum_ast::literal::LiteralKind;
@@ -41,12 +41,10 @@ use verum_ast::pretty::format_expr;
 use verum_ast::{Expr, Ident};
 use verum_common::{Heap, List, Maybe, Text};
 use verum_smt::context::Context;
-use verum_smt::proof_search::{
-    MatchArm, ProofError, ProofGoal, ProofSearchEngine, ProofTactic,
-};
+use verum_smt::proof_search::{MatchArm, ProofError, ProofGoal, ProofSearchEngine, ProofTactic};
 use verum_smt::verify::VerificationError;
 use verum_verification::tactic_evaluation::{Goal, GoalMetadata, Hypothesis};
-use verum_verification::tactic_heuristics::{suggest_next_tactics, TacticSuggestion};
+use verum_verification::tactic_heuristics::{TacticSuggestion, suggest_next_tactics};
 
 // ---------------------------------------------------------------------------
 // Public result types
@@ -168,8 +166,7 @@ pub fn convert_tactic(tactic: &TacticExpr) -> ProofTactic {
             if lemmas.is_empty() && matches!(at_target, Maybe::None) {
                 ProofTactic::Simplify
             } else {
-                let lemma_texts: List<Text> =
-                    lemmas.iter().map(|l| format_expr(l)).collect();
+                let lemma_texts: List<Text> = lemmas.iter().map(|l| format_expr(l)).collect();
                 // If there is a target, compose Simp with a focused rewrite
                 if let Maybe::Some(target) = at_target {
                     let simp = if lemma_texts.is_empty() {
@@ -257,26 +254,21 @@ pub fn convert_tactic(tactic: &TacticExpr) -> ProofTactic {
 
         TacticExpr::Try(inner) => ProofTactic::Try(Heap::new(convert_tactic(inner))),
 
-        TacticExpr::TryElse { body, fallback } => {
-            ProofTactic::Alt(
-                Heap::new(convert_tactic(body)),
-                Heap::new(convert_tactic(fallback)),
-            )
-        }
+        TacticExpr::TryElse { body, fallback } => ProofTactic::Alt(
+            Heap::new(convert_tactic(body)),
+            Heap::new(convert_tactic(fallback)),
+        ),
 
         TacticExpr::Repeat(inner) => ProofTactic::Repeat(Heap::new(convert_tactic(inner))),
 
         TacticExpr::Seq(tactics) => convert_tactic_sequence(tactics),
 
         TacticExpr::Alt(tactics) => {
-            let converted: List<ProofTactic> =
-                tactics.iter().map(|t| convert_tactic(t)).collect();
+            let converted: List<ProofTactic> = tactics.iter().map(|t| convert_tactic(t)).collect();
             build_alt(converted)
         }
 
-        TacticExpr::AllGoals(inner) => {
-            ProofTactic::AllGoals(Heap::new(convert_tactic(inner)))
-        }
+        TacticExpr::AllGoals(inner) => ProofTactic::AllGoals(Heap::new(convert_tactic(inner))),
 
         TacticExpr::Focus(inner) => ProofTactic::Focus(Heap::new(convert_tactic(inner))),
 
@@ -348,11 +340,7 @@ fn convert_tactic_sequence(tactics: &List<TacticExpr>) -> ProofTactic {
             if i == 0 {
                 return let_node;
             }
-            let prefix: List<ProofTactic> = tactics
-                .iter()
-                .take(i)
-                .map(convert_tactic)
-                .collect();
+            let prefix: List<ProofTactic> = tactics.iter().take(i).map(convert_tactic).collect();
             return ProofTactic::Seq(Heap::new(build_seq(prefix)), Heap::new(let_node));
         }
     }
@@ -466,12 +454,8 @@ fn verify_calc_chain(
         let step_start = Instant::now();
 
         // Build the relational proposition: current_expr <rel> target
-        let proposition = build_relation_expr(
-            &current_expr,
-            &step.target,
-            &step.relation,
-            step.span,
-        );
+        let proposition =
+            build_relation_expr(&current_expr, &step.target, &step.relation, step.span);
 
         // Create a goal with current hypotheses
         let goal = ProofGoal::with_hypotheses(proposition, hypotheses.clone());
@@ -604,7 +588,11 @@ fn verify_proof_method(
             )
         }
 
-        ProofMethod::WellFoundedInduction { relation, on, cases } => {
+        ProofMethod::WellFoundedInduction {
+            relation,
+            on,
+            cases,
+        } => {
             let mut steps = List::new();
             let step_start = Instant::now();
 
@@ -713,10 +701,9 @@ fn verify_proof_method(
             Ok(steps)
         }
 
-        ProofMethod::Contradiction {
-            assumption,
-            proof,
-        } => verify_contradiction(engine, smt_ctx, assumption, proof, goal),
+        ProofMethod::Contradiction { assumption, proof } => {
+            verify_contradiction(engine, smt_ctx, assumption, proof, goal)
+        }
     }
 }
 
@@ -741,7 +728,11 @@ fn verify_induction(
     // not as the only way to check it. Same pattern as `by cases`.
     if let Ok(auto_sub) = engine.execute_tactic(&ProofTactic::Auto, goal) {
         if auto_sub.is_empty() {
-            let label = if strong { "strong induction" } else { "induction" };
+            let label = if strong {
+                "strong induction"
+            } else {
+                "induction"
+            };
             steps.push(VerifiedStep {
                 description: Text::from(format!("{label} (goal closed by auto)")),
                 tactic_used: Text::from(format!("{label}→auto")),
@@ -779,7 +770,11 @@ fn verify_induction(
         }
     })?;
 
-    let kind_label = if strong { "strong induction" } else { "induction" };
+    let kind_label = if strong {
+        "strong induction"
+    } else {
+        "induction"
+    };
     steps.push(VerifiedStep {
         description: Text::from(format!("{} on '{}'", kind_label, var_name)),
         tactic_used: Text::from(kind_label),
@@ -789,7 +784,11 @@ fn verify_induction(
     // Verify each case with InductionCase context so `have IH: …;`
     // without an explicit `by` clause is admitted as the IH.
     let case_steps = verify_proof_cases_ctx(
-        engine, smt_ctx, cases, &sub_goals, StepContext::InductionCase,
+        engine,
+        smt_ctx,
+        cases,
+        &sub_goals,
+        StepContext::InductionCase,
     )?;
     steps.extend(case_steps);
     Ok(steps)
@@ -815,18 +814,15 @@ fn verify_contradiction(
             ns
         },
     };
-    let sub_goals = engine
-        .execute_tactic(&intro_tactic, goal)
-        .map_err(|e| ProofVerificationError::MethodFailed {
+    let sub_goals = engine.execute_tactic(&intro_tactic, goal).map_err(|e| {
+        ProofVerificationError::MethodFailed {
             method: "contradiction (intro)".into(),
             reason: format!("{}", e).into(),
-        })?;
+        }
+    })?;
 
     steps.push(VerifiedStep {
-        description: Text::from(format!(
-            "assume negation as '{}'",
-            assumption.name
-        )),
+        description: Text::from(format!("assume negation as '{}'", assumption.name)),
         tactic_used: Text::from("intro (contradiction)"),
         duration: step_start.elapsed(),
     });
@@ -934,9 +930,8 @@ fn verify_proof_cases_ctx(
         // context kind so `have` steps are admitted only when the
         // parent is an induction case (the IH surface).
         let mut acc = case_hypotheses.clone();
-        let inner_steps = verify_proof_steps_accumulating_ctx(
-            engine, smt_ctx, &case.proof, &mut acc, ctx_kind,
-        )?;
+        let inner_steps =
+            verify_proof_steps_accumulating_ctx(engine, smt_ctx, &case.proof, &mut acc, ctx_kind)?;
 
         steps.push(VerifiedStep {
             description: Text::from(format!("case {}: pattern {:?}", i + 1, case.pattern)),
@@ -977,7 +972,13 @@ fn verify_proof_steps(
     initial_hypotheses: &List<Expr>,
 ) -> Result<List<VerifiedStep>, ProofVerificationError> {
     let mut accumulated = initial_hypotheses.clone();
-    verify_proof_steps_accumulating_ctx(engine, smt_ctx, steps, &mut accumulated, StepContext::TopLevel)
+    verify_proof_steps_accumulating_ctx(
+        engine,
+        smt_ctx,
+        steps,
+        &mut accumulated,
+        StepContext::TopLevel,
+    )
 }
 
 /// Context in which a step sequence is being verified. Admitted
@@ -1014,13 +1015,7 @@ fn verify_proof_steps_accumulating(
     steps: &List<ProofStep>,
     hypotheses: &mut List<Expr>,
 ) -> Result<List<VerifiedStep>, ProofVerificationError> {
-    verify_proof_steps_accumulating_ctx(
-        engine,
-        smt_ctx,
-        steps,
-        hypotheses,
-        StepContext::TopLevel,
-    )
+    verify_proof_steps_accumulating_ctx(engine, smt_ctx, steps, hypotheses, StepContext::TopLevel)
 }
 
 fn verify_proof_steps_accumulating_ctx(
@@ -1060,10 +1055,8 @@ fn verify_proof_steps_accumulating_ctx(
                 // proposition as an axiomatic hypothesis (with an
                 // admit-flag in the tactic_used name so the
                 // certificate still tracks it).
-                let implicit_trivial = matches!(
-                    justification,
-                    verum_ast::decl::TacticExpr::Trivial
-                );
+                let implicit_trivial =
+                    matches!(justification, verum_ast::decl::TacticExpr::Trivial);
                 let mut admitted = false;
                 match exec_result {
                     Ok(sub_goals) => {
@@ -1120,13 +1113,12 @@ fn verify_proof_steps_accumulating_ctx(
                 let goal =
                     ProofGoal::with_hypotheses(proposition.as_ref().clone(), hypotheses.clone());
                 let tactic = convert_tactic(justification);
-                let sub_goals =
-                    engine
-                        .execute_tactic(&tactic, &goal)
-                        .map_err(|e| ProofVerificationError::StepFailed {
-                            step: Text::from("show"),
-                            reason: format!("{}", e).into(),
-                        })?;
+                let sub_goals = engine.execute_tactic(&tactic, &goal).map_err(|e| {
+                    ProofVerificationError::StepFailed {
+                        step: Text::from("show"),
+                        reason: format!("{}", e).into(),
+                    }
+                })?;
 
                 discharge_subgoals(engine, smt_ctx, &sub_goals, "show")?;
 
@@ -1151,13 +1143,12 @@ fn verify_proof_steps_accumulating_ctx(
                 let goal =
                     ProofGoal::with_hypotheses(proposition.as_ref().clone(), hypotheses.clone());
                 let tactic = convert_tactic(justification);
-                let sub_goals =
-                    engine
-                        .execute_tactic(&tactic, &goal)
-                        .map_err(|e| ProofVerificationError::StepFailed {
-                            step: Text::from("suffices"),
-                            reason: format!("{}", e).into(),
-                        })?;
+                let sub_goals = engine.execute_tactic(&tactic, &goal).map_err(|e| {
+                    ProofVerificationError::StepFailed {
+                        step: Text::from("suffices"),
+                        reason: format!("{}", e).into(),
+                    }
+                })?;
 
                 discharge_subgoals(engine, smt_ctx, &sub_goals, "suffices")?;
 
@@ -1166,10 +1157,7 @@ fn verify_proof_steps_accumulating_ctx(
                 hypotheses.push(proposition.as_ref().clone());
 
                 verified.push(VerifiedStep {
-                    description: Text::from(format!(
-                        "suffices {}",
-                        format_expr(proposition)
-                    )),
+                    description: Text::from(format!("suffices {}", format_expr(proposition))),
                     tactic_used: format!("{:?}", justification).into(),
                     duration: step_start.elapsed(),
                 });
@@ -1194,19 +1182,17 @@ fn verify_proof_steps_accumulating_ctx(
                 // into a witness `x` and its proof. We execute a destruct
                 // tactic on the `from` expression.
                 let from_text = format_expr(from);
-                let goal =
-                    ProofGoal::with_hypotheses(from.as_ref().clone(), hypotheses.clone());
+                let goal = ProofGoal::with_hypotheses(from.as_ref().clone(), hypotheses.clone());
                 let tactic = ProofTactic::Destruct {
                     hypothesis: from_text.clone(),
                 };
 
-                let sub_goals =
-                    engine
-                        .execute_tactic(&tactic, &goal)
-                        .map_err(|e| ProofVerificationError::StepFailed {
-                            step: Text::from("obtain"),
-                            reason: format!("{}", e).into(),
-                        })?;
+                let sub_goals = engine.execute_tactic(&tactic, &goal).map_err(|e| {
+                    ProofVerificationError::StepFailed {
+                        step: Text::from("obtain"),
+                        reason: format!("{}", e).into(),
+                    }
+                })?;
 
                 // Add the destructed components as hypotheses
                 for sg in &sub_goals {
@@ -1214,10 +1200,7 @@ fn verify_proof_steps_accumulating_ctx(
                 }
 
                 verified.push(VerifiedStep {
-                    description: Text::from(format!(
-                        "obtain {:?} from {}",
-                        pattern, from_text
-                    )),
+                    description: Text::from(format!("obtain {:?} from {}", pattern, from_text)),
                     tactic_used: Text::from("obtain/destruct"),
                     duration: step_start.elapsed(),
                 });
@@ -1236,13 +1219,12 @@ fn verify_proof_steps_accumulating_ctx(
                 let tactic = ProofTactic::CasesOn {
                     hypothesis: format_expr(scrutinee),
                 };
-                let sub_goals =
-                    engine
-                        .execute_tactic(&tactic, &goal)
-                        .map_err(|e| ProofVerificationError::StepFailed {
-                            step: Text::from("cases"),
-                            reason: format!("{}", e).into(),
-                        })?;
+                let sub_goals = engine.execute_tactic(&tactic, &goal).map_err(|e| {
+                    ProofVerificationError::StepFailed {
+                        step: Text::from("cases"),
+                        reason: format!("{}", e).into(),
+                    }
+                })?;
 
                 let case_steps = verify_proof_cases(engine, smt_ctx, cases, &sub_goals)?;
                 verified.extend(case_steps);
@@ -1253,8 +1235,7 @@ fn verify_proof_steps_accumulating_ctx(
                 goal_index: _,
                 steps: inner_steps,
             } => {
-                let inner =
-                    verify_proof_steps(engine, smt_ctx, inner_steps, &hypotheses)?;
+                let inner = verify_proof_steps(engine, smt_ctx, inner_steps, &hypotheses)?;
                 verified.extend(inner);
             }
 
@@ -1462,10 +1443,7 @@ pub fn verify_proof_body_with_aliases(
                     e.bridge_name,
                     e.args_rendered.join(", "),
                 );
-                let suggestion = format!(
-                    "kernel `{}` reports: {}",
-                    e.bridge_name, e.reason,
-                );
+                let suggestion = format!("kernel `{}` reports: {}", e.bridge_name, e.reason,);
                 UnprovedSubgoal {
                     goal: Text::from(goal_text),
                     hypotheses: List::new(),
@@ -1588,10 +1566,7 @@ pub fn verify_proof_body_with_aliases(
                 Ok(()) => {
                     let mut steps = List::new();
                     steps.push(VerifiedStep {
-                        description: Text::from(format!(
-                            "proof term: {}",
-                            format_expr(proof_term)
-                        )),
+                        description: Text::from(format!("proof term: {}", format_expr(proof_term))),
                         tactic_used: Text::from("exact/auto"),
                         duration: step_start.elapsed(),
                     });
@@ -1609,10 +1584,7 @@ pub fn verify_proof_body_with_aliases(
                     suggestions.extend(build_suggestions_from_error(&e));
                     unproved.push(UnprovedSubgoal {
                         goal: format_expr(&proposition),
-                        hypotheses: hypotheses
-                            .iter()
-                            .map(|h| format_expr(h))
-                            .collect(),
+                        hypotheses: hypotheses.iter().map(|h| format_expr(h)).collect(),
                         suggestions,
                     });
                     ProofVerificationResult::Failed {
@@ -1656,18 +1628,12 @@ pub fn verify_proof_body_with_aliases(
                 }
                 Err(e) => {
                     let mut unproved = List::new();
-                    let mut suggestions = heuristic_suggestions(
-                        &proposition,
-                        &hypotheses,
-                        pv_error_tactic_name(&e),
-                    );
+                    let mut suggestions =
+                        heuristic_suggestions(&proposition, &hypotheses, pv_error_tactic_name(&e));
                     suggestions.extend(build_suggestions_from_pv_error(&e));
                     unproved.push(UnprovedSubgoal {
                         goal: format_expr(&proposition),
-                        hypotheses: hypotheses
-                            .iter()
-                            .map(|h| format_expr(h))
-                            .collect(),
+                        hypotheses: hypotheses.iter().map(|h| format_expr(h)).collect(),
                         suggestions,
                     });
                     ProofVerificationResult::Failed {
@@ -1681,9 +1647,14 @@ pub fn verify_proof_body_with_aliases(
         // ----------------------------------------------------------------
         // Structured proof
         // ----------------------------------------------------------------
-        ProofBody::Structured(structure) => {
-            verify_structured_proof(engine, smt_ctx, structure, &primary_goal, &theorem_name, proof_start)
-        }
+        ProofBody::Structured(structure) => verify_structured_proof(
+            engine,
+            smt_ctx,
+            structure,
+            &primary_goal,
+            &theorem_name,
+            proof_start,
+        ),
 
         // ----------------------------------------------------------------
         // Proof by method (induction / cases / contradiction)
@@ -1703,18 +1674,12 @@ pub fn verify_proof_body_with_aliases(
                 }
                 Err(e) => {
                     let mut unproved = List::new();
-                    let mut suggestions = heuristic_suggestions(
-                        &proposition,
-                        &hypotheses,
-                        pv_error_tactic_name(&e),
-                    );
+                    let mut suggestions =
+                        heuristic_suggestions(&proposition, &hypotheses, pv_error_tactic_name(&e));
                     suggestions.extend(build_suggestions_from_pv_error(&e));
                     unproved.push(UnprovedSubgoal {
                         goal: format_expr(&proposition),
-                        hypotheses: hypotheses
-                            .iter()
-                            .map(|h| format_expr(h))
-                            .collect(),
+                        hypotheses: hypotheses.iter().map(|h| format_expr(h)).collect(),
                         suggestions,
                     });
                     ProofVerificationResult::Failed {
@@ -1758,10 +1723,8 @@ fn verify_structured_proof(
 
                 // The conclusion tactic closes the original goal with
                 // all hypotheses accumulated during step verification.
-                let enriched_goal = ProofGoal::with_hypotheses(
-                    proposition.clone(),
-                    hypotheses.clone(),
-                );
+                let enriched_goal =
+                    ProofGoal::with_hypotheses(proposition.clone(), hypotheses.clone());
 
                 match engine.execute_tactic(&tactic, &enriched_goal) {
                     Ok(sub_goals) => {
@@ -1777,10 +1740,7 @@ fn verify_structured_proof(
                             suggestions.extend(build_suggestions_from_pv_error(&e));
                             unproved.push(UnprovedSubgoal {
                                 goal: format_expr(&proposition),
-                                hypotheses: hypotheses
-                                    .iter()
-                                    .map(|h| format_expr(h))
-                                    .collect(),
+                                hypotheses: hypotheses.iter().map(|h| format_expr(h)).collect(),
                                 suggestions,
                             });
                             return ProofVerificationResult::Failed {
@@ -1802,10 +1762,7 @@ fn verify_structured_proof(
                         suggestions.extend(build_suggestions_from_proof_error(&e));
                         unproved.push(UnprovedSubgoal {
                             goal: format_expr(&proposition),
-                            hypotheses: hypotheses
-                                .iter()
-                                .map(|h| format_expr(h))
-                                .collect(),
+                            hypotheses: hypotheses.iter().map(|h| format_expr(h)).collect(),
                             suggestions,
                         });
                         return ProofVerificationResult::Failed {
@@ -1819,10 +1776,8 @@ fn verify_structured_proof(
                 // applied to an enriched `ProofGoal` that carries every
                 // hypothesis accumulated by the `have` / `show` steps
                 // plus the theorem's own `requires`.
-                let closer_goal = ProofGoal::with_hypotheses(
-                    proposition.clone(),
-                    hypotheses.clone(),
-                );
+                let closer_goal =
+                    ProofGoal::with_hypotheses(proposition.clone(), hypotheses.clone());
                 let closer_result = engine
                     .execute_tactic(&ProofTactic::Auto, &closer_goal)
                     .and_then(|sub_goals| {
@@ -1831,10 +1786,9 @@ fn verify_structured_proof(
                         } else {
                             // Auto opened further subgoals (nested
                             // conjunction split, etc.). Recurse.
-                            discharge_subgoals(engine, smt_ctx, &sub_goals, "closer")
-                                .map_err(|pe| ProofError::TacticFailed(
-                                    format!("closer: {:?}", pe).into(),
-                                ))
+                            discharge_subgoals(engine, smt_ctx, &sub_goals, "closer").map_err(
+                                |pe| ProofError::TacticFailed(format!("closer: {:?}", pe).into()),
+                            )
                         }
                     });
                 if let Err(e) = closer_result {
@@ -1844,10 +1798,7 @@ fn verify_structured_proof(
                     suggestions.extend(build_suggestions_from_proof_error(&e));
                     unproved.push(UnprovedSubgoal {
                         goal: format_expr(&proposition),
-                        hypotheses: hypotheses
-                            .iter()
-                            .map(|h| format_expr(h))
-                            .collect(),
+                        hypotheses: hypotheses.iter().map(|h| format_expr(h)).collect(),
                         suggestions,
                     });
                     return ProofVerificationResult::Failed {
@@ -1857,9 +1808,9 @@ fn verify_structured_proof(
                 }
             }
 
-            let has_incomplete = verified_steps.iter().any(|s| {
-                s.tactic_used.contains("admit") || s.tactic_used.contains("sorry")
-            });
+            let has_incomplete = verified_steps
+                .iter()
+                .any(|s| s.tactic_used.contains("admit") || s.tactic_used.contains("sorry"));
 
             ProofVerificationResult::Verified(ProofCertificate {
                 theorem_name: theorem_name.clone(),
@@ -1901,16 +1852,10 @@ fn verify_structured_proof(
 #[derive(Debug, Clone)]
 pub enum ProofVerificationError {
     /// A tactic execution failed.
-    TacticFailed {
-        tactic: Text,
-        reason: Text,
-    },
+    TacticFailed { tactic: Text, reason: Text },
 
     /// A proof step (have/show/suffices/obtain) failed.
-    StepFailed {
-        step: Text,
-        reason: Text,
-    },
+    StepFailed { step: Text, reason: Text },
 
     /// A calculation chain step could not be justified.
     CalcStepFailed {
@@ -1921,16 +1866,10 @@ pub enum ProofVerificationError {
     },
 
     /// A subgoal could not be discharged.
-    SubgoalFailed {
-        goal: Text,
-        reason: Text,
-    },
+    SubgoalFailed { goal: Text, reason: Text },
 
     /// A proof method (induction/cases/contradiction) failed.
-    MethodFailed {
-        method: Text,
-        reason: Text,
-    },
+    MethodFailed { method: Text, reason: Text },
 
     /// Case analysis is incomplete (fewer cases than subgoals).
     IncompleteCases {
@@ -2015,17 +1954,11 @@ impl From<ProofError> for ProofVerificationError {
             },
             ProofError::NotInContext(name) => Self::TacticFailed {
                 tactic: Text::from("assumption"),
-                reason: Text::from(format!(
-                    "hypothesis `{}` is not in scope",
-                    name.as_str()
-                )),
+                reason: Text::from(format!("hypothesis `{}` is not in scope", name.as_str())),
             },
             ProofError::NotEquality(detail) => Self::TacticFailed {
                 tactic: Text::from("rewrite"),
-                reason: Text::from(format!(
-                    "target is not an equality: {}",
-                    detail.as_str()
-                )),
+                reason: Text::from(format!("target is not an equality: {}", detail.as_str())),
             },
             ProofError::InvalidProof(detail) => Self::TacticFailed {
                 tactic: Text::from("proof"),
@@ -2048,9 +1981,7 @@ fn split_tactic_reason(input: &str) -> (Text, Text) {
     }
     // Pattern 2: bare leading identifier token up to the first space.
     if let Some((first, rest)) = input.split_once(char::is_whitespace) {
-        if !first.is_empty()
-            && first.chars().all(|c| c.is_alphanumeric() || c == '_')
-        {
+        if !first.is_empty() && first.chars().all(|c| c.is_alphanumeric() || c == '_') {
             let rest = rest.trim_start_matches(|c: char| c == ':' || c.is_whitespace());
             return (Text::from(first), Text::from(rest));
         }
@@ -2166,12 +2097,8 @@ fn build_suggestions_from_proof_error(err: &ProofError) -> List<Text> {
 /// just failed.
 fn pv_error_tactic_name(err: &ProofVerificationError) -> Maybe<&str> {
     match err {
-        ProofVerificationError::TacticFailed { tactic, .. } => {
-            Maybe::Some(tactic.as_str())
-        }
-        ProofVerificationError::MethodFailed { method, .. } => {
-            Maybe::Some(method.as_str())
-        }
+        ProofVerificationError::TacticFailed { tactic, .. } => Maybe::Some(tactic.as_str()),
+        ProofVerificationError::MethodFailed { method, .. } => Maybe::Some(method.as_str()),
         _ => Maybe::None,
     }
 }
@@ -2216,8 +2143,7 @@ fn heuristic_suggestions(
         Maybe::None => vec![],
     };
 
-    let ranked: Vec<TacticSuggestion> =
-        suggest_next_tactics(&goal, &exhausted_vec);
+    let ranked: Vec<TacticSuggestion> = suggest_next_tactics(&goal, &exhausted_vec);
 
     ranked
         .into_iter()
@@ -2270,8 +2196,7 @@ pub fn propositional_witness_hypotheses(theorem: &TheoremDecl) -> Vec<Expr> {
     use verum_ast::ty::{GenericParamKind, TypeBoundKind, TypeKind};
 
     // Collect names of generics bound by the `Prop` protocol.
-    let mut prop_generic_names: std::collections::HashSet<Text> =
-        std::collections::HashSet::new();
+    let mut prop_generic_names: std::collections::HashSet<Text> = std::collections::HashSet::new();
     for g in &theorem.generics {
         if let GenericParamKind::Type { name, bounds, .. } = &g.kind {
             for b in bounds {
@@ -2303,9 +2228,9 @@ pub fn propositional_witness_hypotheses(theorem: &TheoremDecl) -> Vec<Expr> {
                 if let Some(id) = path.as_ident() {
                     if prop_generic_names.contains(&id.name) && emitted.insert(id.name.clone()) {
                         out.push(Expr::new(
-                            verum_ast::expr::ExprKind::Path(
-                                verum_ast::ty::Path::single(id.clone()),
-                            ),
+                            verum_ast::expr::ExprKind::Path(verum_ast::ty::Path::single(
+                                id.clone(),
+                            )),
                             ty.span,
                         ));
                     }
@@ -2338,11 +2263,24 @@ pub fn variant_exhaustiveness_hypotheses(
 
     let mut out: Vec<Expr> = Vec::new();
     for param in &theorem.params {
-        let FunctionParamKind::Regular { pattern, ty, .. } = &param.kind else { continue; };
-        let PatternKind::Ident { name: param_name, .. } = &pattern.kind else { continue; };
-        let TypeKind::Path(path) = &ty.kind else { continue; };
-        let Some(type_id) = path.as_ident() else { continue; };
-        let Some(ctors) = variant_map.get(&type_id.name) else { continue; };
+        let FunctionParamKind::Regular { pattern, ty, .. } = &param.kind else {
+            continue;
+        };
+        let PatternKind::Ident {
+            name: param_name, ..
+        } = &pattern.kind
+        else {
+            continue;
+        };
+        let TypeKind::Path(path) = &ty.kind else {
+            continue;
+        };
+        let Some(type_id) = path.as_ident() else {
+            continue;
+        };
+        let Some(ctors) = variant_map.get(&type_id.name) else {
+            continue;
+        };
         if ctors.is_empty() {
             continue;
         }
@@ -2358,10 +2296,7 @@ pub fn variant_exhaustiveness_hypotheses(
                 ]),
                 ty.span,
             );
-            let qualified_expr = Expr::new(
-                ExprKind::Path(qualified_path),
-                ty.span,
-            );
+            let qualified_expr = Expr::new(ExprKind::Path(qualified_path), ty.span);
             let param_path = Expr::new(
                 ExprKind::Path(verum_ast::ty::Path::single(param_name.clone())),
                 ty.span,
@@ -2465,9 +2400,7 @@ fn collect_refinements(
             out.push(rewritten);
             collect_refinements(base, param_ident, out, alias_map);
         }
-        TypeKind::Bounded { base, .. } => {
-            collect_refinements(base, param_ident, out, alias_map)
-        }
+        TypeKind::Bounded { base, .. } => collect_refinements(base, param_ident, out, alias_map),
         // Nominal type reference (`n: FanoDim`). If the name resolves to an
         // entry in the precomputed alias map, contribute every stored
         // predicate with `self` rewritten to the parameter name. The map is
@@ -2477,10 +2410,8 @@ fn collect_refinements(
             if let verum_ast::PathSegment::Name(id) = &path.segments[0] {
                 if let Some(preds) = alias_map.get(&id.name) {
                     for pred in preds {
-                        let rewritten = substitute_ident(
-                            pred,
-                            &[(Text::from("self"), param_ident.clone())],
-                        );
+                        let rewritten =
+                            substitute_ident(pred, &[(Text::from("self"), param_ident.clone())]);
                         out.push(rewritten);
                     }
                 }
@@ -2512,8 +2443,8 @@ fn collect_refinements(
 /// ite-chain handles exhaustiveness indirectly when the user
 /// enumerates all constructors.
 pub fn variant_disjointness_axioms(module: &verum_ast::Module) -> Vec<Expr> {
-    use verum_ast::decl::TypeDeclBody;
     use verum_ast::ItemKind;
+    use verum_ast::decl::TypeDeclBody;
 
     let mut axioms: Vec<Expr> = Vec::new();
     for item in &module.items {
@@ -2531,8 +2462,7 @@ pub fn variant_disjointness_axioms(module: &verum_ast::Module) -> Vec<Expr> {
                 // same canonical construction here.
                 let make_variant_path = |v_name: &verum_common::Text| -> Expr {
                     let type_ident = verum_ast::ty::Ident::new(type_name, type_span);
-                    let variant_ident =
-                        verum_ast::ty::Ident::new(v_name.as_str(), type_span);
+                    let variant_ident = verum_ast::ty::Ident::new(v_name.as_str(), type_span);
                     let path = verum_ast::ty::Path::new(
                         List::from_iter([
                             verum_ast::ty::PathSegment::Name(type_ident),
@@ -2596,14 +2526,10 @@ pub fn register_module_lemmas(
 
     for item in &module.items {
         let (name, proposition) = match &item.kind {
-            ItemKind::Theorem(t) | ItemKind::Lemma(t) | ItemKind::Corollary(t) => (
-                t.name.name.clone(),
-                t.proposition.as_ref().clone(),
-            ),
-            ItemKind::Axiom(a) => (
-                a.name.name.clone(),
-                a.proposition.as_ref().clone(),
-            ),
+            ItemKind::Theorem(t) | ItemKind::Lemma(t) | ItemKind::Corollary(t) => {
+                (t.name.name.clone(), t.proposition.as_ref().clone())
+            }
+            ItemKind::Axiom(a) => (a.name.name.clone(), a.proposition.as_ref().clone()),
             _ => continue,
         };
 
@@ -2633,8 +2559,8 @@ pub fn build_refinement_alias_map(
     module: &verum_ast::Module,
 ) -> std::collections::HashMap<Text, Vec<Expr>> {
     use std::collections::HashMap;
-    use verum_ast::decl::TypeDeclBody;
     use verum_ast::ItemKind;
+    use verum_ast::decl::TypeDeclBody;
 
     // First pass: collect `name → body_type` for every alias/newtype
     // declaration in the module.
@@ -2685,10 +2611,7 @@ fn flatten_chain(
             if let Maybe::Some(binder) = &predicate.binding {
                 pred_expr = substitute_ident(
                     &pred_expr,
-                    &[(
-                        binder.name.clone(),
-                        Ident::new("self", predicate.span),
-                    )],
+                    &[(binder.name.clone(), Ident::new("self", predicate.span))],
                 );
             }
             // `it` → `self` normalisation (Rule 1 convention).
@@ -2778,11 +2701,12 @@ pub fn substitute_ident(expr: &Expr, from_to: &[(Text, Ident)]) -> Expr {
             ExprKind::Paren(Heap::new(substitute_ident(inner, from_to))),
             expr.span,
         ),
-        ExprKind::Call { func, type_args, args } => {
-            let new_args: List<Expr> = args
-                .iter()
-                .map(|a| substitute_ident(a, from_to))
-                .collect();
+        ExprKind::Call {
+            func,
+            type_args,
+            args,
+        } => {
+            let new_args: List<Expr> = args.iter().map(|a| substitute_ident(a, from_to)).collect();
             Expr::new(
                 ExprKind::Call {
                     func: Heap::new(substitute_ident(func, from_to)),
@@ -2798,10 +2722,7 @@ pub fn substitute_ident(expr: &Expr, from_to: &[(Text, Ident)]) -> Expr {
             type_args,
             args,
         } => {
-            let new_args: List<Expr> = args
-                .iter()
-                .map(|a| substitute_ident(a, from_to))
-                .collect();
+            let new_args: List<Expr> = args.iter().map(|a| substitute_ident(a, from_to)).collect();
             Expr::new(
                 ExprKind::MethodCall {
                     receiver: Heap::new(substitute_ident(receiver, from_to)),
@@ -2902,7 +2823,11 @@ fn substitute_result_with_true(expr: &Expr) -> Expr {
             ExprKind::Paren(Heap::new(substitute_result_with_true(inner))),
             expr.span,
         ),
-        ExprKind::Call { func, type_args, args } => {
+        ExprKind::Call {
+            func,
+            type_args,
+            args,
+        } => {
             let new_args: List<Expr> = args
                 .iter()
                 .map(|a| substitute_result_with_true(a))
@@ -3037,7 +2962,8 @@ pub fn verify_impl_axioms(
         let axiom_name_text = Text::from(obligation.axiom_name.name.as_str());
 
         // Strategy 1: explicit proof clause.
-        if let Some(tactic) = find_proof_clause_for(impl_decl, obligation.axiom_name.name.as_str()) {
+        if let Some(tactic) = find_proof_clause_for(impl_decl, obligation.axiom_name.name.as_str())
+        {
             let proof_tactic = convert_tactic(tactic);
             let goal = ProofGoal::new(obligation.proposition.clone());
             match engine.execute_tactic(&proof_tactic, &goal) {
@@ -3047,10 +2973,7 @@ pub fn verify_impl_axioms(
                 Err(err) => {
                     unverified.push(ImplObligationFailure {
                         axiom_name: axiom_name_text,
-                        reason: Text::from(format!(
-                            "explicit tactic failed: {}",
-                            err
-                        )),
+                        reason: Text::from(format!("explicit tactic failed: {}", err)),
                         origin_span: obligation.origin_span,
                         impl_span,
                         attempted_tactic: tactic_summary(&proof_tactic),

@@ -97,7 +97,11 @@ public fn main() -> Int { 0 }
         "expected error code in output: {}",
         combined
     );
-    assert!(combined.contains("bad"), "expected `bad` function in output: {}", combined);
+    assert!(
+        combined.contains("bad"),
+        "expected `bad` function in output: {}",
+        combined
+    );
 }
 
 #[test]
@@ -134,10 +138,7 @@ fn hygiene_strict_json_format_emits_schema_v1() {
 public fn main() -> Int { 0 }
 "#,
     );
-    let out = run_verum(
-        &["audit", "--hygiene-strict", "--format", "json"],
-        &dir,
-    );
+    let out = run_verum(&["audit", "--hygiene-strict", "--format", "json"], &dir);
     assert!(!out.status.success(), "violation must fail");
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(

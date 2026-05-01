@@ -482,8 +482,7 @@ fn add_module_completions(completions: &mut List<CompletionItem>, module: &verum
                 // Add variants for variant types
                 if let TypeDeclBody::Variant(variants) = &type_decl.body {
                     for variant in variants {
-                        let variant_label =
-                            format!("{}::{}", name, variant.name.as_str());
+                        let variant_label = format!("{}::{}", name, variant.name.as_str());
                         completions.push(CompletionItem {
                             label: variant_label.clone(),
                             kind: Some(CompletionItemKind::ENUM_MEMBER),
@@ -1130,27 +1129,87 @@ fn format_targets(targets: AttributeTarget) -> String {
 
 /// Tactics available in proof contexts
 const TACTICS: &[(&str, &str)] = &[
-    ("auto", "Automatic proof search - attempts to discharge goal using available hypotheses and lemmas"),
-    ("simp", "Simplification - applies simplification lemmas repeatedly to simplify the goal"),
-    ("ring", "Ring equation solver - proves algebraic equations using ring axioms"),
-    ("field", "Field theory solver - proves equations in field structures"),
-    ("omega", "Linear arithmetic solver - solves linear arithmetic over integers"),
-    ("blast", "DPLL-based proof search - aggressive automated proving"),
-    ("smt", "SMT solver invocation - sends the goal to an external SMT solver (Z3/CVC5)"),
-    ("induction", "Proof by induction - applies structural induction on a term"),
-    ("cases", "Case analysis - splits goal into cases based on constructors"),
-    ("trivial", "Trivial proof - solves reflexivity and simple equalities"),
-    ("assumption", "Proof by assumption - searches hypotheses for exact match"),
-    ("contradiction", "Proof by contradiction - derives False from hypotheses"),
-    ("rewrite", "Rewrite using equality - replaces terms using an equality lemma"),
-    ("apply", "Apply lemma/theorem - matches goal with the conclusion of a lemma"),
-    ("exact", "Exact proof term - provides an explicit proof term for the goal"),
-    ("unfold", "Unfold definition - expands a definition in the goal"),
-    ("intro", "Introduction - introduces assumptions or forall-bound variables"),
-    ("split", "Split conjunction - splits a goal A ∧ B into two subgoals"),
+    (
+        "auto",
+        "Automatic proof search - attempts to discharge goal using available hypotheses and lemmas",
+    ),
+    (
+        "simp",
+        "Simplification - applies simplification lemmas repeatedly to simplify the goal",
+    ),
+    (
+        "ring",
+        "Ring equation solver - proves algebraic equations using ring axioms",
+    ),
+    (
+        "field",
+        "Field theory solver - proves equations in field structures",
+    ),
+    (
+        "omega",
+        "Linear arithmetic solver - solves linear arithmetic over integers",
+    ),
+    (
+        "blast",
+        "DPLL-based proof search - aggressive automated proving",
+    ),
+    (
+        "smt",
+        "SMT solver invocation - sends the goal to an external SMT solver (Z3/CVC5)",
+    ),
+    (
+        "induction",
+        "Proof by induction - applies structural induction on a term",
+    ),
+    (
+        "cases",
+        "Case analysis - splits goal into cases based on constructors",
+    ),
+    (
+        "trivial",
+        "Trivial proof - solves reflexivity and simple equalities",
+    ),
+    (
+        "assumption",
+        "Proof by assumption - searches hypotheses for exact match",
+    ),
+    (
+        "contradiction",
+        "Proof by contradiction - derives False from hypotheses",
+    ),
+    (
+        "rewrite",
+        "Rewrite using equality - replaces terms using an equality lemma",
+    ),
+    (
+        "apply",
+        "Apply lemma/theorem - matches goal with the conclusion of a lemma",
+    ),
+    (
+        "exact",
+        "Exact proof term - provides an explicit proof term for the goal",
+    ),
+    (
+        "unfold",
+        "Unfold definition - expands a definition in the goal",
+    ),
+    (
+        "intro",
+        "Introduction - introduces assumptions or forall-bound variables",
+    ),
+    (
+        "split",
+        "Split conjunction - splits a goal A ∧ B into two subgoals",
+    ),
     ("left", "Prove left disjunct - proves A when goal is A ∨ B"),
-    ("right", "Prove right disjunct - proves B when goal is A ∨ B"),
-    ("exists", "Witness existential - provides a witness for ∃x.P(x)"),
+    (
+        "right",
+        "Prove right disjunct - proves B when goal is A ∨ B",
+    ),
+    (
+        "exists",
+        "Witness existential - provides a witness for ∃x.P(x)",
+    ),
 ];
 
 /// Add proof tactic completions
@@ -1216,28 +1275,60 @@ const FORMAT_TAGS: &[(&str, &str, &str)] = &[
     // Data formats
     ("json", "JSON data", "json#\"{ \"key\": \"value\" }\""),
     ("yaml", "YAML data", "yaml#\"key: value\""),
-    ("toml", "TOML configuration", "toml#\"[section]\\nkey = \\\"value\\\"\""),
+    (
+        "toml",
+        "TOML configuration",
+        "toml#\"[section]\\nkey = \\\"value\\\"\"",
+    ),
     ("xml", "XML document", "xml#\"<root><child/></root>\""),
-    ("html", "HTML markup", "html#\"<div class=\\\"foo\\\">content</div>\""),
+    (
+        "html",
+        "HTML markup",
+        "html#\"<div class=\\\"foo\\\">content</div>\"",
+    ),
     ("css", "CSS styles", "css#\".class { color: red; }\""),
-
     // Query languages
-    ("sql", "SQL query (compile-time validated)", "sql#\"SELECT * FROM users WHERE id = ?\""),
+    (
+        "sql",
+        "SQL query (compile-time validated)",
+        "sql#\"SELECT * FROM users WHERE id = ?\"",
+    ),
     ("gql", "GraphQL query", "gql#\"{ user(id: 1) { name } }\""),
-    ("cypher", "Cypher query (Neo4j)", "cypher#\"MATCH (n:Person) RETURN n\""),
-
+    (
+        "cypher",
+        "Cypher query (Neo4j)",
+        "cypher#\"MATCH (n:Person) RETURN n\"",
+    ),
     // Pattern matching
-    ("rx", "Regular expression (compile-time validated)", "rx#\"[a-zA-Z][a-zA-Z0-9_]*\""),
-    ("regex", "Regular expression (alias)", "regex#\"\\\\d{3}-\\\\d{4}\""),
+    (
+        "rx",
+        "Regular expression (compile-time validated)",
+        "rx#\"[a-zA-Z][a-zA-Z0-9_]*\"",
+    ),
+    (
+        "regex",
+        "Regular expression (alias)",
+        "regex#\"\\\\d{3}-\\\\d{4}\"",
+    ),
     ("glob", "Glob pattern", "glob#\"**/*.rs\""),
-
     // Identifiers and URIs
-    ("url", "URL (validated)", "url#\"https://example.com/path?query=value\""),
+    (
+        "url",
+        "URL (validated)",
+        "url#\"https://example.com/path?query=value\"",
+    ),
     ("uri", "URI (validated)", "uri#\"mailto:user@example.com\""),
-    ("email", "Email address (validated)", "email#\"user@example.com\""),
+    (
+        "email",
+        "Email address (validated)",
+        "email#\"user@example.com\"",
+    ),
     ("path", "File path", "path#\"/usr/local/bin\""),
-    ("uuid", "UUID (validated)", "uuid#\"550e8400-e29b-41d4-a716-446655440000\""),
-
+    (
+        "uuid",
+        "UUID (validated)",
+        "uuid#\"550e8400-e29b-41d4-a716-446655440000\"",
+    ),
     // Time formats
     ("d", "ISO 8601 datetime", "d#\"2024-01-21T08:30:00Z\""),
     ("date", "Date only", "date#\"2024-01-21\""),
@@ -1245,22 +1336,22 @@ const FORMAT_TAGS: &[(&str, &str, &str)] = &[
     ("dur", "Duration", "dur#\"5m30s\""),
     ("duration", "Duration (alias)", "duration#\"1h30m\""),
     ("cron", "Cron expression", "cron#\"0 0 * * *\""),
-
     // Encoding formats
     ("b64", "Base64 encoded", "b64#\"SGVsbG8gV29ybGQ=\""),
     ("base64", "Base64 encoded (alias)", "base64#\"SGVsbG8=\""),
     ("hex", "Hexadecimal", "hex#\"deadbeef\""),
-
     // Semantic strings
     ("semver", "Semantic version", "semver#\"1.2.3-beta.1\""),
     ("ipv4", "IPv4 address", "ipv4#\"192.168.1.1\""),
     ("ipv6", "IPv6 address", "ipv6#\"::1\""),
     ("jwt", "JWT token", "jwt#\"eyJhbGciOiJIUzI1NiJ9...\""),
-
     // Shell command literal — auto-escapes ${expr} interpolations through
     // ShellEscape::shell_quote. See `internal/specs/shell-scripting.md`.
-    ("sh",  "Shell command (auto-escaped interpolation)",
-            "sh#\"git log --oneline ${branch} -10\""),
+    (
+        "sh",
+        "Shell command (auto-escaped interpolation)",
+        "sh#\"git log --oneline ${branch} -10\"",
+    ),
 ];
 
 /// Add tagged literal format completions

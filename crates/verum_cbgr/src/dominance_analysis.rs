@@ -335,10 +335,7 @@ impl DominanceInfo {
                 }
 
                 // Count how many blocks dominate this candidate
-                let dom_count = self
-                    .dominators
-                    .get(&dom_id)
-                    .map_or(0, |s| s.len());
+                let dom_count = self.dominators.get(&dom_id).map_or(0, |s| s.len());
 
                 // The immediate dominator has the largest dominator set
                 // (excluding the block itself)

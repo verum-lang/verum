@@ -170,17 +170,17 @@ pub use exports::{
 pub use imports::{ImportResolver, ResolvedImport};
 pub use loader::{LazyModuleResolver, ModuleLoader, ModuleSource, SharedModuleResolver};
 // Re-export cfg types for conditional compilation configuration
-pub use verum_ast::cfg::{CfgEvaluator, CfgPredicate, TargetConfig};
+pub use parallel::{
+    ParallelLoadConfig, ParallelLoadResult, ParallelLoadStats, ParallelLoader, SyncParallelLoader,
+};
 pub use path::{ModuleId, ModulePath, resolve_import};
 pub use profile::{LanguageProfile, ModuleFeature, ModuleProfile, ProfileChecker};
 pub use resolver::{NameResolver, ResolvedName, Scope};
 pub use suggestions::{
-    Suggestion, find_similar, find_similar_items, find_similar_modules,
-    format_module_suggestions, format_suggestions, levenshtein_distance, similarity_ratio,
+    Suggestion, find_similar, find_similar_items, find_similar_modules, format_module_suggestions,
+    format_suggestions, levenshtein_distance, similarity_ratio,
 };
-pub use parallel::{
-    ParallelLoadConfig, ParallelLoadResult, ParallelLoadStats, ParallelLoader, SyncParallelLoader,
-};
+pub use verum_ast::cfg::{CfgEvaluator, CfgPredicate, TargetConfig};
 pub use visibility::{Visibility, VisibilityChecker};
 pub use warnings::{
     ModuleWarning, PreludeShadowingChecker, WarningCollector, WarningKind, WarningSeverity,
@@ -583,7 +583,8 @@ impl ModuleRegistry {
             // Replace the module in the registry
             let path_str = updated.path.to_string();
             self.modules.insert(target_id, Shared::new(updated));
-            self.path_to_id.insert(Text::from(path_str.as_str()), target_id);
+            self.path_to_id
+                .insert(Text::from(path_str.as_str()), target_id);
         }
         newly_added
     }
@@ -784,12 +785,7 @@ impl ModuleRegistry {
     /// but the ID counter is fresh, starting at max_existing_id + 1.
     pub fn deep_clone(&self) -> Self {
         // Find the max existing module ID to set the counter properly
-        let max_id = self
-            .modules
-            .keys()
-            .map(|id| id.as_u32())
-            .max()
-            .unwrap_or(0);
+        let max_id = self.modules.keys().map(|id| id.as_u32()).max().unwrap_or(0);
 
         Self {
             modules: self.modules.clone(),

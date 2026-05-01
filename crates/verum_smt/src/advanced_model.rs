@@ -27,9 +27,9 @@ use std::fmt;
 use z3::ast::{Dynamic, Int};
 use z3::{Context, FuncDecl, FuncInterp, Model, Translate};
 
-use verum_common::{List, Map, Maybe, Set, Text};
 #[allow(unused_imports)]
 use verum_common::ToText;
+use verum_common::{List, Map, Maybe, Set, Text};
 
 // ==================== Core Types ====================
 

@@ -154,14 +154,15 @@ fn test_context_in_function_type() {
     let param_type = Type::Var(t_var);
     let return_type = Type::Var(t_var);
 
-    let func_type = Type::function(
-        List::from(vec![param_type]),
-        return_type,
-    );
+    let func_type = Type::function(List::from(vec![param_type]), return_type);
 
     // Verify the function type
     match func_type {
-        Type::Function { ref params, ref return_type, .. } => {
+        Type::Function {
+            ref params,
+            ref return_type,
+            ..
+        } => {
             assert_eq!(params.len(), 1);
             assert!(matches!(&params[0], Type::Var(_)));
         }
@@ -193,10 +194,7 @@ fn test_context_propagation() {
     let c_var = TypeVar::fresh();
 
     // f: fn(T) -> U using C
-    let callback_type = Type::function(
-        List::from(vec![Type::Var(t_var)]),
-        Type::Var(u_var),
-    );
+    let callback_type = Type::function(List::from(vec![Type::Var(t_var)]), Type::Var(u_var));
 
     // The callback's context C should propagate to the result
     // This is verified through the type checker during inference
@@ -269,10 +267,7 @@ fn test_context_variable_generalization() {
     let ctx_type = Type::Var(ctx_var);
 
     // Create a function type that uses the context
-    let func_type = Type::function(
-        List::from(vec![Type::int()]),
-        Type::int(),
-    );
+    let func_type = Type::function(List::from(vec![Type::int()]), Type::int());
 
     // Generalize the type
     let scheme = env.generalize(func_type);
@@ -290,10 +285,7 @@ fn test_context_variable_in_scheme() {
     let ctx_var = TypeVar::fresh();
 
     // Create a type that contains the context variable
-    let func_type = Type::function(
-        List::from(vec![Type::Var(ctx_var)]),
-        Type::Var(ctx_var),
-    );
+    let func_type = Type::function(List::from(vec![Type::Var(ctx_var)]), Type::Var(ctx_var));
 
     // Generalize - ctx_var should be quantified
     let scheme = env.generalize(func_type);

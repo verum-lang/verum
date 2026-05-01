@@ -35,20 +35,22 @@
 //! that allow the rest of the tree to be processed. This enables IDE features
 //! to work on incomplete code.
 
+use verum_ast::smallvec::smallvec;
 use verum_ast::{
     Attribute, BinOp, Block, ConditionKind, ContextList, Expr, ExprKind, FileId, FunctionBody,
-    FunctionDecl, FunctionParam, FunctionParamKind, GenericParam, Ident, IfCondition, MountDecl,
-    MountTree, MountTreeKind, Item, ItemKind, Literal, LiteralKind, MatchArm, Module, Path,
+    FunctionDecl, FunctionParam, FunctionParamKind, GenericParam, Ident, IfCondition, Item,
+    ItemKind, Literal, LiteralKind, MatchArm, Module, MountDecl, MountTree, MountTreeKind, Path,
     PathSegment, Pattern, PatternKind, Span, Stmt, StmtKind, Type, TypeDecl, TypeDeclBody,
     TypeKind, UnOp, Visibility, WhereClause,
-    decl::{ConstDecl, ContextDecl, ContextRequirement, ImplDecl, ModuleDecl, ProtocolDecl,
-           ProtocolItem, ProtocolItemKind, RecordField, StaticDecl, Variant},
+    decl::{
+        ConstDecl, ContextDecl, ContextRequirement, ImplDecl, ModuleDecl, ProtocolDecl,
+        ProtocolItem, ProtocolItemKind, RecordField, StaticDecl, Variant,
+    },
     expr::{RecoverBody, RecoverClosureParam},
     literal::StringLit,
     pattern::{FieldPattern, VariantPatternData},
     ty::GenericArg,
 };
-use verum_ast::smallvec::smallvec;
 use verum_common::{Heap, List, Maybe, Text};
 use verum_syntax::{SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken, TextRange};
 
@@ -221,25 +223,23 @@ impl AstSink {
 
         for child in node.children() {
             match child {
-                SyntaxElement::Token(token) => {
-                    match token.kind() {
-                        SyntaxKind::PUB_KW => visibility = Visibility::Public,
-                        SyntaxKind::ASYNC_KW => is_async = true,
-                        SyntaxKind::META_KW => is_meta = true,
-                        SyntaxKind::PURE_KW => is_pure = true,
-                        SyntaxKind::EXTERN_KW => extern_abi = Maybe::Some(Text::from("C")),
-                        SyntaxKind::COFIX_KW => is_cofix = true,
-                        SyntaxKind::UNSAFE_KW => is_unsafe = true,
-                        SyntaxKind::IDENT => {
-                            if name.is_none() {
-                                name = Some(self.token_to_ident(&token));
-                            }
+                SyntaxElement::Token(token) => match token.kind() {
+                    SyntaxKind::PUB_KW => visibility = Visibility::Public,
+                    SyntaxKind::ASYNC_KW => is_async = true,
+                    SyntaxKind::META_KW => is_meta = true,
+                    SyntaxKind::PURE_KW => is_pure = true,
+                    SyntaxKind::EXTERN_KW => extern_abi = Maybe::Some(Text::from("C")),
+                    SyntaxKind::COFIX_KW => is_cofix = true,
+                    SyntaxKind::UNSAFE_KW => is_unsafe = true,
+                    SyntaxKind::IDENT => {
+                        if name.is_none() {
+                            name = Some(self.token_to_ident(&token));
                         }
-                        SyntaxKind::STAR => is_generator = true,
-                        SyntaxKind::ARROW => seen_arrow = true,
-                        _ => {}
                     }
-                }
+                    SyntaxKind::STAR => is_generator = true,
+                    SyntaxKind::ARROW => seen_arrow = true,
+                    _ => {}
+                },
                 SyntaxElement::Node(child_node) => {
                     match child_node.kind() {
                         SyntaxKind::GENERIC_PARAMS => {
@@ -265,9 +265,8 @@ impl AstSink {
                             contexts = self.convert_using_clause(&child_node);
                         }
                         SyntaxKind::BLOCK => {
-                            body = Maybe::Some(FunctionBody::Block(
-                                self.convert_block(&child_node)
-                            ));
+                            body =
+                                Maybe::Some(FunctionBody::Block(self.convert_block(&child_node)));
                         }
                         SyntaxKind::ATTRIBUTE => {
                             if let Some(attr) = self.convert_attribute(&child_node) {
@@ -276,14 +275,14 @@ impl AstSink {
                         }
                         // Explicit type node kinds that EventBasedParser emits
                         SyntaxKind::PATH_TYPE
-                            | SyntaxKind::REFERENCE_TYPE
-                            | SyntaxKind::TUPLE_TYPE
-                            | SyntaxKind::FUNCTION_TYPE
-                            | SyntaxKind::ARRAY_TYPE
-                            | SyntaxKind::NEVER_TYPE
-                            | SyntaxKind::INFER_TYPE
-                            | SyntaxKind::REFINED_TYPE
-                            | SyntaxKind::GENERIC_TYPE => {
+                        | SyntaxKind::REFERENCE_TYPE
+                        | SyntaxKind::TUPLE_TYPE
+                        | SyntaxKind::FUNCTION_TYPE
+                        | SyntaxKind::ARRAY_TYPE
+                        | SyntaxKind::NEVER_TYPE
+                        | SyntaxKind::INFER_TYPE
+                        | SyntaxKind::REFINED_TYPE
+                        | SyntaxKind::GENERIC_TYPE => {
                             if seen_arrow && return_type.is_none() {
                                 if let Some(ty) = self.convert_type(&child_node) {
                                     return_type = Maybe::Some(ty);
@@ -350,17 +349,15 @@ impl AstSink {
 
         for child in node.children() {
             match child {
-                SyntaxElement::Token(token) => {
-                    match token.kind() {
-                        SyntaxKind::PUB_KW => visibility = Visibility::Public,
-                        SyntaxKind::IDENT => {
-                            if name.is_none() {
-                                name = Some(self.token_to_ident(&token));
-                            }
+                SyntaxElement::Token(token) => match token.kind() {
+                    SyntaxKind::PUB_KW => visibility = Visibility::Public,
+                    SyntaxKind::IDENT => {
+                        if name.is_none() {
+                            name = Some(self.token_to_ident(&token));
                         }
-                        _ => {}
                     }
-                }
+                    _ => {}
+                },
                 SyntaxElement::Node(child_node) => {
                     match child_node.kind() {
                         SyntaxKind::GENERIC_PARAMS => {
@@ -377,14 +374,16 @@ impl AstSink {
                         }
                         // Explicit type node kinds that EventBasedParser emits
                         SyntaxKind::PATH_TYPE
-                            | SyntaxKind::REFERENCE_TYPE
-                            | SyntaxKind::TUPLE_TYPE
-                            | SyntaxKind::FUNCTION_TYPE
-                            | SyntaxKind::ARRAY_TYPE
-                            | SyntaxKind::NEVER_TYPE
-                            | SyntaxKind::INFER_TYPE
-                            | SyntaxKind::REFINED_TYPE
-                            | SyntaxKind::GENERIC_TYPE if body.is_none() => {
+                        | SyntaxKind::REFERENCE_TYPE
+                        | SyntaxKind::TUPLE_TYPE
+                        | SyntaxKind::FUNCTION_TYPE
+                        | SyntaxKind::ARRAY_TYPE
+                        | SyntaxKind::NEVER_TYPE
+                        | SyntaxKind::INFER_TYPE
+                        | SyntaxKind::REFINED_TYPE
+                        | SyntaxKind::GENERIC_TYPE
+                            if body.is_none() =>
+                        {
                             if let Some(ty) = self.convert_type(&child_node) {
                                 body = Some(TypeDeclBody::Alias(ty));
                             }
@@ -870,9 +869,10 @@ impl AstSink {
                 return None;
             }
             _ => {
-                {
-                    let expr = self.convert_expr(node)?;
-                    StmtKind::Expr { expr, has_semi: false }
+                let expr = self.convert_expr(node)?;
+                StmtKind::Expr {
+                    expr,
+                    has_semi: false,
                 }
             }
         };
@@ -889,17 +889,25 @@ impl AstSink {
 
         for child in node.child_nodes() {
             match child.kind() {
-                SyntaxKind::IDENT_PAT | SyntaxKind::TUPLE_PAT |
-                SyntaxKind::RECORD_PAT | SyntaxKind::WILDCARD_PAT => {
+                SyntaxKind::IDENT_PAT
+                | SyntaxKind::TUPLE_PAT
+                | SyntaxKind::RECORD_PAT
+                | SyntaxKind::WILDCARD_PAT => {
                     if pattern.is_none() {
                         pattern = self.convert_pattern(&child);
                     }
                 }
                 kind if kind.can_start_type() && ty.is_none() => {
-                    ty = self.convert_type(&child).map(Maybe::Some).unwrap_or(Maybe::None);
+                    ty = self
+                        .convert_type(&child)
+                        .map(Maybe::Some)
+                        .unwrap_or(Maybe::None);
                 }
                 kind if kind.can_start_expr() && pattern.is_some() => {
-                    init = self.convert_expr(&child).map(Maybe::Some).unwrap_or(Maybe::None);
+                    init = self
+                        .convert_expr(&child)
+                        .map(Maybe::Some)
+                        .unwrap_or(Maybe::None);
                 }
                 _ => {}
             }
@@ -959,8 +967,10 @@ impl AstSink {
             let is_last = i == len - 1;
 
             match child.kind() {
-                SyntaxKind::LET_STMT | SyntaxKind::DEFER_STMT | SyntaxKind::ERRDEFER_STMT |
-                SyntaxKind::PROVIDE_STMT => {
+                SyntaxKind::LET_STMT
+                | SyntaxKind::DEFER_STMT
+                | SyntaxKind::ERRDEFER_STMT
+                | SyntaxKind::PROVIDE_STMT => {
                     if let Some(stmt) = self.convert_stmt(&child) {
                         stmts.push(stmt);
                     }
@@ -976,7 +986,10 @@ impl AstSink {
                             expr = Maybe::Some(Heap::new(e));
                         } else {
                             stmts.push(Stmt::new(
-                                StmtKind::Expr { expr: e, has_semi: true },
+                                StmtKind::Expr {
+                                    expr: e,
+                                    has_semi: true,
+                                },
                                 self.range_to_span(child.text_range()),
                             ));
                         }
@@ -1012,10 +1025,8 @@ impl AstSink {
                 return None;
             }
             _ => {
-                {
-                    let path = self.convert_path(node)?;
-                    TypeKind::Path(path)
-                }
+                let path = self.convert_path(node)?;
+                TypeKind::Path(path)
             }
         };
 
@@ -1187,7 +1198,7 @@ impl AstSink {
     /// Parse a string literal.
     fn parse_string_literal(&self, text: &str) -> Text {
         let inner = if text.starts_with('"') && text.ends_with('"') && text.len() >= 2 {
-            &text[1..text.len()-1]
+            &text[1..text.len() - 1]
         } else {
             text
         };
@@ -1197,7 +1208,7 @@ impl AstSink {
     /// Parse a char literal.
     fn parse_char_literal(&self, text: &str) -> char {
         let inner = if text.starts_with('\'') && text.ends_with('\'') && text.len() >= 2 {
-            &text[1..text.len()-1]
+            &text[1..text.len() - 1]
         } else {
             text
         };
@@ -1362,19 +1373,17 @@ impl AstSink {
 
         for child in node.children() {
             match child {
-                SyntaxElement::Token(token) => {
-                    match token.kind() {
-                        SyntaxKind::PUB_KW => visibility = Visibility::Public,
-                        SyntaxKind::CONTEXT_KW => is_context = true,
-                        SyntaxKind::IDENT => {
-                            if name.is_none() {
-                                name = Some(self.token_to_ident(&token));
-                            }
+                SyntaxElement::Token(token) => match token.kind() {
+                    SyntaxKind::PUB_KW => visibility = Visibility::Public,
+                    SyntaxKind::CONTEXT_KW => is_context = true,
+                    SyntaxKind::IDENT => {
+                        if name.is_none() {
+                            name = Some(self.token_to_ident(&token));
                         }
-                        SyntaxKind::EXTENDS_KW => seen_extends = true,
-                        _ => {}
                     }
-                }
+                    SyntaxKind::EXTENDS_KW => seen_extends = true,
+                    _ => {}
+                },
                 SyntaxElement::Node(child_node) => {
                     match child_node.kind() {
                         SyntaxKind::GENERIC_PARAMS => {
@@ -1506,34 +1515,32 @@ impl AstSink {
                         name = Some(self.token_to_ident(&token));
                     }
                 }
-                SyntaxElement::Node(child_node) => {
-                    match child_node.kind() {
-                        SyntaxKind::GENERIC_PARAMS => {
-                            type_params = self.convert_generic_params(&child_node);
-                        }
-                        SyntaxKind::BOUND_LIST | SyntaxKind::TYPE_BOUND => {
-                            for bound_child in child_node.child_nodes() {
-                                if let Some(path) = self.convert_path(&bound_child) {
-                                    bounds.push(path);
-                                }
-                            }
-                            if child_node.kind() == SyntaxKind::TYPE_BOUND {
-                                if let Some(path) = self.convert_path(&child_node) {
-                                    bounds.push(path);
-                                }
-                            }
-                        }
-                        SyntaxKind::WHERE_CLAUSE => {
-                            where_clause = self.convert_where_clause(&child_node);
-                        }
-                        kind if kind.can_start_type() && default_type.is_none() => {
-                            if let Some(ty) = self.convert_type(&child_node) {
-                                default_type = Maybe::Some(ty);
-                            }
-                        }
-                        _ => {}
+                SyntaxElement::Node(child_node) => match child_node.kind() {
+                    SyntaxKind::GENERIC_PARAMS => {
+                        type_params = self.convert_generic_params(&child_node);
                     }
-                }
+                    SyntaxKind::BOUND_LIST | SyntaxKind::TYPE_BOUND => {
+                        for bound_child in child_node.child_nodes() {
+                            if let Some(path) = self.convert_path(&bound_child) {
+                                bounds.push(path);
+                            }
+                        }
+                        if child_node.kind() == SyntaxKind::TYPE_BOUND {
+                            if let Some(path) = self.convert_path(&child_node) {
+                                bounds.push(path);
+                            }
+                        }
+                    }
+                    SyntaxKind::WHERE_CLAUSE => {
+                        where_clause = self.convert_where_clause(&child_node);
+                    }
+                    kind if kind.can_start_type() && default_type.is_none() => {
+                        if let Some(ty) = self.convert_type(&child_node) {
+                            default_type = Maybe::Some(ty);
+                        }
+                    }
+                    _ => {}
+                },
             }
         }
 
@@ -1699,10 +1706,7 @@ impl AstSink {
                     }
                 }
                 _ => {
-                    self.error_at(
-                        node.text_range(),
-                        "expected protocol path in impl block",
-                    );
+                    self.error_at(node.text_range(), "expected protocol path in impl block");
                     return None;
                 }
             };
@@ -1812,17 +1816,15 @@ impl AstSink {
                         name = Some(self.token_to_ident(&token));
                     }
                 }
-                SyntaxElement::Node(child_node) => {
-                    match child_node.kind() {
-                        SyntaxKind::GENERIC_PARAMS => {
-                            type_params = self.convert_generic_params(&child_node);
-                        }
-                        kind if kind.can_start_type() && ty.is_none() => {
-                            ty = self.convert_type(&child_node);
-                        }
-                        _ => {}
+                SyntaxElement::Node(child_node) => match child_node.kind() {
+                    SyntaxKind::GENERIC_PARAMS => {
+                        type_params = self.convert_generic_params(&child_node);
                     }
-                }
+                    kind if kind.can_start_type() && ty.is_none() => {
+                        ty = self.convert_type(&child_node);
+                    }
+                    _ => {}
+                },
             }
         }
 
@@ -1840,16 +1842,14 @@ impl AstSink {
 
         for child in node.children() {
             match child {
-                SyntaxElement::Token(token) => {
-                    match token.kind() {
-                        SyntaxKind::IDENT if name.is_none() => {
-                            name = Some(self.token_to_ident(&token));
-                        }
-                        SyntaxKind::COLON => seen_colon = true,
-                        SyntaxKind::EQ => seen_eq = true,
-                        _ => {}
+                SyntaxElement::Token(token) => match token.kind() {
+                    SyntaxKind::IDENT if name.is_none() => {
+                        name = Some(self.token_to_ident(&token));
                     }
-                }
+                    SyntaxKind::COLON => seen_colon = true,
+                    SyntaxKind::EQ => seen_eq = true,
+                    _ => {}
+                },
                 SyntaxElement::Node(child_node) => {
                     if seen_colon && !seen_eq && ty.is_none() {
                         // Type comes after colon, before equals
@@ -1986,7 +1986,10 @@ impl AstSink {
                                 if let Some(nested) = self.convert_mount_tree(&list_child) {
                                     nested_trees.push(nested);
                                 }
-                            } else if matches!(list_child.kind(), SyntaxKind::PATH | SyntaxKind::PATH_EXPR) {
+                            } else if matches!(
+                                list_child.kind(),
+                                SyntaxKind::PATH | SyntaxKind::PATH_EXPR
+                            ) {
                                 if let Some(path) = self.convert_path(&list_child) {
                                     nested_trees.push(MountTree {
                                         kind: MountTreeKind::Path(path),
@@ -2009,20 +2012,22 @@ impl AstSink {
             // Also check for IDENT tokens directly in braces
             let mut in_braces = false;
             for child in node.children() {
-                if let SyntaxElement::Token(token) = child { match token.kind() {
-                    SyntaxKind::L_BRACE => in_braces = true,
-                    SyntaxKind::R_BRACE => in_braces = false,
-                    SyntaxKind::IDENT if in_braces => {
-                        let ident = self.token_to_ident(&token);
-                        let path = Path::single(ident);
-                        nested_trees.push(MountTree {
-                            kind: MountTreeKind::Path(path),
-                            alias: Maybe::None,
-                            span: self.range_to_span(token.text_range()),
-                        });
+                if let SyntaxElement::Token(token) = child {
+                    match token.kind() {
+                        SyntaxKind::L_BRACE => in_braces = true,
+                        SyntaxKind::R_BRACE => in_braces = false,
+                        SyntaxKind::IDENT if in_braces => {
+                            let ident = self.token_to_ident(&token);
+                            let path = Path::single(ident);
+                            nested_trees.push(MountTree {
+                                kind: MountTreeKind::Path(path),
+                                alias: Maybe::None,
+                                span: self.range_to_span(token.text_range()),
+                            });
+                        }
+                        _ => {}
                     }
-                    _ => {}
-                } }
+                }
             }
 
             if let Some(prefix_path) = prefix {
@@ -2096,17 +2101,15 @@ impl AstSink {
 
         for child in node.children() {
             match child {
-                SyntaxElement::Token(token) => {
-                    match token.kind() {
-                        SyntaxKind::PUB_KW => visibility = Visibility::Public,
-                        SyntaxKind::IDENT if name.is_none() => {
-                            name = Some(self.token_to_ident(&token));
-                        }
-                        SyntaxKind::COLON => seen_colon = true,
-                        SyntaxKind::EQ => seen_eq = true,
-                        _ => {}
+                SyntaxElement::Token(token) => match token.kind() {
+                    SyntaxKind::PUB_KW => visibility = Visibility::Public,
+                    SyntaxKind::IDENT if name.is_none() => {
+                        name = Some(self.token_to_ident(&token));
                     }
-                }
+                    SyntaxKind::COLON => seen_colon = true,
+                    SyntaxKind::EQ => seen_eq = true,
+                    _ => {}
+                },
                 SyntaxElement::Node(child_node) => {
                     if seen_colon && !seen_eq && ty.is_none() {
                         // Type comes after colon, before equals
@@ -2160,18 +2163,16 @@ impl AstSink {
 
         for child in node.children() {
             match child {
-                SyntaxElement::Token(token) => {
-                    match token.kind() {
-                        SyntaxKind::PUB_KW => visibility = Visibility::Public,
-                        SyntaxKind::MUT_KW => is_mut = true,
-                        SyntaxKind::IDENT if name.is_none() => {
-                            name = Some(self.token_to_ident(&token));
-                        }
-                        SyntaxKind::COLON => seen_colon = true,
-                        SyntaxKind::EQ => seen_eq = true,
-                        _ => {}
+                SyntaxElement::Token(token) => match token.kind() {
+                    SyntaxKind::PUB_KW => visibility = Visibility::Public,
+                    SyntaxKind::MUT_KW => is_mut = true,
+                    SyntaxKind::IDENT if name.is_none() => {
+                        name = Some(self.token_to_ident(&token));
                     }
-                }
+                    SyntaxKind::COLON => seen_colon = true,
+                    SyntaxKind::EQ => seen_eq = true,
+                    _ => {}
+                },
                 SyntaxElement::Node(child_node) => {
                     if seen_colon && !seen_eq && ty.is_none() {
                         // Type comes after colon, before equals
@@ -2225,16 +2226,14 @@ impl AstSink {
 
         for child in node.children() {
             match child {
-                SyntaxElement::Token(token) => {
-                    match token.kind() {
-                        SyntaxKind::PUB_KW => visibility = Visibility::Public,
-                        SyntaxKind::ASYNC_KW => is_async = true,
-                        SyntaxKind::IDENT if name.is_none() => {
-                            name = Some(self.token_to_ident(&token));
-                        }
-                        _ => {}
+                SyntaxElement::Token(token) => match token.kind() {
+                    SyntaxKind::PUB_KW => visibility = Visibility::Public,
+                    SyntaxKind::ASYNC_KW => is_async = true,
+                    SyntaxKind::IDENT if name.is_none() => {
+                        name = Some(self.token_to_ident(&token));
                     }
-                }
+                    _ => {}
+                },
                 SyntaxElement::Node(child_node) => {
                     match child_node.kind() {
                         SyntaxKind::GENERIC_PARAMS => {
@@ -2300,15 +2299,13 @@ impl AstSink {
 
         for child in node.children() {
             match child {
-                SyntaxElement::Token(token) => {
-                    match token.kind() {
-                        SyntaxKind::PUB_KW => visibility = Visibility::Public,
-                        SyntaxKind::IDENT if name.is_none() => {
-                            name = Some(self.token_to_ident(&token));
-                        }
-                        _ => {}
+                SyntaxElement::Token(token) => match token.kind() {
+                    SyntaxKind::PUB_KW => visibility = Visibility::Public,
+                    SyntaxKind::IDENT if name.is_none() => {
+                        name = Some(self.token_to_ident(&token));
                     }
-                }
+                    _ => {}
+                },
                 SyntaxElement::Node(child_node) => {
                     match child_node.kind() {
                         // Module body contains items
@@ -2354,13 +2351,17 @@ impl AstSink {
         })
     }
 
-
     /// Convert a GENERIC_PARAMS node to a list of GenericParam.
     fn convert_generic_params(&mut self, node: &SyntaxNode) -> List<GenericParam> {
         use verum_ast::ty::{GenericParamKind, TypeBound, TypeBoundKind};
         let mut params = List::new();
         for child in node.child_nodes() {
-            if !matches!(child.kind(), SyntaxKind::GENERIC_PARAM | SyntaxKind::TYPE_PARAM | SyntaxKind::META_PARAM) { continue; }
+            if !matches!(
+                child.kind(),
+                SyntaxKind::GENERIC_PARAM | SyntaxKind::TYPE_PARAM | SyntaxKind::META_PARAM
+            ) {
+                continue;
+            }
             let span = self.range_to_span(child.text_range());
             let mut name = None;
             let mut bounds = List::new();
@@ -2371,29 +2372,50 @@ impl AstSink {
             for elem in child.children() {
                 match elem {
                     SyntaxElement::Token(token) => match token.kind() {
-                        SyntaxKind::IDENT => { if name.is_none() { name = Some(self.token_to_ident(&token)); } }
-                        SyntaxKind::META_KW => { is_meta = true; }
+                        SyntaxKind::IDENT => {
+                            if name.is_none() {
+                                name = Some(self.token_to_ident(&token));
+                            }
+                        }
+                        SyntaxKind::META_KW => {
+                            is_meta = true;
+                        }
                         _ => {}
                     },
                     SyntaxElement::Node(child_node) => match child_node.kind() {
                         SyntaxKind::BOUND_LIST | SyntaxKind::TYPE_BOUND => {
                             for bound_child in child_node.child_nodes() {
                                 if let Some(path) = self.convert_path(&bound_child) {
-                                    bounds.push(TypeBound { kind: TypeBoundKind::Protocol(path), span: self.range_to_span(bound_child.text_range()) });
+                                    bounds.push(TypeBound {
+                                        kind: TypeBoundKind::Protocol(path),
+                                        span: self.range_to_span(bound_child.text_range()),
+                                    });
                                 }
                             }
                             if child_node.kind() == SyntaxKind::TYPE_BOUND {
                                 if let Some(path) = self.convert_path(&child_node) {
-                                    bounds.push(TypeBound { kind: TypeBoundKind::Protocol(path), span: self.range_to_span(child_node.text_range()) });
+                                    bounds.push(TypeBound {
+                                        kind: TypeBoundKind::Protocol(path),
+                                        span: self.range_to_span(child_node.text_range()),
+                                    });
                                 }
                             }
                         }
                         kind if kind.can_start_type() => {
-                            if is_meta && meta_ty.is_none() { meta_ty = self.convert_type(&child_node); }
-                            else if !is_meta && default_type.is_none() { if let Some(ty) = self.convert_type(&child_node) { default_type = Maybe::Some(ty); } }
+                            if is_meta && meta_ty.is_none() {
+                                meta_ty = self.convert_type(&child_node);
+                            } else if !is_meta && default_type.is_none() {
+                                if let Some(ty) = self.convert_type(&child_node) {
+                                    default_type = Maybe::Some(ty);
+                                }
+                            }
                         }
                         SyntaxKind::REFINEMENT_EXPR => {
-                            if let Some(expr) = child_node.child_nodes().find_map(|n| self.convert_expr(&n)) { meta_refinement = Maybe::Some(Heap::new(expr)); }
+                            if let Some(expr) =
+                                child_node.child_nodes().find_map(|n| self.convert_expr(&n))
+                            {
+                                meta_refinement = Maybe::Some(Heap::new(expr));
+                            }
                         }
                         _ => {}
                     },
@@ -2401,13 +2423,25 @@ impl AstSink {
             }
             if let Some(ident) = name {
                 let param_kind = if is_meta {
-                    GenericParamKind::Meta { name: ident, ty: meta_ty.unwrap_or_else(|| Type::new(TypeKind::Int, span)), refinement: meta_refinement }
+                    GenericParamKind::Meta {
+                        name: ident,
+                        ty: meta_ty.unwrap_or_else(|| Type::new(TypeKind::Int, span)),
+                        refinement: meta_refinement,
+                    }
                 } else {
-                    GenericParamKind::Type { name: ident, bounds, default: default_type }
+                    GenericParamKind::Type {
+                        name: ident,
+                        bounds,
+                        default: default_type,
+                    }
                 };
                 // Note: The CST-based parser doesn't currently support implicit syntax.
                 // Implicit parameters would need to be detected from the source text.
-                params.push(GenericParam { kind: param_kind, is_implicit: false, span });
+                params.push(GenericParam {
+                    kind: param_kind,
+                    is_implicit: false,
+                    span,
+                });
             }
         }
         params
@@ -2417,7 +2451,9 @@ impl AstSink {
     fn convert_param_list(&mut self, node: &SyntaxNode) -> List<FunctionParam> {
         let mut params = List::new();
         for child in node.child_nodes() {
-            if !matches!(child.kind(), SyntaxKind::PARAM | SyntaxKind::SELF_PARAM) { continue; }
+            if !matches!(child.kind(), SyntaxKind::PARAM | SyntaxKind::SELF_PARAM) {
+                continue;
+            }
             let span = self.range_to_span(child.text_range());
             if child.kind() == SyntaxKind::SELF_PARAM {
                 let has_ref = self.has_token(&child, SyntaxKind::AMP);
@@ -2457,29 +2493,58 @@ impl AstSink {
                         }
                     }
                     SyntaxElement::Node(child_node) => match child_node.kind() {
-                        SyntaxKind::IDENT_PAT | SyntaxKind::TUPLE_PAT | SyntaxKind::RECORD_PAT | SyntaxKind::WILDCARD_PAT => {
-                            if pattern.is_none() { pattern = self.convert_pattern(&child_node); }
+                        SyntaxKind::IDENT_PAT
+                        | SyntaxKind::TUPLE_PAT
+                        | SyntaxKind::RECORD_PAT
+                        | SyntaxKind::WILDCARD_PAT => {
+                            if pattern.is_none() {
+                                pattern = self.convert_pattern(&child_node);
+                            }
                         }
                         // Explicit type node kinds that EventBasedParser emits
                         SyntaxKind::PATH_TYPE
-                            | SyntaxKind::REFERENCE_TYPE
-                            | SyntaxKind::TUPLE_TYPE
-                            | SyntaxKind::FUNCTION_TYPE
-                            | SyntaxKind::ARRAY_TYPE
-                            | SyntaxKind::NEVER_TYPE
-                            | SyntaxKind::INFER_TYPE
-                            | SyntaxKind::REFINED_TYPE
-                            | SyntaxKind::GENERIC_TYPE => {
-                            if ty.is_none() { ty = self.convert_type(&child_node); }
+                        | SyntaxKind::REFERENCE_TYPE
+                        | SyntaxKind::TUPLE_TYPE
+                        | SyntaxKind::FUNCTION_TYPE
+                        | SyntaxKind::ARRAY_TYPE
+                        | SyntaxKind::NEVER_TYPE
+                        | SyntaxKind::INFER_TYPE
+                        | SyntaxKind::REFINED_TYPE
+                        | SyntaxKind::GENERIC_TYPE => {
+                            if ty.is_none() {
+                                ty = self.convert_type(&child_node);
+                            }
                         }
-                        kind if kind.can_start_type() && pattern.is_some() => { if ty.is_none() { ty = self.convert_type(&child_node); } }
+                        kind if kind.can_start_type() && pattern.is_some() => {
+                            if ty.is_none() {
+                                ty = self.convert_type(&child_node);
+                            }
+                        }
                         _ => {}
                     },
                 }
             }
             match (pattern, ty) {
-                (Some(pat), Some(param_ty)) => { params.push(FunctionParam::new(FunctionParamKind::Regular { pattern: pat, ty: param_ty, default_value: Maybe::None }, span)); }
-                (Some(pat), None) => { params.push(FunctionParam::new(FunctionParamKind::Regular { pattern: pat, ty: Type::new(TypeKind::Inferred, span), default_value: Maybe::None }, span)); }
+                (Some(pat), Some(param_ty)) => {
+                    params.push(FunctionParam::new(
+                        FunctionParamKind::Regular {
+                            pattern: pat,
+                            ty: param_ty,
+                            default_value: Maybe::None,
+                        },
+                        span,
+                    ));
+                }
+                (Some(pat), None) => {
+                    params.push(FunctionParam::new(
+                        FunctionParamKind::Regular {
+                            pattern: pat,
+                            ty: Type::new(TypeKind::Inferred, span),
+                            default_value: Maybe::None,
+                        },
+                        span,
+                    ));
+                }
                 _ => {}
             }
         }
@@ -2493,7 +2558,9 @@ impl AstSink {
         let span = self.range_to_span(node.text_range());
         let mut predicates = List::new();
         for child in node.child_nodes() {
-            if child.kind() != SyntaxKind::WHERE_PRED { continue; }
+            if child.kind() != SyntaxKind::WHERE_PRED {
+                continue;
+            }
             let pred_span = self.range_to_span(child.text_range());
             let mut is_meta_pred = false;
             let mut pred_ty = None;
@@ -2502,19 +2569,23 @@ impl AstSink {
             for elem in child.children() {
                 match elem {
                     SyntaxElement::Token(token) => {
-                        if token.kind() == SyntaxKind::META_KW { is_meta_pred = true; }
-                    },
+                        if token.kind() == SyntaxKind::META_KW {
+                            is_meta_pred = true;
+                        }
+                    }
                     SyntaxElement::Node(child_node) => match child_node.kind() {
                         // Explicit type node kinds that EventBasedParser emits
                         SyntaxKind::PATH_TYPE
-                            | SyntaxKind::REFERENCE_TYPE
-                            | SyntaxKind::TUPLE_TYPE
-                            | SyntaxKind::FUNCTION_TYPE
-                            | SyntaxKind::ARRAY_TYPE
-                            | SyntaxKind::NEVER_TYPE
-                            | SyntaxKind::INFER_TYPE
-                            | SyntaxKind::REFINED_TYPE
-                            | SyntaxKind::GENERIC_TYPE if !is_meta_pred => {
+                        | SyntaxKind::REFERENCE_TYPE
+                        | SyntaxKind::TUPLE_TYPE
+                        | SyntaxKind::FUNCTION_TYPE
+                        | SyntaxKind::ARRAY_TYPE
+                        | SyntaxKind::NEVER_TYPE
+                        | SyntaxKind::INFER_TYPE
+                        | SyntaxKind::REFINED_TYPE
+                        | SyntaxKind::GENERIC_TYPE
+                            if !is_meta_pred =>
+                        {
                             // First type is the predicate type (e.g., T in T: Debug)
                             // Additional types after colon are bounds (e.g., Debug)
                             if pred_ty.is_none() {
@@ -2522,7 +2593,10 @@ impl AstSink {
                             } else {
                                 // Additional types are bounds
                                 if let Some(path) = self.convert_path(&child_node) {
-                                    bounds.push(TypeBound { kind: TypeBoundKind::Protocol(path), span: self.range_to_span(child_node.text_range()) });
+                                    bounds.push(TypeBound {
+                                        kind: TypeBoundKind::Protocol(path),
+                                        span: self.range_to_span(child_node.text_range()),
+                                    });
                                 }
                             }
                         }
@@ -2532,30 +2606,51 @@ impl AstSink {
                         SyntaxKind::BOUND_LIST | SyntaxKind::TYPE_BOUND => {
                             for bound_child in child_node.child_nodes() {
                                 if let Some(path) = self.convert_path(&bound_child) {
-                                    bounds.push(TypeBound { kind: TypeBoundKind::Protocol(path), span: self.range_to_span(bound_child.text_range()) });
+                                    bounds.push(TypeBound {
+                                        kind: TypeBoundKind::Protocol(path),
+                                        span: self.range_to_span(bound_child.text_range()),
+                                    });
                                 }
                             }
                             if child_node.kind() == SyntaxKind::TYPE_BOUND {
                                 if let Some(path) = self.convert_path(&child_node) {
-                                    bounds.push(TypeBound { kind: TypeBoundKind::Protocol(path), span: self.range_to_span(child_node.text_range()) });
+                                    bounds.push(TypeBound {
+                                        kind: TypeBoundKind::Protocol(path),
+                                        span: self.range_to_span(child_node.text_range()),
+                                    });
                                 }
                             }
                         }
                         kind if kind.can_start_expr() && is_meta_pred => {
-                            if constraint_expr.is_none() { constraint_expr = self.convert_expr(&child_node); }
+                            if constraint_expr.is_none() {
+                                constraint_expr = self.convert_expr(&child_node);
+                            }
                         }
                         _ => {}
                     },
                 }
             }
             let pred_kind = if is_meta_pred {
-                if let Some(expr) = constraint_expr { WherePredicateKind::Meta { constraint: expr } } else { continue; }
+                if let Some(expr) = constraint_expr {
+                    WherePredicateKind::Meta { constraint: expr }
+                } else {
+                    continue;
+                }
             } else if let Some(ty) = pred_ty {
                 WherePredicateKind::Type { ty, bounds }
-            } else { continue; };
-            predicates.push(WherePredicate { kind: pred_kind, span: pred_span });
+            } else {
+                continue;
+            };
+            predicates.push(WherePredicate {
+                kind: pred_kind,
+                span: pred_span,
+            });
         }
-        if predicates.is_empty() { Maybe::None } else { Maybe::Some(WhereClause::new(predicates, span)) }
+        if predicates.is_empty() {
+            Maybe::None
+        } else {
+            Maybe::Some(WhereClause::new(predicates, span))
+        }
     }
 
     fn convert_clause_expr(&mut self, node: &SyntaxNode) -> Option<Expr> {
@@ -2566,12 +2661,17 @@ impl AstSink {
     fn convert_using_clause(&mut self, node: &SyntaxNode) -> List<ContextRequirement> {
         let mut contexts = List::new();
         for child in node.child_nodes() {
-            if let Some(req) = self.convert_single_context_requirement(&child) { contexts.push(req); }
+            if let Some(req) = self.convert_single_context_requirement(&child) {
+                contexts.push(req);
+            }
         }
         contexts
     }
 
-    fn convert_single_context_requirement(&mut self, node: &SyntaxNode) -> Option<ContextRequirement> {
+    fn convert_single_context_requirement(
+        &mut self,
+        node: &SyntaxNode,
+    ) -> Option<ContextRequirement> {
         let span = self.range_to_span(node.text_range());
         let mut path = None;
         let mut type_args = List::new();
@@ -2580,30 +2680,59 @@ impl AstSink {
         for elem in node.children() {
             match elem {
                 SyntaxElement::Token(token) => match token.kind() {
-                    SyntaxKind::BANG => { is_negative = true; }
+                    SyntaxKind::BANG => {
+                        is_negative = true;
+                    }
                     SyntaxKind::IDENT => {
                         if path.is_none() {
                             let ident = self.token_to_ident(&token);
-                            path = Some(Path::new(List::from_iter([PathSegment::Name(ident)]), span));
-                        } else if alias.is_none() { alias = Maybe::Some(self.token_to_ident(&token)); }
+                            path =
+                                Some(Path::new(List::from_iter([PathSegment::Name(ident)]), span));
+                        } else if alias.is_none() {
+                            alias = Maybe::Some(self.token_to_ident(&token));
+                        }
                     }
                     _ => {}
                 },
                 SyntaxElement::Node(child_node) => match child_node.kind() {
-                    SyntaxKind::PATH | SyntaxKind::PATH_TYPE | SyntaxKind::PATH_EXPR => { if path.is_none() { path = self.convert_path(&child_node); } }
-                    SyntaxKind::GENERIC_ARGS => { for arg_child in child_node.child_nodes() { if let Some(ty) = self.convert_type(&arg_child) { type_args.push(ty); } } }
+                    SyntaxKind::PATH | SyntaxKind::PATH_TYPE | SyntaxKind::PATH_EXPR => {
+                        if path.is_none() {
+                            path = self.convert_path(&child_node);
+                        }
+                    }
+                    SyntaxKind::GENERIC_ARGS => {
+                        for arg_child in child_node.child_nodes() {
+                            if let Some(ty) = self.convert_type(&arg_child) {
+                                type_args.push(ty);
+                            }
+                        }
+                    }
                     _ => {}
                 },
             }
         }
-        Some(ContextRequirement { path: path?, args: type_args, is_negative, alias, name: Maybe::None, condition: Maybe::None, transforms: List::new(), span })
+        Some(ContextRequirement {
+            path: path?,
+            args: type_args,
+            is_negative,
+            alias,
+            name: Maybe::None,
+            condition: Maybe::None,
+            transforms: List::new(),
+            span,
+        })
     }
 
     /// Convert a FIELD_LIST node to a TypeDeclBody::Record.
     fn convert_record_body(&mut self, node: &SyntaxNode) -> TypeDeclBody {
         let mut fields = List::new();
         for child in node.child_nodes() {
-            if !matches!(child.kind(), SyntaxKind::FIELD_DEF | SyntaxKind::RECORD_FIELD) { continue; }
+            if !matches!(
+                child.kind(),
+                SyntaxKind::FIELD_DEF | SyntaxKind::RECORD_FIELD
+            ) {
+                continue;
+            }
             let field_span = self.range_to_span(child.text_range());
             let mut visibility = Visibility::Private;
             let mut field_name = None;
@@ -2612,29 +2741,51 @@ impl AstSink {
             for elem in child.children() {
                 match elem {
                     SyntaxElement::Token(token) => match token.kind() {
-                        SyntaxKind::PUB_KW => { visibility = Visibility::Public; }
-                        SyntaxKind::IDENT => { if field_name.is_none() { field_name = Some(self.token_to_ident(&token)); } }
+                        SyntaxKind::PUB_KW => {
+                            visibility = Visibility::Public;
+                        }
+                        SyntaxKind::IDENT => {
+                            if field_name.is_none() {
+                                field_name = Some(self.token_to_ident(&token));
+                            }
+                        }
                         _ => {}
                     },
                     SyntaxElement::Node(child_node) => match child_node.kind() {
                         // Explicit type node kinds that EventBasedParser emits
                         SyntaxKind::PATH_TYPE
-                            | SyntaxKind::REFERENCE_TYPE
-                            | SyntaxKind::TUPLE_TYPE
-                            | SyntaxKind::FUNCTION_TYPE
-                            | SyntaxKind::ARRAY_TYPE
-                            | SyntaxKind::NEVER_TYPE
-                            | SyntaxKind::INFER_TYPE
-                            | SyntaxKind::REFINED_TYPE
-                            | SyntaxKind::GENERIC_TYPE if field_ty.is_none() => { field_ty = self.convert_type(&child_node); }
-                        kind if kind.can_start_type() && field_ty.is_none() => { field_ty = self.convert_type(&child_node); }
-                        SyntaxKind::ATTRIBUTE => { if let Some(attr) = self.convert_attribute(&child_node) { field_attrs.push(attr); } }
+                        | SyntaxKind::REFERENCE_TYPE
+                        | SyntaxKind::TUPLE_TYPE
+                        | SyntaxKind::FUNCTION_TYPE
+                        | SyntaxKind::ARRAY_TYPE
+                        | SyntaxKind::NEVER_TYPE
+                        | SyntaxKind::INFER_TYPE
+                        | SyntaxKind::REFINED_TYPE
+                        | SyntaxKind::GENERIC_TYPE
+                            if field_ty.is_none() =>
+                        {
+                            field_ty = self.convert_type(&child_node);
+                        }
+                        kind if kind.can_start_type() && field_ty.is_none() => {
+                            field_ty = self.convert_type(&child_node);
+                        }
+                        SyntaxKind::ATTRIBUTE => {
+                            if let Some(attr) = self.convert_attribute(&child_node) {
+                                field_attrs.push(attr);
+                            }
+                        }
                         _ => {}
                     },
                 }
             }
             if let (Some(name), Some(ty)) = (field_name, field_ty) {
-                fields.push(RecordField::with_attributes(visibility, name, ty, field_attrs, field_span));
+                fields.push(RecordField::with_attributes(
+                    visibility,
+                    name,
+                    ty,
+                    field_attrs,
+                    field_span,
+                ));
             }
         }
         TypeDeclBody::Record(fields)
@@ -2645,7 +2796,9 @@ impl AstSink {
         use verum_ast::decl::VariantData;
         let mut variants = List::new();
         for child in node.child_nodes() {
-            if child.kind() != SyntaxKind::VARIANT_DEF { continue; }
+            if child.kind() != SyntaxKind::VARIANT_DEF {
+                continue;
+            }
             let variant_span = self.range_to_span(child.text_range());
             let mut variant_name = None;
             let mut variant_data = Maybe::None;
@@ -2654,48 +2807,83 @@ impl AstSink {
                 match elem {
                     SyntaxElement::Token(token) => {
                         // Variant names can be IDENT, NONE_KW, or SOME_KW
-                        if matches!(token.kind(), SyntaxKind::IDENT | SyntaxKind::NONE_KW | SyntaxKind::SOME_KW) && variant_name.is_none() {
+                        if matches!(
+                            token.kind(),
+                            SyntaxKind::IDENT | SyntaxKind::NONE_KW | SyntaxKind::SOME_KW
+                        ) && variant_name.is_none()
+                        {
                             variant_name = Some(self.token_to_ident(&token));
                         }
                     }
                     SyntaxElement::Node(child_node) => match child_node.kind() {
                         SyntaxKind::TUPLE_TYPE => {
                             let mut tuple_types = List::new();
-                            for type_child in child_node.child_nodes() { if let Some(ty) = self.convert_type(&type_child) { tuple_types.push(ty); } }
-                            if !tuple_types.is_empty() { variant_data = Maybe::Some(VariantData::Tuple(tuple_types)); }
+                            for type_child in child_node.child_nodes() {
+                                if let Some(ty) = self.convert_type(&type_child) {
+                                    tuple_types.push(ty);
+                                }
+                            }
+                            if !tuple_types.is_empty() {
+                                variant_data = Maybe::Some(VariantData::Tuple(tuple_types));
+                            }
                         }
                         // Explicit type node kinds that EventBasedParser emits directly
                         SyntaxKind::PATH_TYPE
-                            | SyntaxKind::REFERENCE_TYPE
-                            | SyntaxKind::FUNCTION_TYPE
-                            | SyntaxKind::ARRAY_TYPE
-                            | SyntaxKind::NEVER_TYPE
-                            | SyntaxKind::INFER_TYPE
-                            | SyntaxKind::REFINED_TYPE
-                            | SyntaxKind::GENERIC_TYPE if variant_name.is_some() => {
+                        | SyntaxKind::REFERENCE_TYPE
+                        | SyntaxKind::FUNCTION_TYPE
+                        | SyntaxKind::ARRAY_TYPE
+                        | SyntaxKind::NEVER_TYPE
+                        | SyntaxKind::INFER_TYPE
+                        | SyntaxKind::REFINED_TYPE
+                        | SyntaxKind::GENERIC_TYPE
+                            if variant_name.is_some() =>
+                        {
                             // Collect all type nodes for tuple variant
                             if let Some(ty) = self.convert_type(&child_node) {
-                                if let Maybe::Some(VariantData::Tuple(ref mut types)) = variant_data {
+                                if let Maybe::Some(VariantData::Tuple(ref mut types)) = variant_data
+                                {
                                     types.push(ty);
                                 } else {
-                                    variant_data = Maybe::Some(VariantData::Tuple(List::from_iter([ty])));
+                                    variant_data =
+                                        Maybe::Some(VariantData::Tuple(List::from_iter([ty])));
                                 }
                             }
                         }
-                        kind if kind.can_start_type() && variant_name.is_some() && variant_data.is_none() => {
-                            if let Some(ty) = self.convert_type(&child_node) { variant_data = Maybe::Some(VariantData::Tuple(List::from_iter([ty]))); }
-                        }
-                        SyntaxKind::FIELD_LIST => {
-                            if let TypeDeclBody::Record(fields) = self.convert_record_body(&child_node) {
-                                if !fields.is_empty() { variant_data = Maybe::Some(VariantData::Record(fields)); }
+                        kind if kind.can_start_type()
+                            && variant_name.is_some()
+                            && variant_data.is_none() =>
+                        {
+                            if let Some(ty) = self.convert_type(&child_node) {
+                                variant_data =
+                                    Maybe::Some(VariantData::Tuple(List::from_iter([ty])));
                             }
                         }
-                        SyntaxKind::ATTRIBUTE => { if let Some(attr) = self.convert_attribute(&child_node) { variant_attrs.push(attr); } }
+                        SyntaxKind::FIELD_LIST => {
+                            if let TypeDeclBody::Record(fields) =
+                                self.convert_record_body(&child_node)
+                            {
+                                if !fields.is_empty() {
+                                    variant_data = Maybe::Some(VariantData::Record(fields));
+                                }
+                            }
+                        }
+                        SyntaxKind::ATTRIBUTE => {
+                            if let Some(attr) = self.convert_attribute(&child_node) {
+                                variant_attrs.push(attr);
+                            }
+                        }
                         _ => {}
                     },
                 }
             }
-            if let Some(name) = variant_name { variants.push(Variant::with_attributes(name, variant_data, variant_attrs, variant_span)); }
+            if let Some(name) = variant_name {
+                variants.push(Variant::with_attributes(
+                    name,
+                    variant_data,
+                    variant_attrs,
+                    variant_span,
+                ));
+            }
         }
         TypeDeclBody::Variant(variants)
     }
@@ -3030,11 +3218,7 @@ impl AstSink {
         let base = base_type?;
         let pred = predicate_expr?;
 
-        let refinement = RefinementPredicate::with_binding(
-            pred,
-            binding_name,
-            span,
-        );
+        let refinement = RefinementPredicate::with_binding(pred, binding_name, span);
 
         Some(Type::new(
             TypeKind::Refined {
@@ -3250,10 +3434,7 @@ impl AstSink {
         // Check for variant data: tuple `(...)` or record `{...}`
         let data = self.extract_variant_data(node);
 
-        Some(Pattern::new(
-            PatternKind::Variant { path, data },
-            span,
-        ))
+        Some(Pattern::new(PatternKind::Variant { path, data }, span))
     }
 
     /// Extract a path from a pattern node.
@@ -3315,14 +3496,12 @@ impl AstSink {
 
         for child in node.children() {
             match child {
-                SyntaxElement::Token(token) => {
-                    match token.kind() {
-                        SyntaxKind::L_BRACE => in_braces = true,
-                        SyntaxKind::R_BRACE => in_braces = false,
-                        SyntaxKind::DOT_DOT if in_braces => has_rest = true,
-                        _ => {}
-                    }
-                }
+                SyntaxElement::Token(token) => match token.kind() {
+                    SyntaxKind::L_BRACE => in_braces = true,
+                    SyntaxKind::R_BRACE => in_braces = false,
+                    SyntaxKind::DOT_DOT if in_braces => has_rest = true,
+                    _ => {}
+                },
                 SyntaxElement::Node(child_node) => {
                     // Look for field pattern nodes
                     if in_braces {
@@ -3351,15 +3530,13 @@ impl AstSink {
 
         for child in node.children() {
             match child {
-                SyntaxElement::Token(token) => {
-                    match token.kind() {
-                        SyntaxKind::IDENT if name.is_none() => {
-                            name = Some(self.token_to_ident(&token));
-                        }
-                        SyntaxKind::COLON => seen_colon = true,
-                        _ => {}
+                SyntaxElement::Token(token) => match token.kind() {
+                    SyntaxKind::IDENT if name.is_none() => {
+                        name = Some(self.token_to_ident(&token));
                     }
-                }
+                    SyntaxKind::COLON => seen_colon = true,
+                    _ => {}
+                },
                 SyntaxElement::Node(child_node) => {
                     // If we have seen a colon, look for the pattern
                     if seen_colon && pattern.is_none() {
@@ -3396,16 +3573,14 @@ impl AstSink {
 
         for child in node.children() {
             match child {
-                SyntaxElement::Token(token) => {
-                    match token.kind() {
-                        SyntaxKind::L_PAREN => in_parens = true,
-                        SyntaxKind::R_PAREN => in_parens = false,
-                        SyntaxKind::L_BRACE => in_braces = true,
-                        SyntaxKind::R_BRACE => in_braces = false,
-                        SyntaxKind::DOT_DOT if in_braces => has_rest = true,
-                        _ => {}
-                    }
-                }
+                SyntaxElement::Token(token) => match token.kind() {
+                    SyntaxKind::L_PAREN => in_parens = true,
+                    SyntaxKind::R_PAREN => in_parens = false,
+                    SyntaxKind::L_BRACE => in_braces = true,
+                    SyntaxKind::R_BRACE => in_braces = false,
+                    SyntaxKind::DOT_DOT if in_braces => has_rest = true,
+                    _ => {}
+                },
                 SyntaxElement::Node(child_node) => {
                     if in_parens {
                         // Tuple variant data
@@ -3729,20 +3904,26 @@ impl AstSink {
                     }
                     // Explicit type node kinds that EventBasedParser emits
                     SyntaxKind::PATH_TYPE
-                        | SyntaxKind::REFERENCE_TYPE
-                        | SyntaxKind::TUPLE_TYPE
-                        | SyntaxKind::FUNCTION_TYPE
-                        | SyntaxKind::ARRAY_TYPE
-                        | SyntaxKind::NEVER_TYPE
-                        | SyntaxKind::INFER_TYPE
-                        | SyntaxKind::REFINED_TYPE
-                        | SyntaxKind::GENERIC_TYPE if seen_arrow && return_type.is_none() => {
-                        return_type =
-                            self.convert_type(&child_node).map(Maybe::Some).unwrap_or(Maybe::None);
+                    | SyntaxKind::REFERENCE_TYPE
+                    | SyntaxKind::TUPLE_TYPE
+                    | SyntaxKind::FUNCTION_TYPE
+                    | SyntaxKind::ARRAY_TYPE
+                    | SyntaxKind::NEVER_TYPE
+                    | SyntaxKind::INFER_TYPE
+                    | SyntaxKind::REFINED_TYPE
+                    | SyntaxKind::GENERIC_TYPE
+                        if seen_arrow && return_type.is_none() =>
+                    {
+                        return_type = self
+                            .convert_type(&child_node)
+                            .map(Maybe::Some)
+                            .unwrap_or(Maybe::None);
                     }
                     kind if kind.can_start_type() && seen_arrow && return_type.is_none() => {
-                        return_type =
-                            self.convert_type(&child_node).map(Maybe::Some).unwrap_or(Maybe::None);
+                        return_type = self
+                            .convert_type(&child_node)
+                            .map(Maybe::Some)
+                            .unwrap_or(Maybe::None);
                     }
                     kind if kind.can_start_expr() || kind == SyntaxKind::BLOCK => {
                         if body.is_none() {
@@ -3793,7 +3974,10 @@ impl AstSink {
                     if pattern.is_none() {
                         pattern = self.convert_pattern(&child_node);
                     } else if ty.is_none() && child_node.kind().can_start_type() {
-                        ty = self.convert_type(&child_node).map(Maybe::Some).unwrap_or(Maybe::None);
+                        ty = self
+                            .convert_type(&child_node)
+                            .map(Maybe::Some)
+                            .unwrap_or(Maybe::None);
                     }
                 }
             }
@@ -4735,7 +4919,8 @@ mod tests {
     // NOTE: Requires EventBasedParser to emit PUB_KW tokens in FN_DEF nodes
     // ========================================================================
 
-    #[test]    fn test_syntax_to_ast_pub_function() {
+    #[test]
+    fn test_syntax_to_ast_pub_function() {
         let result = parse_to_ast("pub fn foo() { }");
 
         if let ItemKind::Function(func) = &result.module.items[0].kind {
@@ -4746,7 +4931,8 @@ mod tests {
         }
     }
 
-    #[test]    fn test_syntax_to_ast_pub_type() {
+    #[test]
+    fn test_syntax_to_ast_pub_type() {
         let result = parse_to_ast("pub type Foo is { };");
 
         if let ItemKind::Type(ty) = &result.module.items[0].kind {
@@ -4762,7 +4948,8 @@ mod tests {
     // NOTE: Requires EventBasedParser to emit modifier tokens in FN_DEF nodes
     // ========================================================================
 
-    #[test]    fn test_syntax_to_ast_async_function() {
+    #[test]
+    fn test_syntax_to_ast_async_function() {
         let result = parse_to_ast("async fn foo() { }");
 
         if let ItemKind::Function(func) = &result.module.items[0].kind {
@@ -4773,7 +4960,8 @@ mod tests {
         }
     }
 
-    #[test]    fn test_syntax_to_ast_pure_function() {
+    #[test]
+    fn test_syntax_to_ast_pure_function() {
         let result = parse_to_ast("pure fn foo() { }");
 
         if let ItemKind::Function(func) = &result.module.items[0].kind {
@@ -4784,7 +4972,8 @@ mod tests {
         }
     }
 
-    #[test]    fn test_syntax_to_ast_meta_function() {
+    #[test]
+    fn test_syntax_to_ast_meta_function() {
         let result = parse_to_ast("meta fn foo() { }");
 
         if let ItemKind::Function(func) = &result.module.items[0].kind {
@@ -4796,7 +4985,8 @@ mod tests {
         }
     }
 
-    #[test]    fn test_syntax_to_ast_unsafe_function() {
+    #[test]
+    fn test_syntax_to_ast_unsafe_function() {
         let result = parse_to_ast("unsafe fn foo() { }");
 
         if let ItemKind::Function(func) = &result.module.items[0].kind {
@@ -4833,7 +5023,8 @@ mod tests {
         }
     }
 
-    #[test]    fn test_syntax_to_ast_function_multiple_params() {
+    #[test]
+    fn test_syntax_to_ast_function_multiple_params() {
         let result = parse_to_ast("fn foo(x: Int, y: Int) { }");
 
         if let ItemKind::Function(func) = &result.module.items[0].kind {
@@ -4843,7 +5034,8 @@ mod tests {
         }
     }
 
-    #[test]    fn test_syntax_to_ast_function_self_param() {
+    #[test]
+    fn test_syntax_to_ast_function_self_param() {
         let result = parse_to_ast("fn foo(self) { }");
 
         if let ItemKind::Function(func) = &result.module.items[0].kind {
@@ -4854,7 +5046,8 @@ mod tests {
         }
     }
 
-    #[test]    fn test_syntax_to_ast_function_ref_self_param() {
+    #[test]
+    fn test_syntax_to_ast_function_ref_self_param() {
         let result = parse_to_ast("fn foo(&self) { }");
 
         if let ItemKind::Function(func) = &result.module.items[0].kind {
@@ -4865,7 +5058,8 @@ mod tests {
         }
     }
 
-    #[test]    fn test_syntax_to_ast_function_ref_mut_self_param() {
+    #[test]
+    fn test_syntax_to_ast_function_ref_mut_self_param() {
         let result = parse_to_ast("fn foo(&mut self) { }");
 
         if let ItemKind::Function(func) = &result.module.items[0].kind {
@@ -4881,7 +5075,8 @@ mod tests {
     // NOTE: Requires EventBasedParser to emit return type nodes
     // ========================================================================
 
-    #[test]    fn test_syntax_to_ast_function_with_return_type() {
+    #[test]
+    fn test_syntax_to_ast_function_with_return_type() {
         let result = parse_to_ast("fn foo() -> Int { }");
 
         if let ItemKind::Function(func) = &result.module.items[0].kind {
@@ -4911,7 +5106,8 @@ mod tests {
     // NOTE: Requires EventBasedParser to emit GENERIC_PARAMS nodes
     // ========================================================================
 
-    #[test]    fn test_syntax_to_ast_generic_function() {
+    #[test]
+    fn test_syntax_to_ast_generic_function() {
         let result = parse_to_ast("fn foo<T>() { }");
 
         if let ItemKind::Function(func) = &result.module.items[0].kind {
@@ -4922,7 +5118,8 @@ mod tests {
         }
     }
 
-    #[test]    fn test_syntax_to_ast_multiple_generic_params() {
+    #[test]
+    fn test_syntax_to_ast_multiple_generic_params() {
         let result = parse_to_ast("fn foo<T, U, V>() { }");
 
         if let ItemKind::Function(func) = &result.module.items[0].kind {
@@ -4932,7 +5129,8 @@ mod tests {
         }
     }
 
-    #[test]    fn test_syntax_to_ast_generic_type() {
+    #[test]
+    fn test_syntax_to_ast_generic_type() {
         let result = parse_to_ast("type Container<T> is { value: T };");
 
         if let ItemKind::Type(ty) = &result.module.items[0].kind {
@@ -4948,7 +5146,8 @@ mod tests {
     // NOTE: Requires EventBasedParser to emit FIELD_LIST/VARIANT_LIST nodes
     // ========================================================================
 
-    #[test]    fn test_syntax_to_ast_record_type_with_fields() {
+    #[test]
+    fn test_syntax_to_ast_record_type_with_fields() {
         let result = parse_to_ast("type Point is { x: Float, y: Float };");
 
         if let ItemKind::Type(ty) = &result.module.items[0].kind {
@@ -4964,7 +5163,8 @@ mod tests {
         }
     }
 
-    #[test]    fn test_syntax_to_ast_variant_type() {
+    #[test]
+    fn test_syntax_to_ast_variant_type() {
         let result = parse_to_ast("type Option<T> is None | Some(T);");
 
         if let ItemKind::Type(ty) = &result.module.items[0].kind {
@@ -4989,7 +5189,8 @@ mod tests {
         }
     }
 
-    #[test]    fn test_syntax_to_ast_type_alias() {
+    #[test]
+    fn test_syntax_to_ast_type_alias() {
         let result = parse_to_ast("type IntList is List<Int>;");
 
         if let ItemKind::Type(ty) = &result.module.items[0].kind {
@@ -5041,7 +5242,8 @@ mod tests {
     // Block and Statement Tests
     // ========================================================================
 
-    #[test]    fn test_syntax_to_ast_block_with_let() {
+    #[test]
+    fn test_syntax_to_ast_block_with_let() {
         let result = parse_to_ast("fn foo() { let x = 1; }");
 
         if let ItemKind::Function(func) = &result.module.items[0].kind {
@@ -5071,7 +5273,8 @@ mod tests {
     // NOTE: These test multiple features that need EventBasedParser support
     // ========================================================================
 
-    #[test]    fn test_syntax_to_ast_complex_function() {
+    #[test]
+    fn test_syntax_to_ast_complex_function() {
         let result = parse_to_ast("pub async fn fetch<T>(url: Text) -> T { }");
 
         if let ItemKind::Function(func) = &result.module.items[0].kind {
@@ -5103,7 +5306,8 @@ mod tests {
         }
     }
 
-    #[test]    fn test_syntax_to_ast_function_with_where_clause() {
+    #[test]
+    fn test_syntax_to_ast_function_with_where_clause() {
         let result = parse_to_ast("fn foo<T>() where T: Debug { }");
 
         if let ItemKind::Function(func) = &result.module.items[0].kind {
@@ -5114,7 +5318,8 @@ mod tests {
         }
     }
 
-    #[test]    fn test_syntax_to_ast_pub_type_with_pub_fields() {
+    #[test]
+    fn test_syntax_to_ast_pub_type_with_pub_fields() {
         let result = parse_to_ast("pub type Point is { pub x: Float, pub y: Float };");
 
         if let ItemKind::Type(ty) = &result.module.items[0].kind {
@@ -5140,7 +5345,8 @@ mod tests {
         }
     }
 
-    #[test]    fn test_syntax_to_ast_deeply_nested_generics() {
+    #[test]
+    fn test_syntax_to_ast_deeply_nested_generics() {
         let result = parse_to_ast("type Deep is Map<Text, List<Maybe<Int>>>;");
 
         if let ItemKind::Type(ty) = &result.module.items[0].kind {
@@ -5158,7 +5364,8 @@ mod tests {
         }
     }
 
-    #[test]    fn test_syntax_to_ast_multiline_function() {
+    #[test]
+    fn test_syntax_to_ast_multiline_function() {
         let result = parse_to_ast(
             r#"fn foo(
     x: Int,
@@ -5178,7 +5385,8 @@ mod tests {
     // Protocol Definition Tests
     // ========================================================================
 
-    #[test]    fn test_syntax_to_ast_protocol_def() {
+    #[test]
+    fn test_syntax_to_ast_protocol_def() {
         let result = parse_to_ast("type Printable is protocol { fn print(&self); };");
 
         if let ItemKind::Protocol(proto) = &result.module.items[0].kind {
@@ -5187,7 +5395,8 @@ mod tests {
         }
     }
 
-    #[test]    fn test_syntax_to_ast_empty_protocol() {
+    #[test]
+    fn test_syntax_to_ast_empty_protocol() {
         let result = parse_to_ast("type Empty is protocol { };");
 
         if let ItemKind::Protocol(proto) = &result.module.items[0].kind {
@@ -5221,7 +5430,8 @@ mod tests {
     // Tuple Type Tests
     // ========================================================================
 
-    #[test]    fn test_syntax_to_ast_tuple_type_param() {
+    #[test]
+    fn test_syntax_to_ast_tuple_type_param() {
         let result = parse_to_ast("fn foo(pair: (Int, Int)) { }");
 
         if let ItemKind::Function(func) = &result.module.items[0].kind {
@@ -5248,7 +5458,8 @@ mod tests {
         }
     }
 
-    #[test]    fn test_syntax_to_ast_mut_reference_param() {
+    #[test]
+    fn test_syntax_to_ast_mut_reference_param() {
         let result = parse_to_ast("fn foo(x: &mut Int) { }");
 
         if let ItemKind::Function(func) = &result.module.items[0].kind {

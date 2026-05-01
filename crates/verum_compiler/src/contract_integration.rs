@@ -6,8 +6,8 @@
 
 use std::time::Duration;
 use verum_ast::Span;
-use verum_smt::{ContractSpec, ProofResult, VerificationCost};
 use verum_common::Text;
+use verum_smt::{ContractSpec, ProofResult, VerificationCost};
 
 use crate::phases::{ContractTarget, VerifiedContract, VerifiedContractRegistry};
 

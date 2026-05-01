@@ -29,8 +29,8 @@
 
 use verum_ast::ffi::ErrorProtocol;
 use verum_ast::{FileId, ItemKind};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 /// Helper to extract error protocol from parsed FFI boundary
 fn extract_error_protocol(source: &str) -> ErrorProtocol {

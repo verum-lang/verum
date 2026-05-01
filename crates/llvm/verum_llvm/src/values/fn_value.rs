@@ -1,14 +1,19 @@
-use verum_llvm_sys::analysis::{LLVMVerifierFailureAction, LLVMVerifyFunction, LLVMViewFunctionCFG, LLVMViewFunctionCFGOnly};
+use verum_llvm_sys::analysis::{
+    LLVMVerifierFailureAction, LLVMVerifyFunction, LLVMViewFunctionCFG, LLVMViewFunctionCFGOnly,
+};
 use verum_llvm_sys::core::LLVMAppendExistingBasicBlock;
 use verum_llvm_sys::core::{
-    LLVMAddAttributeAtIndex, LLVMGetAttributeCountAtIndex, LLVMGetEnumAttributeAtIndex, LLVMGetStringAttributeAtIndex,
-    LLVMRemoveEnumAttributeAtIndex, LLVMRemoveStringAttributeAtIndex,
+    LLVMAddAttributeAtIndex, LLVMGetAttributeCountAtIndex, LLVMGetEnumAttributeAtIndex,
+    LLVMGetStringAttributeAtIndex, LLVMRemoveEnumAttributeAtIndex,
+    LLVMRemoveStringAttributeAtIndex,
 };
 use verum_llvm_sys::core::{
-    LLVMCountBasicBlocks, LLVMCountParams, LLVMDeleteFunction, LLVMGetBasicBlocks, LLVMGetFirstBasicBlock,
-    LLVMGetFirstParam, LLVMGetFunctionCallConv, LLVMGetGC, LLVMGetIntrinsicID, LLVMGetLastBasicBlock, LLVMGetLastParam,
-    LLVMGetLinkage, LLVMGetNextFunction, LLVMGetNextParam, LLVMGetParam, LLVMGetParams, LLVMGetPreviousFunction,
-    LLVMIsAFunction, LLVMIsConstant, LLVMSetFunctionCallConv, LLVMSetGC, LLVMSetLinkage, LLVMSetParamAlignment,
+    LLVMCountBasicBlocks, LLVMCountParams, LLVMDeleteFunction, LLVMGetBasicBlocks,
+    LLVMGetFirstBasicBlock, LLVMGetFirstParam, LLVMGetFunctionCallConv, LLVMGetGC,
+    LLVMGetIntrinsicID, LLVMGetLastBasicBlock, LLVMGetLastParam, LLVMGetLinkage,
+    LLVMGetNextFunction, LLVMGetNextParam, LLVMGetParam, LLVMGetParams, LLVMGetPreviousFunction,
+    LLVMIsAFunction, LLVMIsConstant, LLVMSetFunctionCallConv, LLVMSetGC, LLVMSetLinkage,
+    LLVMSetParamAlignment,
 };
 use verum_llvm_sys::core::{LLVMGetPersonalityFn, LLVMSetPersonalityFn};
 use verum_llvm_sys::debuginfo::{LLVMGetSubprogram, LLVMSetSubprogram};
@@ -180,7 +185,10 @@ impl<'ctx> FunctionValue<'ctx> {
             Vec::from_raw_parts(ptr, count as usize, count as usize)
         };
 
-        raw_vec.iter().map(|val| unsafe { BasicValueEnum::new(*val) }).collect()
+        raw_vec
+            .iter()
+            .map(|val| unsafe { BasicValueEnum::new(*val) })
+            .collect()
     }
 
     pub fn get_last_basic_block(self) -> Option<BasicBlock<'ctx>> {
@@ -209,7 +217,11 @@ impl<'ctx> FunctionValue<'ctx> {
     }
 
     pub fn get_type(self) -> FunctionType<'ctx> {
-        unsafe { FunctionType::new(verum_llvm_sys::core::LLVMGlobalGetValueType(self.as_value_ref())) }
+        unsafe {
+            FunctionType::new(verum_llvm_sys::core::LLVMGlobalGetValueType(
+                self.as_value_ref(),
+            ))
+        }
     }
 
     /// Returns true if this function has a personality function for exception handling (EH).
@@ -283,7 +295,9 @@ impl<'ctx> FunctionValue<'ctx> {
     /// fn_value.add_attribute(AttributeLoc::Return, enum_attribute);
     /// ```
     pub fn add_attribute(self, loc: AttributeLoc, attribute: Attribute) {
-        unsafe { LLVMAddAttributeAtIndex(self.as_value_ref(), loc.get_index(), attribute.attribute) }
+        unsafe {
+            LLVMAddAttributeAtIndex(self.as_value_ref(), loc.get_index(), attribute.attribute)
+        }
     }
 
     /// Counts the number of `Attribute`s belonging to the specified location in this `FunctionValue`.
@@ -343,8 +357,8 @@ impl<'ctx> FunctionValue<'ctx> {
     /// assert_eq!(fn_value.attributes(AttributeLoc::Return), vec![string_attribute, enum_attribute]);
     /// ```
     pub fn attributes(self, loc: AttributeLoc) -> Vec<Attribute> {
-        use verum_llvm_sys::core::LLVMGetAttributesAtIndex;
         use std::mem::{ManuallyDrop, MaybeUninit};
+        use verum_llvm_sys::core::LLVMGetAttributesAtIndex;
 
         let count = self.count_attributes(loc) as usize;
 
@@ -458,7 +472,8 @@ impl<'ctx> FunctionValue<'ctx> {
     /// ```
     // SubTypes: -> Option<Attribute<Enum>>
     pub fn get_enum_attribute(self, loc: AttributeLoc, kind_id: u32) -> Option<Attribute> {
-        let ptr = unsafe { LLVMGetEnumAttributeAtIndex(self.as_value_ref(), loc.get_index(), kind_id) };
+        let ptr =
+            unsafe { LLVMGetEnumAttributeAtIndex(self.as_value_ref(), loc.get_index(), kind_id) };
 
         if ptr.is_null() {
             return None;

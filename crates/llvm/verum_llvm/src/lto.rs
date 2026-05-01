@@ -5,9 +5,9 @@
 
 // On MSVC, the linker processes static libraries in single-pass order.
 // Force it to resolve LTO symbols from LLVMLTO.lib.
-use verum_llvm_sys::lto::*;
 use std::ffi::{CStr, c_char};
 use std::path::{Path, PathBuf};
+use verum_llvm_sys::lto::*;
 
 use crate::error::{LlvmError, LlvmResult};
 use crate::support::to_c_str;
@@ -20,8 +20,7 @@ struct ObjectBuffer {
 }
 
 /// LTO mode
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LtoMode {
     /// No LTO
     None,
@@ -31,7 +30,6 @@ pub enum LtoMode {
     /// Full LTO (slower, better optimization)
     Full,
 }
-
 
 /// ThinLTO cache configuration
 #[derive(Debug, Clone)]
@@ -53,10 +51,10 @@ impl ThinLtoCache {
     pub fn new(dir: impl AsRef<Path>) -> Self {
         Self {
             dir: dir.as_ref().to_path_buf(),
-            pruning_interval: 86400,  // 1 day
-            expiration: 604800,       // 1 week
-            max_size_bytes: 0,        // unlimited
-            max_size_percentage: 75,  // 75% of available space
+            pruning_interval: 86400, // 1 day
+            expiration: 604800,      // 1 week
+            max_size_bytes: 0,       // unlimited
+            max_size_percentage: 75, // 75% of available space
         }
     }
 
@@ -350,10 +348,7 @@ impl ThinLtoCodegen {
             if obj_buf.buffer.is_null() || obj_buf.size == 0 {
                 return None;
             }
-            Some(std::slice::from_raw_parts(
-                obj_buf.buffer as *const u8,
-                obj_buf.size,
-            ).to_vec())
+            Some(std::slice::from_raw_parts(obj_buf.buffer as *const u8, obj_buf.size).to_vec())
         }
     }
 
@@ -410,20 +405,21 @@ impl FullLtoCodegen {
     pub fn add_module(&self, data: &[u8]) -> LlvmResult<()> {
         // Create LTO module from memory
         let module = unsafe {
-            lto_module_create_from_memory(
-                data.as_ptr() as *const std::ffi::c_void,
-                data.len(),
-            )
+            lto_module_create_from_memory(data.as_ptr() as *const std::ffi::c_void, data.len())
         };
 
         if module.is_null() {
-            return Err(LlvmError::LtoError("Failed to create LTO module".to_string()));
+            return Err(LlvmError::LtoError(
+                "Failed to create LTO module".to_string(),
+            ));
         }
 
         let result = unsafe { lto_codegen_add_module(self.codegen, module) };
 
         if result != 0 {
-            return Err(LlvmError::LtoError("Failed to add module to LTO".to_string()));
+            return Err(LlvmError::LtoError(
+                "Failed to add module to LTO".to_string(),
+            ));
         }
 
         Ok(())
@@ -475,10 +471,7 @@ impl FullLtoCodegen {
     /// Wraps `lto_codegen_set_should_internalize`.
     pub fn set_internalize(&self, internalize: bool) {
         unsafe {
-            lto_codegen_set_should_internalize(
-                self.codegen,
-                if internalize { 1 } else { 0 },
-            );
+            lto_codegen_set_should_internalize(self.codegen, if internalize { 1 } else { 0 });
         }
     }
 
@@ -506,10 +499,7 @@ impl FullLtoCodegen {
         // Closes the inert-defense pattern by routing the values
         // through tracing so embedders setting
         // `lto.features = "+avx2"` see the request was observed.
-        if !config.features.is_empty()
-            || config.opt_level != 2
-            || !config.whole_program
-        {
+        if !config.features.is_empty() || config.opt_level != 2 || !config.whole_program {
             tracing::debug!(
                 "FullLtoCodeGen::apply_config: features={:?}, opt_level={}, \
                  whole_program={} — these LtoConfig fields are not routed \
@@ -574,7 +564,9 @@ impl FullLtoCodegen {
         let path_c = to_c_str(path);
         let result = unsafe { lto_codegen_write_merged_modules(self.codegen, path_c.as_ptr()) };
         if result != 0 {
-            return Err(LlvmError::LtoError("Failed to write merged modules".to_string()));
+            return Err(LlvmError::LtoError(
+                "Failed to write merged modules".to_string(),
+            ));
         }
         Ok(())
     }

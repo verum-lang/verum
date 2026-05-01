@@ -31,7 +31,7 @@ use std::time::Instant;
 use anyhow::Result;
 use tracing::{debug, info};
 
-use verum_ast::{decl::ItemKind, Module};
+use verum_ast::{Module, decl::ItemKind};
 use verum_common::List;
 
 use super::{CfgBuildContext, CompilationPipeline};
@@ -50,9 +50,9 @@ impl<'s> CompilationPipeline<'s> {
     /// CBGR analysis: builds CFGs, runs escape analysis to promote references from
     /// Tier 0 (~15ns managed) to Tier 1 (0ns compiler-proven safe, `&checked T`).
     pub(super) fn phase_cbgr_analysis(&self, module: &Module) -> Result<()> {
+        use crate::session::FunctionId;
         use verum_cbgr::tier_analysis::{TierAnalysisConfig, TierAnalyzer};
         use verum_cbgr::tier_types::TierStatistics;
-        use crate::session::FunctionId;
 
         // Gate on [runtime].cbgr_mode:
         //  "unsafe" → skip analysis entirely (all refs are raw)
@@ -66,9 +66,7 @@ impl<'s> CompilationPipeline<'s> {
             .as_str()
             .to_string();
         if cbgr_mode == "unsafe" {
-            tracing::debug!(
-                "CBGR analysis SKIPPED ([runtime] cbgr_mode = \"unsafe\")"
-            );
+            tracing::debug!("CBGR analysis SKIPPED ([runtime] cbgr_mode = \"unsafe\")");
             return Ok(());
         }
 
@@ -1822,9 +1820,12 @@ impl<'s> CompilationPipeline<'s> {
                 matches!(ty.kind, TypeKind::Reference { .. })
             }
             // Self reference parameters
-            FunctionParamKind::SelfRef | FunctionParamKind::SelfRefMut |
-            FunctionParamKind::SelfRefChecked | FunctionParamKind::SelfRefCheckedMut |
-            FunctionParamKind::SelfRefUnsafe | FunctionParamKind::SelfRefUnsafeMut => true,
+            FunctionParamKind::SelfRef
+            | FunctionParamKind::SelfRefMut
+            | FunctionParamKind::SelfRefChecked
+            | FunctionParamKind::SelfRefCheckedMut
+            | FunctionParamKind::SelfRefUnsafe
+            | FunctionParamKind::SelfRefUnsafeMut => true,
             FunctionParamKind::SelfOwn | FunctionParamKind::SelfOwnMut => true,
             // Self value parameters are not references
             FunctionParamKind::SelfValue | FunctionParamKind::SelfValueMut => false,

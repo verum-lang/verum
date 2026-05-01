@@ -79,23 +79,14 @@ pub enum CcTerm {
     /// Variable reference.
     Var(Text),
     /// Lambda abstraction `λx. body`.
-    Lam {
-        param: Text,
-        body: Box<CcTerm>,
-    },
+    Lam { param: Text, body: Box<CcTerm> },
     /// Application `f arg`.
-    App {
-        func: Box<CcTerm>,
-        arg: Box<CcTerm>,
-    },
+    App { func: Box<CcTerm>, arg: Box<CcTerm> },
     /// `reset M` — install a control delimiter.
     Reset(Box<CcTerm>),
     /// `shift k. M` — capture the continuation up to the nearest
     /// reset, bind it to `k`.
-    Shift {
-        binder: Text,
-        body: Box<CcTerm>,
-    },
+    Shift { binder: Text, body: Box<CcTerm> },
 }
 
 impl CcTerm {
@@ -247,8 +238,7 @@ pub fn step(term: &CcTerm) -> Option<CcTerm> {
             // — the empty-context case where the captured
             // continuation is the identity.
             if let CcTerm::Shift { binder, body } = inner.as_ref() {
-                let identity_k =
-                    CcTerm::lam("x", CcTerm::reset(CcTerm::var("x")));
+                let identity_k = CcTerm::lam("x", CcTerm::reset(CcTerm::var("x")));
                 let substituted = body.substitute(binder, &identity_k);
                 return Some(CcTerm::reset(substituted));
             }
@@ -308,10 +298,7 @@ mod tests {
     #[test]
     fn beta_reduction_substitutes() {
         // (λx. x) c ↦ c
-        let term = CcTerm::app(
-            CcTerm::lam("x", CcTerm::var("x")),
-            CcTerm::cnst("c"),
-        );
+        let term = CcTerm::app(CcTerm::lam("x", CcTerm::var("x")), CcTerm::cnst("c"));
         let result = step(&term).unwrap();
         assert_eq!(result, CcTerm::cnst("c"));
     }
@@ -425,10 +412,7 @@ mod tests {
     #[test]
     fn evaluate_terminates_at_normal_form() {
         // (λx. x) c ↦ c (normal form after 1 step)
-        let term = CcTerm::app(
-            CcTerm::lam("x", CcTerm::var("x")),
-            CcTerm::cnst("c"),
-        );
+        let term = CcTerm::app(CcTerm::lam("x", CcTerm::var("x")), CcTerm::cnst("c"));
         let r = evaluate(&term, 100);
         assert_eq!(r, CcTerm::cnst("c"));
     }
@@ -437,10 +421,7 @@ mod tests {
     fn evaluate_caps_at_fuel() {
         // Apply Y-style non-terminator a couple of times — the
         // evaluator must stop without panicking.
-        let omega = CcTerm::lam(
-            "x",
-            CcTerm::app(CcTerm::var("x"), CcTerm::var("x")),
-        );
+        let omega = CcTerm::lam("x", CcTerm::app(CcTerm::var("x"), CcTerm::var("x")));
         let term = CcTerm::app(omega.clone(), omega);
         let _ = evaluate(&term, 5);
         // The point is that `evaluate` returned at all.

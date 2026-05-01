@@ -25,14 +25,14 @@ use verum_ast::{
     expr::{BinOp, Block, ConditionKind, ExprKind, IfCondition},
     stmt::StmtKind,
 };
+use verum_common::List as StdList;
 use verum_common::Text as CoreText; // alias for String - used by verum_ast
+use verum_common::Text as StdText; // The Text wrapper type used by verum_smt
 use verum_common::{Heap, List, Maybe};
 use verum_smt::{
     Context, ContextConfig,
     wp_calculus::{DataflowAnalyzer, WpEngine, WpError, extract_loop_body_effects_enhanced},
 };
-use verum_common::List as StdList;
-use verum_common::Text as StdText; // The Text wrapper type used by verum_smt
 use z3::ast::{Ast, Bool, Int};
 
 // Helper to create a dummy span
@@ -309,13 +309,15 @@ fn test_wp_if_then_else() {
         BinOp::Assign,
         make_path_expr("x"),
         make_binary_expr(BinOp::Add, make_path_expr("x"), make_int_expr(1)),
-    ))].into();
+    ))]
+    .into();
 
     let else_stmts: List<Stmt> = vec![make_expr_stmt(make_binary_expr(
         BinOp::Assign,
         make_path_expr("x"),
         make_int_expr(0),
-    ))].into();
+    ))]
+    .into();
 
     let if_expr = make_if_expr(cond_expr, then_stmts, Some(else_stmts));
 
@@ -434,13 +436,15 @@ fn test_dataflow_conditional_modification() {
         BinOp::Assign,
         make_path_expr("x"),
         make_int_expr(1),
-    ))].into();
+    ))]
+    .into();
 
     let else_stmts: List<Stmt> = vec![make_expr_stmt(make_binary_expr(
         BinOp::Assign,
         make_path_expr("x"),
         make_int_expr(2),
-    ))].into();
+    ))]
+    .into();
 
     let if_expr = make_if_expr(cond_expr, then_stmts, Some(else_stmts));
 

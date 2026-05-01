@@ -30,9 +30,9 @@
 // than rewriting each call-site.
 #![allow(clippy::absurd_extreme_comparisons)]
 
+use verum_common::{List, Text};
 use verum_smt::Context;
 use verum_smt::interpolation::*;
-use verum_common::{List, Text};
 use z3::ast::{Ast, Bool, Int};
 
 // ==================== Basic Interpolation Tests ====================

@@ -117,7 +117,10 @@ impl Valuation {
     }
 
     pub fn get(&self, world: &World, atom: &Text) -> bool {
-        self.truth.get(&(world.clone(), atom.clone())).copied().unwrap_or(false)
+        self.truth
+            .get(&(world.clone(), atom.clone()))
+            .copied()
+            .unwrap_or(false)
     }
 }
 
@@ -349,7 +352,12 @@ mod tests {
         f.add_edge(w("0"), w("1"));
         let mut v = Valuation::new();
         v.set(w("1"), "p", true);
-        assert!(evaluate(&ModalForm::nec(ModalForm::atom("p")), &f, &v, &w("0")));
+        assert!(evaluate(
+            &ModalForm::nec(ModalForm::atom("p")),
+            &f,
+            &v,
+            &w("0")
+        ));
     }
 
     #[test]
@@ -360,7 +368,12 @@ mod tests {
         let mut v = Valuation::new();
         v.set(w("1"), "p", true);
         v.set(w("2"), "p", false);
-        assert!(!evaluate(&ModalForm::nec(ModalForm::atom("p")), &f, &v, &w("0")));
+        assert!(!evaluate(
+            &ModalForm::nec(ModalForm::atom("p")),
+            &f,
+            &v,
+            &w("0")
+        ));
     }
 
     #[test]
@@ -369,7 +382,12 @@ mod tests {
         f.add_world(w("0"));
         let v = Valuation::new();
         // No edges from w0 → □p is vacuously true.
-        assert!(evaluate(&ModalForm::nec(ModalForm::atom("p")), &f, &v, &w("0")));
+        assert!(evaluate(
+            &ModalForm::nec(ModalForm::atom("p")),
+            &f,
+            &v,
+            &w("0")
+        ));
     }
 
     #[test]
@@ -380,7 +398,12 @@ mod tests {
         let mut v = Valuation::new();
         v.set(w("1"), "p", false);
         v.set(w("2"), "p", true);
-        assert!(evaluate(&ModalForm::pos(ModalForm::atom("p")), &f, &v, &w("0")));
+        assert!(evaluate(
+            &ModalForm::pos(ModalForm::atom("p")),
+            &f,
+            &v,
+            &w("0")
+        ));
     }
 
     #[test]
@@ -389,7 +412,12 @@ mod tests {
         f.add_edge(w("0"), w("1"));
         let mut v = Valuation::new();
         v.set(w("1"), "p", false);
-        assert!(!evaluate(&ModalForm::pos(ModalForm::atom("p")), &f, &v, &w("0")));
+        assert!(!evaluate(
+            &ModalForm::pos(ModalForm::atom("p")),
+            &f,
+            &v,
+            &w("0")
+        ));
     }
 
     #[test]
@@ -401,7 +429,9 @@ mod tests {
         // false → false is true
         assert!(evaluate(
             &ModalForm::implies(ModalForm::atom("p"), ModalForm::atom("q")),
-            &f, &v, &w("0")
+            &f,
+            &v,
+            &w("0")
         ));
     }
 

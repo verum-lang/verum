@@ -46,8 +46,8 @@
 
 use std::fmt;
 
-use crate::types::TypeId;
 use crate::FunctionId;
+use crate::types::TypeId;
 
 /// Base NaN bits for tagged values.
 /// We use a quiet NaN: 0x7FF8 (exponent=0x7FF, quiet bit set at position 51).
@@ -100,7 +100,7 @@ const SPECIAL_VALUE_MARKER: u64 = 1u64 << 47;
 /// On Yield, the full register state + PC + context stack is saved. On GenNext (0x9F), the
 /// generator is resumed from saved state. GenHasNext (0xC9) checks if more values are available.
 /// NaN-boxed encoding: TAG_POINTER with SPECIAL_VALUE_MARKER set, bit 46 clear, bits 0-44 = GeneratorId.
-const GENERATOR_MARKER: u64 = SPECIAL_VALUE_MARKER;  // bit 47 = 1, bit 46 = 0
+const GENERATOR_MARKER: u64 = SPECIAL_VALUE_MARKER; // bit 47 = 1, bit 46 = 0
 
 /// Sub-marker bit (bit 46) to distinguish boxed integers from generators.
 ///
@@ -123,7 +123,7 @@ const BOXED_INT_SUB_MARKER: u64 = 1u64 << 46;
 /// This encoding guarantees no collision with:
 /// - Real heap pointers: bit 47 = 0 (canonical addressing)
 /// - Generators: bit 47 = 1, bit 46 = 0
-const BOXED_INT_MARKER: u64 = SPECIAL_VALUE_MARKER | BOXED_INT_SUB_MARKER;  // bits 47 and 46
+const BOXED_INT_MARKER: u64 = SPECIAL_VALUE_MARKER | BOXED_INT_SUB_MARKER; // bits 47 and 46
 
 /// Mask for generator ID (bits 0-44, 45 bits total).
 /// This avoids bit 45 which is used as THIN_REF_SUB_MARKER.
@@ -146,7 +146,7 @@ const THIN_REF_SUB_MARKER: u64 = 1u64 << 45;
 
 /// ThinRef values use TAG_POINTER with this marker pattern.
 /// The remaining 45 bits hold an index into the global ThinRef table.
-const THIN_REF_MARKER: u64 = SPECIAL_VALUE_MARKER | THIN_REF_SUB_MARKER;  // bits 47 and 45
+const THIN_REF_MARKER: u64 = SPECIAL_VALUE_MARKER | THIN_REF_SUB_MARKER; // bits 47 and 45
 
 /// Sub-marker bit (bit 45) to distinguish FatRef from boxed integers.
 ///
@@ -161,7 +161,7 @@ const FAT_REF_SUB_MARKER: u64 = 1u64 << 45;
 
 /// FatRef values use TAG_POINTER with this marker pattern.
 /// The remaining 45 bits hold an index into the global FatRef table.
-const FAT_REF_MARKER: u64 = SPECIAL_VALUE_MARKER | BOXED_INT_SUB_MARKER | FAT_REF_SUB_MARKER;  // bits 47, 46, 45
+const FAT_REF_MARKER: u64 = SPECIAL_VALUE_MARKER | BOXED_INT_SUB_MARKER | FAT_REF_SUB_MARKER; // bits 47, 46, 45
 
 /// Mask for reference index (bits 0-44, 45 bits total).
 const REF_INDEX_MASK: u64 = (1u64 << 45) - 1;
@@ -259,7 +259,13 @@ impl Capabilities {
 
     /// Mutable exclusive capabilities.
     pub const MUT_EXCLUSIVE: Capabilities = Capabilities(
-        Self::READ | Self::WRITE | Self::ADD | Self::REMOVE | Self::EXCLUSIVE | Self::DELEGATE | Self::DROP
+        Self::READ
+            | Self::WRITE
+            | Self::ADD
+            | Self::REMOVE
+            | Self::EXCLUSIVE
+            | Self::DELEGATE
+            | Self::DROP,
     );
 
     /// Creates new capabilities with the given flags.
@@ -408,7 +414,13 @@ pub struct FatRef {
 impl FatRef {
     /// Creates a new FatRef.
     #[inline]
-    pub fn new(ptr: *mut u8, generation: u32, epoch: u16, caps: Capabilities, metadata: u64) -> Self {
+    pub fn new(
+        ptr: *mut u8,
+        generation: u32,
+        epoch: u16,
+        caps: Capabilities,
+        metadata: u64,
+    ) -> Self {
         Self {
             thin: ThinRef::new(ptr, generation, epoch, caps),
             metadata,
@@ -707,7 +719,12 @@ impl Value {
             "Generator ID {} exceeds 45-bit limit",
             generator_id
         );
-        Value(NAN_BITS | (TAG_POINTER << TAG_SHIFT) | GENERATOR_MARKER | (generator_id & GENERATOR_ID_MASK))
+        Value(
+            NAN_BITS
+                | (TAG_POINTER << TAG_SHIFT)
+                | GENERATOR_MARKER
+                | (generator_id & GENERATOR_ID_MASK),
+        )
     }
 
     /// Creates a ThinRef value (stored in global table).
@@ -806,8 +823,7 @@ impl Value {
     /// On x86-64/ARM64, user-space addresses have bits 47-63 all-zero.
     #[inline]
     pub fn is_boxed_int(&self) -> bool {
-        self.tag() == Some(TAG_POINTER as u8)
-            && (self.0 & BOXED_INT_MARKER) == BOXED_INT_MARKER  // Both bits 47 and 46 must be set
+        self.tag() == Some(TAG_POINTER as u8) && (self.0 & BOXED_INT_MARKER) == BOXED_INT_MARKER // Both bits 47 and 46 must be set
     }
 
     /// Returns true if this is an integer (inline or boxed).
@@ -874,7 +890,7 @@ impl Value {
         self.tag() == Some(TAG_POINTER as u8)
             && (self.0 & SPECIAL_VALUE_MARKER) != 0  // bit 47 set
             && (self.0 & BOXED_INT_SUB_MARKER) == 0  // bit 46 clear
-            && (self.0 & THIN_REF_SUB_MARKER) == 0   // bit 45 clear (not ThinRef)
+            && (self.0 & THIN_REF_SUB_MARKER) == 0 // bit 45 clear (not ThinRef)
     }
 
     /// Returns true if this is a ThinRef (CBGR managed reference).
@@ -890,7 +906,7 @@ impl Value {
     pub fn is_thin_ref(&self) -> bool {
         self.tag() == Some(TAG_POINTER as u8)
             && (self.0 & THIN_REF_MARKER) == THIN_REF_MARKER  // bits 47 and 45 set
-            && (self.0 & BOXED_INT_SUB_MARKER) == 0           // bit 46 clear
+            && (self.0 & BOXED_INT_SUB_MARKER) == 0 // bit 46 clear
     }
 
     /// Returns true if this is a FatRef (CBGR managed reference with metadata).
@@ -904,8 +920,7 @@ impl Value {
     /// - Boxed integers: bit 47 = 1, bit 46 = 1, bit 45 = 0
     #[inline]
     pub fn is_fat_ref(&self) -> bool {
-        self.tag() == Some(TAG_POINTER as u8)
-            && (self.0 & FAT_REF_MARKER) == FAT_REF_MARKER  // bits 47, 46, and 45 all set
+        self.tag() == Some(TAG_POINTER as u8) && (self.0 & FAT_REF_MARKER) == FAT_REF_MARKER // bits 47, 46, and 45 all set
     }
 
     /// Returns true if this is any CBGR reference (ThinRef or FatRef).
@@ -1013,7 +1028,9 @@ impl Value {
             (self.0 & 1) != 0
         } else if self.is_int() {
             self.as_i64() != 0
-        } else { !(self.is_nil() || self.is_unit()) }
+        } else {
+            !(self.is_nil() || self.is_unit())
+        }
     }
 
     /// Extracts as i64, accepting both Int and Bool values.
@@ -1172,11 +1189,7 @@ impl Value {
     /// Panics if this is not a ThinRef value.
     #[inline]
     pub fn as_thin_ref(&self) -> ThinRef {
-        debug_assert!(
-            self.is_thin_ref(),
-            "Expected ThinRef, got {:?}",
-            self.tag()
-        );
+        debug_assert!(self.is_thin_ref(), "Expected ThinRef, got {:?}", self.tag());
         let index = (self.0 & REF_INDEX_MASK) as usize;
         let table = THIN_REFS.lock().unwrap();
         table[index]
@@ -1191,11 +1204,7 @@ impl Value {
     /// Panics if this is not a FatRef value.
     #[inline]
     pub fn as_fat_ref(&self) -> FatRef {
-        debug_assert!(
-            self.is_fat_ref(),
-            "Expected FatRef, got {:?}",
-            self.tag()
-        );
+        debug_assert!(self.is_fat_ref(), "Expected FatRef, got {:?}", self.tag());
         let index = (self.0 & REF_INDEX_MASK) as usize;
         let table = FAT_REFS.lock().unwrap();
         table[index]
@@ -1316,13 +1325,26 @@ impl fmt::Debug for Value {
         } else if self.is_thin_ref() {
             // Check ThinRef before generic pointer (uses TAG_POINTER)
             let thin_ref = self.as_thin_ref();
-            write!(f, "Value::ThinRef({:p}, gen={}, epoch={}, caps={:#x})",
-                thin_ref.ptr, thin_ref.generation, thin_ref.epoch(), thin_ref.capabilities().0)
+            write!(
+                f,
+                "Value::ThinRef({:p}, gen={}, epoch={}, caps={:#x})",
+                thin_ref.ptr,
+                thin_ref.generation,
+                thin_ref.epoch(),
+                thin_ref.capabilities().0
+            )
         } else if self.is_fat_ref() {
             // Check FatRef before boxed int (both have bit 46 set)
             let fat_ref = self.as_fat_ref();
-            write!(f, "Value::FatRef({:p}, gen={}, epoch={}, caps={:#x}, len={})",
-                fat_ref.ptr(), fat_ref.generation(), fat_ref.epoch(), fat_ref.capabilities().0, fat_ref.len())
+            write!(
+                f,
+                "Value::FatRef({:p}, gen={}, epoch={}, caps={:#x}, len={})",
+                fat_ref.ptr(),
+                fat_ref.generation(),
+                fat_ref.epoch(),
+                fat_ref.capabilities().0,
+                fat_ref.len()
+            )
         } else if self.is_boxed_int() {
             // Check boxed int before generic pointer (boxed ints use TAG_POINTER)
             write!(f, "Value::BoxedInt({})", self.as_i64())
@@ -1413,8 +1435,13 @@ impl SmallString {
         // to guard against memory corruption.
         #[cfg(debug_assertions)]
         {
-            std::str::from_utf8(&self.bytes[..self.len])
-                .unwrap_or_else(|e| panic!("SmallString contains invalid UTF-8: {:?}, error: {}", &self.bytes[..self.len], e))
+            std::str::from_utf8(&self.bytes[..self.len]).unwrap_or_else(|e| {
+                panic!(
+                    "SmallString contains invalid UTF-8: {:?}, error: {}",
+                    &self.bytes[..self.len],
+                    e
+                )
+            })
         }
         #[cfg(not(debug_assertions))]
         {
@@ -1515,7 +1542,12 @@ mod tests {
     #[test]
     fn test_unit_value() {
         let v = Value::unit();
-        assert!(v.is_unit(), "Expected unit, is_float={}, tag={:?}", v.is_float(), v.tag());
+        assert!(
+            v.is_unit(),
+            "Expected unit, is_float={}, tag={:?}",
+            v.is_float(),
+            v.tag()
+        );
         assert!(!v.is_float());
         assert!(!v.is_int());
         assert!(!v.is_bool());
@@ -1659,8 +1691,16 @@ mod tests {
         assert_eq!(PAYLOAD_MASK, 0x0000_FFFF_FFFF_FFFF);
 
         // Verify tag constants are distinct and fit in 3 bits
-        let tags = [TAG_POINTER, TAG_INTEGER, TAG_BOOLEAN, TAG_UNIT,
-                   TAG_SMALL_STRING, TAG_TYPE_REF, TAG_FUNC_REF, TAG_NAN];
+        let tags = [
+            TAG_POINTER,
+            TAG_INTEGER,
+            TAG_BOOLEAN,
+            TAG_UNIT,
+            TAG_SMALL_STRING,
+            TAG_TYPE_REF,
+            TAG_FUNC_REF,
+            TAG_NAN,
+        ];
         for &tag in &tags {
             assert!(tag < 8, "Tag {} exceeds 3-bit limit", tag);
         }
@@ -1816,9 +1856,14 @@ mod tests {
                 .filter(|&&b| b)
                 .count();
 
-            assert_eq!(count, 1,
+            assert_eq!(
+                count,
+                1,
                 "Value {:?} ({}) should match exactly one predicate, got {:?}",
-                v, name, (is_unit, is_int, is_bool, is_float, is_type, is_func));
+                v,
+                name,
+                (is_unit, is_int, is_bool, is_float, is_type, is_func)
+            );
         }
     }
 

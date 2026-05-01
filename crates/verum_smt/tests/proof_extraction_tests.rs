@@ -18,8 +18,8 @@
 
 // FIXED (Session 23): Added explicit Text::from() calls for type inference.
 
-use verum_smt::proof_extraction::*;
 use verum_common::{List, Text};
+use verum_smt::proof_extraction::*;
 
 #[test]
 fn test_proof_term_axiom() {

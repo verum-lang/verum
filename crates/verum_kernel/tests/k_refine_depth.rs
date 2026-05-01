@@ -146,8 +146,8 @@ fn k_refine_rejects_schema_referencing_its_own_instantiation() {
     // cartesian-closed-context diagonal `α: Y → T^Y` that T-2f*
     // blocks at comprehension time.
     let base = ind("Int", vec![]);
-    let one_up = ind("List", vec![base.clone()]);        // depth 2
-    let pred = ind("P", vec![one_up]);                   // depth 3
+    let one_up = ind("List", vec![base.clone()]); // depth 2
+    let pred = ind("P", vec![one_up]); // depth 3
     let t = refine(base, "n", pred);
 
     let result = infer(&Context::new(), &t, &AxiomRegistry::new());
@@ -170,7 +170,10 @@ fn k_refine_rejects_predicate_two_strata_deeper_than_base() {
     // Base Int (depth 1), predicate = List<List<List<Int>>> (depth 4).
     // 4 >= 1+1 — violation.
     let base = ind("Int", vec![]);
-    let pred = ind("List", vec![ind("List", vec![ind("List", vec![base.clone()])])]);
+    let pred = ind(
+        "List",
+        vec![ind("List", vec![ind("List", vec![base.clone()])])],
+    );
     let t = refine(base, "n", pred);
 
     match infer(&Context::new(), &t, &AxiomRegistry::new()) {

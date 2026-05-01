@@ -693,7 +693,8 @@ fn enable_constant_propagation_false_skips_concrete_set() {
         "symbolic-execution gate stays on → symbolic mirror still recorded",
     );
     assert_eq!(
-        propagator.stats().concrete_propagated, 0,
+        propagator.stats().concrete_propagated,
+        0,
         "concrete-propagation gate off → no concrete-stat increment",
     );
 }
@@ -769,8 +770,17 @@ fn config_accessor_round_trips() {
     let propagator = ValuePropagator::with_config(original.clone());
     let read_back = propagator.config();
 
-    assert_eq!(read_back.enable_constant_propagation, original.enable_constant_propagation);
-    assert_eq!(read_back.enable_range_analysis, original.enable_range_analysis);
-    assert_eq!(read_back.enable_symbolic_execution, original.enable_symbolic_execution);
+    assert_eq!(
+        read_back.enable_constant_propagation,
+        original.enable_constant_propagation
+    );
+    assert_eq!(
+        read_back.enable_range_analysis,
+        original.enable_range_analysis
+    );
+    assert_eq!(
+        read_back.enable_symbolic_execution,
+        original.enable_symbolic_execution
+    );
     assert_eq!(read_back.max_iterations, original.max_iterations);
 }

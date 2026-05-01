@@ -11,8 +11,8 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use verum_ast::{Expr, Type};
-use verum_common::{List, Map, Maybe, Text};
 use verum_common::ToText;
+use verum_common::{List, Map, Maybe, Text};
 
 // ==================== Cache Key ====================
 
@@ -298,13 +298,10 @@ impl VerificationCache {
         // level + verify_signatures flag; the module's own
         // config takes more fields (filesystem_fallback, redis,
         // credentials) that we leave at their defaults here.
-        let mut dc = crate::distributed_cache::DistributedCacheConfig::new(
-            config.s3_url.clone(),
-        );
+        let mut dc = crate::distributed_cache::DistributedCacheConfig::new(config.s3_url.clone());
         dc.trust_level = match config.trust {
             TrustLevel::All => crate::distributed_cache::TrustLevel::None,
-            TrustLevel::Signatures
-            | TrustLevel::SignaturesAndExpiry => {
+            TrustLevel::Signatures | TrustLevel::SignaturesAndExpiry => {
                 // The module's own TrustLevel doesn't expose a
                 // separate "with-expiry" variant; downgrade to
                 // Signatures (the lower bound of the requested

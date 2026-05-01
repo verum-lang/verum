@@ -33,8 +33,8 @@
 // in all relevant contexts.
 
 use verum_ast::{TypeKind, span::FileId};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 /// Helper function to parse a type from a string.
 fn parse_type(source: &str) -> Result<verum_ast::Type, String> {
@@ -84,7 +84,10 @@ fn assert_parses_decl(source: &str) {
 fn test_sigma_type_simple_positive_int() {
     let ty = parse_type("x: Int where x > 0").unwrap();
     match ty.kind {
-        TypeKind::Refined { ref base, ref predicate } => {
+        TypeKind::Refined {
+            ref base,
+            ref predicate,
+        } => {
             let binder = match &predicate.binding {
                 verum_common::Maybe::Some(id) => id,
                 verum_common::Maybe::None => {

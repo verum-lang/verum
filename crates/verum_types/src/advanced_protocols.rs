@@ -54,12 +54,12 @@ use verum_ast::{
     span::Span,
     ty::{Ident, Path},
 };
-use verum_common::{ConstValue, List, Map, Maybe, Set, Text};
 use verum_common::well_known_types::WellKnownType as WKT;
+use verum_common::{ConstValue, List, Map, Maybe, Set, Text};
 
+pub use crate::kind_inference::Kind;
 use crate::protocol::{ProtocolBound, ProtocolImpl};
 use crate::ty::Type;
-pub use crate::kind_inference::Kind;
 pub use crate::variance::Variance;
 
 // ==================== Generic Associated Types (GATs) ====================

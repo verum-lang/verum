@@ -19,8 +19,8 @@ use verum_ast::{
     span::Span,
     ty::{Ident, Path},
 };
-use verum_common::{List, Map, Maybe, Text};
 use verum_common::ConstValue;
+use verum_common::{List, Map, Maybe, Text};
 use verum_types::refinement::RefinementPredicate;
 use verum_types::ty::*;
 
@@ -1095,7 +1095,10 @@ fn test_monad_pattern() {
 fn test_rank2_forall_construction() {
     let r_var = TypeVar::fresh();
     let reducer_int = Type::function(vec![Type::Var(r_var), Type::int()].into(), Type::Var(r_var));
-    let reducer_text = Type::function(vec![Type::Var(r_var), Type::text()].into(), Type::Var(r_var));
+    let reducer_text = Type::function(
+        vec![Type::Var(r_var), Type::text()].into(),
+        Type::Var(r_var),
+    );
     let rank2 = Type::Forall {
         vars: vec![r_var].into(),
         body: Box::new(Type::function(vec![reducer_int].into(), reducer_text)),
@@ -1109,17 +1112,29 @@ fn test_rank2_substitution_respects_binding() {
     let r_var = TypeVar::fresh();
     let forall_ty = Type::Forall {
         vars: vec![r_var].into(),
-        body: Box::new(Type::function(vec![Type::Var(r_var)].into(), Type::Var(r_var))),
+        body: Box::new(Type::function(
+            vec![Type::Var(r_var)].into(),
+            Type::Var(r_var),
+        )),
     };
     let mut subst = Substitution::new();
     subst.insert(r_var, Type::int());
     let result = forall_ty.apply_subst(&subst);
     if let Type::Forall { body, .. } = result {
-        if let Type::Function { params, return_type, .. } = body.as_ref() {
+        if let Type::Function {
+            params,
+            return_type,
+            ..
+        } = body.as_ref()
+        {
             assert_eq!(params[0], Type::Var(r_var));
             assert_eq!(*return_type.as_ref(), Type::Var(r_var));
-        } else { panic!("Expected Function inside Forall"); }
-    } else { panic!("Expected Forall"); }
+        } else {
+            panic!("Expected Function inside Forall");
+        }
+    } else {
+        panic!("Expected Forall");
+    }
 }
 
 #[test]
@@ -1129,7 +1144,8 @@ fn test_rank2_free_vars_mixed() {
     let rank2 = Type::Forall {
         vars: vec![r_var].into(),
         body: Box::new(Type::function(
-            vec![Type::Var(r_var), Type::Var(a_var)].into(), Type::Var(r_var),
+            vec![Type::Var(r_var), Type::Var(a_var)].into(),
+            Type::Var(r_var),
         )),
     };
     let free = rank2.free_vars();
@@ -1143,7 +1159,10 @@ fn test_rank2_free_vars_mixed() {
 #[test]
 fn test_existential_construction() {
     let t_var = TypeVar::fresh();
-    let exists = Type::Exists { var: t_var, body: Box::new(Type::Var(t_var)) };
+    let exists = Type::Exists {
+        var: t_var,
+        body: Box::new(Type::Var(t_var)),
+    };
     assert!(exists.free_vars().is_empty());
 }
 
@@ -1152,7 +1171,10 @@ fn test_existential_with_constraint() {
     let t_var = TypeVar::fresh();
     let exists = Type::Exists {
         var: t_var,
-        body: Box::new(Type::Generic { name: "List".into(), args: vec![Type::Var(t_var)].into() }),
+        body: Box::new(Type::Generic {
+            name: "List".into(),
+            args: vec![Type::Var(t_var)].into(),
+        }),
     };
     assert!(exists.free_vars().is_empty());
 }
@@ -1172,8 +1194,12 @@ fn test_existential_substitution() {
         if let Type::Tuple(elems) = body.as_ref() {
             assert_eq!(elems[0], Type::Var(t_var));
             assert_eq!(elems[1], Type::int());
-        } else { panic!("Expected Tuple"); }
-    } else { panic!("Expected Exists"); }
+        } else {
+            panic!("Expected Tuple");
+        }
+    } else {
+        panic!("Expected Exists");
+    }
 }
 
 // ==================== HKT Tests ====================
@@ -1181,7 +1207,10 @@ fn test_existential_substitution() {
 #[test]
 fn test_hkt_type_app_with_var_constructor() {
     let f_var = TypeVar::fresh();
-    let f_int = Type::TypeApp { constructor: Box::new(Type::Var(f_var)), args: vec![Type::int()].into() };
+    let f_int = Type::TypeApp {
+        constructor: Box::new(Type::Var(f_var)),
+        args: vec![Type::int()].into(),
+    };
     assert!(f_int.free_vars().contains(&f_var));
 }
 
@@ -1190,7 +1219,10 @@ fn test_hkt_type_app_substitution() {
     use verum_types::advanced_protocols::Kind;
     let f_var = TypeVar::fresh();
     let a_var = TypeVar::fresh();
-    let f_a = Type::TypeApp { constructor: Box::new(Type::Var(f_var)), args: vec![Type::Var(a_var)].into() };
+    let f_a = Type::TypeApp {
+        constructor: Box::new(Type::Var(f_var)),
+        args: vec![Type::Var(a_var)].into(),
+    };
     let list_ctor = Type::type_constructor("List".into(), 1, Kind::unary_constructor());
     let mut subst = Substitution::new();
     subst.insert(f_var, list_ctor);
@@ -1199,7 +1231,9 @@ fn test_hkt_type_app_substitution() {
     if let Type::TypeApp { constructor, args } = result {
         assert!(matches!(*constructor, Type::TypeConstructor { .. }));
         assert_eq!(args[0], Type::int());
-    } else { panic!("Expected TypeApp"); }
+    } else {
+        panic!("Expected TypeApp");
+    }
 }
 
 // ==================== Skolem Tracker Tests ====================
@@ -1209,7 +1243,11 @@ fn test_skolem_tracker_scope() {
     use verum_types::existential::SkolemTracker;
     let mut tracker = SkolemTracker::new();
     tracker.enter_scope();
-    let skolem = tracker.create_skolem("sk_test".into(), verum_common::List::new(), verum_ast::span::Span::default());
+    let skolem = tracker.create_skolem(
+        "sk_test".into(),
+        verum_common::List::new(),
+        verum_ast::span::Span::default(),
+    );
     assert!(tracker.is_in_scope(skolem.id));
     let exiting = tracker.exit_scope();
     assert_eq!(exiting.len(), 1);
@@ -1220,9 +1258,17 @@ fn test_skolem_tracker_nested_scope() {
     use verum_types::existential::SkolemTracker;
     let mut tracker = SkolemTracker::new();
     tracker.enter_scope();
-    let outer = tracker.create_skolem("outer".into(), verum_common::List::new(), verum_ast::span::Span::default());
+    let outer = tracker.create_skolem(
+        "outer".into(),
+        verum_common::List::new(),
+        verum_ast::span::Span::default(),
+    );
     tracker.enter_scope();
-    let inner = tracker.create_skolem("inner".into(), verum_common::List::new(), verum_ast::span::Span::default());
+    let inner = tracker.create_skolem(
+        "inner".into(),
+        verum_common::List::new(),
+        verum_ast::span::Span::default(),
+    );
     assert!(tracker.is_in_scope(outer.id));
     assert!(tracker.is_in_scope(inner.id));
     tracker.exit_scope();
@@ -1238,9 +1284,19 @@ fn test_unify_forall_alpha_rename() {
     let mut unifier = Unifier::new();
     let a = TypeVar::fresh();
     let b = TypeVar::fresh();
-    let fa = Type::Forall { vars: vec![a].into(), body: Box::new(Type::function(vec![Type::Var(a)].into(), Type::Var(a))) };
-    let fb = Type::Forall { vars: vec![b].into(), body: Box::new(Type::function(vec![Type::Var(b)].into(), Type::Var(b))) };
-    assert!(unifier.unify(&fa, &fb, verum_ast::span::Span::default()).is_ok());
+    let fa = Type::Forall {
+        vars: vec![a].into(),
+        body: Box::new(Type::function(vec![Type::Var(a)].into(), Type::Var(a))),
+    };
+    let fb = Type::Forall {
+        vars: vec![b].into(),
+        body: Box::new(Type::function(vec![Type::Var(b)].into(), Type::Var(b))),
+    };
+    assert!(
+        unifier
+            .unify(&fa, &fb, verum_ast::span::Span::default())
+            .is_ok()
+    );
 }
 
 #[test]
@@ -1249,9 +1305,19 @@ fn test_unify_exists_alpha_rename() {
     let mut unifier = Unifier::new();
     let a = TypeVar::fresh();
     let b = TypeVar::fresh();
-    let ea = Type::Exists { var: a, body: Box::new(Type::Var(a)) };
-    let eb = Type::Exists { var: b, body: Box::new(Type::Var(b)) };
-    assert!(unifier.unify(&ea, &eb, verum_ast::span::Span::default()).is_ok());
+    let ea = Type::Exists {
+        var: a,
+        body: Box::new(Type::Var(a)),
+    };
+    let eb = Type::Exists {
+        var: b,
+        body: Box::new(Type::Var(b)),
+    };
+    assert!(
+        unifier
+            .unify(&ea, &eb, verum_ast::span::Span::default())
+            .is_ok()
+    );
 }
 
 #[test]
@@ -1259,8 +1325,15 @@ fn test_unify_exists_with_concrete() {
     use verum_types::unify::Unifier;
     let mut unifier = Unifier::new();
     let a = TypeVar::fresh();
-    let exists = Type::Exists { var: a, body: Box::new(Type::Var(a)) };
-    assert!(unifier.unify(&exists, &Type::int(), verum_ast::span::Span::default()).is_ok());
+    let exists = Type::Exists {
+        var: a,
+        body: Box::new(Type::Var(a)),
+    };
+    assert!(
+        unifier
+            .unify(&exists, &Type::int(), verum_ast::span::Span::default())
+            .is_ok()
+    );
 }
 
 #[test]
@@ -1268,9 +1341,19 @@ fn test_unify_type_app_vs_generic() {
     use verum_types::unify::Unifier;
     let mut unifier = Unifier::new();
     let f = TypeVar::fresh();
-    let ta = Type::TypeApp { constructor: Box::new(Type::Var(f)), args: vec![Type::int()].into() };
-    let li = Type::Generic { name: "List".into(), args: vec![Type::int()].into() };
-    assert!(unifier.unify(&ta, &li, verum_ast::span::Span::default()).is_ok());
+    let ta = Type::TypeApp {
+        constructor: Box::new(Type::Var(f)),
+        args: vec![Type::int()].into(),
+    };
+    let li = Type::Generic {
+        name: "List".into(),
+        args: vec![Type::int()].into(),
+    };
+    assert!(
+        unifier
+            .unify(&ta, &li, verum_ast::span::Span::default())
+            .is_ok()
+    );
     let resolved = unifier.apply(&Type::Var(f));
     assert!(matches!(resolved, Type::TypeConstructor { .. }));
 }
@@ -1282,7 +1365,10 @@ fn test_subtype_forall_reflexive() {
     use verum_types::subtype::Subtyping;
     let s = Subtyping::new();
     let a = TypeVar::fresh();
-    let ty = Type::Forall { vars: vec![a].into(), body: Box::new(Type::function(vec![].into(), Type::Var(a))) };
+    let ty = Type::Forall {
+        vars: vec![a].into(),
+        body: Box::new(Type::function(vec![].into(), Type::Var(a))),
+    };
     assert!(s.is_subtype(&ty, &ty));
 }
 
@@ -1291,7 +1377,10 @@ fn test_subtype_exists_reflexive() {
     use verum_types::subtype::Subtyping;
     let s = Subtyping::new();
     let a = TypeVar::fresh();
-    let ty = Type::Exists { var: a, body: Box::new(Type::Var(a)) };
+    let ty = Type::Exists {
+        var: a,
+        body: Box::new(Type::Var(a)),
+    };
     assert!(s.is_subtype(&ty, &ty));
 }
 
@@ -1300,6 +1389,9 @@ fn test_subtype_concrete_to_existential() {
     use verum_types::subtype::Subtyping;
     let s = Subtyping::new();
     let a = TypeVar::fresh();
-    let exists = Type::Exists { var: a, body: Box::new(Type::Var(a)) };
+    let exists = Type::Exists {
+        var: a,
+        body: Box::new(Type::Var(a)),
+    };
     assert!(s.is_subtype(&Type::int(), &exists));
 }

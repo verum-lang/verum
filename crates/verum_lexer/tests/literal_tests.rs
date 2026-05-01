@@ -512,9 +512,13 @@ fn test_float_in_arithmetic() {
 #[test]
 fn test_char_escaped_single_quote_actual() {
     // Test that '\'' (escaped single quote) lexes correctly
-    let input = r#"'\''"#;  // This is literally '\''
+    let input = r#"'\''"#; // This is literally '\''
     println!("Testing input: {:?}", input);
     let tokens = tokenize(input);
     println!("Tokens: {:?}", tokens);
-    assert!(matches!(tokens[0], TokenKind::Char('\'')), "Expected Char('\\'''), got {:?}", tokens[0]);
+    assert!(
+        matches!(tokens[0], TokenKind::Char('\'')),
+        "Expected Char('\\'''), got {:?}",
+        tokens[0]
+    );
 }

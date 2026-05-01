@@ -184,9 +184,10 @@ pub fn tactic_lia(constraints: &[LinearConstraint]) -> TacticOutcome {
     }
     // All constraints trivially valid → goal is the trivial equation
     // 0 = 0; closed.
-    if constraints.iter().all(|c| {
-        c.evaluate_trivial() == Some(true)
-    }) && !constraints.is_empty()
+    if constraints
+        .iter()
+        .all(|c| c.evaluate_trivial() == Some(true))
+        && !constraints.is_empty()
     {
         return TacticOutcome::Closed {
             tactic_name: Text::from("lia"),
@@ -314,12 +315,18 @@ pub fn tactic_induction(
     let goal = goal_name.into();
     if !base_closed {
         return TacticOutcome::Open {
-            reason: Text::from(format!("induction: base case not closed for {}", goal.as_str())),
+            reason: Text::from(format!(
+                "induction: base case not closed for {}",
+                goal.as_str()
+            )),
         };
     }
     if !step_closed {
         return TacticOutcome::Open {
-            reason: Text::from(format!("induction: step case not closed for {}", goal.as_str())),
+            reason: Text::from(format!(
+                "induction: step case not closed for {}",
+                goal.as_str()
+            )),
         };
     }
     TacticOutcome::Closed {
@@ -449,19 +456,12 @@ pub struct EautoHint {
 /// V0 eauto tactic: depth-bounded back-chaining over the supplied hint
 /// database. Closes a goal iff there is a derivation of depth ≤ `bound`
 /// from axiom-shaped hints (those with `body == []`).
-pub fn tactic_eauto(
-    hints: &[EautoHint],
-    goal: u32,
-    bound: u32,
-) -> TacticOutcome {
+pub fn tactic_eauto(hints: &[EautoHint], goal: u32, bound: u32) -> TacticOutcome {
     let mut visited = std::collections::HashSet::new();
     if eauto_helper(hints, goal, bound, &mut visited) {
         TacticOutcome::Closed {
             tactic_name: Text::from("eauto"),
-            witness: Text::from(format!(
-                "back-chain depth ≤ {} closed goal {}",
-                bound, goal
-            )),
+            witness: Text::from(format!("back-chain depth ≤ {} closed goal {}", bound, goal)),
         }
     } else {
         TacticOutcome::Open {
@@ -484,9 +484,7 @@ fn eauto_helper(
     }
     if bound == 0 {
         // Only axioms can close at depth 0.
-        let result = hints
-            .iter()
-            .any(|h| h.head == goal && h.body.is_empty());
+        let result = hints.iter().any(|h| h.head == goal && h.body.is_empty());
         visited.remove(&goal);
         return result;
     }
@@ -648,7 +646,10 @@ mod tests {
     #[test]
     fn eauto_closes_via_axiom() {
         // Axiom: ⊢ A. Goal: ⊢ A. Closes at depth 0.
-        let hints = vec![EautoHint { head: 0, body: vec![] }];
+        let hints = vec![EautoHint {
+            head: 0,
+            body: vec![],
+        }];
         assert!(tactic_eauto(&hints, 0, 0).is_closed());
     }
 
@@ -656,8 +657,14 @@ mod tests {
     fn eauto_closes_via_one_step_back_chain() {
         // Axioms: ⊢ A. Rule: A ⇒ B. Goal: ⊢ B. Closes at depth 1.
         let hints = vec![
-            EautoHint { head: 0, body: vec![] },     // A
-            EautoHint { head: 1, body: vec![0] },    // B :- A
+            EautoHint {
+                head: 0,
+                body: vec![],
+            }, // A
+            EautoHint {
+                head: 1,
+                body: vec![0],
+            }, // B :- A
         ];
         assert!(tactic_eauto(&hints, 1, 1).is_closed());
     }
@@ -666,22 +673,34 @@ mod tests {
     fn eauto_opens_when_bound_too_small() {
         // Same as above but bound = 0 — the rule needs depth 1.
         let hints = vec![
-            EautoHint { head: 0, body: vec![] },
-            EautoHint { head: 1, body: vec![0] },
+            EautoHint {
+                head: 0,
+                body: vec![],
+            },
+            EautoHint {
+                head: 1,
+                body: vec![0],
+            },
         ];
         assert!(!tactic_eauto(&hints, 1, 0).is_closed());
     }
 
     #[test]
     fn eauto_opens_on_unreachable_goal() {
-        let hints = vec![EautoHint { head: 0, body: vec![] }];
+        let hints = vec![EautoHint {
+            head: 0,
+            body: vec![],
+        }];
         assert!(!tactic_eauto(&hints, 99, 5).is_closed());
     }
 
     #[test]
     fn eauto_handles_cycles_without_infinite_loop() {
         // Rule: A :- A. Goal: ⊢ A. No axiom — should fail, not loop.
-        let hints = vec![EautoHint { head: 0, body: vec![0] }];
+        let hints = vec![EautoHint {
+            head: 0,
+            body: vec![0],
+        }];
         assert!(!tactic_eauto(&hints, 0, 5).is_closed());
     }
 }

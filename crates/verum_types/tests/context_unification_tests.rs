@@ -477,7 +477,8 @@ fn test_context_expr_serialize_concrete() {
     // Test ContextRequirement roundtrip directly (which is what Deserialize supports)
     let req = make_logger_db_req();
     let req_json = serde_json::to_string(&req).expect("serialize req");
-    let deserialized_req: ContextRequirement = serde_json::from_str(&req_json).expect("deserialize req");
+    let deserialized_req: ContextRequirement =
+        serde_json::from_str(&req_json).expect("deserialize req");
     assert_eq!(deserialized_req.len(), 2);
     assert!(deserialized_req.requires("Logger"));
     assert!(deserialized_req.requires("Database"));

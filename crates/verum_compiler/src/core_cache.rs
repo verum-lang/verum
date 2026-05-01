@@ -189,7 +189,6 @@ pub struct CachedCoreMetadata {
     // =========================================================================
     // These fields enable macro expansion and meta-function resolution
     // in user code that uses stdlib features.
-
     /// Meta function registry entries
     ///
 
@@ -363,7 +362,10 @@ impl CoreCacheStore {
     /// * `project_root` - Root directory of the project
     pub fn new(project_root: &Path) -> Result<Self> {
         // Use target/.verum-cache/core/ for project-local caching
-        let cache_dir = project_root.join("target").join(".verum-cache").join("stdlib");
+        let cache_dir = project_root
+            .join("target")
+            .join(".verum-cache")
+            .join("stdlib");
         fs::create_dir_all(&cache_dir)
             .with_context(|| format!("Failed to create cache dir: {}", cache_dir.display()))?;
 
@@ -453,8 +455,7 @@ impl CoreCacheStore {
 
     /// Save cache entry to disk.
     fn save_to_disk(&self, path: &Path, entry: &CoreCacheEntry) -> Result<()> {
-        let data = bincode::serialize(entry)
-            .context("Failed to serialize cache entry")?;
+        let data = bincode::serialize(entry).context("Failed to serialize cache entry")?;
         fs::write(path, &data)
             .with_context(|| format!("Failed to write cache file: {}", path.display()))?;
         Ok(())
@@ -658,7 +659,11 @@ impl CoreCache {
     }
 
     /// Get cache entry if available (without compiling).
-    pub fn get_cached(&self, source: &CoreSource, target: &TargetConfig) -> Option<Arc<CoreCacheEntry>> {
+    pub fn get_cached(
+        &self,
+        source: &CoreSource,
+        target: &TargetConfig,
+    ) -> Option<Arc<CoreCacheEntry>> {
         let key = CoreCacheKey::new(source, target);
         self.store.get(&key)
     }
@@ -677,7 +682,9 @@ impl CoreCache {
 
         // Discover modules
         let mut resolver = CoreSourceResolver::new(source);
-        resolver.discover().map_err(|e| anyhow::anyhow!("Module discovery failed: {}", e))?;
+        resolver
+            .discover()
+            .map_err(|e| anyhow::anyhow!("Module discovery failed: {}", e))?;
 
         let modules = resolver.modules_in_order();
 
@@ -916,7 +923,11 @@ impl CoreCache {
         &self,
         source: &dyn CoreSourceTrait,
         modules: &[CachedModuleEntry],
-    ) -> (Vec<CachedMetaFunctionEntry>, Vec<CachedMacroEntry>, Vec<CachedDeriveEntry>) {
+    ) -> (
+        Vec<CachedMetaFunctionEntry>,
+        Vec<CachedMacroEntry>,
+        Vec<CachedDeriveEntry>,
+    ) {
         let mut meta_functions = Vec::new();
         let mut macros = Vec::new();
         let mut derives = Vec::new();
@@ -967,7 +978,9 @@ impl CoreCache {
 
             // Macro attribute: @macro(kind = "derive", ...)
             if trimmed.starts_with("@macro") {
-                if let Some(macro_entry) = self.parse_macro_attribute(trimmed, module_name, &lines, i) {
+                if let Some(macro_entry) =
+                    self.parse_macro_attribute(trimmed, module_name, &lines, i)
+                {
                     macros.push(macro_entry);
                 }
             }
@@ -1037,7 +1050,8 @@ impl CoreCache {
                 }
             } else {
                 // Single context
-                let end = rest.find(|c: char| !c.is_alphanumeric() && c != '_' && c != '.')
+                let end = rest
+                    .find(|c: char| !c.is_alphanumeric() && c != '_' && c != '.')
                     .unwrap_or(rest.len());
                 let ctx = rest[..end].trim();
                 if !ctx.is_empty() {
@@ -1082,7 +1096,8 @@ impl CoreCache {
         if let Some(arrow_idx) = line.find("->") {
             let rest = &line[arrow_idx + 2..];
             // Find end of type (before { or using or end of line)
-            let end = rest.find(['{', ';'])
+            let end = rest
+                .find(['{', ';'])
                 .or_else(|| rest.find("using"))
                 .unwrap_or(rest.len());
             rest[..end].trim().to_string()
@@ -1139,8 +1154,10 @@ impl CoreCache {
     fn find_next_function_name(&self, lines: &[&str], start_idx: usize) -> Option<String> {
         for line in lines.iter().skip(start_idx + 1) {
             let trimmed = line.trim();
-            if trimmed.starts_with("fn ") || trimmed.starts_with("public fn ")
-                || trimmed.starts_with("meta fn ") || trimmed.starts_with("public meta fn ")
+            if trimmed.starts_with("fn ")
+                || trimmed.starts_with("public fn ")
+                || trimmed.starts_with("meta fn ")
+                || trimmed.starts_with("public meta fn ")
             {
                 return self.extract_function_name(trimmed);
             }
@@ -1160,14 +1177,23 @@ impl CoreCache {
 
         let for_idx = rest.find(" for ")?;
         let derive_name = rest[..for_idx].trim().to_string();
-        let target_type = rest[for_idx + 5..].trim()
+        let target_type = rest[for_idx + 5..]
+            .trim()
             .split(['{', '<'])
             .next()?
             .trim()
             .to_string();
 
         // Only track common derives
-        let common_derives = ["Debug", "Clone", "Copy", "Eq", "PartialEq", "Hash", "Default"];
+        let common_derives = [
+            "Debug",
+            "Clone",
+            "Copy",
+            "Eq",
+            "PartialEq",
+            "Hash",
+            "Default",
+        ];
         if !common_derives.contains(&derive_name.as_str()) {
             return None;
         }
@@ -1238,9 +1264,8 @@ pub fn global_cache() -> &'static CoreCache {
 
 /// Get the global stdlib cache, initializing if needed.
 pub fn global_cache_or_init(project_root: &Path) -> &'static CoreCache {
-    GLOBAL_CORE_CACHE.get_or_init(|| {
-        CoreCache::new(project_root).expect("Failed to initialize stdlib cache")
-    })
+    GLOBAL_CORE_CACHE
+        .get_or_init(|| CoreCache::new(project_root).expect("Failed to initialize stdlib cache"))
 }
 
 #[cfg(test)]

@@ -602,12 +602,10 @@ fn test_sigma_type() {
     );
 
     match ty.kind {
-        TypeKind::Refined { ref predicate, .. } => {
-            match &predicate.binding {
-                Maybe::Some(bound) => assert_eq!(bound.name.as_str(), "x"),
-                Maybe::None => panic!("Expected explicit binder on sigma refinement"),
-            }
-        }
+        TypeKind::Refined { ref predicate, .. } => match &predicate.binding {
+            Maybe::Some(bound) => assert_eq!(bound.name.as_str(), "x"),
+            Maybe::None => panic!("Expected explicit binder on sigma refinement"),
+        },
         _ => panic!("Expected Refined (sigma form)"),
     }
 }

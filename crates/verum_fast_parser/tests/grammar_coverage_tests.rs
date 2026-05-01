@@ -20,8 +20,8 @@
 
 use verum_ast::{FileId, ItemKind, Module};
 use verum_common::List;
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 /// Helper to parse a module from source.
 fn parse_module(source: &str) -> Result<Module, String> {
@@ -62,23 +62,17 @@ mod inductive_types {
     #[test]
     fn basic_inductive_type() {
         // type Nat is inductive { | Zero | Succ(Nat) };
-        assert_parses(
-            r#"type Nat is inductive { | Zero | Succ(Nat) };"#
-        );
+        assert_parses(r#"type Nat is inductive { | Zero | Succ(Nat) };"#);
     }
 
     #[test]
     fn inductive_without_leading_pipe() {
-        assert_parses(
-            r#"type Nat is inductive { Zero | Succ(Nat) };"#
-        );
+        assert_parses(r#"type Nat is inductive { Zero | Succ(Nat) };"#);
     }
 
     #[test]
     fn inductive_single_variant() {
-        assert_parses(
-            r#"type Unit is inductive { Unit };"#
-        );
+        assert_parses(r#"type Unit is inductive { Unit };"#);
     }
 
     #[test]
@@ -88,15 +82,13 @@ mod inductive_types {
                 Lit { value: Int }
                 | Add { left: Expr, right: Expr }
                 | Neg { inner: Expr }
-            };"#
+            };"#,
         );
     }
 
     #[test]
     fn inductive_generic() {
-        assert_parses(
-            r#"type List<T> is inductive { Nil | Cons(T, List<T>) };"#
-        );
+        assert_parses(r#"type List<T> is inductive { Nil | Cons(T, List<T>) };"#);
     }
 
     #[test]
@@ -105,7 +97,7 @@ mod inductive_types {
             r#"type Tree<T> is inductive {
                 Leaf(T)
                 | Node(Tree<T>, T, Tree<T>)
-            };"#
+            };"#,
         );
     }
 }
@@ -124,7 +116,7 @@ mod coinductive_types {
             r#"type Stream<T> is coinductive {
                 fn head(&self) -> T;
                 fn tail(&self) -> Stream<T>;
-            };"#
+            };"#,
         );
     }
 
@@ -133,7 +125,7 @@ mod coinductive_types {
         assert_parses(
             r#"type InfiniteList<T> is coinductive {
                 fn observe(&self) -> T;
-            };"#
+            };"#,
         );
     }
 
@@ -142,7 +134,7 @@ mod coinductive_types {
         assert_parses(
             r#"type Process<I, O> is coinductive {
                 fn step(&self, input: I) -> (O, Process<I, O>);
-            };"#
+            };"#,
         );
     }
 
@@ -153,7 +145,7 @@ mod coinductive_types {
                 fn is_empty(&self) -> Bool;
                 fn head(&self) -> T;
                 fn tail(&self) -> CoList<T>;
-            };"#
+            };"#,
         );
     }
 }
@@ -168,37 +160,29 @@ mod throws_clause {
 
     #[test]
     fn function_with_single_throws() {
-        assert_parses(
-            r#"fn parse(input: Text) throws(ParseError) -> AST { input }"#
-        );
+        assert_parses(r#"fn parse(input: Text) throws(ParseError) -> AST { input }"#);
     }
 
     #[test]
     fn function_with_multiple_throws() {
         assert_parses(
-            r#"fn process(data: Data) throws(ParseError | ValidationError) -> Result { data }"#
+            r#"fn process(data: Data) throws(ParseError | ValidationError) -> Result { data }"#,
         );
     }
 
     #[test]
     fn function_throws_no_return_type() {
-        assert_parses(
-            r#"fn validate(input: Text) throws(ValidationError) { input }"#
-        );
+        assert_parses(r#"fn validate(input: Text) throws(ValidationError) { input }"#);
     }
 
     #[test]
     fn function_throws_with_using() {
-        assert_parses(
-            r#"fn save(item: Item) throws(DbError) -> Bool using [Database] { true }"#
-        );
+        assert_parses(r#"fn save(item: Item) throws(DbError) -> Bool using [Database] { true }"#);
     }
 
     #[test]
     fn throws_empty_is_error() {
-        assert_fails(
-            r#"fn f() throws() -> Int { 0 }"#
-        );
+        assert_fails(r#"fn f() throws() -> Int { 0 }"#);
     }
 }
 
@@ -216,7 +200,7 @@ mod generator_functions {
             r#"fn* range(n: Int) -> Int {
                 let i = 0;
                 yield i;
-            }"#
+            }"#,
         );
     }
 
@@ -225,7 +209,7 @@ mod generator_functions {
         assert_parses(
             r#"async fn* fetch_pages() -> Page {
                 yield default_page;
-            }"#
+            }"#,
         );
     }
 
@@ -238,7 +222,7 @@ mod generator_functions {
                     yield n;
                     n = n + 1;
                 }
-            }"#
+            }"#,
         );
     }
 }
@@ -253,31 +237,23 @@ mod existential_types {
 
     #[test]
     fn existential_return_type() {
-        assert_parses(
-            r#"fn make_iter() -> some I: Iterator { items }"#
-        );
+        assert_parses(r#"fn make_iter() -> some I: Iterator { items }"#);
     }
 
     #[test]
     fn existential_multiple_bounds() {
-        assert_parses(
-            r#"fn processor() -> some P: Processor + Send + Sync { p }"#
-        );
+        assert_parses(r#"fn processor() -> some P: Processor + Send + Sync { p }"#);
     }
 
     #[test]
     fn existential_type_definition() {
-        assert_parses(
-            r#"type Plugin is some P: PluginInterface;"#
-        );
+        assert_parses(r#"type Plugin is some P: PluginInterface;"#);
     }
 
     #[test]
     fn existential_in_function_param_type() {
         // Existential types can be used where a type expression is expected
-        assert_parses(
-            r#"fn use_thing(x: some T: Display) { x }"#
-        );
+        assert_parses(r#"fn use_thing(x: some T: Display) { x }"#);
     }
 }
 
@@ -295,22 +271,18 @@ mod layer_definitions {
             r#"layer DatabaseLayer {
                 provide ConnectionPool = ConnectionPool.new();
                 provide QueryExecutor = QueryExecutor.new();
-            }"#
+            }"#,
         );
     }
 
     #[test]
     fn composite_layer() {
-        assert_parses(
-            r#"layer AppLayer = DatabaseLayer + LoggingLayer;"#
-        );
+        assert_parses(r#"layer AppLayer = DatabaseLayer + LoggingLayer;"#);
     }
 
     #[test]
     fn composite_layer_three() {
-        assert_parses(
-            r#"layer FullStack = DatabaseLayer + LoggingLayer + CacheLayer;"#
-        );
+        assert_parses(r#"layer FullStack = DatabaseLayer + LoggingLayer + CacheLayer;"#);
     }
 
     #[test]
@@ -318,7 +290,7 @@ mod layer_definitions {
         assert_parses(
             r#"public layer SharedLayer {
                 provide Config = Config.default();
-            }"#
+            }"#,
         );
     }
 
@@ -327,7 +299,7 @@ mod layer_definitions {
         assert_parses(
             r#"layer MinimalLayer {
                 provide Logger = Logger.new();
-            }"#
+            }"#,
         );
     }
 }
@@ -345,7 +317,7 @@ mod context_protocol_definitions {
         assert_parses(
             r#"context protocol Serializable {
                 fn serialize(&self) -> Text;
-            }"#
+            }"#,
         );
     }
 
@@ -355,7 +327,7 @@ mod context_protocol_definitions {
             r#"context protocol Codec {
                 fn encode(&self) -> List<Int>;
                 fn decode(data: List<Int>) -> Self;
-            }"#
+            }"#,
         );
     }
 
@@ -365,7 +337,7 @@ mod context_protocol_definitions {
         assert_parses(
             r#"context type Hashable is protocol {
                 fn hash(&self) -> Int;
-            };"#
+            };"#,
         );
     }
 
@@ -374,7 +346,7 @@ mod context_protocol_definitions {
         assert_parses(
             r#"public context protocol Logger {
                 fn log(&self, msg: Text);
-            }"#
+            }"#,
         );
     }
 }
@@ -389,51 +361,37 @@ mod special_types {
 
     #[test]
     fn never_type_in_return() {
-        assert_parses(
-            r#"fn diverge() -> ! { panic("diverge") }"#
-        );
+        assert_parses(r#"fn diverge() -> ! { panic("diverge") }"#);
     }
 
     #[test]
     fn unknown_type_in_param() {
-        assert_parses(
-            r#"fn accept_any(x: unknown) -> Bool { true }"#
-        );
+        assert_parses(r#"fn accept_any(x: unknown) -> Bool { true }"#);
     }
 
     #[test]
     fn universe_type_basic() {
-        assert_parses(
-            r#"fn identity(x: Type) -> Type { x }"#
-        );
+        assert_parses(r#"fn identity(x: Type) -> Type { x }"#);
     }
 
     #[test]
     fn capability_type_in_function() {
-        assert_parses(
-            r#"fn analyze(db: Database with [Read]) -> Stats { db }"#
-        );
+        assert_parses(r#"fn analyze(db: Database with [Read]) -> Stats { db }"#);
     }
 
     #[test]
     fn capability_type_multiple() {
-        assert_parses(
-            r#"fn process(db: Database with [Read, Write]) -> Bool { true }"#
-        );
+        assert_parses(r#"fn process(db: Database with [Read, Write]) -> Bool { true }"#);
     }
 
     #[test]
     fn dynamic_type_simple() {
-        assert_parses(
-            r#"fn show(item: dyn Display) { item }"#
-        );
+        assert_parses(r#"fn show(item: dyn Display) { item }"#);
     }
 
     #[test]
     fn dynamic_type_multiple_bounds() {
-        assert_parses(
-            r#"fn show(item: dyn Display + Debug) { item }"#
-        );
+        assert_parses(r#"fn show(item: dyn Display + Debug) { item }"#);
     }
 }
 
@@ -447,16 +405,12 @@ mod where_clauses {
 
     #[test]
     fn simple_where_clause() {
-        assert_parses(
-            r#"fn sort<T>(list: List<T>) -> List<T> where type T: Ord { list }"#
-        );
+        assert_parses(r#"fn sort<T>(list: List<T>) -> List<T> where type T: Ord { list }"#);
     }
 
     #[test]
     fn where_clause_multiple_bounds() {
-        assert_parses(
-            r#"fn display<T>(item: T) -> Text where type T: Display + Debug { item }"#
-        );
+        assert_parses(r#"fn display<T>(item: T) -> Text where type T: Display + Debug { item }"#);
     }
 
     #[test]
@@ -464,15 +418,13 @@ mod where_clauses {
         assert_parses(
             r#"implement<T> Display for List<T> where type T: Display {
                 fn display(&self) -> Text { self }
-            }"#
+            }"#,
         );
     }
 
     #[test]
     fn generic_where_clause_on_type() {
-        assert_parses(
-            r#"type SortedList<T> where type T: Ord is { items: List<T> };"#
-        );
+        assert_parses(r#"type SortedList<T> where type T: Ord is { items: List<T> };"#);
     }
 }
 
@@ -486,16 +438,12 @@ mod sigma_types {
 
     #[test]
     fn single_sigma_binding() {
-        assert_parses(
-            r#"type Natural is n: Int where n >= 0;"#
-        );
+        assert_parses(r#"type Natural is n: Int where n >= 0;"#);
     }
 
     #[test]
     fn multi_sigma_binding() {
-        assert_parses(
-            r#"type SizedVec is n: Int, data: List<Int>;"#
-        );
+        assert_parses(r#"type SizedVec is n: Int, data: List<Int>;"#);
     }
 }
 
@@ -514,7 +462,7 @@ mod for_await_loops {
                 for await item in stream {
                     process(item);
                 }
-            }"#
+            }"#,
         );
     }
 
@@ -525,7 +473,7 @@ mod for_await_loops {
                 for await (key, value) in entries {
                     store(key, value);
                 }
-            }"#
+            }"#,
         );
     }
 }
@@ -546,7 +494,7 @@ mod select_expressions {
                     data = channel.recv().await => data,
                     else => default_value,
                 };
-            }"#
+            }"#,
         );
     }
 
@@ -558,7 +506,7 @@ mod select_expressions {
                     data = priority.recv().await => data,
                     msg = normal.recv().await => msg,
                 };
-            }"#
+            }"#,
         );
     }
 
@@ -570,7 +518,7 @@ mod select_expressions {
                     data = ch.recv().await if enabled => data,
                     else => fallback,
                 };
-            }"#
+            }"#,
         );
     }
 }
@@ -591,7 +539,7 @@ mod nursery_expressions {
                     let a = spawn fetch_a();
                     let b = spawn fetch_b();
                 }
-            }"#
+            }"#,
         );
     }
 
@@ -604,7 +552,7 @@ mod nursery_expressions {
                 } recover {
                     err => handle(err),
                 }
-            }"#
+            }"#,
         );
     }
 }
@@ -626,7 +574,7 @@ mod try_recover_finally {
                 } recover {
                     err => handle(err),
                 }
-            }"#
+            }"#,
         );
     }
 
@@ -639,7 +587,7 @@ mod try_recover_finally {
                 } finally {
                     close_resource();
                 }
-            }"#
+            }"#,
         );
     }
 
@@ -654,7 +602,7 @@ mod try_recover_finally {
                 } finally {
                     cleanup();
                 }
-            }"#
+            }"#,
         );
     }
 
@@ -667,7 +615,7 @@ mod try_recover_finally {
                 } recover |e| {
                     handle(e)
                 }
-            }"#
+            }"#,
         );
     }
 }
@@ -685,7 +633,7 @@ mod defer_statements {
         assert_parses(
             r#"fn cleanup() {
                 defer close();
-            }"#
+            }"#,
         );
     }
 
@@ -697,7 +645,7 @@ mod defer_statements {
                     close_file();
                     flush_buffer();
                 }
-            }"#
+            }"#,
         );
     }
 
@@ -707,7 +655,7 @@ mod defer_statements {
             r#"fn careful() {
                 errdefer rollback();
                 let result = do_work();
-            }"#
+            }"#,
         );
     }
 
@@ -719,7 +667,7 @@ mod defer_statements {
                     rollback();
                     notify_failure();
                 }
-            }"#
+            }"#,
         );
     }
 }
@@ -737,7 +685,7 @@ mod let_else_statements {
         assert_parses(
             r#"fn f() {
                 let Some(x) = maybe_val else { return; };
-            }"#
+            }"#,
         );
     }
 
@@ -746,7 +694,7 @@ mod let_else_statements {
         assert_parses(
             r#"fn f() {
                 let Ok(val): Result<Int, Error> = compute() else { return; };
-            }"#
+            }"#,
         );
     }
 }
@@ -767,7 +715,7 @@ mod view_patterns {
                     parity -> Even => "even",
                     _ => "odd",
                 }
-            }"#
+            }"#,
         );
     }
 
@@ -779,7 +727,7 @@ mod view_patterns {
                     parse_json -> Ok(value) => value,
                     _ => default_val,
                 }
-            }"#
+            }"#,
         );
     }
 }
@@ -798,7 +746,7 @@ mod extern_blocks {
             r#"extern "C" {
                 fn malloc(size: Int) -> &unsafe Int;
                 fn free(ptr: &unsafe Int);
-            }"#
+            }"#,
         );
     }
 
@@ -807,15 +755,13 @@ mod extern_blocks {
         assert_parses(
             r#"extern {
                 fn custom_func(x: Int) -> Int;
-            }"#
+            }"#,
         );
     }
 
     #[test]
     fn extern_empty() {
-        assert_parses(
-            r#"extern "C" {}"#
-        );
+        assert_parses(r#"extern "C" {}"#);
     }
 }
 
@@ -832,7 +778,7 @@ mod protocol_extensions {
         assert_parses(
             r#"type Ordered is protocol extends Eq {
                 fn compare(&self, other: &Self) -> Int;
-            };"#
+            };"#,
         );
     }
 
@@ -841,7 +787,7 @@ mod protocol_extensions {
         assert_parses(
             r#"type Printable is protocol extends Display + Debug {
                 fn pretty_print(&self) -> Text;
-            };"#
+            };"#,
         );
     }
 }
@@ -859,7 +805,7 @@ mod rank2_function_types {
         assert_parses(
             r#"type Transducer is {
                 transform: fn<R>(R) -> R,
-            };"#
+            };"#,
         );
     }
 
@@ -868,15 +814,13 @@ mod rank2_function_types {
         assert_parses(
             r#"type Mapper is {
                 apply: fn<A, B>(A) -> B,
-            };"#
+            };"#,
         );
     }
 
     #[test]
     fn rank2_in_function_param() {
-        assert_parses(
-            r#"fn apply(f: fn<T>(T) -> T, x: Int) -> Int { f(x) }"#
-        );
+        assert_parses(r#"fn apply(f: fn<T>(T) -> T, x: Int) -> Int { f(x) }"#);
     }
 }
 
@@ -893,7 +837,7 @@ mod pipeline_expressions {
         assert_parses(
             r#"fn f() {
                 let result = data |> process;
-            }"#
+            }"#,
         );
     }
 
@@ -902,7 +846,7 @@ mod pipeline_expressions {
         assert_parses(
             r#"fn f() {
                 let result = data |> transform |> filter |> collect;
-            }"#
+            }"#,
         );
     }
 
@@ -911,7 +855,7 @@ mod pipeline_expressions {
         assert_parses(
             r#"fn f() {
                 let result = items |> .filter(pred) |> .map(transform);
-            }"#
+            }"#,
         );
     }
 }
@@ -929,7 +873,7 @@ mod null_coalescing {
         assert_parses(
             r#"fn f() {
                 let val = maybe_val ?? default_val;
-            }"#
+            }"#,
         );
     }
 
@@ -938,7 +882,7 @@ mod null_coalescing {
         assert_parses(
             r#"fn f() {
                 let val = first ?? second ?? third;
-            }"#
+            }"#,
         );
     }
 }
@@ -958,7 +902,7 @@ mod is_expressions {
                 if x is Some(v) {
                     v
                 }
-            }"#
+            }"#,
         );
     }
 
@@ -969,7 +913,7 @@ mod is_expressions {
                 if x is not None {
                     process(x);
                 }
-            }"#
+            }"#,
         );
     }
 }
@@ -987,7 +931,7 @@ mod stream_expressions {
         assert_parses(
             r#"fn f() {
                 let s = stream[x * 2 for x in source];
-            }"#
+            }"#,
         );
     }
 
@@ -996,7 +940,7 @@ mod stream_expressions {
         assert_parses(
             r#"fn f() {
                 let s = stream[x for x in items if x > 0];
-            }"#
+            }"#,
         );
     }
 }
@@ -1013,7 +957,7 @@ mod comprehensions {
         assert_parses(
             r#"fn f() {
                 let doubled = [x * 2 for x in items];
-            }"#
+            }"#,
         );
     }
 
@@ -1022,7 +966,7 @@ mod comprehensions {
         assert_parses(
             r#"fn f() {
                 let evens = [x for x in items if x % 2 == 0];
-            }"#
+            }"#,
         );
     }
 
@@ -1031,7 +975,7 @@ mod comprehensions {
         assert_parses(
             r#"fn f() {
                 let m = {k: v for (k, v) in entries};
-            }"#
+            }"#,
         );
     }
 
@@ -1040,7 +984,7 @@ mod comprehensions {
         assert_parses(
             r#"fn f() {
                 let s = set{x for x in items};
-            }"#
+            }"#,
         );
     }
 
@@ -1049,7 +993,7 @@ mod comprehensions {
         assert_parses(
             r#"fn f() {
                 let g = gen{x * x for x in range};
-            }"#
+            }"#,
         );
     }
 }
@@ -1063,9 +1007,7 @@ mod async_await {
 
     #[test]
     fn async_function() {
-        assert_parses(
-            r#"async fn fetch(url: Text) -> Response { get(url).await }"#
-        );
+        assert_parses(r#"async fn fetch(url: Text) -> Response { get(url).await }"#);
     }
 
     #[test]
@@ -1073,7 +1015,7 @@ mod async_await {
         assert_parses(
             r#"fn f() {
                 let future = async { compute().await };
-            }"#
+            }"#,
         );
     }
 
@@ -1082,7 +1024,7 @@ mod async_await {
         assert_parses(
             r#"fn f() {
                 let handle = spawn async { work() };
-            }"#
+            }"#,
         );
     }
 
@@ -1091,7 +1033,7 @@ mod async_await {
         assert_parses(
             r#"fn f() {
                 let handle = spawn using [Database, Logger] async { query() };
-            }"#
+            }"#,
         );
     }
 }
@@ -1109,7 +1051,7 @@ mod yield_expressions {
         assert_parses(
             r#"fn* gen() -> Int {
                 yield 42;
-            }"#
+            }"#,
         );
     }
 
@@ -1118,7 +1060,7 @@ mod yield_expressions {
         assert_parses(
             r#"fn* gen(x: Int) -> Int {
                 yield x + 1;
-            }"#
+            }"#,
         );
     }
 }
@@ -1136,7 +1078,7 @@ mod provide_statements {
         assert_parses(
             r#"fn f() {
                 provide Logger = ConsoleLogger.new();
-            }"#
+            }"#,
         );
     }
 
@@ -1145,7 +1087,7 @@ mod provide_statements {
         assert_parses(
             r#"fn f() {
                 provide Database as primary = PgDatabase.new();
-            }"#
+            }"#,
         );
     }
 
@@ -1156,7 +1098,7 @@ mod provide_statements {
                 provide Logger = FileLogger.new() in {
                     do_work();
                 }
-            }"#
+            }"#,
         );
     }
 
@@ -1165,7 +1107,7 @@ mod provide_statements {
         assert_parses(
             r#"fn f() {
                 provide AppLayer;
-            }"#
+            }"#,
         );
     }
 }
@@ -1185,7 +1127,7 @@ mod pattern_matching {
                     1 | 2 | 3 => "small",
                     _ => "big",
                 }
-            }"#
+            }"#,
         );
     }
 
@@ -1198,7 +1140,7 @@ mod pattern_matching {
                     n if n < 0 => "negative",
                     _ => "zero",
                 }
-            }"#
+            }"#,
         );
     }
 
@@ -1210,7 +1152,7 @@ mod pattern_matching {
                     n where n > 0 => "positive",
                     _ => "other",
                 }
-            }"#
+            }"#,
         );
     }
 
@@ -1222,7 +1164,7 @@ mod pattern_matching {
                     whole @ Some(inner) => whole,
                     None => None,
                 }
-            }"#
+            }"#,
         );
     }
 
@@ -1234,7 +1176,7 @@ mod pattern_matching {
                     [first, ..] => first,
                     [] => 0,
                 }
-            }"#
+            }"#,
         );
     }
 
@@ -1246,7 +1188,7 @@ mod pattern_matching {
                     &0 => "zero",
                     &n => "nonzero",
                 }
-            }"#
+            }"#,
         );
     }
 }
@@ -1261,16 +1203,12 @@ mod active_pattern_defs {
 
     #[test]
     fn simple_active_pattern() {
-        assert_parses(
-            r#"pattern Even(n: Int) -> Bool = n % 2 == 0;"#
-        );
+        assert_parses(r#"pattern Even(n: Int) -> Bool = n % 2 == 0;"#);
     }
 
     #[test]
     fn parameterized_active_pattern() {
-        assert_parses(
-            r#"pattern InRange(lo: Int, hi: Int)(n: Int) -> Bool = n >= lo && n <= hi;"#
-        );
+        assert_parses(r#"pattern InRange(lo: Int, hi: Int)(n: Int) -> Bool = n >= lo && n <= hi;"#);
     }
 }
 
@@ -1316,7 +1254,7 @@ mod context_definitions {
             r#"context Database {
                 fn query(&self, sql: Text) -> List<Row>;
                 fn execute(&self, sql: Text) -> Int;
-            }"#
+            }"#,
         );
     }
 
@@ -1325,7 +1263,7 @@ mod context_definitions {
         assert_parses(
             r#"context async HttpClient {
                 fn get(&self, url: Text) -> Response;
-            }"#
+            }"#,
         );
     }
 
@@ -1334,7 +1272,7 @@ mod context_definitions {
         assert_parses(
             r#"async context WebSocket {
                 fn send(&self, msg: Text);
-            }"#
+            }"#,
         );
     }
 
@@ -1344,7 +1282,7 @@ mod context_definitions {
             r#"context Cache<K, V> {
                 fn get(&self, key: K) -> Maybe<V>;
                 fn set(&self, key: K, value: V);
-            }"#
+            }"#,
         );
     }
 }
@@ -1359,30 +1297,22 @@ mod context_clauses {
 
     #[test]
     fn using_single() {
-        assert_parses(
-            r#"fn query() -> Data using Database { data }"#
-        );
+        assert_parses(r#"fn query() -> Data using Database { data }"#);
     }
 
     #[test]
     fn using_multiple() {
-        assert_parses(
-            r#"fn process() -> Result using [Database, Logger] { ok }"#
-        );
+        assert_parses(r#"fn process() -> Result using [Database, Logger] { ok }"#);
     }
 
     #[test]
     fn using_negative() {
-        assert_parses(
-            r#"fn pure_fn() using [!IO, !State] { 42 }"#
-        );
+        assert_parses(r#"fn pure_fn() using [!IO, !State] { 42 }"#);
     }
 
     #[test]
     fn using_with_alias() {
-        assert_parses(
-            r#"fn work() using [Database as db, Logger as log] { ok }"#
-        );
+        assert_parses(r#"fn work() using [Database as db, Logger as log] { ok }"#);
     }
 }
 
@@ -1399,7 +1329,7 @@ mod optional_chaining {
         assert_parses(
             r#"fn f(x: Maybe<Record>) {
                 let val = x?.field;
-            }"#
+            }"#,
         );
     }
 
@@ -1408,7 +1338,7 @@ mod optional_chaining {
         assert_parses(
             r#"fn f(x: Maybe<List<Int>>) {
                 let len = x?.len();
-            }"#
+            }"#,
         );
     }
 }
@@ -1426,7 +1356,7 @@ mod destructuring_assignment {
         assert_parses(
             r#"fn f() {
                 let (a, b) = get_pair();
-            }"#
+            }"#,
         );
     }
 
@@ -1435,7 +1365,7 @@ mod destructuring_assignment {
         assert_parses(
             r#"fn f() {
                 let Point { x, y } = get_point();
-            }"#
+            }"#,
         );
     }
 }
@@ -1449,9 +1379,7 @@ mod variant_attributes {
 
     #[test]
     fn variant_with_attribute() {
-        assert_parses(
-            r#"type Status is @default Ok | @deprecated Legacy | Error(Text);"#
-        );
+        assert_parses(r#"type Status is @default Ok | @deprecated Legacy | Error(Text);"#);
     }
 }
 
@@ -1470,7 +1398,7 @@ mod unsafe_expressions {
                 unsafe {
                     raw_operation();
                 }
-            }"#
+            }"#,
         );
     }
 }
@@ -1488,7 +1416,7 @@ mod meta_expressions {
         assert_parses(
             r#"fn f() {
                 let q = @sql_query("SELECT * FROM users");
-            }"#
+            }"#,
         );
     }
 
@@ -1499,7 +1427,7 @@ mod meta_expressions {
                 meta {
                     generate_code()
                 }
-            }"#
+            }"#,
         );
     }
 }
@@ -1519,7 +1447,7 @@ mod quote_expressions {
                 quote {
                     fn hello() { print("hello") }
                 }
-            }"#
+            }"#,
         );
     }
 }
@@ -1534,16 +1462,12 @@ mod pure_functions {
 
     #[test]
     fn pure_function() {
-        assert_parses(
-            r#"pure fn add(a: Int, b: Int) -> Int { a + b }"#
-        );
+        assert_parses(r#"pure fn add(a: Int, b: Int) -> Int { a + b }"#);
     }
 
     #[test]
     fn pure_async_function() {
-        assert_parses(
-            r#"pure async fn compute(x: Int) -> Int { x * 2 }"#
-        );
+        assert_parses(r#"pure async fn compute(x: Int) -> Int { x * 2 }"#);
     }
 }
 
@@ -1561,7 +1485,7 @@ mod impl_blocks {
                 fn new(x: Float, y: Float) -> Self {
                     Point { x: x, y: y }
                 }
-            }"#
+            }"#,
         );
     }
 
@@ -1570,7 +1494,7 @@ mod impl_blocks {
         assert_parses(
             r#"implement Display for Point {
                 fn display(&self) -> Text { self }
-            }"#
+            }"#,
         );
     }
 
@@ -1579,7 +1503,7 @@ mod impl_blocks {
         assert_parses(
             r#"implement<T> Container<T> {
                 fn get(&self) -> T { self.value }
-            }"#
+            }"#,
         );
     }
 
@@ -1589,15 +1513,13 @@ mod impl_blocks {
             r#"implement Iterator for MyIter {
                 type Item = Int;
                 fn next(&mut self) -> Maybe<Int> { None }
-            }"#
+            }"#,
         );
     }
 
     #[test]
     fn impl_unsafe() {
-        assert_parses(
-            r#"unsafe implement Send for MyType {}"#
-        );
+        assert_parses(r#"unsafe implement Send for MyType {}"#);
     }
 }
 
@@ -1614,7 +1536,7 @@ mod range_expressions {
         assert_parses(
             r#"fn f() {
                 for i in 0..10 { i; }
-            }"#
+            }"#,
         );
     }
 
@@ -1623,7 +1545,7 @@ mod range_expressions {
         assert_parses(
             r#"fn f() {
                 for i in 0..=10 { i; }
-            }"#
+            }"#,
         );
     }
 }
@@ -1731,9 +1653,7 @@ mod function_types {
 
     #[test]
     fn fn_type_with_context() {
-        assert_parses(
-            r#"fn call(f: fn(Text) -> Bool using [Logger]) { f("test") }"#
-        );
+        assert_parses(r#"fn call(f: fn(Text) -> Bool using [Logger]) { f("test") }"#);
     }
 }
 
@@ -1750,7 +1670,7 @@ mod if_let_chains {
         assert_parses(
             r#"fn f(x: Maybe<Int>) {
                 if let Some(v) = x { v; }
-            }"#
+            }"#,
         );
     }
 
@@ -1759,7 +1679,7 @@ mod if_let_chains {
         assert_parses(
             r#"fn f(x: Maybe<Int>) {
                 if let Some(v) = x && v > 0 { v; }
-            }"#
+            }"#,
         );
     }
 
@@ -1770,7 +1690,7 @@ mod if_let_chains {
                 if let Some(x) = a && let Some(y) = b {
                     x + y;
                 }
-            }"#
+            }"#,
         );
     }
 }
@@ -1788,7 +1708,7 @@ mod closures {
         assert_parses(
             r#"fn f() {
                 let c = || 42;
-            }"#
+            }"#,
         );
     }
 
@@ -1797,7 +1717,7 @@ mod closures {
         assert_parses(
             r#"fn f() {
                 let c = |x, y| x + y;
-            }"#
+            }"#,
         );
     }
 
@@ -1809,7 +1729,7 @@ mod closures {
                     let y = x + 1;
                     y * 2
                 };
-            }"#
+            }"#,
         );
     }
 
@@ -1818,7 +1738,7 @@ mod closures {
         assert_parses(
             r#"fn f() {
                 let c = async |url| fetch(url).await;
-            }"#
+            }"#,
         );
     }
 }
@@ -1837,15 +1757,13 @@ mod higher_kinded_types {
             r#"type Functor is protocol {
                 type F<_>;
                 fn map<A, B>(&self, f: fn(A) -> B) -> Self;
-            };"#
+            };"#,
         );
     }
 
     #[test]
     fn hkt_param_in_function() {
-        assert_parses(
-            r#"fn transform<F<_>>(container: F<Int>) -> F<Text> { container }"#
-        );
+        assert_parses(r#"fn transform<F<_>>(container: F<Int>) -> F<Text> { container }"#);
     }
 }
 
@@ -1864,7 +1782,7 @@ mod field_defaults {
                 host: Text = "localhost",
                 port: Int = 8080,
                 debug: Bool = false,
-            };"#
+            };"#,
         );
     }
 }
@@ -1879,9 +1797,7 @@ mod affine_types {
 
     #[test]
     fn affine_type() {
-        assert_parses(
-            r#"type affine FileHandle is { fd: Int };"#
-        );
+        assert_parses(r#"type affine FileHandle is { fd: Int };"#);
     }
 }
 
@@ -1900,7 +1816,7 @@ mod throw_expressions {
                 if x < 0 {
                     throw ValidationError;
                 }
-            }"#
+            }"#,
         );
     }
 }
@@ -1918,7 +1834,7 @@ mod quantifier_expressions {
         assert_parses(
             r#"fn f() {
                 forall x: Int. x + 0 == x
-            }"#
+            }"#,
         );
     }
 
@@ -1927,7 +1843,7 @@ mod quantifier_expressions {
         assert_parses(
             r#"fn f() {
                 exists x: Int. x * x == 4
-            }"#
+            }"#,
         );
     }
 }
@@ -1945,7 +1861,7 @@ mod genref_types {
         assert_parses(
             r#"type WindowIter<T> is {
                 data: GenRef<List<T>>,
-            };"#
+            };"#,
         );
     }
 }
@@ -1964,7 +1880,7 @@ mod cofix_functions {
         assert_parses(
             r#"async cofix fn ones() -> Stream<Int> {
                 ones()
-            }"#
+            }"#,
         );
     }
 }
@@ -1985,7 +1901,7 @@ mod match_expression_styles {
                     0 => "zero",
                     _ => "other",
                 }
-            }"#
+            }"#,
         );
     }
 
@@ -1997,7 +1913,7 @@ mod match_expression_styles {
                     0 => "zero",
                     _ => "other",
                 }
-            }"#
+            }"#,
         );
     }
 }
@@ -2017,7 +1933,7 @@ mod loop_annotations {
                 while i < n invariant i >= 0 {
                     i = i + 1;
                 }
-            }"#
+            }"#,
         );
     }
 
@@ -2028,7 +1944,7 @@ mod loop_annotations {
                 while i > 0 decreases i {
                     i = i - 1;
                 }
-            }"#
+            }"#,
         );
     }
 }
@@ -2046,7 +1962,7 @@ mod protocol_consts {
             r#"type Bounded is protocol {
                 const MAX: Int;
                 fn value(&self) -> Int;
-            };"#
+            };"#,
         );
     }
 }
@@ -2066,7 +1982,7 @@ mod protocol_defaults {
                 fn greet(&self) -> Text {
                     self.name()
                 }
-            };"#
+            };"#,
         );
     }
 }
@@ -2084,7 +2000,7 @@ mod ffi_declarations {
         assert_parses(
             r#"ffi LibC {
                 @extern("malloc") fn malloc(size: Int) -> &unsafe Int;
-            }"#
+            }"#,
         );
     }
 }
@@ -2102,7 +2018,7 @@ mod typeof_expressions {
         assert_parses(
             r#"fn f(x: unknown) {
                 let t = typeof(x);
-            }"#
+            }"#,
         );
     }
 }
@@ -2152,7 +2068,7 @@ mod integration {
                     }
                 }
             }
-            "#
+            "#,
         );
     }
 
@@ -2174,7 +2090,7 @@ mod integration {
                     else => default_data,
                 };
             }
-            "#
+            "#,
         );
     }
 
@@ -2194,7 +2110,7 @@ mod integration {
                     log_done();
                 }
             }
-            "#
+            "#,
         );
     }
 
@@ -2215,7 +2131,7 @@ mod integration {
             fn diverge() -> ! { panic("never returns") }
 
             fn accept_any(x: unknown) -> Bool { true }
-            "#
+            "#,
         );
     }
 
@@ -2242,7 +2158,7 @@ mod integration {
                     handle(opt);
                 }
             }
-            "#
+            "#,
         );
     }
 }
@@ -2289,7 +2205,7 @@ mod as_cast_expressions {
         assert_parses(
             r#"fn f(x: Int) {
                 let y = x as Float;
-            }"#
+            }"#,
         );
     }
 
@@ -2298,7 +2214,7 @@ mod as_cast_expressions {
         assert_parses(
             r#"fn f(x: Int) {
                 let y = x as Float as Int;
-            }"#
+            }"#,
         );
     }
 }
@@ -2340,7 +2256,7 @@ mod record_spread {
         assert_parses(
             r#"fn f() {
                 let p = Point { x: 1, ..other };
-            }"#
+            }"#,
         );
     }
 
@@ -2349,7 +2265,7 @@ mod record_spread {
         assert_parses(
             r#"fn f() {
                 let p = Config { ..defaults };
-            }"#
+            }"#,
         );
     }
 }
@@ -2367,7 +2283,7 @@ mod stream_literals {
         assert_parses(
             r#"fn f() {
                 let s = stream[];
-            }"#
+            }"#,
         );
     }
 
@@ -2376,7 +2292,7 @@ mod stream_literals {
         assert_parses(
             r#"fn f() {
                 let s = stream[1, 2, 3];
-            }"#
+            }"#,
         );
     }
 
@@ -2385,7 +2301,7 @@ mod stream_literals {
         assert_parses(
             r#"fn f() {
                 let s = stream[1, 2, 3, ...];
-            }"#
+            }"#,
         );
     }
 
@@ -2394,7 +2310,7 @@ mod stream_literals {
         assert_parses(
             r#"fn f() {
                 let s = stream[0..100];
-            }"#
+            }"#,
         );
     }
 
@@ -2403,7 +2319,7 @@ mod stream_literals {
         assert_parses(
             r#"fn f() {
                 let s = stream[0..=100];
-            }"#
+            }"#,
         );
     }
 
@@ -2412,7 +2328,7 @@ mod stream_literals {
         assert_parses(
             r#"fn f() {
                 let s = stream[0..];
-            }"#
+            }"#,
         );
     }
 
@@ -2421,7 +2337,7 @@ mod stream_literals {
         assert_parses(
             r#"fn f() {
                 let s = stream[42];
-            }"#
+            }"#,
         );
     }
 }
@@ -2442,7 +2358,7 @@ mod stream_patterns {
                     stream[head, ...tail] => head,
                     stream[] => 0,
                 }
-            }"#
+            }"#,
         );
     }
 
@@ -2454,7 +2370,7 @@ mod stream_patterns {
                     stream[first, second, ...rest] => first + second,
                     _ => 0,
                 }
-            }"#
+            }"#,
         );
     }
 }
@@ -2469,16 +2385,12 @@ mod context_group_definitions {
 
     #[test]
     fn context_group_simple() {
-        assert_parses(
-            r#"using WebContext = [Database, Logger];"#
-        );
+        assert_parses(r#"using WebContext = [Database, Logger];"#);
     }
 
     #[test]
     fn context_group_with_negation() {
-        assert_parses(
-            r#"using Pure = [!IO, !State];"#
-        );
+        assert_parses(r#"using Pure = [!IO, !State];"#);
     }
 }
 
@@ -2495,7 +2407,7 @@ mod inject_expressions {
         assert_parses(
             r#"fn f() {
                 let db = inject DatabaseService;
-            }"#
+            }"#,
         );
     }
 }
@@ -2515,7 +2427,7 @@ mod nursery_options {
                 nursery(timeout: 5000) {
                     let a = spawn fetch_data();
                 }
-            }"#
+            }"#,
         );
     }
 
@@ -2528,7 +2440,7 @@ mod nursery_options {
                 } on_cancel {
                     cleanup();
                 }
-            }"#
+            }"#,
         );
     }
 
@@ -2539,7 +2451,7 @@ mod nursery_options {
                 nursery(timeout: 5000, on_error: cancel_all) {
                     let a = spawn fetch_a();
                 }
-            }"#
+            }"#,
         );
     }
 }
@@ -2557,15 +2469,13 @@ mod module_definitions {
         assert_parses(
             r#"module math {
                 fn add(a: Int, b: Int) -> Int { a + b }
-            }"#
+            }"#,
         );
     }
 
     #[test]
     fn module_external() {
-        assert_parses(
-            r#"module utils;"#
-        );
+        assert_parses(r#"module utils;"#);
     }
 
     #[test]
@@ -2573,7 +2483,7 @@ mod module_definitions {
         assert_parses(
             r#"public module api {
                 fn hello() -> Text { "hello" }
-            }"#
+            }"#,
         );
     }
 
@@ -2582,7 +2492,7 @@ mod module_definitions {
         assert_parses(
             r#"module math.linear {
                 fn dot(a: Int, b: Int) -> Int { a * b }
-            }"#
+            }"#,
         );
     }
 }
@@ -2621,23 +2531,17 @@ mod context_clause_advanced {
 
     #[test]
     fn named_context_colon() {
-        assert_parses(
-            r#"fn work() using [db: Database, log: Logger] { ok }"#
-        );
+        assert_parses(r#"fn work() using [db: Database, log: Logger] { ok }"#);
     }
 
     #[test]
     fn conditional_context() {
-        assert_parses(
-            r#"fn work() using [Analytics if analytics_enabled] { ok }"#
-        );
+        assert_parses(r#"fn work() using [Analytics if analytics_enabled] { ok }"#);
     }
 
     #[test]
     fn transformed_context() {
-        assert_parses(
-            r#"fn work() using [Database.transactional()] { ok }"#
-        );
+        assert_parses(r#"fn work() using [Database.transactional()] { ok }"#);
     }
 }
 
@@ -2654,7 +2558,7 @@ mod interpolated_strings {
         assert_parses(
             r#"fn f() {
                 let msg = f"Hello {name}";
-            }"#
+            }"#,
         );
     }
 
@@ -2663,7 +2567,7 @@ mod interpolated_strings {
         assert_parses(
             r#"fn f() {
                 let msg = f"x={x}, y={y}";
-            }"#
+            }"#,
         );
     }
 }
@@ -2681,7 +2585,7 @@ mod tagged_literals {
         assert_parses(
             r#"fn f() {
                 let q = sql#"SELECT * FROM users";
-            }"#
+            }"#,
         );
     }
 
@@ -2690,7 +2594,7 @@ mod tagged_literals {
         assert_parses(
             r#"fn f() {
                 let pattern = rx#"[a-z]+";
-            }"#
+            }"#,
         );
     }
 
@@ -2699,7 +2603,7 @@ mod tagged_literals {
         assert_parses(
             r#"fn f() {
                 let u = url#"https://example.com";
-            }"#
+            }"#,
         );
     }
 }
@@ -2720,7 +2624,7 @@ mod proof_declarations {
                 ensures result >= 0
             {
                 proof by auto
-            }"#
+            }"#,
         );
     }
 
@@ -2731,15 +2635,13 @@ mod proof_declarations {
                 ensures result == x
             {
                 proof by auto
-            }"#
+            }"#,
         );
     }
 
     #[test]
     fn axiom_basic() {
-        assert_parses(
-            r#"axiom excluded_middle(p: Bool) -> Bool;"#
-        );
+        assert_parses(r#"axiom excluded_middle(p: Bool) -> Bool;"#);
     }
 }
 
@@ -2753,9 +2655,7 @@ mod ensures_clauses {
 
     #[test]
     fn function_with_ensures() {
-        assert_parses(
-            r#"fn abs(x: Int) -> Int where ensures result >= 0 { x }"#
-        );
+        assert_parses(r#"fn abs(x: Int) -> Int where ensures result >= 0 { x }"#);
     }
 }
 
@@ -2773,7 +2673,7 @@ mod meta_definitions {
         assert_parses(
             r#"meta my_macro(input: expr) {
                 input => { input }
-            }"#
+            }"#,
         );
     }
 
@@ -2782,7 +2682,7 @@ mod meta_definitions {
         assert_parses(
             r#"meta log_macro(msg: expr) {
                 msg => { print(msg) }
-            }"#
+            }"#,
         );
     }
 }
@@ -2800,7 +2700,7 @@ mod meta_level_functions {
         assert_parses(
             r#"fn f() {
                 let x = @const(2 + 2);
-            }"#
+            }"#,
         );
     }
 
@@ -2809,7 +2709,7 @@ mod meta_level_functions {
         assert_parses(
             r#"fn f() {
                 let x = @cfg(debug);
-            }"#
+            }"#,
         );
     }
 
@@ -2818,7 +2718,7 @@ mod meta_level_functions {
         assert_parses(
             r#"fn f() {
                 let x = @file;
-            }"#
+            }"#,
         );
     }
 
@@ -2827,7 +2727,7 @@ mod meta_level_functions {
         assert_parses(
             r#"fn f() {
                 let x = @line;
-            }"#
+            }"#,
         );
     }
 }
@@ -2846,7 +2746,7 @@ mod question_mark_operator {
             r#"fn f() -> Maybe<Int> {
                 let x = get_value()?;
                 Some(x)
-            }"#
+            }"#,
         );
     }
 
@@ -2855,7 +2755,7 @@ mod question_mark_operator {
         assert_parses(
             r#"fn f() {
                 let x = a()?.b()?.c;
-            }"#
+            }"#,
         );
     }
 }
@@ -2875,7 +2775,7 @@ mod tuple_index {
                 let pair = (1, "hello");
                 let x = pair.0;
                 let y = pair.1;
-            }"#
+            }"#,
         );
     }
 }
@@ -2893,7 +2793,7 @@ mod return_expressions {
         assert_parses(
             r#"fn f() -> Int {
                 return 42;
-            }"#
+            }"#,
         );
     }
 
@@ -2902,7 +2802,7 @@ mod return_expressions {
         assert_parses(
             r#"fn f() {
                 return;
-            }"#
+            }"#,
         );
     }
 }
@@ -2922,7 +2822,7 @@ mod break_expressions {
                 let x = loop {
                     break 42;
                 };
-            }"#
+            }"#,
         );
     }
 
@@ -2931,7 +2831,7 @@ mod break_expressions {
         assert_parses(
             r#"fn f() {
                 loop { break; }
-            }"#
+            }"#,
         );
     }
 
@@ -2943,7 +2843,7 @@ mod break_expressions {
                     if x == 0 { continue; }
                     process(x);
                 }
-            }"#
+            }"#,
         );
     }
 }
@@ -2980,7 +2880,7 @@ mod inferred_types {
         assert_parses(
             r#"fn f() {
                 let x: _ = 42;
-            }"#
+            }"#,
         );
     }
 }
@@ -3017,7 +2917,7 @@ mod unit_expressions {
         assert_parses(
             r#"fn f() {
                 let x = ();
-            }"#
+            }"#,
         );
     }
 }
@@ -3035,7 +2935,7 @@ mod array_expressions {
         assert_parses(
             r#"fn f() {
                 let arr = [0; 100];
-            }"#
+            }"#,
         );
     }
 
@@ -3044,7 +2944,7 @@ mod array_expressions {
         assert_parses(
             r#"fn f() {
                 let arr: [Int] = [];
-            }"#
+            }"#,
         );
     }
 }
@@ -3063,7 +2963,7 @@ mod gat_in_protocol {
             r#"type Lending is protocol {
                 type Item<T>;
                 fn next(&mut self) -> Maybe<Self.Item<Int>>;
-            };"#
+            };"#,
         );
     }
 }
@@ -3084,7 +2984,7 @@ mod default_impl_items {
             r#"implement<T> Display for List<T> {
                 fn display(&self) -> Text { "list" }
                 fn debug(&self) -> Text { "debug" }
-            }"#
+            }"#,
         );
     }
 }
@@ -3102,7 +3002,7 @@ mod meta_staged {
         assert_parses(
             r#"meta fn generate() {
                 quote { fn hello() { print("hello") } }
-            }"#
+            }"#,
         );
     }
 
@@ -3111,7 +3011,7 @@ mod meta_staged {
         assert_parses(
             r#"meta(2) fn generate_meta() {
                 quote { meta fn inner() { quote { 42 } } }
-            }"#
+            }"#,
         );
     }
 }
@@ -3130,7 +3030,7 @@ mod variant_data_kinds {
             r#"type Shape is
                 Circle { radius: Float }
                 | Rectangle { width: Float, height: Float }
-                | Point;"#
+                | Point;"#,
         );
     }
 
@@ -3140,7 +3040,7 @@ mod variant_data_kinds {
             r#"type Expr is
                 Literal(Int)
                 | Binary { op: Text, left: Heap<Expr>, right: Heap<Expr> }
-                | Unary(Text, Heap<Expr>);"#
+                | Unary(Text, Heap<Expr>);"#,
         );
     }
 }
@@ -3161,7 +3061,7 @@ mod slice_patterns {
                     [first, ..] => first,
                     [] => 0,
                 }
-            }"#
+            }"#,
         );
     }
 
@@ -3173,7 +3073,7 @@ mod slice_patterns {
                     [a, b, ..] => a + b,
                     _ => 0,
                 }
-            }"#
+            }"#,
         );
     }
 }
@@ -3194,7 +3094,7 @@ mod range_patterns {
                     0..=9 => "digit",
                     _ => "other",
                 }
-            }"#
+            }"#,
         );
     }
 
@@ -3206,7 +3106,7 @@ mod range_patterns {
                     0..100 => "small",
                     _ => "big",
                 }
-            }"#
+            }"#,
         );
     }
 }
@@ -3222,44 +3122,32 @@ mod bitwise_operators {
 
     #[test]
     fn bitwise_and() {
-        assert_parses(
-            r#"fn f(a: Int, b: Int) -> Int { a & b }"#
-        );
+        assert_parses(r#"fn f(a: Int, b: Int) -> Int { a & b }"#);
     }
 
     #[test]
     fn bitwise_or() {
-        assert_parses(
-            r#"fn f(a: Int, b: Int) -> Int { a | b }"#
-        );
+        assert_parses(r#"fn f(a: Int, b: Int) -> Int { a | b }"#);
     }
 
     #[test]
     fn bitwise_xor() {
-        assert_parses(
-            r#"fn f(a: Int, b: Int) -> Int { a ^ b }"#
-        );
+        assert_parses(r#"fn f(a: Int, b: Int) -> Int { a ^ b }"#);
     }
 
     #[test]
     fn shift_left() {
-        assert_parses(
-            r#"fn f(a: Int) -> Int { a << 2 }"#
-        );
+        assert_parses(r#"fn f(a: Int) -> Int { a << 2 }"#);
     }
 
     #[test]
     fn shift_right() {
-        assert_parses(
-            r#"fn f(a: Int) -> Int { a >> 2 }"#
-        );
+        assert_parses(r#"fn f(a: Int) -> Int { a >> 2 }"#);
     }
 
     #[test]
     fn power_operator() {
-        assert_parses(
-            r#"fn f(a: Int) -> Int { a ** 2 }"#
-        );
+        assert_parses(r#"fn f(a: Int) -> Int { a ** 2 }"#);
     }
 }
 
@@ -3277,7 +3165,7 @@ mod compound_assignment {
             r#"fn f() {
                 let mut x = 0;
                 x += 1;
-            }"#
+            }"#,
         );
     }
 
@@ -3287,7 +3175,7 @@ mod compound_assignment {
             r#"fn f() {
                 let mut x = 10;
                 x -= 1;
-            }"#
+            }"#,
         );
     }
 
@@ -3297,7 +3185,7 @@ mod compound_assignment {
             r#"fn f() {
                 let mut x = 2;
                 x *= 3;
-            }"#
+            }"#,
         );
     }
 
@@ -3307,7 +3195,7 @@ mod compound_assignment {
             r#"fn f() {
                 let mut x = 10;
                 x /= 2;
-            }"#
+            }"#,
         );
     }
 }
@@ -3322,30 +3210,22 @@ mod unary_operators {
 
     #[test]
     fn logical_not() {
-        assert_parses(
-            r#"fn f(b: Bool) -> Bool { !b }"#
-        );
+        assert_parses(r#"fn f(b: Bool) -> Bool { !b }"#);
     }
 
     #[test]
     fn negation() {
-        assert_parses(
-            r#"fn f(x: Int) -> Int { -x }"#
-        );
+        assert_parses(r#"fn f(x: Int) -> Int { -x }"#);
     }
 
     #[test]
     fn bitwise_not() {
-        assert_parses(
-            r#"fn f(x: Int) -> Int { ~x }"#
-        );
+        assert_parses(r#"fn f(x: Int) -> Int { ~x }"#);
     }
 
     #[test]
     fn dereference() {
-        assert_parses(
-            r#"fn f(x: &Int) -> Int { *x }"#
-        );
+        assert_parses(r#"fn f(x: &Int) -> Int { *x }"#);
     }
 
     #[test]
@@ -3353,7 +3233,7 @@ mod unary_operators {
         assert_parses(
             r#"fn f(x: Int) {
                 let r = &x;
-            }"#
+            }"#,
         );
     }
 
@@ -3362,7 +3242,7 @@ mod unary_operators {
         assert_parses(
             r#"fn f(mut x: Int) {
                 let r = &mut x;
-            }"#
+            }"#,
         );
     }
 }
@@ -3381,7 +3261,7 @@ mod ffi_advanced {
             r#"ffi LibMath {
                 @extern("sqrt") fn sqrt(x: Float) -> Float;
                 @extern("pow") fn pow(base: Float, exp: Float) -> Float;
-            }"#
+            }"#,
         );
     }
 
@@ -3390,7 +3270,7 @@ mod ffi_advanced {
         assert_parses(
             r#"ffi LibExtended extends LibBase {
                 @extern("extended_fn") fn extended_fn(x: Int) -> Int;
-            }"#
+            }"#,
         );
     }
 }
@@ -3408,7 +3288,7 @@ mod protocol_with_where {
         assert_parses(
             r#"type Sortable<T> is protocol extends Eq where type T: Ord {
                 fn sort(&self) -> Self;
-            };"#
+            };"#,
         );
     }
 }
@@ -3428,7 +3308,7 @@ mod while_let_loops {
                 while let Some(item) = iter.next() {
                     process(item);
                 }
-            }"#
+            }"#,
         );
     }
 }
@@ -3446,7 +3326,7 @@ mod negative_bounds {
         assert_parses(
             r#"implement<T> MyProtocol for T where type T: Send {
                 fn do_it(&self) { self }
-            }"#
+            }"#,
         );
     }
 }
@@ -3461,9 +3341,7 @@ mod type_level_functions {
 
     #[test]
     fn type_alias_with_constraints() {
-        assert_parses(
-            r#"type NumList<T> is List<T>;"#
-        );
+        assert_parses(r#"type NumList<T> is List<T>;"#);
     }
 }
 
@@ -3481,7 +3359,7 @@ mod field_visibility {
             r#"type Config is {
                 public host: Text,
                 port: Int,
-            };"#
+            };"#,
         );
     }
 }
@@ -3497,7 +3375,7 @@ mod generic_features {
     #[test]
     fn multiple_generic_params_with_bounds() {
         assert_parses(
-            r#"fn zip<A: Clone, B: Clone>(a: List<A>, b: List<B>) -> List<(A, B)> { a }"#
+            r#"fn zip<A: Clone, B: Clone>(a: List<A>, b: List<B>) -> List<(A, B)> { a }"#,
         );
     }
 
@@ -3506,7 +3384,7 @@ mod generic_features {
         assert_parses(
             r#"fn f() {
                 let x = identity<Int>(42);
-            }"#
+            }"#,
         );
     }
 }
@@ -3523,7 +3401,7 @@ mod attributes {
     fn derive_attribute() {
         assert_parses(
             r#"@derive(Eq, Hash)
-            type Point is { x: Int, y: Int };"#
+            type Point is { x: Int, y: Int };"#,
         );
     }
 
@@ -3533,7 +3411,7 @@ mod attributes {
             r#"@specialize
             implement Display for List<Int> {
                 fn display(&self) -> Text { "list" }
-            }"#
+            }"#,
         );
     }
 
@@ -3541,7 +3419,7 @@ mod attributes {
     fn verify_attribute() {
         assert_parses(
             r#"@verify(runtime)
-            fn safe_divide(a: Int, b: Int) -> Int { a / b }"#
+            fn safe_divide(a: Int, b: Int) -> Int { a / b }"#,
         );
     }
 }
@@ -3562,7 +3440,7 @@ mod integration_advanced {
                 fn free(ptr: *mut Int);
                 fn memcpy(dst: *mut Int, src: *const Int, n: Int);
             }
-            "#
+            "#,
         );
     }
 
@@ -3589,7 +3467,7 @@ mod integration_advanced {
                 provide AppLayer;
                 let data = inject Database;
             }
-            "#
+            "#,
         );
     }
 
@@ -3603,7 +3481,7 @@ mod integration_advanced {
                 let ranged = stream[0..100];
                 let comprehended = stream[x * 2 for x in source if x > 0];
             }
-            "#
+            "#,
         );
     }
 
@@ -3628,7 +3506,7 @@ mod integration_advanced {
                 Zero
                 | Succ(Nat)
             };
-            "#
+            "#,
         );
     }
 
@@ -3647,7 +3525,7 @@ mod integration_advanced {
                 let mut counter = 0;
                 counter += 1;
             }
-            "#
+            "#,
         );
     }
 }

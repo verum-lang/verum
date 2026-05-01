@@ -21,7 +21,9 @@ use verum_ast::{FileId, ItemKind, TypeKind, decl::*};
 use verum_lexer::Lexer;
 use verum_parser::VerumParser;
 
-fn parse_source(source: &str) -> Result<Vec<verum_ast::Item>, verum_common::List<verum_fast_parser::ParseError>> {
+fn parse_source(
+    source: &str,
+) -> Result<Vec<verum_ast::Item>, verum_common::List<verum_fast_parser::ParseError>> {
     let file_id = FileId::new(0);
     let lexer = Lexer::new(source, file_id);
     let parser = VerumParser::new();
@@ -516,9 +518,9 @@ fn test_generic_protocol_declaration() {
 
 #[test]
 fn debug_generic_protocol_tokens() {
-    use verum_lexer::Lexer;
     use verum_ast::FileId;
-    
+    use verum_lexer::Lexer;
+
     // Test generic protocol with type parameter in method return type
     let source = r#"
         type Provider<T> is protocol {
@@ -528,7 +530,7 @@ fn debug_generic_protocol_tokens() {
 
     let file_id = FileId::new(0);
     let lexer = Lexer::new(source, file_id);
-    
+
     eprintln!("Source:\n{}", source);
     eprintln!("\nTokens:");
     for (i, result) in lexer.enumerate() {
@@ -541,12 +543,12 @@ fn debug_generic_protocol_tokens() {
             }
         }
     }
-    
+
     // Now try parsing
     let file_id = FileId::new(0);
     let lexer = Lexer::new(source, file_id);
     let parser = verum_fast_parser::VerumParser::new();
-    
+
     match parser.parse_module(lexer, file_id) {
         Ok(module) => eprintln!("Parsed {} items", module.items.len()),
         Err(errors) => {

@@ -210,7 +210,10 @@ fn meta_project_package_name(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 0, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 0,
+            got: args.len(),
+        });
     }
     Ok(ConstValue::Text(ctx.project_info.name.clone()))
 }
@@ -221,7 +224,10 @@ fn meta_project_package_version(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 0, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 0,
+            got: args.len(),
+        });
     }
     Ok(ConstValue::Text(ctx.project_info.version.clone()))
 }
@@ -232,7 +238,10 @@ fn meta_project_package_authors(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 0, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 0,
+            got: args.len(),
+        });
     }
     let authors: List<ConstValue> = ctx
         .project_info
@@ -253,7 +262,10 @@ fn meta_project_dependencies(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 0, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 0,
+            got: args.len(),
+        });
     }
     let deps: List<ConstValue> = ctx
         .project_info
@@ -275,7 +287,10 @@ fn meta_project_has_dependency(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
     match &args[0] {
         ConstValue::Text(name) => {
@@ -300,7 +315,10 @@ fn meta_project_target_os(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 0, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 0,
+            got: args.len(),
+        });
     }
     let os = if ctx.project_info.target_os.is_empty() {
         Text::from(std::env::consts::OS)
@@ -316,7 +334,10 @@ fn meta_project_target_arch(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 0, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 0,
+            got: args.len(),
+        });
     }
     let arch = if ctx.project_info.target_arch.is_empty() {
         Text::from(std::env::consts::ARCH)
@@ -332,7 +353,10 @@ fn meta_project_is_debug(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 0, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 0,
+            got: args.len(),
+        });
     }
     Ok(ConstValue::Bool(ctx.project_info.is_debug))
 }
@@ -343,7 +367,10 @@ fn meta_project_is_release(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 0, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 0,
+            got: args.len(),
+        });
     }
     Ok(ConstValue::Bool(!ctx.project_info.is_debug))
 }
@@ -354,7 +381,10 @@ fn meta_project_root(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 0, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 0,
+            got: args.len(),
+        });
     }
     Ok(ConstValue::Text(ctx.project_info.project_root.clone()))
 }
@@ -365,7 +395,10 @@ fn meta_project_source_dir(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 0, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 0,
+            got: args.len(),
+        });
     }
     let source_dir = if ctx.project_info.source_dir.is_empty() {
         // Default to "src" subdirectory of project root
@@ -386,7 +419,10 @@ fn meta_project_enabled_features(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 0, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 0,
+            got: args.len(),
+        });
     }
     let features: List<ConstValue> = ctx
         .project_info
@@ -403,7 +439,10 @@ fn meta_project_is_feature_enabled(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
     match &args[0] {
         ConstValue::Text(feature) => {
@@ -448,7 +487,10 @@ fn meta_version_stamp(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 0, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 0,
+            got: args.len(),
+        });
     }
     let version = ctx.project_info.version.clone();
     let revision = ctx
@@ -472,7 +514,10 @@ fn meta_project_git_revision(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 0, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 0,
+            got: args.len(),
+        });
     }
     let revision = ctx
         .project_info
@@ -488,7 +533,10 @@ fn meta_project_build_time_ms(
     args: List<ConstValue>,
 ) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 0, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 0,
+            got: args.len(),
+        });
     }
     let build_ms = ctx.project_info.build_time_unix_ms.unwrap_or(0);
     Ok(ConstValue::UInt(build_ms.into()))
@@ -506,10 +554,7 @@ mod tests {
         // Set up project info
         ctx.project_info.name = Text::from("my_project");
         ctx.project_info.version = Text::from("1.2.3");
-        ctx.project_info.authors = List::from(vec![
-            Text::from("Alice"),
-            Text::from("Bob"),
-        ]);
+        ctx.project_info.authors = List::from(vec![Text::from("Alice"), Text::from("Bob")]);
         ctx.project_info.is_debug = true;
         ctx.project_info.project_root = Text::from("/home/user/project");
         ctx.project_info.source_dir = Text::from("/home/user/project/src");
@@ -519,12 +564,8 @@ mod tests {
         ctx.project_info
             .dependencies
             .insert(Text::from("tokio"), Text::from("1.28"));
-        ctx.project_info
-            .enabled_features
-            .push(Text::from("async"));
-        ctx.project_info
-            .enabled_features
-            .push(Text::from("simd"));
+        ctx.project_info.enabled_features.push(Text::from("async"));
+        ctx.project_info.enabled_features.push(Text::from("simd"));
 
         ctx
     }
@@ -595,10 +636,7 @@ mod tests {
     fn test_project_root() {
         let mut ctx = create_test_context();
         let result = meta_project_root(&mut ctx, List::new()).unwrap();
-        assert_eq!(
-            result,
-            ConstValue::Text(Text::from("/home/user/project"))
-        );
+        assert_eq!(result, ConstValue::Text(Text::from("/home/user/project")));
     }
 
     #[test]

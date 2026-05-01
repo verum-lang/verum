@@ -1,21 +1,22 @@
 use libc::c_int;
 use verum_llvm_sys::execution_engine::{
-    LLVMAddGlobalMapping, LLVMAddModule, LLVMDisposeExecutionEngine, LLVMExecutionEngineRef, LLVMFindFunction,
-    LLVMFreeMachineCodeForFunction, LLVMGenericValueRef, LLVMGetExecutionEngineTargetData, LLVMGetFunctionAddress,
-    LLVMLinkInInterpreter, LLVMLinkInMCJIT, LLVMRemoveModule, LLVMRunFunction, LLVMRunFunctionAsMain,
+    LLVMAddGlobalMapping, LLVMAddModule, LLVMDisposeExecutionEngine, LLVMExecutionEngineRef,
+    LLVMFindFunction, LLVMFreeMachineCodeForFunction, LLVMGenericValueRef,
+    LLVMGetExecutionEngineTargetData, LLVMGetFunctionAddress, LLVMLinkInInterpreter,
+    LLVMLinkInMCJIT, LLVMRemoveModule, LLVMRunFunction, LLVMRunFunctionAsMain,
     LLVMRunStaticConstructors, LLVMRunStaticDestructors,
 };
 
 use crate::context::Context;
 use crate::module::Module;
-use crate::support::{to_c_str, LLVMString};
+use crate::support::{LLVMString, to_c_str};
 use crate::targets::TargetData;
 use crate::values::{AnyValue, AsValueRef, FunctionValue, GenericValue};
 
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::marker::PhantomData;
-use std::mem::{forget, size_of, transmute_copy, MaybeUninit};
+use std::mem::{MaybeUninit, forget, size_of, transmute_copy};
 use std::ops::Deref;
 use std::rc::Rc;
 
@@ -32,7 +33,9 @@ impl Error for FunctionLookupError {}
 impl FunctionLookupError {
     fn as_str(&self) -> &str {
         match self {
-            FunctionLookupError::JITNotEnabled => "ExecutionEngine does not have JIT functionality enabled",
+            FunctionLookupError::JITNotEnabled => {
+                "ExecutionEngine does not have JIT functionality enabled"
+            }
             FunctionLookupError::FunctionNotFound => "Function not found in ExecutionEngine",
         }
     }
@@ -67,8 +70,12 @@ impl RemoveModuleError {
     fn as_str(&self) -> &str {
         match self {
             RemoveModuleError::ModuleNotOwned => "Module is not owned by an Execution Engine",
-            RemoveModuleError::IncorrectModuleOwner => "Module is not owned by this Execution Engine",
-            RemoveModuleError::LLVMError(string) => string.to_str().unwrap_or("LLVMError with invalid unicode"),
+            RemoveModuleError::IncorrectModuleOwner => {
+                "Module is not owned by this Execution Engine"
+            }
+            RemoveModuleError::LLVMError(string) => {
+                string.to_str().unwrap_or("LLVMError with invalid unicode")
+            }
         }
     }
 }
@@ -193,7 +200,13 @@ impl<'ctx> ExecutionEngine<'ctx> {
     /// assert_eq!(result, 128.);
     /// ```
     pub fn add_global_mapping(&self, value: &dyn AnyValue<'ctx>, addr: usize) {
-        unsafe { LLVMAddGlobalMapping(self.execution_engine_inner(), value.as_value_ref(), addr as *mut _) }
+        unsafe {
+            LLVMAddGlobalMapping(
+                self.execution_engine_inner(),
+                value.as_value_ref(),
+                addr as *mut _,
+            )
+        }
     }
 
     /// Adds a module to an `ExecutionEngine`.
@@ -233,8 +246,8 @@ impl<'ctx> ExecutionEngine<'ctx> {
     pub fn remove_module(&self, module: &Module<'ctx>) -> Result<(), RemoveModuleError> {
         match *module.owned_by_ee.borrow() {
             Some(ref ee) if ee.execution_engine_inner() != self.execution_engine_inner() => {
-                return Err(RemoveModuleError::IncorrectModuleOwner)
-            },
+                return Err(RemoveModuleError::IncorrectModuleOwner);
+            }
             None => return Err(RemoveModuleError::ModuleNotOwned),
             _ => (),
         }
@@ -253,7 +266,9 @@ impl<'ctx> ExecutionEngine<'ctx> {
 
         if code == 1 {
             unsafe {
-                return Err(RemoveModuleError::LLVMError(LLVMString::new(err_string.assume_init())));
+                return Err(RemoveModuleError::LLVMError(LLVMString::new(
+                    err_string.assume_init(),
+                )));
             }
         }
 
@@ -336,7 +351,10 @@ impl<'ctx> ExecutionEngine<'ctx> {
     ///
 
     /// [`UnsafeFunctionPointer`]: trait.UnsafeFunctionPointer.html
-    pub unsafe fn get_function<F>(&self, fn_name: &str) -> Result<JitFunction<'ctx, F>, FunctionLookupError>
+    pub unsafe fn get_function<F>(
+        &self,
+        fn_name: &str,
+    ) -> Result<JitFunction<'ctx, F>, FunctionLookupError>
     where
         F: UnsafeFunctionPointer,
     {
@@ -368,7 +386,8 @@ impl<'ctx> ExecutionEngine<'ctx> {
     /// pointer so that you don't have to do error-prone transmutes yourself.
     pub fn get_function_address(&self, fn_name: &str) -> Result<usize, FunctionLookupError> {
         let c_string = to_c_str(fn_name);
-        let address = unsafe { LLVMGetFunctionAddress(self.execution_engine_inner(), c_string.as_ptr()) };
+        let address =
+            unsafe { LLVMGetFunctionAddress(self.execution_engine_inner(), c_string.as_ptr()) };
 
         // REVIEW: Can also return 0 if no targets are initialized.
         // One option might be to set a (thread local?) global to true if any at all of the targets have been
@@ -393,7 +412,10 @@ impl<'ctx> ExecutionEngine<'ctx> {
     // do have a global flag for anything initialized. Catch is that it must be initialized
     // before EE is created
     // REVIEW: Should FunctionValue lifetime be tied to self not 'ctx?
-    pub fn get_function_value(&self, fn_name: &str) -> Result<FunctionValue<'ctx>, FunctionLookupError> {
+    pub fn get_function_value(
+        &self,
+        fn_name: &str,
+    ) -> Result<FunctionValue<'ctx>, FunctionLookupError> {
         if !self.jit_mode {
             return Err(FunctionLookupError::JITNotEnabled);
         }
@@ -401,10 +423,19 @@ impl<'ctx> ExecutionEngine<'ctx> {
         let c_string = to_c_str(fn_name);
         let mut function = MaybeUninit::uninit();
 
-        let code = unsafe { LLVMFindFunction(self.execution_engine_inner(), c_string.as_ptr(), function.as_mut_ptr()) };
+        let code = unsafe {
+            LLVMFindFunction(
+                self.execution_engine_inner(),
+                c_string.as_ptr(),
+                function.as_mut_ptr(),
+            )
+        };
 
         if code == 0 {
-            return unsafe { FunctionValue::new(function.assume_init()).ok_or(FunctionLookupError::FunctionNotFound) };
+            return unsafe {
+                FunctionValue::new(function.assume_init())
+                    .ok_or(FunctionLookupError::FunctionNotFound)
+            };
         };
 
         Err(FunctionLookupError::FunctionNotFound)
@@ -431,7 +462,11 @@ impl<'ctx> ExecutionEngine<'ctx> {
 
     /// Runs a function as if it were `main(argc, argv)`. Unsafe because the JIT'd code
     /// may perform arbitrary operations. Environment variables are not passed (empty envp).
-    pub unsafe fn run_function_as_main(&self, function: FunctionValue<'ctx>, args: &[&str]) -> c_int {
+    pub unsafe fn run_function_as_main(
+        &self,
+        function: FunctionValue<'ctx>,
+        args: &[&str],
+    ) -> c_int {
         let cstring_args: Vec<_> = args.iter().map(|&arg| to_c_str(arg)).collect();
         let raw_args: Vec<*const _> = cstring_args.iter().map(|arg| arg.as_ptr()).collect();
 
@@ -447,7 +482,9 @@ impl<'ctx> ExecutionEngine<'ctx> {
     }
 
     pub fn free_fn_machine_code(&self, function: FunctionValue<'ctx>) {
-        unsafe { LLVMFreeMachineCodeForFunction(self.execution_engine_inner(), function.as_value_ref()) }
+        unsafe {
+            LLVMFreeMachineCodeForFunction(self.execution_engine_inner(), function.as_value_ref())
+        }
     }
 
     // REVIEW: Is this actually safe?
@@ -580,4 +617,3 @@ macro_rules! impl_unsafe_fn {
 }
 
 impl_unsafe_fn!(A, B, C, D, E, F, G, H, I, J, K, L, M);
-

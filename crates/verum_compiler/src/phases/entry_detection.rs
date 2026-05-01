@@ -40,8 +40,8 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 use verum_ast::decl::{FunctionBody, FunctionDecl, ItemKind};
 use verum_ast::{Expr, ExprKind, Module, Stmt, StmtKind};
-use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
 use verum_common::{List, Text};
+use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
 
 use super::{CompilationPhase, PhaseData, PhaseInput, PhaseMetrics, PhaseOutput};
 
@@ -216,7 +216,10 @@ impl EntryDetectionPhase {
 
         if main_count > 1 {
             let diag = DiagnosticBuilder::new(Severity::Error)
-                .message(Text::from(format!("Multiple main functions found ({})", main_count)))
+                .message(Text::from(format!(
+                    "Multiple main functions found ({})",
+                    main_count
+                )))
                 .help(Text::from("Only one main function is allowed"))
                 .build();
             return Err(vec![diag].into());
@@ -341,7 +344,10 @@ impl EntryDetectionPhase {
                 && !self.context_groups.contains_key(context_name)
             {
                 let diag = DiagnosticBuilder::new(Severity::Error)
-                    .message(Text::from(format!("Context '{}' is not declared", context_name)))
+                    .message(Text::from(format!(
+                        "Context '{}' is not declared",
+                        context_name
+                    )))
                     .help(Text::from(format!(
                         "Register the context with 'context {} {{ ... }}' or check spelling",
                         context_name
@@ -388,7 +394,9 @@ impl EntryDetectionPhase {
                     "Circular context group reference detected: '{}'",
                     group_name
                 )))
-                .help(Text::from("Remove the circular dependency between context groups"))
+                .help(Text::from(
+                    "Remove the circular dependency between context groups",
+                ))
                 .build();
             diagnostics.push(diag);
             return Err(diagnostics.clone());

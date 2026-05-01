@@ -8,10 +8,10 @@
 //! │ stdout output here │
 //! └────────────────────────────────────────────────────────┘
 
+use super::output::{format_output_lines, output_line_count};
+use crate::playbook::session::{Cell, CellKind, CellOutput};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Widget};
-use crate::playbook::session::{Cell, CellKind, CellOutput};
-use super::output::{format_output_lines, output_line_count};
 
 /// Calculate the height needed to render a cell (including borders and output).
 pub fn cell_height(cell: &Cell, collapsed: bool) -> u16 {
@@ -61,10 +61,15 @@ fn status_indicator(cell: &Cell) -> (&'static str, Color) {
 fn exec_time_str(cell: &Cell) -> String {
     if let Some(output) = &cell.output {
         match output {
-            CellOutput::Timing { execution_time_ms, .. } => format!("{}ms", execution_time_ms),
+            CellOutput::Timing {
+                execution_time_ms, ..
+            } => format!("{}ms", execution_time_ms),
             CellOutput::Multi { outputs } => {
                 for o in outputs {
-                    if let CellOutput::Timing { execution_time_ms, .. } = o {
+                    if let CellOutput::Timing {
+                        execution_time_ms, ..
+                    } = o
+                    {
                         return format!("{}ms", execution_time_ms);
                     }
                 }
@@ -82,36 +87,96 @@ fn highlight_verum_line(source: &str) -> Vec<Span<'_>> {
     // Keywords per grammar/verum.ebnf (reserved + primary + control + async + modifiers + ffi + module + additional + proof)
     let keywords = [
         // Reserved (3)
-        "fn", "let", "is",
+        "fn",
+        "let",
+        "is",
         // Primary (3)
-        "type", "where", "using",
+        "type",
+        "where",
+        "using",
         // Control flow (9)
-        "if", "else", "match", "return", "for", "while", "loop", "break", "continue",
+        "if",
+        "else",
+        "match",
+        "return",
+        "for",
+        "while",
+        "loop",
+        "break",
+        "continue",
         // Async/context (10)
-        "async", "await", "spawn", "defer", "errdefer", "try", "yield", "throws", "select", "nursery",
+        "async",
+        "await",
+        "spawn",
+        "defer",
+        "errdefer",
+        "try",
+        "yield",
+        "throws",
+        "select",
+        "nursery",
         // Modifiers (5)
-        "pub", "mut", "const", "unsafe", "pure",
+        "pub",
+        "mut",
+        "const",
+        "unsafe",
+        "pure",
         // FFI (1)
         "ffi",
         // Module (6)
-        "module", "mount", "implement", "context", "protocol", "extends",
+        "module",
+        "mount",
+        "implement",
+        "context",
+        "protocol",
+        "extends",
         // Additional (21)
-        "self", "super", "cog", "static", "meta", "provide", "finally", "recover",
-        "invariant", "decreases", "stream", "tensor", "affine", "linear",
-        "public", "internal", "protected", "ensures", "requires", "result", "some",
+        "self",
+        "super",
+        "cog",
+        "static",
+        "meta",
+        "provide",
+        "finally",
+        "recover",
+        "invariant",
+        "decreases",
+        "stream",
+        "tensor",
+        "affine",
+        "linear",
+        "public",
+        "internal",
+        "protected",
+        "ensures",
+        "requires",
+        "result",
+        "some",
         // Proof (17)
-        "theorem", "lemma", "axiom", "corollary", "proof", "calc",
-        "have", "show", "suffices", "obtain", "by", "qed",
-        "induction", "cases", "contradiction", "forall", "exists",
+        "theorem",
+        "lemma",
+        "axiom",
+        "corollary",
+        "proof",
+        "calc",
+        "have",
+        "show",
+        "suffices",
+        "obtain",
+        "by",
+        "qed",
+        "induction",
+        "cases",
+        "contradiction",
+        "forall",
+        "exists",
     ];
     // Boolean literals (highlighted as keywords for visibility)
     let literals = ["true", "false"];
     // Primitive + stdlib types per grammar line 1032 + semantic types
     let types = [
-        "Int", "Float", "Bool", "Char", "Text",
-        "List", "Map", "Set", "Maybe", "Heap", "Shared",
-        "Deque", "Channel", "Mutex", "Task", "Result",
-        "Tensor", "Future", "Duration",
+        "Int", "Float", "Bool", "Char", "Text", "List", "Map", "Set", "Maybe", "Heap", "Shared",
+        "Deque", "Channel", "Mutex", "Task", "Result", "Tensor", "Future", "Duration",
     ];
 
     let mut spans = Vec::new();
@@ -123,18 +188,35 @@ fn highlight_verum_line(source: &str) -> Vec<Span<'_>> {
             let start = i;
             let mut end = i + 1;
             while let Some(&(ni, nc)) = chars.peek() {
-                if nc.is_alphanumeric() || nc == '_' { end = ni + nc.len_utf8(); chars.next(); } else { break; }
+                if nc.is_alphanumeric() || nc == '_' {
+                    end = ni + nc.len_utf8();
+                    chars.next();
+                } else {
+                    break;
+                }
             }
-            if start > current_start { spans.push(Span::raw(&source[current_start..start])); }
-            spans.push(Span::styled(&source[start..end], Style::default().fg(Color::LightYellow)));
+            if start > current_start {
+                spans.push(Span::raw(&source[current_start..start]));
+            }
+            spans.push(Span::styled(
+                &source[start..end],
+                Style::default().fg(Color::LightYellow),
+            ));
             current_start = end;
         } else if c.is_alphabetic() || c == '_' {
             let start = i;
             let mut end = i + c.len_utf8();
             while let Some(&(ni, nc)) = chars.peek() {
-                if nc.is_alphanumeric() || nc == '_' { end = ni + nc.len_utf8(); chars.next(); } else { break; }
+                if nc.is_alphanumeric() || nc == '_' {
+                    end = ni + nc.len_utf8();
+                    chars.next();
+                } else {
+                    break;
+                }
             }
-            if start > current_start { spans.push(Span::raw(&source[current_start..start])); }
+            if start > current_start {
+                spans.push(Span::raw(&source[current_start..start]));
+            }
             let word = &source[start..end];
             let style = if keywords.contains(&word) {
                 Style::default().fg(Color::Magenta).bold()
@@ -154,15 +236,32 @@ fn highlight_verum_line(source: &str) -> Vec<Span<'_>> {
             let mut end = i + 1;
             let mut escaped = false;
             while let Some(&(ni, nc)) = chars.peek() {
-                end = ni + nc.len_utf8(); chars.next();
-                if escaped { escaped = false; } else if nc == '\\' { escaped = true; } else if nc == '"' { break; }
+                end = ni + nc.len_utf8();
+                chars.next();
+                if escaped {
+                    escaped = false;
+                } else if nc == '\\' {
+                    escaped = true;
+                } else if nc == '"' {
+                    break;
+                }
             }
-            if start > current_start { spans.push(Span::raw(&source[current_start..start])); }
-            spans.push(Span::styled(&source[start..end], Style::default().fg(Color::Yellow)));
+            if start > current_start {
+                spans.push(Span::raw(&source[current_start..start]));
+            }
+            spans.push(Span::styled(
+                &source[start..end],
+                Style::default().fg(Color::Yellow),
+            ));
             current_start = end;
-        } else if c == '/' && source.get(i+1..i+2) == Some("/") {
-            if i > current_start { spans.push(Span::raw(&source[current_start..i])); }
-            spans.push(Span::styled(&source[i..], Style::default().fg(Color::DarkGray).italic()));
+        } else if c == '/' && source.get(i + 1..i + 2) == Some("/") {
+            if i > current_start {
+                spans.push(Span::raw(&source[current_start..i]));
+            }
+            spans.push(Span::styled(
+                &source[i..],
+                Style::default().fg(Color::DarkGray).italic(),
+            ));
             current_start = source.len();
             while chars.next().is_some() {}
         } else if c.is_ascii_digit() {
@@ -170,16 +269,28 @@ fn highlight_verum_line(source: &str) -> Vec<Span<'_>> {
             let mut end = i + 1;
             while let Some(&(ni, nc)) = chars.peek() {
                 if nc.is_ascii_digit() || nc == '.' || nc == '_' || nc == 'x' || nc == 'b' {
-                    end = ni + nc.len_utf8(); chars.next();
-                } else { break; }
+                    end = ni + nc.len_utf8();
+                    chars.next();
+                } else {
+                    break;
+                }
             }
-            if start > current_start { spans.push(Span::raw(&source[current_start..start])); }
-            spans.push(Span::styled(&source[start..end], Style::default().fg(Color::LightBlue)));
+            if start > current_start {
+                spans.push(Span::raw(&source[current_start..start]));
+            }
+            spans.push(Span::styled(
+                &source[start..end],
+                Style::default().fg(Color::LightBlue),
+            ));
             current_start = end;
         }
     }
-    if current_start < source.len() { spans.push(Span::raw(&source[current_start..])); }
-    if spans.is_empty() { spans.push(Span::raw(source)); }
+    if current_start < source.len() {
+        spans.push(Span::raw(&source[current_start..]));
+    }
+    if spans.is_empty() {
+        spans.push(Span::raw(source));
+    }
     spans
 }
 
@@ -190,7 +301,9 @@ fn render_markdown_line(line: &str) -> Line<'_> {
     if let Some(rest) = line.strip_prefix("### ") {
         return Line::from(Span::styled(
             rest,
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         ));
     }
     if let Some(rest) = line.strip_prefix("## ") {
@@ -214,7 +327,12 @@ fn render_markdown_line(line: &str) -> Line<'_> {
     if let Some(rest) = line.strip_prefix("> ") {
         return Line::from(vec![
             Span::styled("▎ ", Style::default().fg(Color::DarkGray)),
-            Span::styled(rest, Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC)),
+            Span::styled(
+                rest,
+                Style::default()
+                    .fg(Color::Gray)
+                    .add_modifier(Modifier::ITALIC),
+            ),
         ]);
     }
 
@@ -228,15 +346,17 @@ fn render_markdown_line(line: &str) -> Line<'_> {
 
     // Numbered list (e.g. "1. ", "12. ")
     if let Some(dot_pos) = line.find(". ")
-        && dot_pos <= 3 && line[..dot_pos].chars().all(|c| c.is_ascii_digit()) {
-            return Line::from(vec![
-                Span::styled(
-                    format!("  {}. ", &line[..dot_pos]),
-                    Style::default().fg(Color::Cyan),
-                ),
-                Span::styled(&line[dot_pos + 2..], Style::default().fg(Color::White)),
-            ]);
-        }
+        && dot_pos <= 3
+        && line[..dot_pos].chars().all(|c| c.is_ascii_digit())
+    {
+        return Line::from(vec![
+            Span::styled(
+                format!("  {}. ", &line[..dot_pos]),
+                Style::default().fg(Color::Cyan),
+            ),
+            Span::styled(&line[dot_pos + 2..], Style::default().fg(Color::White)),
+        ]);
+    }
 
     // Horizontal rule
     if line.trim() == "---" || line.trim() == "***" || line.trim() == "___" {
@@ -384,7 +504,8 @@ impl<'a> Widget for CellWidget<'a> {
             CellKind::Code => "▸",
             CellKind::Markdown => "≡",
         };
-        let exec_str = self.execution_number
+        let exec_str = self
+            .execution_number
             .map(|n| format!("[{}]", n))
             .unwrap_or_else(|| "[ ]".to_string());
         let (status, status_color) = status_indicator(self.cell);
@@ -458,19 +579,16 @@ impl<'a> Widget for CellWidget<'a> {
 
         if self.cell.is_code() {
             for (line_num, line) in source.lines().enumerate() {
-                if y >= max_y { break; }
+                if y >= max_y {
+                    break;
+                }
                 // Line number gutter
                 let num_str = format!(
                     "{:>width$} │ ",
                     line_num + 1,
                     width = (source_line_count.to_string().len())
                 );
-                buf.set_string(
-                    inner.x,
-                    y,
-                    &num_str,
-                    Style::default().fg(Color::DarkGray),
-                );
+                buf.set_string(inner.x, y, &num_str, Style::default().fg(Color::DarkGray));
                 // Syntax-highlighted source
                 let spans = highlight_verum_line(line);
                 let styled_line = Line::from(spans);
@@ -478,18 +596,15 @@ impl<'a> Widget for CellWidget<'a> {
                 y += 1;
             }
             if source.is_empty() && y < max_y {
-                buf.set_string(
-                    inner.x,
-                    y,
-                    "  1 │ ",
-                    Style::default().fg(Color::DarkGray),
-                );
+                buf.set_string(inner.x, y, "  1 │ ", Style::default().fg(Color::DarkGray));
                 y += 1;
             }
         } else {
             // Markdown rendering with inline formatting
             for line in source.lines() {
-                if y >= max_y { break; }
+                if y >= max_y {
+                    break;
+                }
                 let styled_line = render_markdown_line(line);
                 buf.set_line(inner.x + 1, y, &styled_line, inner.width.saturating_sub(1));
                 y += 1;
@@ -501,7 +616,11 @@ impl<'a> Widget for CellWidget<'a> {
             let output_lines = format_output_lines(output);
             if !output_lines.is_empty() && y < max_y {
                 // ── separator with collapse indicator ──
-                let indicator = if self.cell.output_collapsed { "[+]" } else { "[-]" };
+                let indicator = if self.cell.output_collapsed {
+                    "[+]"
+                } else {
+                    "[-]"
+                };
                 let rule_width = inner.width.saturating_sub(6) as usize;
                 let separator = Line::from(vec![
                     Span::styled(
@@ -522,14 +641,18 @@ impl<'a> Widget for CellWidget<'a> {
                         let brief = super::output::format_output_brief(output);
                         let summary = Line::from(Span::styled(
                             format!(" {} ", brief),
-                            Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+                            Style::default()
+                                .fg(Color::DarkGray)
+                                .add_modifier(Modifier::ITALIC),
                         ));
                         buf.set_line(inner.x, y, &summary, inner.width);
                         let _ = y + 1; // height already accounted for in cell_height
                     }
                 } else {
                     for line in output_lines {
-                        if y >= max_y { break; }
+                        if y >= max_y {
+                            break;
+                        }
                         buf.set_line(inner.x + 1, y, &line, inner.width.saturating_sub(1));
                         y += 1;
                     }

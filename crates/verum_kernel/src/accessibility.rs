@@ -203,10 +203,7 @@ pub fn build_filtered_colimit(
 
 /// Verify that AR 1.26's accessibility-preservation property holds:
 /// the produced colimit's κ matches the target category's κ.
-pub fn preserves_accessibility(
-    colim: &FilteredColimit,
-    target: &KappaAccessibleCategory,
-) -> bool {
+pub fn preserves_accessibility(colim: &FilteredColimit, target: &KappaAccessibleCategory) -> bool {
     colim.kappa == target.kappa
 }
 
@@ -253,8 +250,10 @@ mod tests {
         let mut d = sample_diagram();
         d.is_lambda_filtered = false;
         let c = sample_target();
-        assert!(build_filtered_colimit(&d, &c).is_none(),
-            "non-λ-filtered diagram must fail preconditions");
+        assert!(
+            build_filtered_colimit(&d, &c).is_none(),
+            "non-λ-filtered diagram must fail preconditions"
+        );
     }
 
     #[test]
@@ -269,23 +268,20 @@ mod tests {
             true,
         );
         let c = KappaAccessibleCategory::at_kappa("C", Ordinal::Kappa(1));
-        assert!(build_filtered_colimit(&d, &c).is_none(),
-            "λ > κ violates AR 1.26's cofinality bound");
+        assert!(
+            build_filtered_colimit(&d, &c).is_none(),
+            "λ > κ violates AR 1.26's cofinality bound"
+        );
     }
 
     #[test]
     fn build_fails_on_empty_diagram() {
-        let d = LambdaFilteredDiagram::new(
-            "D",
-            "I",
-            "C",
-            Ordinal::Omega,
-            vec![],
-            true,
-        );
+        let d = LambdaFilteredDiagram::new("D", "I", "C", Ordinal::Omega, vec![], true);
         let c = sample_target();
-        assert!(build_filtered_colimit(&d, &c).is_none(),
-            "empty diagram has no colimit");
+        assert!(
+            build_filtered_colimit(&d, &c).is_none(),
+            "empty diagram has no colimit"
+        );
     }
 
     #[test]
@@ -293,17 +289,28 @@ mod tests {
         let d = sample_diagram();
         let c = sample_target();
         let colim = build_filtered_colimit(&d, &c).unwrap();
-        assert!(preserves_accessibility(&colim, &c),
-            "AR 1.26: colim inherits κ-accessibility");
+        assert!(
+            preserves_accessibility(&colim, &c),
+            "AR 1.26: colim inherits κ-accessibility"
+        );
     }
 
     #[test]
     fn cofinality_bound_decidable() {
         assert!(cofinality_bound_holds(&Ordinal::Omega, &Ordinal::Kappa(1)));
-        assert!(cofinality_bound_holds(&Ordinal::Kappa(1), &Ordinal::Kappa(2)));
-        assert!(!cofinality_bound_holds(&Ordinal::Kappa(2), &Ordinal::Kappa(1)));
+        assert!(cofinality_bound_holds(
+            &Ordinal::Kappa(1),
+            &Ordinal::Kappa(2)
+        ));
+        assert!(!cofinality_bound_holds(
+            &Ordinal::Kappa(2),
+            &Ordinal::Kappa(1)
+        ));
         // Non-regular λ.
-        assert!(!cofinality_bound_holds(&Ordinal::OmegaTimes(2), &Ordinal::Kappa(1)));
+        assert!(!cofinality_bound_holds(
+            &Ordinal::OmegaTimes(2),
+            &Ordinal::Kappa(1)
+        ));
     }
 
     #[test]
@@ -312,8 +319,7 @@ mod tests {
         let result = std::panic::catch_unwind(|| {
             KappaAccessibleCategory::at_kappa("Bad", Ordinal::OmegaSquared)
         });
-        assert!(result.is_err(),
-            "at_kappa must panic on non-regular κ");
+        assert!(result.is_err(), "at_kappa must panic on non-regular κ");
     }
 
     #[test]

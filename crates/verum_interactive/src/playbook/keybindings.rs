@@ -91,7 +91,9 @@ impl Keybindings {
     pub fn normal_action(&self, key: KeyEvent) -> KeyAction {
         // Global keys
         // Global fullscreen: F11 (Linux/Win) or Ctrl+F (macOS)
-        if key.code == KeyCode::F(11) { return KeyAction::ToggleFullscreen; }
+        if key.code == KeyCode::F(11) {
+            return KeyAction::ToggleFullscreen;
+        }
         if key.code == KeyCode::Char('f') && key.modifiers.contains(KeyModifiers::CONTROL) {
             return KeyAction::ToggleFullscreen;
         }

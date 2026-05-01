@@ -13,8 +13,7 @@
 
 use verum_smt::Context;
 use verum_smt::analysis::{
-    AnalysisVerifier, CompleteOrderedField, Limit, RealFunction, RealSequence,
-    standard_functions,
+    AnalysisVerifier, CompleteOrderedField, Limit, RealFunction, RealSequence, standard_functions,
 };
 
 fn main() {

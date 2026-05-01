@@ -115,14 +115,11 @@ impl SolverCapability {
                 PreferredSolver::RequiresZ3
             }
             // CVC5 exclusive
-            Self::SygusSynthesis
-            | Self::Abduction
-            | Self::Sequences
-            | Self::CadNonlinearReal => PreferredSolver::RequiresCvc5,
-            // CVC5 strongly preferred
-            Self::FiniteModelFinding | Self::StringsRegex => {
-                PreferredSolver::PrefersCvc5
+            Self::SygusSynthesis | Self::Abduction | Self::Sequences | Self::CadNonlinearReal => {
+                PreferredSolver::RequiresCvc5
             }
+            // CVC5 strongly preferred
+            Self::FiniteModelFinding | Self::StringsRegex => PreferredSolver::PrefersCvc5,
             // Z3 strongly preferred
             Self::BitVectors | Self::Arrays => PreferredSolver::PrefersZ3,
             // Either works well
@@ -186,10 +183,7 @@ impl PreferredSolver {
 
     /// Whether both solvers can handle this capability (even if one is preferred).
     pub fn is_flexible(self) -> bool {
-        matches!(
-            self,
-            Self::PrefersZ3 | Self::PrefersCvc5 | Self::Either
-        )
+        matches!(self, Self::PrefersZ3 | Self::PrefersCvc5 | Self::Either)
     }
 }
 
@@ -526,10 +520,23 @@ mod tests {
     fn all_capabilities_have_names() {
         use SolverCapability::*;
         let caps = [
-            Interpolation, Optimization, HornClauses, SygusSynthesis, Abduction,
-            FiniteModelFinding, StringsRegex, Sequences, CadNonlinearReal,
-            QuantifierElimination, ProofProduction, UnsatCores, ModelExtraction,
-            IncrementalSolving, BitVectors, Arrays, InductiveDatatypes,
+            Interpolation,
+            Optimization,
+            HornClauses,
+            SygusSynthesis,
+            Abduction,
+            FiniteModelFinding,
+            StringsRegex,
+            Sequences,
+            CadNonlinearReal,
+            QuantifierElimination,
+            ProofProduction,
+            UnsatCores,
+            ModelExtraction,
+            IncrementalSolving,
+            BitVectors,
+            Arrays,
+            InductiveDatatypes,
         ];
         for cap in caps {
             assert!(!cap.name().is_empty(), "capability {:?} has no name", cap);

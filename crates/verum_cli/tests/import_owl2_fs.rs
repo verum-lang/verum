@@ -61,7 +61,11 @@ fn import_owl2_fs_emits_class_decl() {
         String::from_utf8_lossy(&out.stderr)
     );
     let body = fs::read_to_string(&out_vr).expect("read emitted .vr");
-    assert!(body.contains("@owl2_class"), "missing @owl2_class in:\n{}", body);
+    assert!(
+        body.contains("@owl2_class"),
+        "missing @owl2_class in:\n{}",
+        body
+    );
     assert!(
         body.contains("public type Person is"),
         "missing Person decl in:\n{}",
@@ -96,15 +100,27 @@ fn import_owl2_fs_emits_subclass_and_property() {
         ],
         None,
     );
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let body = fs::read_to_string(&out_vr).expect("read emitted .vr");
-    assert!(body.contains("@owl2_subclass_of(Animal)"), "missing subclass in:\n{}", body);
+    assert!(
+        body.contains("@owl2_subclass_of(Animal)"),
+        "missing subclass in:\n{}",
+        body
+    );
     assert!(
         body.contains("@owl2_property(domain = Person, range = Person)"),
         "missing property attrs in:\n{}",
         body
     );
-    assert!(body.contains("@owl2_characteristic(transitive)"), "missing transitive in:\n{}", body);
+    assert!(
+        body.contains("@owl2_characteristic(transitive)"),
+        "missing transitive in:\n{}",
+        body
+    );
 }
 
 #[test]
@@ -130,9 +146,17 @@ fn import_owl2_fs_haskey_round_trips() {
         ],
         None,
     );
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let body = fs::read_to_string(&out_vr).expect("read emitted .vr");
-    assert!(body.contains("@owl2_has_key(hasOrderId)"), "missing has_key in:\n{}", body);
+    assert!(
+        body.contains("@owl2_has_key(hasOrderId)"),
+        "missing has_key in:\n{}",
+        body
+    );
 }
 
 #[test]
@@ -148,21 +172,24 @@ fn import_owl2_fs_default_output_path_is_input_with_vr_ext() {
         &["import", "--from", "owl2-fs", ofn.to_str().unwrap()],
         None,
     );
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let default_out = ofn.with_extension("vr");
-    assert!(default_out.exists(), "default output {} not created", default_out.display());
+    assert!(
+        default_out.exists(),
+        "default output {} not created",
+        default_out.display()
+    );
 }
 
 #[test]
 fn import_owl2_fs_rejects_unknown_format() {
     let (_t, ofn) = write_ofn("Ontology(<x>)");
     let out = run_verum(
-        &[
-            "import",
-            "--from",
-            "rdf-xml",
-            ofn.to_str().unwrap(),
-        ],
+        &["import", "--from", "rdf-xml", ofn.to_str().unwrap()],
         None,
     );
     assert!(!out.status.success(), "unknown format must fail");

@@ -18,8 +18,8 @@
 
 // #![cfg(feature = "static_verification_tests_disabled")]
 
-use verum_smt::static_verification::*;
 use verum_common::Text;
+use verum_smt::static_verification::*;
 
 #[test]
 fn test_bounds_check_verification_proved() {
@@ -143,7 +143,9 @@ fn test_batch_honours_global_timeout() {
     // the zero-budget would not be reachable; both must bail.
     let c1 = SafetyConstraint {
         id: Text::from("a"),
-        formula: ConstraintFormula::NonNull { ptr_name: Text::from("p") },
+        formula: ConstraintFormula::NonNull {
+            ptr_name: Text::from("p"),
+        },
         source_location: None,
         category: ConstraintCategory::NullCheck,
         variables: vec![].into(),
@@ -151,7 +153,9 @@ fn test_batch_honours_global_timeout() {
     };
     let c2 = SafetyConstraint {
         id: Text::from("b"),
-        formula: ConstraintFormula::NonNull { ptr_name: Text::from("q") },
+        formula: ConstraintFormula::NonNull {
+            ptr_name: Text::from("q"),
+        },
         source_location: None,
         category: ConstraintCategory::NullCheck,
         variables: vec![].into(),
@@ -165,8 +169,14 @@ fn test_batch_honours_global_timeout() {
     let all_timeout = results
         .iter()
         .all(|(_, r)| matches!(r, VerificationResult::Timeout { .. }));
-    assert!(all_timeout, "zero-budget batch must short-circuit every constraint to Timeout");
+    assert!(
+        all_timeout,
+        "zero-budget batch must short-circuit every constraint to Timeout"
+    );
     // The whole batch should finish near-instantly because no real
     // verification work happens.
-    assert!(elapsed < Duration::from_secs(1), "batch should bail near-instantly under zero budget");
+    assert!(
+        elapsed < Duration::from_secs(1),
+        "batch should bail near-instantly under zero budget"
+    );
 }

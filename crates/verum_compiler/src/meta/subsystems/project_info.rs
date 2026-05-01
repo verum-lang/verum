@@ -246,11 +246,7 @@ mod tests {
                 rev.as_str().len()
             );
             for c in rev.as_str().chars() {
-                assert!(
-                    c.is_ascii_hexdigit(),
-                    "git revision must be hex: {:?}",
-                    rev
-                );
+                assert!(c.is_ascii_hexdigit(), "git revision must be hex: {:?}", rev);
             }
         }
     }

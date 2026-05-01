@@ -481,14 +481,30 @@ impl Cvc5Capabilities {
         }
         let version = self.version.as_deref().unwrap_or("unknown");
         let mut features = Vec::new();
-        if self.sygus { features.push("SyGuS"); }
-        if self.abduction { features.push("abduction"); }
-        if self.quantifier_elimination { features.push("QE"); }
-        if self.finite_model_finding { features.push("FMF"); }
-        if self.strings { features.push("strings"); }
-        if self.sequences { features.push("sequences"); }
-        if self.nonlinear_real { features.push("NRA"); }
-        if self.proofs_cpc { features.push("CPC proofs"); }
+        if self.sygus {
+            features.push("SyGuS");
+        }
+        if self.abduction {
+            features.push("abduction");
+        }
+        if self.quantifier_elimination {
+            features.push("QE");
+        }
+        if self.finite_model_finding {
+            features.push("FMF");
+        }
+        if self.strings {
+            features.push("strings");
+        }
+        if self.sequences {
+            features.push("sequences");
+        }
+        if self.nonlinear_real {
+            features.push("NRA");
+        }
+        if self.proofs_cpc {
+            features.push("CPC proofs");
+        }
         format!("CVC5 {} ({})", version, features.join(", "))
     }
 }
@@ -515,7 +531,7 @@ pub fn detect_capabilities() -> Cvc5Capabilities {
         strings: true,
         sequences: true,
         nonlinear_real: true,
-        proofs_cpc: true,  // CVC5 1.3.0+ default
+        proofs_cpc: true, // CVC5 1.3.0+ default
     }
 }
 
@@ -544,7 +560,10 @@ mod tests {
     #[test]
     fn require_cvc5_blocks_in_stub_mode() {
         if !is_available() {
-            assert!(matches!(require_cvc5(), Err(Cvc5AdvancedError::NotAvailable)));
+            assert!(matches!(
+                require_cvc5(),
+                Err(Cvc5AdvancedError::NotAvailable)
+            ));
         } else {
             assert!(require_cvc5().is_ok());
         }
@@ -602,7 +621,7 @@ mod tests {
         if is_available() {
             let query = QeQuery {
                 logic: "LIA".into(),
-                formula: "(> x 0)".into(),  // no quantifier
+                formula: "(> x 0)".into(), // no quantifier
                 timeout_ms: 1000,
             };
             assert!(matches!(

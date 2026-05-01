@@ -141,7 +141,10 @@ impl Example {
         let mut output = String::new();
 
         output.push_str(&format!("# {}\n\n", self.title));
-        output.push_str(&format!("Category: {} | Difficulty: {}/5\n\n", self.category, self.difficulty));
+        output.push_str(&format!(
+            "Category: {} | Difficulty: {}/5\n\n",
+            self.category, self.difficulty
+        ));
         output.push_str(&self.description);
         output.push_str("\n\n");
         output.push_str("```verum\n");
@@ -187,7 +190,6 @@ print(message)"#,
         .with_expected("Hello, Verum!")
         .with_difficulty(1)
         .with_tags(["beginner", "print"]),
-
         Example::new(
             "Variables and Types",
             "Working with bindings and type inference",
@@ -201,7 +203,6 @@ print(f"x={x}, y={y}, counter={counter}")"#,
         )
         .with_difficulty(1)
         .with_tags(["variables", "types", "inference"]),
-
         Example::new(
             "Functions",
             "Defining and calling functions",
@@ -219,7 +220,6 @@ print(f"2 + 3 = {add(2, 3)}")"#,
         )
         .with_difficulty(1)
         .with_tags(["functions", "parameters", "return"]),
-
         // Collections
         Example::new(
             "List Operations",
@@ -242,7 +242,6 @@ print(f"Sum: {sum}")"#,
         .with_expected("Doubled: [2, 4, 6, 8, 10]\nEvens: [2, 4]\nSum: 15")
         .with_difficulty(2)
         .with_tags(["list", "map", "filter", "reduce"]),
-
         Example::new(
             "Map and Set",
             "Using associative containers",
@@ -261,7 +260,6 @@ print(f"Unique values: {unique}")  // {1, 2, 3}"#,
         )
         .with_difficulty(2)
         .with_tags(["map", "set", "insert", "get"]),
-
         // Pattern Matching
         Example::new(
             "Pattern Matching",
@@ -292,7 +290,6 @@ for shape in shapes {
         )
         .with_difficulty(2)
         .with_tags(["pattern", "match", "enum", "destructure"]),
-
         // Generators
         Example::new(
             "Generators",
@@ -317,7 +314,6 @@ print(f"Fibonacci: {fibs}")"#,
         .with_expected("Fibonacci: [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]")
         .with_difficulty(3)
         .with_tags(["generator", "yield", "lazy", "infinite"]),
-
         // Async
         Example::new(
             "Async/Await",
@@ -339,7 +335,6 @@ async fn main() {
         )
         .with_difficulty(3)
         .with_tags(["async", "await", "future"]),
-
         // Context System
         Example::new(
             "Context System",
@@ -366,7 +361,6 @@ provide ConsoleLogger as Logger {
         )
         .with_difficulty(3)
         .with_tags(["context", "provide", "using", "di"]),
-
         // Math Layer 4: Tensors
         Example::new(
             "Tensor Basics",
@@ -386,7 +380,6 @@ print(f"Result shape: {c.shape()}")"#,
         )
         .with_difficulty(3)
         .with_tags(["tensor", "matrix", "shape"]),
-
         // AutoDiff
         Example::new(
             "Automatic Differentiation",
@@ -407,7 +400,6 @@ print(f"gradient = {gradient}")  // [2.0, 4.0, 6.0]"#,
         )
         .with_difficulty(4)
         .with_tags(["autodiff", "gradient", "differentiation"]),
-
         // Neural Network
         Example::new(
             "Simple Neural Network",
@@ -440,7 +432,6 @@ print(f"Output shape: {output.shape()}")"#,
         )
         .with_difficulty(4)
         .with_tags(["neural", "mlp", "layer", "forward"]),
-
         // Error Handling
         Example::new(
             "Error Handling",

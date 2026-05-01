@@ -18,8 +18,8 @@
 //! These tests verify that we can enumerate all values of finite sorts
 //! from Z3 models using the C API.
 
-use verum_smt::advanced_model::AdvancedModelExtractor;
 use verum_common::{Set, Text};
+use verum_smt::advanced_model::AdvancedModelExtractor;
 use z3::{
     DatatypeBuilder, FuncDecl, SatResult, Solver, Sort, Symbol,
     ast::{Ast, Datatype, Int},

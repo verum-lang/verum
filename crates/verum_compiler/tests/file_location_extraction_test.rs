@@ -19,9 +19,9 @@
 //! file location information (path, line, column) from function spans.
 
 use std::path::PathBuf;
+use verum_common::span::{FileId, SourceFile, Span};
 use verum_compiler::options::CompilerOptions;
 use verum_compiler::session::Session;
-use verum_common::span::{FileId, SourceFile, Span};
 
 #[test]
 fn test_file_location_extraction_from_span() {

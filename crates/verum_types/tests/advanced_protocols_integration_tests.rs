@@ -1134,10 +1134,7 @@ fn test_kind_arity_calculation() {
     // Test kind arity calculation for nested arrows
     let kind = Kind::Arrow(
         Box::new(Kind::Type),
-        Box::new(Kind::Arrow(
-            Box::new(Kind::Type),
-            Box::new(Kind::Type),
-        )),
+        Box::new(Kind::Arrow(Box::new(Kind::Type), Box::new(Kind::Type))),
     );
 
     assert_eq!(kind.arity(), 2);

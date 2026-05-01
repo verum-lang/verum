@@ -23,11 +23,23 @@ pub struct Stmt {
 
 impl Stmt {
     pub fn new(kind: StmtKind, span: Span) -> Self {
-        Self { kind, span, attributes: Vec::new() }
+        Self {
+            kind,
+            span,
+            attributes: Vec::new(),
+        }
     }
 
-    pub fn with_attributes(kind: StmtKind, span: Span, attributes: Vec<crate::decl::Attribute>) -> Self {
-        Self { kind, span, attributes }
+    pub fn with_attributes(
+        kind: StmtKind,
+        span: Span,
+        attributes: Vec<crate::decl::Attribute>,
+    ) -> Self {
+        Self {
+            kind,
+            span,
+            attributes,
+        }
     }
 
     pub fn let_stmt(pattern: Pattern, ty: Maybe<Type>, value: Maybe<Expr>, span: Span) -> Self {

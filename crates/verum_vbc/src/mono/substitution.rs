@@ -52,12 +52,11 @@ impl TypeSubstitution {
     /// Recursively substitutes type parameters with their bindings.
     pub fn apply(&self, type_ref: &TypeRef) -> TypeRef {
         match type_ref {
-            TypeRef::Generic(param_id) => {
-                self.bindings
-                    .get(param_id)
-                    .cloned()
-                    .unwrap_or_else(|| type_ref.clone())
-            }
+            TypeRef::Generic(param_id) => self
+                .bindings
+                .get(param_id)
+                .cloned()
+                .unwrap_or_else(|| type_ref.clone()),
             TypeRef::Concrete(_) => type_ref.clone(),
             TypeRef::Instantiated { base, args } => TypeRef::Instantiated {
                 base: *base,

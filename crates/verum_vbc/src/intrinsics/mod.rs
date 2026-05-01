@@ -41,20 +41,20 @@
 //! | atomic_load | 5 cycles | 3 cycles |
 //! | memcpy(64) | 20 cycles | 8 cycles |
 
-pub mod registry;
 pub mod codegen;
 pub mod lowering;
+pub mod registry;
 pub mod signatures;
 
-pub use registry::{
-    Intrinsic, IntrinsicCategory, IntrinsicHint, IntrinsicRegistry, IntrinsicResult,
-    INTRINSIC_REGISTRY,
-};
 pub use codegen::IntrinsicCodegen;
 pub use lowering::IntrinsicLowering;
+pub use registry::{
+    INTRINSIC_REGISTRY, Intrinsic, IntrinsicCategory, IntrinsicHint, IntrinsicRegistry,
+    IntrinsicResult,
+};
 pub use signatures::{
-    get_signature, IntrinsicSignature, IntrinsicType, ProtocolBound, SignatureError, TypeParam,
-    INTRINSIC_SIGNATURES,
+    INTRINSIC_SIGNATURES, IntrinsicSignature, IntrinsicType, ProtocolBound, SignatureError,
+    TypeParam, get_signature,
 };
 
 use crate::instruction::Opcode;
@@ -185,9 +185,10 @@ pub fn lookup_intrinsic(name: &str) -> Option<IntrinsicInfo> {
                 // Strip common prefixes used in import aliases
                 // e.g., intrinsic_memcpy → memcpy, intrinsic_slice_from_raw_parts_mut → slice_from_raw_parts_mut
                 if let Some(stripped) = name.strip_prefix("intrinsic_")
-                    && let Some(found) = INTRINSIC_REGISTRY.lookup(stripped) {
-                        return Some(found);
-                    }
+                    && let Some(found) = INTRINSIC_REGISTRY.lookup(stripped)
+                {
+                    return Some(found);
+                }
                 // Generic fallback: try UPPER_CASE version of the name
                 // This handles tensor_new → TENSOR_NEW, gpu_malloc → GPU_MALLOC, etc.
                 let upper = name.to_uppercase();
@@ -196,13 +197,11 @@ pub fn lookup_intrinsic(name: &str) -> Option<IntrinsicInfo> {
         };
         INTRINSIC_REGISTRY.lookup(alias)
     });
-    resolved.map(|intrinsic| {
-        IntrinsicInfo {
-            intrinsic,
-            primary_opcode: intrinsic.primary_opcode(),
-            is_pure: intrinsic.hints.contains(&IntrinsicHint::Pure),
-            is_const_eval: intrinsic.hints.contains(&IntrinsicHint::ConstEval),
-        }
+    resolved.map(|intrinsic| IntrinsicInfo {
+        intrinsic,
+        primary_opcode: intrinsic.primary_opcode(),
+        is_pure: intrinsic.hints.contains(&IntrinsicHint::Pure),
+        is_const_eval: intrinsic.hints.contains(&IntrinsicHint::ConstEval),
     })
 }
 

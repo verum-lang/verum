@@ -190,13 +190,18 @@ impl Kind {
 
     /// Check if this kind is a protocol kind (Constraint, Injectable, or both).
     pub fn is_protocol_kind(&self) -> bool {
-        matches!(self, Kind::Constraint | Kind::Injectable | Kind::ConstraintAndInjectable)
+        matches!(
+            self,
+            Kind::Constraint | Kind::Injectable | Kind::ConstraintAndInjectable
+        )
     }
 
     /// Apply kind substitution
     pub fn apply(&self, subst: &KindSubstitution) -> Kind {
         match self {
-            Kind::Type | Kind::Constraint | Kind::Injectable | Kind::ConstraintAndInjectable => self.clone(),
+            Kind::Type | Kind::Constraint | Kind::Injectable | Kind::ConstraintAndInjectable => {
+                self.clone()
+            }
             Kind::Arrow(param, result) => {
                 Kind::Arrow(Box::new(param.apply(subst)), Box::new(result.apply(subst)))
             }
@@ -207,7 +212,9 @@ impl Kind {
     /// Collect free kind variables
     pub fn free_vars(&self) -> Set<u32> {
         match self {
-            Kind::Type | Kind::Constraint | Kind::Injectable | Kind::ConstraintAndInjectable => Set::new(),
+            Kind::Type | Kind::Constraint | Kind::Injectable | Kind::ConstraintAndInjectable => {
+                Set::new()
+            }
             Kind::Arrow(param, result) => {
                 let mut vars = param.free_vars();
                 for var in result.free_vars() {
@@ -273,12 +280,10 @@ impl fmt::Display for Kind {
             Kind::Injectable => write!(f, "Injectable"),
             Kind::ConstraintAndInjectable => write!(f, "Constraint & Injectable"),
             Kind::KindVar(v) => write!(f, "?k{}", v),
-            Kind::Arrow(param, result) => {
-                match **param {
-                    Kind::Arrow(_, _) => write!(f, "({}) -> {}", param, result),
-                    _ => write!(f, "{} -> {}", param, result),
-                }
-            }
+            Kind::Arrow(param, result) => match **param {
+                Kind::Arrow(_, _) => write!(f, "({}) -> {}", param, result),
+                _ => write!(f, "{} -> {}", param, result),
+            },
         }
     }
 }
@@ -589,7 +594,14 @@ impl KindInferer {
         // A fully stdlib-agnostic system would derive this from type definitions.
 
         // Unary constructors (* -> *)
-        for name in &[WKT::List.as_str(), WKT::Maybe.as_str(), WKT::Set.as_str(), "GenRef", WKT::Shared.as_str(), WKT::Heap.as_str()] {
+        for name in &[
+            WKT::List.as_str(),
+            WKT::Maybe.as_str(),
+            WKT::Set.as_str(),
+            "GenRef",
+            WKT::Shared.as_str(),
+            WKT::Heap.as_str(),
+        ] {
             self.register_type_constructor(*name, Kind::unary_constructor());
         }
 

@@ -37,8 +37,8 @@ use std::path::PathBuf;
 use verum_ast::decl::ItemKind;
 use verum_common::Text;
 use verum_verification::doc_render::{
-    build_citation_allowlist, collect_proof_citations, DefaultDocRenderer, DocCorpus,
-    DocItem, DocItemKind, DocRenderer, RenderFormat,
+    DefaultDocRenderer, DocCorpus, DocItem, DocItemKind, DocRenderer, RenderFormat,
+    build_citation_allowlist, collect_proof_citations,
 };
 
 use super::audit::{discover_vr_files, parse_file_for_audit};
@@ -269,7 +269,6 @@ fn render_proof_steps(body: &verum_ast::decl::ProofBody) -> Vec<Text> {
         .collect()
 }
 
-
 // =============================================================================
 // validate format helpers
 // =============================================================================
@@ -297,11 +296,7 @@ fn validate_text_format(s: &str) -> Result<()> {
 // run_render
 // =============================================================================
 
-pub fn run_render(
-    format: &str,
-    out: Option<&PathBuf>,
-    only_public: bool,
-) -> Result<()> {
+pub fn run_render(format: &str, out: Option<&PathBuf>, only_public: bool) -> Result<()> {
     let fmt = parse_render_format(format)?;
     let corpus = collect_corpus(only_public)?;
     let renderer = DefaultDocRenderer::new();
@@ -311,11 +306,7 @@ pub fn run_render(
     match out {
         Some(path) => {
             std::fs::write(path, rendered.as_str()).map_err(|e| {
-                CliError::VerificationFailed(format!(
-                    "write {}: {}",
-                    path.display(),
-                    e
-                ))
+                CliError::VerificationFailed(format!("write {}: {}", path.display(), e))
             })?;
         }
         None => {
@@ -340,10 +331,7 @@ pub fn run_graph(format: &str, only_public: bool) -> Result<()> {
             let g = corpus.citation_graph();
             let mut out = String::from("{\n");
             out.push_str("  \"schema_version\": 1,\n");
-            out.push_str(&format!(
-                "  \"item_count\": {},\n",
-                corpus.items.len()
-            ));
+            out.push_str(&format!("  \"item_count\": {},\n", corpus.items.len()));
             out.push_str("  \"edges\": [\n");
             let mut edges: Vec<(String, String)> = Vec::new();
             for (k, v) in &g {
@@ -386,10 +374,7 @@ pub fn run_check_refs(format: &str, only_public: bool) -> Result<()> {
                     corpus.items.len()
                 );
             } else {
-                println!(
-                    "✗ Found {} broken cross-reference(s):",
-                    broken.len()
-                );
+                println!("✗ Found {} broken cross-reference(s):", broken.len());
                 for b in &broken {
                     println!(
                         "  {} → {}",
@@ -402,10 +387,7 @@ pub fn run_check_refs(format: &str, only_public: bool) -> Result<()> {
         "json" => {
             let mut out = String::from("{\n");
             out.push_str("  \"schema_version\": 1,\n");
-            out.push_str(&format!(
-                "  \"item_count\": {},\n",
-                corpus.items.len()
-            ));
+            out.push_str(&format!("  \"item_count\": {},\n", corpus.items.len()));
             out.push_str(&format!("  \"broken_count\": {},\n", broken.len()));
             out.push_str("  \"broken\": [\n");
             for (i, b) in broken.iter().enumerate() {
@@ -512,9 +494,6 @@ mod tests {
 
     #[test]
     fn parse_render_format_recognises_html_explicitly() {
-        assert_eq!(
-            parse_render_format("html").unwrap(),
-            RenderFormat::Html
-        );
+        assert_eq!(parse_render_format("html").unwrap(), RenderFormat::Html);
     }
 }

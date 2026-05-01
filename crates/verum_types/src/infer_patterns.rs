@@ -33,8 +33,8 @@ impl TypeChecker {
         op: &verum_ast::BinOp,
         span: verum_ast::span::Span,
     ) -> Result<()> {
-        use verum_ast::pattern::PatternKind;
         use verum_ast::BinOp;
+        use verum_ast::pattern::PatternKind;
 
         match &pattern.kind {
             PatternKind::Tuple(patterns) => {
@@ -240,8 +240,12 @@ impl TypeChecker {
         match &pattern.kind {
             PatternKind::Wildcard | PatternKind::Rest => Ok(()),
             PatternKind::Literal(_) => Ok(()),
-            PatternKind::Ident { name, subpattern, .. } => {
-                self.ctx.env.insert(name.name.as_str(), TypeScheme::mono(Type::Unknown));
+            PatternKind::Ident {
+                name, subpattern, ..
+            } => {
+                self.ctx
+                    .env
+                    .insert(name.name.as_str(), TypeScheme::mono(Type::Unknown));
                 if let verum_common::Maybe::Some(sub) = subpattern {
                     self.bind_active_pattern_variables(sub)?;
                 }
@@ -261,7 +265,10 @@ impl TypeChecker {
                                     self.bind_active_pattern_variables(pat)?;
                                 } else {
                                     // Shorthand field pattern — bind field name as variable
-                                    self.ctx.env.insert(f.name.name.as_str(), TypeScheme::mono(Type::Unknown));
+                                    self.ctx.env.insert(
+                                        f.name.name.as_str(),
+                                        TypeScheme::mono(Type::Unknown),
+                                    );
                                 }
                             }
                         }
@@ -297,16 +304,24 @@ impl TypeChecker {
         }
     }
 
-    pub(crate) fn bind_pattern_scheme(&mut self, pattern: &Pattern, scheme: TypeScheme) -> Result<()> {
+    pub(crate) fn bind_pattern_scheme(
+        &mut self,
+        pattern: &Pattern,
+        scheme: TypeScheme,
+    ) -> Result<()> {
         let _global_guard = GlobalDepthGuard::enter()?;
         use verum_ast::pattern::PatternKind;
 
         #[cfg(debug_assertions)]
         if let PatternKind::Variant { path, .. } = &pattern.kind {
-            let tag_name = path.segments.last().map(|s| match s {
-                verum_ast::ty::PathSegment::Name(id) => id.name.as_str(),
-                _ => "?",
-            }).unwrap_or("?");
+            let tag_name = path
+                .segments
+                .last()
+                .map(|s| match s {
+                    verum_ast::ty::PathSegment::Name(id) => id.name.as_str(),
+                    _ => "?",
+                })
+                .unwrap_or("?");
             // #[cfg(debug_assertions)]
             // eprintln!("[DEBUG bind_pattern] Variant pattern '{}' with scheme.ty: {}", tag_name, scheme.ty);
         }
@@ -315,7 +330,10 @@ impl TypeChecker {
             PatternKind::Wildcard => Ok(()),
 
             PatternKind::Ident {
-                name, subpattern, by_ref, mutable,
+                name,
+                subpattern,
+                by_ref,
+                mutable,
             } => {
                 // If the pattern uses 'ref' or 'ref mut', wrap the type in a reference
                 // e.g., `Some(ref x)` binds x to &T, `Some(ref mut x)` binds x to &mut T
@@ -330,7 +348,9 @@ impl TypeChecker {
                 } else {
                     scheme.clone()
                 };
-                self.ctx.env.insert(name.name.as_str(), binding_scheme.clone());
+                self.ctx
+                    .env
+                    .insert(name.name.as_str(), binding_scheme.clone());
                 // Register affine bindings for move semantics enforcement.
                 // CRITICAL: ref bindings (`ref x`, `ref mut x`) are borrows, NOT ownership
                 // transfers. They can be used multiple times without being consumed.
@@ -417,16 +437,22 @@ impl TypeChecker {
                         Type::Tuple(_) => resolved,
                         // Resolve Named/Generic type aliases that may resolve to tuples
                         Type::Named { path, .. } => {
-                            let name: Option<&str> = path.as_ident().map(|id| id.as_str())
-                                .or_else(|| path.segments.last().and_then(|s| match s {
-                                    verum_ast::ty::PathSegment::Name(id) => Some(id.name.as_str()),
-                                    _ => None,
-                                }));
+                            let name: Option<&str> =
+                                path.as_ident().map(|id| id.as_str()).or_else(|| {
+                                    path.segments.last().and_then(|s| match s {
+                                        verum_ast::ty::PathSegment::Name(id) => {
+                                            Some(id.name.as_str())
+                                        }
+                                        _ => None,
+                                    })
+                                });
                             if let Some(n) = name {
                                 // First check __tuple_fields_<Name> for named tuple types
                                 // e.g., `type Rgb is (Byte, Byte, Byte)` stores fields at __tuple_fields_Rgb
                                 let tuple_key = format!("__tuple_fields_{}", n);
-                                if let Some(Type::Tuple(tup_fields)) = self.ctx.lookup_type(&tuple_key) {
+                                if let Some(Type::Tuple(tup_fields)) =
+                                    self.ctx.lookup_type(&tuple_key)
+                                {
                                     Type::Tuple(tup_fields.clone())
                                 } else if let Some(resolved_ty) = self.ctx.lookup_type(n) {
                                     match resolved_ty {
@@ -441,7 +467,9 @@ impl TypeChecker {
                                                 let alias_resolved = self.unifier.apply(&resolved);
                                                 if matches!(&alias_resolved, Type::Tuple(_)) {
                                                     alias_resolved
-                                                } else if let Some(expanded) = self.unifier.try_expand_alias(&resolved) {
+                                                } else if let Some(expanded) =
+                                                    self.unifier.try_expand_alias(&resolved)
+                                                {
                                                     if matches!(&expanded, Type::Tuple(_)) {
                                                         expanded
                                                     } else {
@@ -463,7 +491,9 @@ impl TypeChecker {
                                         let alias_resolved = self.unifier.apply(&resolved);
                                         if matches!(&alias_resolved, Type::Tuple(_)) {
                                             alias_resolved
-                                        } else if let Some(expanded) = self.unifier.try_expand_alias(&resolved) {
+                                        } else if let Some(expanded) =
+                                            self.unifier.try_expand_alias(&resolved)
+                                        {
                                             if matches!(&expanded, Type::Tuple(_)) {
                                                 expanded
                                             } else {
@@ -503,7 +533,8 @@ impl TypeChecker {
                         // For unresolved type variables or Unknown types, create fresh tuple
                         // type variables matching the pattern arity so type inference can proceed
                         Type::Var(_) | Type::Unknown => {
-                            let fresh_types: verum_common::List<Type> = patterns.iter()
+                            let fresh_types: verum_common::List<Type> = patterns
+                                .iter()
                                 .filter(|p| !matches!(p.kind, PatternKind::Rest))
                                 .map(|_| Type::Var(crate::ty::TypeVar::fresh()))
                                 .collect();
@@ -532,7 +563,10 @@ impl TypeChecker {
                         // With rest pattern, we bind the non-rest patterns positionally.
                         // Patterns before `..` bind to the front of the tuple,
                         // patterns after `..` bind to the end.
-                        let rest_idx = patterns.iter().position(|p| matches!(p.kind, PatternKind::Rest)).unwrap_or(0);
+                        let rest_idx = patterns
+                            .iter()
+                            .position(|p| matches!(p.kind, PatternKind::Rest))
+                            .unwrap_or(0);
                         let pat_slice: &[verum_ast::Pattern] = patterns.as_slice();
                         let before = &pat_slice[..rest_idx];
                         let after = &pat_slice[rest_idx + 1..];
@@ -556,7 +590,10 @@ impl TypeChecker {
                         }
 
                         // Bind back patterns from the end of the tuple
-                        for (pat, ty) in after.iter().zip(types.iter().skip(types.len() - after.len())) {
+                        for (pat, ty) in after
+                            .iter()
+                            .zip(types.iter().skip(types.len() - after.len()))
+                        {
                             let elem_ty = match &ref_wrapper {
                                 Some(wrap) => wrap(ty.clone()),
                                 None => ty.clone(),
@@ -692,7 +729,11 @@ impl TypeChecker {
                 {
                     if matches!(&**inner, Type::Variant(_)) {
                         expanded_ty = (**inner).clone();
-                    } else if let Type::Named { path: inner_path, args: _ } = &**inner {
+                    } else if let Type::Named {
+                        path: inner_path,
+                        args: _,
+                    } = &**inner
+                    {
                         // Look up Named type that might be a variant
                         let inner_type_name = inner_path
                             .segments
@@ -711,7 +752,11 @@ impl TypeChecker {
                 }
 
                 // Handle non-reference Named types
-                if let Type::Named { path: type_path, args: _ } = &expanded_ty {
+                if let Type::Named {
+                    path: type_path,
+                    args: _,
+                } = &expanded_ty
+                {
                     let named_type_name = type_path
                         .segments
                         .last()
@@ -762,10 +807,9 @@ impl TypeChecker {
                         if let Some(ref pat) = field_pat.pattern {
                             self.bind_pattern(pat, &fresh_ty)?;
                         } else {
-                            self.ctx.env.insert(
-                                field_pat.name.name.clone(),
-                                TypeScheme::mono(fresh_ty),
-                            );
+                            self.ctx
+                                .env
+                                .insert(field_pat.name.name.clone(), TypeScheme::mono(fresh_ty));
                         }
                     }
                     return Ok(());
@@ -799,7 +843,10 @@ impl TypeChecker {
                                         self.bind_pattern(pat, &Type::Never)?;
                                     } else {
                                         // Shorthand field pattern — bind field name as variable
-                                        self.ctx.env.insert(f.name.name.as_str(), TypeScheme::mono(Type::Never));
+                                        self.ctx.env.insert(
+                                            f.name.name.as_str(),
+                                            TypeScheme::mono(Type::Never),
+                                        );
                                     }
                                 }
                             }
@@ -867,7 +914,11 @@ impl TypeChecker {
                 // where item has type Item<_> (unresolved Iterator::Item).
                 if let Type::Generic { name, args } = &expanded_ty {
                     let is_unresolved_assoc = name.as_str().starts_with("::")
-                        || (name.as_str().chars().next().is_some_and(|c| c.is_ascii_uppercase())
+                        || (name
+                            .as_str()
+                            .chars()
+                            .next()
+                            .is_some_and(|c| c.is_ascii_uppercase())
                             && !args.is_empty()
                             && args.iter().all(|a| matches!(a, Type::Var(_))));
                     if is_unresolved_assoc {
@@ -886,7 +937,10 @@ impl TypeChecker {
                                             self.bind_pattern(pat, &Type::Var(TypeVar::fresh()))?;
                                         } else {
                                             // Shorthand field pattern — bind field name as variable
-                                            self.ctx.env.insert(f.name.name.as_str(), TypeScheme::mono(Type::Var(TypeVar::fresh())));
+                                            self.ctx.env.insert(
+                                                f.name.name.as_str(),
+                                                TypeScheme::mono(Type::Var(TypeVar::fresh())),
+                                            );
                                         }
                                     }
                                 }
@@ -932,9 +986,7 @@ impl TypeChecker {
                             .unwrap_or("");
 
                         // Look up the Named type to see if it's a variant
-                        if let Option::Some(def_ty) =
-                            self.ctx.lookup_type(inner_type_name)
-                        {
+                        if let Option::Some(def_ty) = self.ctx.lookup_type(inner_type_name) {
                             if let Type::Variant(variants) = def_ty.clone() {
                                 // Found a variant type - substitute type args and use it
                                 // For now, we'll use the variant directly (type args handled later)
@@ -957,9 +1009,7 @@ impl TypeChecker {
                         .unwrap_or("");
 
                     // Look up the Named type to see if it's a variant
-                    if let Option::Some(def_ty) =
-                        self.ctx.lookup_type(named_type_name)
-                    {
+                    if let Option::Some(def_ty) = self.ctx.lookup_type(named_type_name) {
                         if let Type::Variant(variants) = def_ty.clone() {
                             let _ = args; // Type args handled in field binding
                             expanded_ty = Type::Variant(variants);
@@ -1014,7 +1064,9 @@ impl TypeChecker {
                             // And patterns like `IntVal(n) & Sign(Positive)` where Sign is
                             // an active pattern, not a variant of the matched type.
                             let tag_text: Text = tag.into();
-                            if let Some((_param_tys, return_ty)) = self.pattern_declarations.get(&tag_text).cloned() {
+                            if let Some((_param_tys, return_ty)) =
+                                self.pattern_declarations.get(&tag_text).cloned()
+                            {
                                 // This is an active pattern! Bind sub-patterns against its return type.
                                 let return_scheme = TypeScheme::mono(return_ty);
                                 if let Some(variant_data) = data {
@@ -1022,16 +1074,25 @@ impl TypeChecker {
                                     match variant_data {
                                         VariantPatternData::Tuple(bindings) => {
                                             for binding in bindings.iter() {
-                                                self.bind_pattern_scheme(binding, return_scheme.clone())?;
+                                                self.bind_pattern_scheme(
+                                                    binding,
+                                                    return_scheme.clone(),
+                                                )?;
                                             }
                                         }
                                         VariantPatternData::Record { fields, .. } => {
                                             for f in fields.iter() {
                                                 if let Some(ref pat) = f.pattern {
-                                                    self.bind_pattern_scheme(pat, return_scheme.clone())?;
+                                                    self.bind_pattern_scheme(
+                                                        pat,
+                                                        return_scheme.clone(),
+                                                    )?;
                                                 } else {
                                                     // Shorthand field pattern — bind field name as variable
-                                                    self.ctx.env.insert(f.name.name.as_str(), return_scheme.clone());
+                                                    self.ctx.env.insert(
+                                                        f.name.name.as_str(),
+                                                        return_scheme.clone(),
+                                                    );
                                                 }
                                             }
                                         }
@@ -1040,7 +1101,8 @@ impl TypeChecker {
                                 Ok(())
                             } else {
                                 // Provide helpful error with available variants
-                                let available: List<_> = variants.keys().map(|s| s.as_str()).collect();
+                                let available: List<_> =
+                                    variants.keys().map(|s| s.as_str()).collect();
                                 Err(TypeError::Other(verum_common::Text::from(format!(
                                     "Unknown variant constructor '{}' at {}. Available variants: [{}]",
                                     tag,
@@ -1050,7 +1112,10 @@ impl TypeChecker {
                             }
                         }
                     }
-                } else if let Type::Named { path: type_path, .. } = &expanded_ty {
+                } else if let Type::Named {
+                    path: type_path, ..
+                } = &expanded_ty
+                {
                     // Check if this is a newtype pattern: `let Counter(n) = value;`
                     // Newtypes are Named types with __newtype_inner_{name} stored
                     let type_name = type_path
@@ -1077,17 +1142,24 @@ impl TypeChecker {
                                             // Bind the single pattern to the inner type
                                             self.bind_pattern(&patterns[0], &inner_ty)?;
                                         } else {
-                                            return Err(TypeError::Other(verum_common::Text::from(format!(
-                                                "Newtype pattern {} expects exactly 1 field, but {} were provided at {}",
-                                                tag, patterns.len(), span_to_line_col(pattern.span)
-                                            ))));
+                                            return Err(TypeError::Other(
+                                                verum_common::Text::from(format!(
+                                                    "Newtype pattern {} expects exactly 1 field, but {} were provided at {}",
+                                                    tag,
+                                                    patterns.len(),
+                                                    span_to_line_col(pattern.span)
+                                                )),
+                                            ));
                                         }
                                     }
                                     VariantPatternData::Record { .. } => {
-                                        return Err(TypeError::Other(verum_common::Text::from(format!(
-                                            "Newtype pattern {} cannot use record syntax at {}",
-                                            tag, span_to_line_col(pattern.span)
-                                        ))));
+                                        return Err(TypeError::Other(verum_common::Text::from(
+                                            format!(
+                                                "Newtype pattern {} cannot use record syntax at {}",
+                                                tag,
+                                                span_to_line_col(pattern.span)
+                                            ),
+                                        )));
                                     }
                                 }
                             }
@@ -1096,7 +1168,9 @@ impl TypeChecker {
 
                         // Check for tuple struct: type Color is (Int, Int, Int)
                         let tuple_fields_key = format!("__tuple_fields_{}", type_name);
-                        if let Option::Some(Type::Tuple(field_types)) = self.ctx.lookup_type(&tuple_fields_key) {
+                        if let Option::Some(Type::Tuple(field_types)) =
+                            self.ctx.lookup_type(&tuple_fields_key)
+                        {
                             // This is a tuple struct destructure: Color(r, g, b)
                             let field_types = field_types.clone();
                             if let Some(variant_data) = data {
@@ -1105,21 +1179,31 @@ impl TypeChecker {
                                     VariantPatternData::Tuple(patterns) => {
                                         if patterns.len() == field_types.len() {
                                             // Bind each pattern to the corresponding field type
-                                            for (pat, field_ty) in patterns.iter().zip(field_types.iter()) {
+                                            for (pat, field_ty) in
+                                                patterns.iter().zip(field_types.iter())
+                                            {
                                                 self.bind_pattern(pat, field_ty)?;
                                             }
                                         } else {
-                                            return Err(TypeError::Other(verum_common::Text::from(format!(
-                                                "Tuple struct pattern {} expects {} fields, but {} were provided at {}",
-                                                tag, field_types.len(), patterns.len(), span_to_line_col(pattern.span)
-                                            ))));
+                                            return Err(TypeError::Other(
+                                                verum_common::Text::from(format!(
+                                                    "Tuple struct pattern {} expects {} fields, but {} were provided at {}",
+                                                    tag,
+                                                    field_types.len(),
+                                                    patterns.len(),
+                                                    span_to_line_col(pattern.span)
+                                                )),
+                                            ));
                                         }
                                     }
                                     VariantPatternData::Record { .. } => {
-                                        return Err(TypeError::Other(verum_common::Text::from(format!(
-                                            "Tuple struct pattern {} cannot use record syntax at {}",
-                                            tag, span_to_line_col(pattern.span)
-                                        ))));
+                                        return Err(TypeError::Other(verum_common::Text::from(
+                                            format!(
+                                                "Tuple struct pattern {} cannot use record syntax at {}",
+                                                tag,
+                                                span_to_line_col(pattern.span)
+                                            ),
+                                        )));
                                     }
                                 }
                             }
@@ -1137,17 +1221,24 @@ impl TypeChecker {
                                         if patterns.len() == 1 {
                                             self.bind_pattern(&patterns[0], &args[0])?;
                                         } else {
-                                            return Err(TypeError::Other(verum_common::Text::from(format!(
-                                                "Generic wrapper pattern {} expects exactly 1 field, but {} were provided at {}",
-                                                tag, patterns.len(), span_to_line_col(pattern.span)
-                                            ))));
+                                            return Err(TypeError::Other(
+                                                verum_common::Text::from(format!(
+                                                    "Generic wrapper pattern {} expects exactly 1 field, but {} were provided at {}",
+                                                    tag,
+                                                    patterns.len(),
+                                                    span_to_line_col(pattern.span)
+                                                )),
+                                            ));
                                         }
                                     }
                                     VariantPatternData::Record { .. } => {
-                                        return Err(TypeError::Other(verum_common::Text::from(format!(
-                                            "Generic wrapper pattern {} cannot use record syntax at {}",
-                                            tag, span_to_line_col(pattern.span)
-                                        ))));
+                                        return Err(TypeError::Other(verum_common::Text::from(
+                                            format!(
+                                                "Generic wrapper pattern {} cannot use record syntax at {}",
+                                                tag,
+                                                span_to_line_col(pattern.span)
+                                            ),
+                                        )));
                                     }
                                 }
                             }
@@ -1167,7 +1258,10 @@ impl TypeChecker {
                     }
 
                     // For unknown/unresolved types, allow variant pattern matching
-                    if matches!(&expanded_ty, Type::Var(_) | Type::Unknown | Type::Placeholder { .. }) {
+                    if matches!(
+                        &expanded_ty,
+                        Type::Var(_) | Type::Unknown | Type::Placeholder { .. }
+                    ) {
                         if let Maybe::Some(variant_data) = data {
                             use verum_ast::pattern::VariantPatternData;
                             match variant_data {
@@ -1182,7 +1276,10 @@ impl TypeChecker {
                                             self.bind_pattern(pat, &Type::Var(TypeVar::fresh()))?;
                                         } else {
                                             // Shorthand field pattern — bind field name as variable
-                                            self.ctx.env.insert(fp.name.name.as_str(), TypeScheme::mono(Type::Var(TypeVar::fresh())));
+                                            self.ctx.env.insert(
+                                                fp.name.name.as_str(),
+                                                TypeScheme::mono(Type::Var(TypeVar::fresh())),
+                                            );
                                         }
                                     }
                                 }
@@ -1192,11 +1289,22 @@ impl TypeChecker {
                     }
                     // Check if this is a constant pattern on a numeric Named type
                     // e.g., match rtype { DNS_TYPE_A => ... } where rtype: UInt16
-                    let is_numeric_named = matches!(type_name,
-                        "Int8" | "Int16" | "Int32" | "Int64"
-                        | "UInt8" | "UInt16" | "UInt32" | "UInt64"
-                        | "ISize" | "USize" | "Float32" | "Float64"
-                        | "Byte");
+                    let is_numeric_named = matches!(
+                        type_name,
+                        "Int8"
+                            | "Int16"
+                            | "Int32"
+                            | "Int64"
+                            | "UInt8"
+                            | "UInt16"
+                            | "UInt32"
+                            | "UInt64"
+                            | "ISize"
+                            | "USize"
+                            | "Float32"
+                            | "Float64"
+                            | "Byte"
+                    );
                     if is_numeric_named && data.is_none() {
                         if let Some(const_scheme) = self.ctx.env.lookup(tag) {
                             let const_ty = self.unifier.apply(&const_scheme.ty);
@@ -1210,7 +1318,11 @@ impl TypeChecker {
                             );
                             if !is_variant_constructor {
                                 let resolved_scrutinee = self.unifier.apply(&expanded_ty);
-                                if self.unifier.unify(&const_ty, &resolved_scrutinee, pattern.span).is_ok() {
+                                if self
+                                    .unifier
+                                    .unify(&const_ty, &resolved_scrutinee, pattern.span)
+                                    .is_ok()
+                                {
                                     return Ok(());
                                 }
                             }
@@ -1223,10 +1335,15 @@ impl TypeChecker {
                     } else {
                         Err(TypeError::Other(verum_common::Text::from(format!(
                             "Pattern expects a variant type, but scrutinee has type {} at {}",
-                            expanded_ty, span_to_line_col(pattern.span)
+                            expanded_ty,
+                            span_to_line_col(pattern.span)
                         ))))
                     }
-                } else if let Type::Generic { name: generic_name, args } = &expanded_ty {
+                } else if let Type::Generic {
+                    name: generic_name,
+                    args,
+                } = &expanded_ty
+                {
                     // Handle generic wrapper destructure: Heap(inner_val) matching Heap<T>
                     if tag == generic_name.as_str() && args.len() == 1 {
                         if let Some(variant_data) = data {
@@ -1236,17 +1353,24 @@ impl TypeChecker {
                                     if patterns.len() == 1 {
                                         self.bind_pattern(&patterns[0], &args[0])?;
                                     } else {
-                                        return Err(TypeError::Other(verum_common::Text::from(format!(
-                                            "Generic wrapper pattern {} expects exactly 1 field, but {} were provided at {}",
-                                            tag, patterns.len(), span_to_line_col(pattern.span)
-                                        ))));
+                                        return Err(TypeError::Other(verum_common::Text::from(
+                                            format!(
+                                                "Generic wrapper pattern {} expects exactly 1 field, but {} were provided at {}",
+                                                tag,
+                                                patterns.len(),
+                                                span_to_line_col(pattern.span)
+                                            ),
+                                        )));
                                     }
                                 }
                                 VariantPatternData::Record { .. } => {
-                                    return Err(TypeError::Other(verum_common::Text::from(format!(
-                                        "Generic wrapper pattern {} cannot use record syntax at {}",
-                                        tag, span_to_line_col(pattern.span)
-                                    ))));
+                                    return Err(TypeError::Other(verum_common::Text::from(
+                                        format!(
+                                            "Generic wrapper pattern {} cannot use record syntax at {}",
+                                            tag,
+                                            span_to_line_col(pattern.span)
+                                        ),
+                                    )));
                                 }
                             }
                         }
@@ -1270,7 +1394,8 @@ impl TypeChecker {
                         if let Some(ref variants) = variant_map {
                             if variants.contains_key(bare_tag) {
                                 // This tag is a valid variant of the type
-                                let variant_payload = variants.get(bare_tag).cloned().unwrap_or(Type::Unit);
+                                let variant_payload =
+                                    variants.get(bare_tag).cloned().unwrap_or(Type::Unit);
                                 let is_unit_variant = matches!(&variant_payload, Type::Unit);
 
                                 if is_unit_variant {
@@ -1295,17 +1420,24 @@ impl TypeChecker {
                                             if patterns.len() == 1 {
                                                 self.bind_pattern(&patterns[0], &concrete_payload)?;
                                             } else {
-                                                return Err(TypeError::Other(verum_common::Text::from(format!(
-                                                    "{} pattern expects exactly 1 field, but {} were provided at {}",
-                                                    bare_tag, patterns.len(), span_to_line_col(pattern.span)
-                                                ))));
+                                                return Err(TypeError::Other(
+                                                    verum_common::Text::from(format!(
+                                                        "{} pattern expects exactly 1 field, but {} were provided at {}",
+                                                        bare_tag,
+                                                        patterns.len(),
+                                                        span_to_line_col(pattern.span)
+                                                    )),
+                                                ));
                                             }
                                         }
                                         VariantPatternData::Record { .. } => {
-                                            return Err(TypeError::Other(verum_common::Text::from(format!(
-                                                "{} pattern cannot use record syntax at {}",
-                                                bare_tag, span_to_line_col(pattern.span)
-                                            ))));
+                                            return Err(TypeError::Other(
+                                                verum_common::Text::from(format!(
+                                                    "{} pattern cannot use record syntax at {}",
+                                                    bare_tag,
+                                                    span_to_line_col(pattern.span)
+                                                )),
+                                            ));
                                         }
                                     }
                                     Ok(())
@@ -1316,7 +1448,9 @@ impl TypeChecker {
                             } else {
                                 Err(TypeError::Other(verum_common::Text::from(format!(
                                     "Pattern '{}' is not a variant of {} at {}",
-                                    tag, generic_name, span_to_line_col(pattern.span)
+                                    tag,
+                                    generic_name,
+                                    span_to_line_col(pattern.span)
                                 ))))
                             }
                         } else {
@@ -1334,10 +1468,16 @@ impl TypeChecker {
                                     VariantPatternData::Record { fields, .. } => {
                                         for fp in fields.iter() {
                                             if let Maybe::Some(ref pat) = fp.pattern {
-                                                self.bind_pattern(pat, &Type::Var(TypeVar::fresh()))?;
+                                                self.bind_pattern(
+                                                    pat,
+                                                    &Type::Var(TypeVar::fresh()),
+                                                )?;
                                             } else {
                                                 // Shorthand field pattern — bind field name as variable
-                                                self.ctx.env.insert(fp.name.name.as_str(), TypeScheme::mono(Type::Var(TypeVar::fresh())));
+                                                self.ctx.env.insert(
+                                                    fp.name.name.as_str(),
+                                                    TypeScheme::mono(Type::Var(TypeVar::fresh())),
+                                                );
                                             }
                                         }
                                     }
@@ -1347,11 +1487,14 @@ impl TypeChecker {
                         }
                     }
                 } else if let Type::Reference { inner, .. }
-                    | Type::CheckedReference { inner, .. }
-                    | Type::UnsafeReference { inner, .. } = &expanded_ty
+                | Type::CheckedReference { inner, .. }
+                | Type::UnsafeReference { inner, .. } = &expanded_ty
                 {
                     // Handle reference to newtype: `let Counter(n) = &counter;`
-                    if let Type::Named { path: type_path, .. } = &**inner {
+                    if let Type::Named {
+                        path: type_path, ..
+                    } = &**inner
+                    {
                         let type_name = type_path
                             .segments
                             .last()
@@ -1377,17 +1520,23 @@ impl TypeChecker {
                                                 };
                                                 self.bind_pattern(&patterns[0], &ref_inner)?;
                                             } else {
-                                                return Err(TypeError::Other(verum_common::Text::from(format!(
-                                                    "Newtype pattern {} expects exactly 1 field at {}",
-                                                    tag, span_to_line_col(pattern.span)
-                                                ))));
+                                                return Err(TypeError::Other(
+                                                    verum_common::Text::from(format!(
+                                                        "Newtype pattern {} expects exactly 1 field at {}",
+                                                        tag,
+                                                        span_to_line_col(pattern.span)
+                                                    )),
+                                                ));
                                             }
                                         }
                                         VariantPatternData::Record { .. } => {
-                                            return Err(TypeError::Other(verum_common::Text::from(format!(
-                                                "Newtype pattern {} cannot use record syntax at {}",
-                                                tag, span_to_line_col(pattern.span)
-                                            ))));
+                                            return Err(TypeError::Other(
+                                                verum_common::Text::from(format!(
+                                                    "Newtype pattern {} cannot use record syntax at {}",
+                                                    tag,
+                                                    span_to_line_col(pattern.span)
+                                                )),
+                                            ));
                                         }
                                     }
                                 }
@@ -1410,24 +1559,29 @@ impl TypeChecker {
                                         self.bind_pattern(pat, &Type::Var(TypeVar::fresh()))?;
                                     } else {
                                         // Shorthand field pattern — bind field name as variable
-                                        self.ctx.env.insert(fp.name.name.as_str(), TypeScheme::mono(Type::Var(TypeVar::fresh())));
+                                        self.ctx.env.insert(
+                                            fp.name.name.as_str(),
+                                            TypeScheme::mono(Type::Var(TypeVar::fresh())),
+                                        );
                                     }
                                 }
                             }
                         }
                     }
                     Ok(())
-                } else if matches!(&expanded_ty, Type::Int | Type::Char | Type::Bool | Type::Float | Type::Text)
-                    || matches!(&expanded_ty, Type::Named { path, .. } if {
-                        let name = path.segments.last().map(|seg| match seg {
-                            verum_ast::ty::PathSegment::Name(id) => id.name.as_str(),
-                            _ => "",
-                        }).unwrap_or("");
-                        matches!(name, "Int8" | "Int16" | "Int32" | "Int64"
-                            | "UInt8" | "UInt16" | "UInt32" | "UInt64"
-                            | "ISize" | "USize" | "Float32" | "Float64"
-                            | "Byte")
-                    }) {
+                } else if matches!(
+                    &expanded_ty,
+                    Type::Int | Type::Char | Type::Bool | Type::Float | Type::Text
+                ) || matches!(&expanded_ty, Type::Named { path, .. } if {
+                    let name = path.segments.last().map(|seg| match seg {
+                        verum_ast::ty::PathSegment::Name(id) => id.name.as_str(),
+                        _ => "",
+                    }).unwrap_or("");
+                    matches!(name, "Int8" | "Int16" | "Int32" | "Int64"
+                        | "UInt8" | "UInt16" | "UInt32" | "UInt64"
+                        | "ISize" | "USize" | "Float32" | "Float64"
+                        | "Byte")
+                }) {
                     // Constant pattern matching for primitive types
                     // This enables: match rtype { DNS_TYPE_A => ..., DNS_TYPE_AAAA => ... }
                     // where DNS_TYPE_A is a const Int = 1
@@ -1457,14 +1611,23 @@ impl TypeChecker {
                             if !is_variant_constructor {
                                 let resolved_scrutinee = self.unifier.apply(&expanded_ty);
                                 // Verify the constant type is compatible with scrutinee type
-                                if self.unifier.unify(&const_ty, &resolved_scrutinee, pattern.span).is_ok() {
+                                if self
+                                    .unifier
+                                    .unify(&const_ty, &resolved_scrutinee, pattern.span)
+                                    .is_ok()
+                                {
                                     // Valid constant pattern - will be checked for equality at runtime
                                     return Ok(());
                                 } else {
-                                    return Err(TypeError::Other(verum_common::Text::from(format!(
-                                        "Constant pattern '{}' has type {}, but scrutinee has type {} at {}",
-                                        tag, const_ty, resolved_scrutinee, span_to_line_col(pattern.span)
-                                    ))));
+                                    return Err(TypeError::Other(verum_common::Text::from(
+                                        format!(
+                                            "Constant pattern '{}' has type {}, but scrutinee has type {} at {}",
+                                            tag,
+                                            const_ty,
+                                            resolved_scrutinee,
+                                            span_to_line_col(pattern.span)
+                                        ),
+                                    )));
                                 }
                             }
                             // Fall through: variant constructor in env doesn't apply to
@@ -1476,7 +1639,9 @@ impl TypeChecker {
                     // take the matched value and return a result type.
                     {
                         let tag_text: Text = tag.into();
-                        if let Some((_param_tys, return_ty)) = self.pattern_declarations.get(&tag_text).cloned() {
+                        if let Some((_param_tys, return_ty)) =
+                            self.pattern_declarations.get(&tag_text).cloned()
+                        {
                             // This is an active pattern! Bind sub-patterns against its return type.
                             let return_scheme = TypeScheme::mono(return_ty);
                             if let Some(variant_data) = data {
@@ -1484,16 +1649,25 @@ impl TypeChecker {
                                 match variant_data {
                                     VariantPatternData::Tuple(bindings) => {
                                         for binding in bindings.iter() {
-                                            self.bind_pattern_scheme(binding, return_scheme.clone())?;
+                                            self.bind_pattern_scheme(
+                                                binding,
+                                                return_scheme.clone(),
+                                            )?;
                                         }
                                     }
                                     VariantPatternData::Record { fields, .. } => {
                                         for f in fields.iter() {
                                             if let Some(ref pat) = f.pattern {
-                                                self.bind_pattern_scheme(pat, return_scheme.clone())?;
+                                                self.bind_pattern_scheme(
+                                                    pat,
+                                                    return_scheme.clone(),
+                                                )?;
                                             } else {
                                                 // Shorthand field pattern — bind field name as variable
-                                                self.ctx.env.insert(f.name.name.as_str(), return_scheme.clone());
+                                                self.ctx.env.insert(
+                                                    f.name.name.as_str(),
+                                                    return_scheme.clone(),
+                                                );
                                             }
                                         }
                                     }
@@ -1506,7 +1680,9 @@ impl TypeChecker {
                     // In Verum, single identifiers without 'let' in match arms are constants, not bindings
                     Err(TypeError::Other(verum_common::Text::from(format!(
                         "Pattern '{}' is not a defined constant. To match {} values, use literal patterns (e.g., 1, 'a') or define a constant. At {}",
-                        tag, expanded_ty, span_to_line_col(pattern.span)
+                        tag,
+                        expanded_ty,
+                        span_to_line_col(pattern.span)
                     ))))
                 } else if let Type::Var(tv) = &expanded_ty {
                     // The scrutinee type is an unresolved type variable.
@@ -1535,7 +1711,10 @@ impl TypeChecker {
                                             self.bind_pattern(pat, &Type::Var(TypeVar::fresh()))?;
                                         } else {
                                             // Shorthand field pattern — bind field name as variable
-                                            self.ctx.env.insert(fp.name.name.as_str(), TypeScheme::mono(Type::Var(TypeVar::fresh())));
+                                            self.ctx.env.insert(
+                                                fp.name.name.as_str(),
+                                                TypeScheme::mono(Type::Var(TypeVar::fresh())),
+                                            );
                                         }
                                     }
                                 }
@@ -1561,7 +1740,10 @@ impl TypeChecker {
                                         self.bind_pattern(pat, &Type::Var(TypeVar::fresh()))?;
                                     } else {
                                         // Shorthand field pattern — bind field name as variable
-                                        self.ctx.env.insert(fp.name.name.as_str(), TypeScheme::mono(Type::Var(TypeVar::fresh())));
+                                        self.ctx.env.insert(
+                                            fp.name.name.as_str(),
+                                            TypeScheme::mono(Type::Var(TypeVar::fresh())),
+                                        );
                                     }
                                 }
                             }
@@ -1602,10 +1784,12 @@ impl TypeChecker {
                                 if !self.subtyping.is_subtype(ty, alt_ty)
                                     || !self.subtyping.is_subtype(alt_ty, ty)
                                 {
-                                    return Err(TypeError::Other(verum_common::Text::from(format!(
-                                        "or-pattern alternative {} binds variable '{}' with type {}, but first alternative has type {}",
-                                        i, name, alt_ty, ty
-                                    ))));
+                                    return Err(TypeError::Other(verum_common::Text::from(
+                                        format!(
+                                            "or-pattern alternative {} binds variable '{}' with type {}, but first alternative has type {}",
+                                            i, name, alt_ty, ty
+                                        ),
+                                    )));
                                 }
                             }
                             None => {
@@ -1668,7 +1852,9 @@ impl TypeChecker {
                 // When matching through a reference (&[T]), bindings get reference type (&T)
                 let is_reference = matches!(
                     &scheme.ty,
-                    Type::Reference { .. } | Type::CheckedReference { .. } | Type::UnsafeReference { .. }
+                    Type::Reference { .. }
+                        | Type::CheckedReference { .. }
+                        | Type::UnsafeReference { .. }
                 );
                 // Auto-deref: if matching &[T] or &&[T] with array pattern, use inner type
                 let effective_ty = self.unwrap_references(&scheme.ty);
@@ -1703,12 +1889,15 @@ impl TypeChecker {
                 // When matching through a reference (&[T]), bindings get reference type (&T)
                 let is_reference = matches!(
                     &scheme.ty,
-                    Type::Reference { .. } | Type::CheckedReference { .. } | Type::UnsafeReference { .. }
+                    Type::Reference { .. }
+                        | Type::CheckedReference { .. }
+                        | Type::UnsafeReference { .. }
                 );
                 // Auto-deref: if matching &[T] or &&[T] with slice pattern, use inner type
                 let effective_ty = self.unwrap_references(&scheme.ty);
                 // Handle Array, Slice, and collection types ([...] syntax works on all)
-                let is_array_or_slice = matches!(&effective_ty, Type::Array { .. } | Type::Slice { .. });
+                let is_array_or_slice =
+                    matches!(&effective_ty, Type::Array { .. } | Type::Slice { .. });
                 let element: Type = if let Some(elem) = self.element_type_of(&effective_ty) {
                     elem
                 } else {
@@ -1795,7 +1984,10 @@ impl TypeChecker {
                     }
                     self.bind_pattern(inner, ref_inner)?;
                     Ok(())
-                } else if matches!(&scheme.ty, Type::Var(_) | Type::Unknown | Type::Placeholder { .. }) {
+                } else if matches!(
+                    &scheme.ty,
+                    Type::Var(_) | Type::Unknown | Type::Placeholder { .. }
+                ) {
                     // For unknown/inferred types, bind the inner pattern to a fresh var
                     let fresh = TypeScheme::mono(Type::Var(TypeVar::fresh()));
                     self.bind_pattern_scheme(inner, fresh)?;
@@ -1819,7 +2011,11 @@ impl TypeChecker {
                 self.bind_pattern_scheme(pattern, scheme)
             }
 
-            PatternKind::Active { name, params, bindings } => {
+            PatternKind::Active {
+                name,
+                params,
+                bindings,
+            } => {
                 // Active patterns (F#-style) - user-defined pattern matchers
                 // Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 11 - Pattern Matching Enhancements
                 //
@@ -1854,7 +2050,9 @@ impl TypeChecker {
                 // Look up the pattern declaration to get its return type
                 let pattern_name_text: Text = name.name.clone();
 
-                if let Some((_param_tys, return_ty)) = self.pattern_declarations.get(&pattern_name_text).cloned() {
+                if let Some((_param_tys, return_ty)) =
+                    self.pattern_declarations.get(&pattern_name_text).cloned()
+                {
                     // Bind the bindings against the pattern's return type
                     let return_scheme = TypeScheme::mono(return_ty);
                     for binding in bindings.iter() {
@@ -1924,10 +2122,12 @@ impl TypeChecker {
                 let variant_resolved = if let Some(ref name) = variant_name_str {
                     let expanded = self.expand_generic_to_variant(&scheme.ty);
                     if let Type::Variant(variants) = expanded {
-                        variants.get(name.as_str()).map(|payload_ty| match payload_ty {
-                            Type::Unit => scheme.ty.clone(),
-                            ty => ty.clone(),
-                        })
+                        variants
+                            .get(name.as_str())
+                            .map(|payload_ty| match payload_ty {
+                                Type::Unit => scheme.ty.clone(),
+                                ty => ty.clone(),
+                            })
                     } else {
                         None
                     }
@@ -1944,9 +2144,10 @@ impl TypeChecker {
                 };
 
                 // Bind the variable name to the narrowed type in scope
-                self.ctx
-                    .env
-                    .insert(binding.name.as_str(), TypeScheme::mono(narrowed_type.clone()));
+                self.ctx.env.insert(
+                    binding.name.as_str(),
+                    TypeScheme::mono(narrowed_type.clone()),
+                );
 
                 // Register in affine tracker for move semantics
                 let contains_affine = self.type_contains_affine(&narrowed_type);
@@ -1964,7 +2165,10 @@ impl TypeChecker {
                 Ok(())
             }
 
-            PatternKind::Stream { head_patterns, rest } => {
+            PatternKind::Stream {
+                head_patterns,
+                rest,
+            } => {
                 // Stream pattern: stream[first, second, ...rest]
                 // Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 18.3 - Stream Pattern Matching
                 //
@@ -2020,7 +2224,10 @@ impl TypeChecker {
                 // Bind head to the element type and tail to the stream/list type.
                 // For now, bind both with fresh type variables.
                 let elem_ty = Type::Var(crate::ty::TypeVar::fresh());
-                let head_scheme = TypeScheme { ty: elem_ty, ..scheme.clone() };
+                let head_scheme = TypeScheme {
+                    ty: elem_ty,
+                    ..scheme.clone()
+                };
                 self.bind_pattern_scheme(head, head_scheme)?;
                 // Tail has the same type as the overall stream
                 self.bind_pattern_scheme(tail, scheme)
@@ -2298,7 +2505,8 @@ impl TypeChecker {
                                 all_bindings.append(&mut bindings);
                             } else {
                                 // Shorthand: { x, y } means { x: x, y: y }
-                                all_bindings.push((verum_common::Text::from(field_name), field_ty.clone()));
+                                all_bindings
+                                    .push((verum_common::Text::from(field_name), field_ty.clone()));
                             }
                         }
                     }
@@ -2367,7 +2575,10 @@ impl TypeChecker {
                 Ok(List::from_iter([(binding.name.clone(), narrowed_type)]))
             }
 
-            PatternKind::Stream { head_patterns, rest } => {
+            PatternKind::Stream {
+                head_patterns,
+                rest,
+            } => {
                 // Stream pattern: collect bindings from head patterns and optional rest binding
                 // Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 18.3 - Stream Pattern Matching
                 let mut all_bindings = List::new();
@@ -2424,7 +2635,9 @@ impl TypeChecker {
                         }
                         verum_ast::pattern::VariantPatternData::Record { fields, .. } => {
                             fields.iter().any(|f| {
-                                f.pattern.as_ref().is_some_and(Self::pattern_has_complex_forms)
+                                f.pattern
+                                    .as_ref()
+                                    .is_some_and(Self::pattern_has_complex_forms)
                             })
                         }
                     }
@@ -2433,9 +2646,7 @@ impl TypeChecker {
                 }
             }
             PatternKind::Array(_) | PatternKind::Slice { .. } => true,
-            PatternKind::Tuple(pats) => {
-                pats.iter().any(Self::pattern_has_complex_forms)
-            }
+            PatternKind::Tuple(pats) => pats.iter().any(Self::pattern_has_complex_forms),
             PatternKind::Record { .. } => true, // Nested records confuse exhaustiveness checker
             PatternKind::View { .. } => true,
             PatternKind::Paren(inner) => Self::pattern_has_complex_forms(inner),
@@ -2577,7 +2788,9 @@ impl TypeChecker {
             Type::Record(_) => payload_ty.clone(),
             Type::Named { path, .. } => {
                 // Try to resolve the named type to see if it's a record
-                let type_name = path.segments.last()
+                let type_name = path
+                    .segments
+                    .last()
                     .map(|seg| match seg {
                         verum_ast::ty::PathSegment::Name(id) => id.name.as_str(),
                         _ => "",
@@ -2658,7 +2871,9 @@ impl TypeChecker {
             // Payload is not a record - cannot use record-style pattern
             Err(TypeError::Other(verum_common::Text::from(format!(
                 "Variant '{}' has payload type {}, which is not a record. Cannot use record-style pattern at {}",
-                tag, payload_ty, span_to_line_col(span)
+                tag,
+                payload_ty,
+                span_to_line_col(span)
             ))))
         }
     }
@@ -2667,7 +2882,10 @@ impl TypeChecker {
     /// This stores the pattern's parameter types and return type so that
     /// active pattern invocations in match arms can be type-checked.
     /// Spec: grammar/verum.ebnf line 1817 - pattern_def
-    pub(crate) fn register_pattern_declaration(&mut self, pattern_decl: &verum_ast::decl::PatternDecl) -> Result<()> {
+    pub(crate) fn register_pattern_declaration(
+        &mut self,
+        pattern_decl: &verum_ast::decl::PatternDecl,
+    ) -> Result<()> {
         let name: Text = pattern_decl.name.name.clone();
 
         // Register generic type parameters into scope before converting types
@@ -2676,7 +2894,9 @@ impl TypeChecker {
         for generic_param in &pattern_decl.generics {
             use verum_ast::ty::GenericParamKind;
             match &generic_param.kind {
-                GenericParamKind::Type { name: param_name, .. } => {
+                GenericParamKind::Type {
+                    name: param_name, ..
+                } => {
                     let fresh_var = TypeVar::fresh();
                     let type_var = Type::Var(fresh_var);
                     let name_text: Text = param_name.name.clone();
@@ -2700,7 +2920,8 @@ impl TypeChecker {
         let return_ty = self.ast_to_type(&pattern_decl.return_type)?;
 
         // Store in pattern declarations map
-        self.pattern_declarations.insert(name.clone(), (param_types.clone(), return_ty.clone()));
+        self.pattern_declarations
+            .insert(name.clone(), (param_types.clone(), return_ty.clone()));
 
         // Also register the pattern as a function in the type environment
         // so it can be called like a regular function if needed
@@ -2714,23 +2935,32 @@ impl TypeChecker {
 
         // If the pattern has generic type parameters, create a polymorphic scheme
         if type_param_vars.is_empty() {
-            self.ctx.env.insert(name.as_str(), TypeScheme::mono(func_ty));
+            self.ctx
+                .env
+                .insert(name.as_str(), TypeScheme::mono(func_ty));
         } else {
-            self.ctx.env.insert(name.as_str(), TypeScheme {
-                vars: type_param_vars,
-                ty: func_ty,
-                implicit_vars: Set::new(),
-                var_type_bounds: Map::new(),
-                var_protocol_bounds: Map::new(),
-                impl_var_count: 0,
-            });
+            self.ctx.env.insert(
+                name.as_str(),
+                TypeScheme {
+                    vars: type_param_vars,
+                    ty: func_ty,
+                    implicit_vars: Set::new(),
+                    var_type_bounds: Map::new(),
+                    var_protocol_bounds: Map::new(),
+                    impl_var_count: 0,
+                },
+            );
         }
 
         Ok(())
     }
 
     /// Check if a pattern binds a variable name
-    pub(crate) fn pattern_binds_var(&self, pattern: &verum_ast::pattern::Pattern, var_name: &Text) -> bool {
+    pub(crate) fn pattern_binds_var(
+        &self,
+        pattern: &verum_ast::pattern::Pattern,
+        var_name: &Text,
+    ) -> bool {
         use verum_ast::pattern::PatternKind;
 
         match &pattern.kind {
@@ -2798,7 +3028,11 @@ impl TypeChecker {
                     self.collect_capture_pattern_bindings(p, bindings);
                 }
             }
-            PatternKind::Slice { before, rest, after } => {
+            PatternKind::Slice {
+                before,
+                rest,
+                after,
+            } => {
                 for p in before {
                     self.collect_capture_pattern_bindings(p, bindings);
                 }
@@ -2823,7 +3057,8 @@ impl TypeChecker {
                                 if let Some(ref pat) = field.pattern {
                                     self.collect_capture_pattern_bindings(pat, bindings);
                                 } else {
-                                    bindings.insert(verum_common::Text::from(field.name.name.as_str()));
+                                    bindings
+                                        .insert(verum_common::Text::from(field.name.name.as_str()));
                                 }
                             }
                         }
@@ -2848,6 +3083,4 @@ impl TypeChecker {
             _ => {}
         }
     }
-
-
 }

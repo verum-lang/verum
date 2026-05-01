@@ -16,17 +16,19 @@ use smallvec::SmallVec;
 use crate::compression::decompress;
 use crate::encoding::*;
 use crate::error::{VbcError, VbcResult};
-use crate::format::{CompressionAlgorithm, VbcFlags, VbcHeader, HEADER_SIZE, MAGIC, VERSION_MAJOR, VERSION_MINOR};
+use crate::format::{
+    CompressionAlgorithm, HEADER_SIZE, MAGIC, VERSION_MAJOR, VERSION_MINOR, VbcFlags, VbcHeader,
+};
 use crate::metadata::{AutodiffGraph, DeviceHints, DistributionMetadata, MlirHints, ShapeMetadata};
 use crate::module::{
-    CallingConvention, Constant, ConstId, FfiLibrary, FfiStructLayout, FfiSymbol,
+    CallingConvention, ConstId, Constant, FfiLibrary, FfiStructLayout, FfiSymbol,
     FunctionDescriptor, FunctionId, ModuleDependency, OptimizationHints, ParamDescriptor,
     SourceMap, SourceMapEntry, SpecializationEntry, StringTable, VbcModule,
 };
 use crate::types::{
     CbgrTier, ContextRef, FieldDescriptor, Mutability, PropertySet, ProtocolId, ProtocolImpl,
     StringId, TypeDescriptor, TypeId, TypeKind, TypeParamDescriptor, TypeParamId, TypeRef,
-    VariantDescriptor, VariantKind, Variance, Visibility,
+    Variance, VariantDescriptor, VariantKind, Visibility,
 };
 
 /// Bundle for deserializing FFI tables together.
@@ -232,7 +234,7 @@ fn verify_dependency_hash(module: &VbcModule) -> VbcResult<()> {
 
 /// Hit at parse time (before any allocation), each rejection
 /// names the offending field for triage.
-const MAX_TYPE_TABLE_ENTRIES: u32 = 1 << 20;            // 1 048 576
+const MAX_TYPE_TABLE_ENTRIES: u32 = 1 << 20; // 1 048 576
 const MAX_FUNCTION_TABLE_ENTRIES: u32 = 1 << 20;
 const MAX_CONSTANT_POOL_ENTRIES: u32 = 1 << 20;
 const MAX_SPECIALIZATION_TABLE_ENTRIES: u32 = 1 << 20;
@@ -274,10 +276,10 @@ const MAX_FN_TYPE_REF_CONTEXTS: usize = 32;
 /// Constant-pool / specialization / source-map bounds. Each
 /// driver is a varint that, post the cf1cff4c canonicality fix,
 /// can decode to `u64::MAX`.
-const MAX_CONSTANT_ARRAY_LEN: usize = 1 << 20;          // 1 048 576
+const MAX_CONSTANT_ARRAY_LEN: usize = 1 << 20; // 1 048 576
 const MAX_SPECIALIZATION_TYPE_ARGS: usize = 64;
-const MAX_SOURCE_MAP_FILES: usize = 1 << 16;            // 65 536
-const MAX_SOURCE_MAP_ENTRIES: usize = 1 << 22;          // 4 194 304
+const MAX_SOURCE_MAP_FILES: usize = 1 << 16; // 65 536
+const MAX_SOURCE_MAP_ENTRIES: usize = 1 << 22; // 4 194 304
 
 /// Maximum decompressed bytecode size for a single module.
 ///
@@ -288,7 +290,7 @@ const MAX_SOURCE_MAP_ENTRIES: usize = 1 << 22;          // 4 194 304
 /// the compressed stream. 1 GB is a generous cap — real Verum
 /// modules are kilobytes, the embedded stdlib (every core/*.vr
 /// compiled) is ~14 MB.
-const MAX_DECOMPRESSED_BYTECODE_BYTES: u32 = 1 << 30;   // 1 GB
+const MAX_DECOMPRESSED_BYTECODE_BYTES: u32 = 1 << 30; // 1 GB
 
 /// VBC module deserializer.
 struct Deserializer<'a> {
@@ -499,13 +501,28 @@ impl<'a> Deserializer<'a> {
 
         // Validate section bounds
         let file_size = self.data.len();
-        self.validate_section_bounds("string_table", string_table_offset, string_table_size, file_size)?;
+        self.validate_section_bounds(
+            "string_table",
+            string_table_offset,
+            string_table_size,
+            file_size,
+        )?;
         self.validate_section_bounds("bytecode", bytecode_offset, bytecode_size, file_size)?;
         if source_map_offset > 0 {
-            self.validate_section_bounds("source_map", source_map_offset, source_map_size, file_size)?;
+            self.validate_section_bounds(
+                "source_map",
+                source_map_offset,
+                source_map_size,
+                file_size,
+            )?;
         }
         if extensions_offset > 0 {
-            self.validate_section_bounds("extensions", extensions_offset, extensions_size, file_size)?;
+            self.validate_section_bounds(
+                "extensions",
+                extensions_offset,
+                extensions_size,
+                file_size,
+            )?;
         }
 
         Ok(VbcHeader {
@@ -573,7 +590,8 @@ impl<'a> Deserializer<'a> {
         // (4 GB) and adding *offset can overflow. On 64-bit the
         // overflow is unreachable but the checked path is
         // platform-portable and zero-cost when no overflow occurs.
-        let end = self.offset
+        let end = self
+            .offset
             .checked_add(size as usize)
             .ok_or(VbcError::SectionOverflow {
                 section: "string_table",
@@ -608,7 +626,8 @@ impl<'a> Deserializer<'a> {
                 });
             }
 
-            let str_end = self.offset
+            let str_end = self
+                .offset
                 .checked_add(len)
                 .ok_or_else(|| VbcError::eof(self.offset, len))?;
             if str_end > end {
@@ -649,13 +668,14 @@ impl<'a> Deserializer<'a> {
                 offset: self.offset,
             });
         }
-        let section_end = self.offset
-            .checked_add(section_size as usize)
-            .ok_or(VbcError::SectionOverflow {
-                section: "bytecode",
-                offset: self.offset as u32,
-                size: section_size,
-            })?;
+        let section_end =
+            self.offset
+                .checked_add(section_size as usize)
+                .ok_or(VbcError::SectionOverflow {
+                    section: "bytecode",
+                    offset: self.offset as u32,
+                    size: section_size,
+                })?;
         if section_end > self.data.len() {
             return Err(VbcError::SectionOverflow {
                 section: "bytecode",
@@ -666,8 +686,8 @@ impl<'a> Deserializer<'a> {
 
         // Read compression algorithm
         let algorithm_byte = decode_u8(self.data, &mut self.offset)?;
-        let algorithm = CompressionAlgorithm::try_from(algorithm_byte)
-            .map_err(VbcError::UnknownCompression)?;
+        let algorithm =
+            CompressionAlgorithm::try_from(algorithm_byte).map_err(VbcError::UnknownCompression)?;
 
         match algorithm {
             CompressionAlgorithm::None => {
@@ -675,7 +695,8 @@ impl<'a> Deserializer<'a> {
                 // section_size > 0 checked above, so the subtraction
                 // is safe.
                 let data_size = (section_size - 1) as usize;
-                let data_end = self.offset
+                let data_end = self
+                    .offset
                     .checked_add(data_size)
                     .ok_or_else(|| VbcError::eof(self.offset, data_size))?;
                 if data_end > self.data.len() {
@@ -709,10 +730,9 @@ impl<'a> Deserializer<'a> {
                 self.offset = section_end;
 
                 // Decompress
-                decompress(compressed, algorithm, uncompressed_size)
-                    .inspect(|_out| {
-                        let _ = compressed_size; // explicitly silence unused
-                    })
+                decompress(compressed, algorithm, uncompressed_size).inspect(|_out| {
+                    let _ = compressed_size; // explicitly silence unused
+                })
             }
         }
     }
@@ -723,8 +743,13 @@ impl<'a> Deserializer<'a> {
         let name = StringId(decode_u32(self.data, &mut self.offset)?);
         let kind = TypeKind::try_from(decode_u8(self.data, &mut self.offset)?)
             .map_err(VbcError::InvalidTypeKind)?;
-        let visibility = Visibility::try_from(decode_u8(self.data, &mut self.offset)?)
-            .map_err(|_| VbcError::InvalidHeader { field: "visibility", offset: self.offset })?;
+        let visibility =
+            Visibility::try_from(decode_u8(self.data, &mut self.offset)?).map_err(|_| {
+                VbcError::InvalidHeader {
+                    field: "visibility",
+                    offset: self.offset,
+                }
+            })?;
         let size = decode_u32(self.data, &mut self.offset)?;
         let alignment = decode_u32(self.data, &mut self.offset)?;
 
@@ -821,8 +846,13 @@ impl<'a> Deserializer<'a> {
     fn parse_type_param(&mut self) -> VbcResult<TypeParamDescriptor> {
         let name = StringId(decode_u32(self.data, &mut self.offset)?);
         let id = TypeParamId(decode_u16(self.data, &mut self.offset)?);
-        let variance = Variance::try_from(decode_u8(self.data, &mut self.offset)?)
-            .map_err(|_| VbcError::InvalidHeader { field: "variance", offset: self.offset })?;
+        let variance =
+            Variance::try_from(decode_u8(self.data, &mut self.offset)?).map_err(|_| {
+                VbcError::InvalidHeader {
+                    field: "variance",
+                    offset: self.offset,
+                }
+            })?;
 
         // Bounds
         let bounds_count = decode_varint(self.data, &mut self.offset)? as usize;
@@ -860,8 +890,13 @@ impl<'a> Deserializer<'a> {
         let name = StringId(decode_u32(self.data, &mut self.offset)?);
         let type_ref = self.parse_type_ref()?;
         let offset = decode_u32(self.data, &mut self.offset)?;
-        let visibility = Visibility::try_from(decode_u8(self.data, &mut self.offset)?)
-            .map_err(|_| VbcError::InvalidHeader { field: "field_visibility", offset: self.offset })?;
+        let visibility =
+            Visibility::try_from(decode_u8(self.data, &mut self.offset)?).map_err(|_| {
+                VbcError::InvalidHeader {
+                    field: "field_visibility",
+                    offset: self.offset,
+                }
+            })?;
 
         Ok(FieldDescriptor {
             name,
@@ -875,8 +910,13 @@ impl<'a> Deserializer<'a> {
     fn parse_variant(&mut self) -> VbcResult<VariantDescriptor> {
         let name = StringId(decode_u32(self.data, &mut self.offset)?);
         let tag = decode_u32(self.data, &mut self.offset)?;
-        let kind = VariantKind::try_from(decode_u8(self.data, &mut self.offset)?)
-            .map_err(|_| VbcError::InvalidHeader { field: "variant_kind", offset: self.offset })?;
+        let kind =
+            VariantKind::try_from(decode_u8(self.data, &mut self.offset)?).map_err(|_| {
+                VbcError::InvalidHeader {
+                    field: "variant_kind",
+                    offset: self.offset,
+                }
+            })?;
         let arity = decode_u8(self.data, &mut self.offset)?;
 
         // Payload
@@ -1037,8 +1077,13 @@ impl<'a> Deserializer<'a> {
         let id = FunctionId(decode_u32(self.data, &mut self.offset)?);
         let name = StringId(decode_u32(self.data, &mut self.offset)?);
         let parent_type = self.parse_optional_u32()?.map(TypeId);
-        let visibility = Visibility::try_from(decode_u8(self.data, &mut self.offset)?)
-            .map_err(|_| VbcError::InvalidHeader { field: "func_visibility", offset: self.offset })?;
+        let visibility =
+            Visibility::try_from(decode_u8(self.data, &mut self.offset)?).map_err(|_| {
+                VbcError::InvalidHeader {
+                    field: "func_visibility",
+                    offset: self.offset,
+                }
+            })?;
 
         let flags = decode_u8(self.data, &mut self.offset)?;
         let is_inline_candidate = flags & 0x01 != 0;
@@ -1160,10 +1205,19 @@ impl<'a> Deserializer<'a> {
         match tag {
             0x01 => Ok(Constant::Int(decode_i64(self.data, &mut self.offset)?)),
             0x02 => Ok(Constant::Float(decode_f64(self.data, &mut self.offset)?)),
-            0x03 => Ok(Constant::String(StringId(decode_u32(self.data, &mut self.offset)?))),
+            0x03 => Ok(Constant::String(StringId(decode_u32(
+                self.data,
+                &mut self.offset,
+            )?))),
             0x04 => Ok(Constant::Type(self.parse_type_ref()?)),
-            0x05 => Ok(Constant::Function(FunctionId(decode_u32(self.data, &mut self.offset)?))),
-            0x06 => Ok(Constant::Protocol(ProtocolId(decode_u32(self.data, &mut self.offset)?))),
+            0x05 => Ok(Constant::Function(FunctionId(decode_u32(
+                self.data,
+                &mut self.offset,
+            )?))),
+            0x06 => Ok(Constant::Protocol(ProtocolId(decode_u32(
+                self.data,
+                &mut self.offset,
+            )?))),
             0x07 => {
                 let count = decode_varint(self.data, &mut self.offset)? as usize;
                 if count > MAX_CONSTANT_ARRAY_LEN {
@@ -1284,9 +1338,8 @@ impl<'a> Deserializer<'a> {
                 return Err(VbcError::eof(self.offset, len));
             }
             result.shape_metadata =
-                bincode::deserialize(&self.data[self.offset..self.offset + len]).map_err(|e| {
-                    VbcError::Deserialization(format!("shape_metadata: {}", e))
-                })?;
+                bincode::deserialize(&self.data[self.offset..self.offset + len])
+                    .map_err(|e| VbcError::Deserialization(format!("shape_metadata: {}", e)))?;
             self.offset += len;
         }
 
@@ -1295,10 +1348,8 @@ impl<'a> Deserializer<'a> {
             if self.offset + len > self.data.len() {
                 return Err(VbcError::eof(self.offset, len));
             }
-            result.device_hints =
-                bincode::deserialize(&self.data[self.offset..self.offset + len]).map_err(|e| {
-                    VbcError::Deserialization(format!("device_hints: {}", e))
-                })?;
+            result.device_hints = bincode::deserialize(&self.data[self.offset..self.offset + len])
+                .map_err(|e| VbcError::Deserialization(format!("device_hints: {}", e)))?;
             self.offset += len;
         }
 
@@ -1307,10 +1358,8 @@ impl<'a> Deserializer<'a> {
             if self.offset + len > self.data.len() {
                 return Err(VbcError::eof(self.offset, len));
             }
-            result.distribution =
-                bincode::deserialize(&self.data[self.offset..self.offset + len]).map_err(|e| {
-                    VbcError::Deserialization(format!("distribution: {}", e))
-                })?;
+            result.distribution = bincode::deserialize(&self.data[self.offset..self.offset + len])
+                .map_err(|e| VbcError::Deserialization(format!("distribution: {}", e)))?;
             self.offset += len;
         }
 
@@ -1320,9 +1369,8 @@ impl<'a> Deserializer<'a> {
                 return Err(VbcError::eof(self.offset, len));
             }
             result.autodiff_graph =
-                bincode::deserialize(&self.data[self.offset..self.offset + len]).map_err(|e| {
-                    VbcError::Deserialization(format!("autodiff_graph: {}", e))
-                })?;
+                bincode::deserialize(&self.data[self.offset..self.offset + len])
+                    .map_err(|e| VbcError::Deserialization(format!("autodiff_graph: {}", e)))?;
             self.offset += len;
         }
 
@@ -1331,10 +1379,8 @@ impl<'a> Deserializer<'a> {
             if self.offset + len > self.data.len() {
                 return Err(VbcError::eof(self.offset, len));
             }
-            result.mlir_hints =
-                bincode::deserialize(&self.data[self.offset..self.offset + len]).map_err(|e| {
-                    VbcError::Deserialization(format!("mlir_hints: {}", e))
-                })?;
+            result.mlir_hints = bincode::deserialize(&self.data[self.offset..self.offset + len])
+                .map_err(|e| VbcError::Deserialization(format!("mlir_hints: {}", e)))?;
             self.offset += len;
         }
 
@@ -1345,9 +1391,8 @@ impl<'a> Deserializer<'a> {
                 return Err(VbcError::eof(self.offset, len));
             }
             let ffi_bundle: FfiBundle =
-                bincode::deserialize(&self.data[self.offset..self.offset + len]).map_err(|e| {
-                    VbcError::Deserialization(format!("ffi_tables: {}", e))
-                })?;
+                bincode::deserialize(&self.data[self.offset..self.offset + len])
+                    .map_err(|e| VbcError::Deserialization(format!("ffi_tables: {}", e)))?;
             result.ffi_libraries = ffi_bundle.libraries;
             result.ffi_symbols = ffi_bundle.symbols;
             result.ffi_layouts = ffi_bundle.layouts;
@@ -1360,10 +1405,8 @@ impl<'a> Deserializer<'a> {
             if self.offset + len > self.data.len() {
                 return Err(VbcError::eof(self.offset, len));
             }
-            result.dependencies =
-                bincode::deserialize(&self.data[self.offset..self.offset + len]).map_err(|e| {
-                    VbcError::Deserialization(format!("dependencies: {}", e))
-                })?;
+            result.dependencies = bincode::deserialize(&self.data[self.offset..self.offset + len])
+                .map_err(|e| VbcError::Deserialization(format!("dependencies: {}", e)))?;
             self.offset += len;
         }
 
@@ -1559,10 +1602,7 @@ mod tests {
         // (the gate we just confirmed is bypassed). Decompression
         // may still fail on the corrupt last byte, but that's a
         // distinct error class.
-        let result = deserialize_module_validated_with_options(
-            &bytes,
-            &ValidationOptions::fast(),
-        );
+        let result = deserialize_module_validated_with_options(&bytes, &ValidationOptions::fast());
         assert!(
             !matches!(result, Err(VbcError::ContentHashMismatch { .. })),
             "fast() must skip hash verification — got ContentHashMismatch \
@@ -1587,10 +1627,8 @@ mod tests {
         bytes[72] ^= 0xFF;
 
         let legacy = deserialize_module_validated(&bytes);
-        let strict = deserialize_module_validated_with_options(
-            &bytes,
-            &ValidationOptions::strict(),
-        );
+        let strict =
+            deserialize_module_validated_with_options(&bytes, &ValidationOptions::strict());
 
         // Both must produce ContentHashMismatch — same reject reason.
         assert!(matches!(legacy, Err(VbcError::ContentHashMismatch { .. })));
@@ -1606,18 +1644,14 @@ mod tests {
         let module = build_big_module();
         let bytes = serialize_module(&module).unwrap();
 
-        let strict_loaded = deserialize_module_validated_with_options(
-            &bytes,
-            &ValidationOptions::strict(),
-        )
-        .expect("clean bytes must load under strict");
+        let strict_loaded =
+            deserialize_module_validated_with_options(&bytes, &ValidationOptions::strict())
+                .expect("clean bytes must load under strict");
         assert_eq!(strict_loaded.name, module.name);
 
-        let fast_loaded = deserialize_module_validated_with_options(
-            &bytes,
-            &ValidationOptions::fast(),
-        )
-        .expect("clean bytes must load under fast");
+        let fast_loaded =
+            deserialize_module_validated_with_options(&bytes, &ValidationOptions::fast())
+                .expect("clean bytes must load under fast");
         assert_eq!(fast_loaded.name, module.name);
     }
 }

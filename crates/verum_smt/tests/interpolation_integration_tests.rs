@@ -15,8 +15,8 @@
 )]
 // Integration tests for Craig Interpolation
 
-use verum_smt::interpolation::InterpolantStrength;
 use verum_common::Text;
+use verum_smt::interpolation::InterpolantStrength;
 use z3::ast::{Bool, Int};
 
 // ==================== Basic Interpolation Tests ====================

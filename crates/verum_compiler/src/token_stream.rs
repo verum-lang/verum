@@ -11,8 +11,8 @@
 
 // Re-export all public types from the quote module
 pub use crate::quote::{
-    GroupDelimiter, InterpolationKind, MetaContext, ParseError, Quote,
-    QuoteBuilder, QuoteError, ToTokens, TokenStream,
+    GroupDelimiter, InterpolationKind, MetaContext, ParseError, Quote, QuoteBuilder, QuoteError,
+    ToTokens, TokenStream,
 };
 
 // Re-export HygieneContext from hygiene module

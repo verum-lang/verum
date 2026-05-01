@@ -53,16 +53,14 @@
 
 use serde::{Deserialize, Serialize};
 
-use verum_ast::decl::{
-    ProofBody, ProofBodyKind, ProofMethod, ProofStepKind, TacticExpr,
-};
+use verum_ast::decl::{ProofBody, ProofBodyKind, ProofMethod, ProofStepKind, TacticExpr};
 use verum_ast::expr::{Expr, ExprKind};
 use verum_ast::ty::PathSegment;
 use verum_common::Maybe;
 
 use super::expr_translate::{
-    AgdaExprRenderer, CoqExprRenderer, DeduktiExprRenderer, ExprRenderer,
-    IsabelleExprRenderer, LeanExprRenderer, TranslatedExpr,
+    AgdaExprRenderer, CoqExprRenderer, DeduktiExprRenderer, ExprRenderer, IsabelleExprRenderer,
+    LeanExprRenderer, TranslatedExpr,
 };
 
 // =============================================================================
@@ -272,7 +270,12 @@ fn classify_apply_tactic(tactic: &TacticExpr) -> Option<(String, &[Expr])> {
     // Call shape over a multi-segment dotted callee:
     // `apply mathlib4.foo.bar(x, y);` — render the path dotted
     // and use the call args.
-    if let ExprKind::Call { func, args, type_args } = &lemma.as_ref().kind {
+    if let ExprKind::Call {
+        func,
+        args,
+        type_args,
+    } = &lemma.as_ref().kind
+    {
         if type_args.is_empty() {
             if let Some(dotted) = dotted_path_text(func.as_ref()) {
                 return Some((dotted, args.as_slice()));
@@ -435,9 +438,7 @@ impl ProofBodyRenderer for LeanProofBodyRenderer {
     fn render(&self, body: &ProofBody) -> TranslatedProofBody {
         match body.kind() {
             ProofBodyKind::Term => render_term_lean(body),
-            ProofBodyKind::Tactic | ProofBodyKind::Structured => {
-                render_single_apply_lean(body)
-            }
+            ProofBodyKind::Tactic | ProofBodyKind::Structured => render_single_apply_lean(body),
             ProofBodyKind::ByMethod => render_by_method_lean(body),
         }
     }
@@ -568,7 +569,8 @@ fn render_single_apply_agda(body: &ProofBody) -> TranslatedProofBody {
         }
     }
     TranslatedProofBody::Fallback {
-        reason: "Agda: V0 covers Term + single-apply + reflexivity/trivial primitives only".to_string(),
+        reason: "Agda: V0 covers Term + single-apply + reflexivity/trivial primitives only"
+            .to_string(),
     }
 }
 
@@ -674,7 +676,8 @@ fn render_single_apply_dedukti(body: &ProofBody) -> TranslatedProofBody {
         }
     }
     TranslatedProofBody::Fallback {
-        reason: "Dedukti: V0 covers Term + single-apply + reflexivity/trivial primitives only".to_string(),
+        reason: "Dedukti: V0 covers Term + single-apply + reflexivity/trivial primitives only"
+            .to_string(),
     }
 }
 
@@ -737,9 +740,7 @@ impl ProofBodyRenderer for IsabelleProofBodyRenderer {
     fn render(&self, body: &ProofBody) -> TranslatedProofBody {
         match body.kind() {
             ProofBodyKind::Term => render_term_isabelle(body),
-            ProofBodyKind::Tactic | ProofBodyKind::Structured => {
-                render_single_apply_isabelle(body)
-            }
+            ProofBodyKind::Tactic | ProofBodyKind::Structured => render_single_apply_isabelle(body),
             ProofBodyKind::ByMethod => render_by_method_isabelle(body),
         }
     }
@@ -755,10 +756,7 @@ fn render_term_isabelle(body: &ProofBody) -> TranslatedProofBody {
             text: format!("by (rule {})", text),
         },
         TranslatedExpr::Fallback { reason, .. } => TranslatedProofBody::Fallback {
-            reason: format!(
-                "Isabelle term-mode: expr renderer fallback — {}",
-                reason
-            ),
+            reason: format!("Isabelle term-mode: expr renderer fallback — {}", reason),
         },
     }
 }
@@ -792,9 +790,7 @@ fn primitive_tactic_to_isabelle(tactic: &TacticExpr) -> Option<String> {
         TacticExpr::Trivial => "by simp".to_string(),
         TacticExpr::Assumption => "by assumption".to_string(),
         TacticExpr::Reflexivity => "by (rule refl)".to_string(),
-        TacticExpr::Auto { with_hints } if with_hints.iter().count() == 0 => {
-            "by auto".to_string()
-        }
+        TacticExpr::Auto { with_hints } if with_hints.iter().count() == 0 => "by auto".to_string(),
         TacticExpr::Ring => "by algebra".to_string(),
         TacticExpr::Field => "by algebra".to_string(),
         TacticExpr::Omega => "by linarith".to_string(),
@@ -847,9 +843,7 @@ fn primitive_tactic_to_coq(tactic: &TacticExpr) -> Option<String> {
         TacticExpr::Trivial => "trivial.".to_string(),
         TacticExpr::Assumption => "assumption.".to_string(),
         TacticExpr::Reflexivity => "reflexivity.".to_string(),
-        TacticExpr::Auto { with_hints } if with_hints.iter().count() == 0 => {
-            "auto.".to_string()
-        }
+        TacticExpr::Auto { with_hints } if with_hints.iter().count() == 0 => "auto.".to_string(),
         TacticExpr::Ring => "ring.".to_string(),
         TacticExpr::Field => "field.".to_string(),
         TacticExpr::Omega => "lia.".to_string(), // modern Coq uses lia for omega

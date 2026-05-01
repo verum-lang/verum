@@ -9,8 +9,8 @@
 
 use verum_kernel::diakrisis_bridge::{BridgeAudit, BridgeId};
 use verum_kernel::infinity_category::{
-    CellLevel, InfinityCategory, InfinityMorphism, compose,
-    compose_is_associative, is_equivalence_at,
+    CellLevel, InfinityCategory, InfinityMorphism, compose, compose_is_associative,
+    is_equivalence_at,
 };
 use verum_kernel::ordinal::Ordinal;
 
@@ -59,9 +59,14 @@ fn ordinal_lt_is_antisymmetric() {
     for (a, b) in &pairs {
         let ab = a.lt(b);
         let ba = b.lt(a);
-        assert!(!(ab && ba),
+        assert!(
+            !(ab && ba),
             "antisymmetry violated: {} < {} AND {} < {}",
-            a.render(), b.render(), b.render(), a.render());
+            a.render(),
+            b.render(),
+            b.render(),
+            a.render()
+        );
     }
 }
 
@@ -88,10 +93,15 @@ fn ordinal_lt_is_transitive() {
                 let b = &chain[j];
                 let c = &chain[k];
                 if a.lt(b) && b.lt(c) {
-                    assert!(a.lt(c),
+                    assert!(
+                        a.lt(c),
                         "transitivity violated: {} < {} < {}, but NOT {} < {}",
-                        a.render(), b.render(), c.render(),
-                        a.render(), c.render());
+                        a.render(),
+                        b.render(),
+                        c.render(),
+                        a.render(),
+                        c.render()
+                    );
                 }
             }
         }
@@ -111,9 +121,13 @@ fn ordinal_succ_strictly_greater() {
     ];
     for a in &candidates {
         let next = a.succ();
-        assert!(a.lt(&next),
+        assert!(
+            a.lt(&next),
             "{} should be < {}.succ() = {}",
-            a.render(), a.render(), next.render());
+            a.render(),
+            a.render(),
+            next.render()
+        );
     }
 }
 
@@ -123,8 +137,10 @@ fn ordinal_sup_empty() {
     // smallest ordinal (0). Our implementation: `parts.iter().all(p)`
     // on empty iter returns true vacuously — so empty Sup < anything.
     let empty_sup = Ordinal::Sup(vec![]);
-    assert!(empty_sup.lt(&Ordinal::Finite(1)),
-        "empty Sup should be < every nonzero ordinal");
+    assert!(
+        empty_sup.lt(&Ordinal::Finite(1)),
+        "empty Sup should be < every nonzero ordinal"
+    );
     assert!(empty_sup.lt(&Ordinal::Omega));
 }
 
@@ -160,8 +176,7 @@ fn ordinal_render_produces_distinct_outputs() {
     ];
     let mut seen = std::collections::HashSet::new();
     for r in &renders {
-        assert!(seen.insert(r.clone()),
-            "render() collision on {:?}", r);
+        assert!(seen.insert(r.clone()), "render() collision on {:?}", r);
     }
 }
 
@@ -213,11 +228,13 @@ fn infinity_morphism_is_identity_strict() {
     let pseudo_id = InfinityMorphism {
         name: verum_common::Text::from("id_X"),
         source: verum_common::Text::from("X"),
-        target: verum_common::Text::from("Y"),  // DIFFERENT target
+        target: verum_common::Text::from("Y"), // DIFFERENT target
         cell: CellLevel::Morphism,
     };
-    assert!(!pseudo_id.is_identity(),
-        "morphism with id_X name but different source/target must NOT be identity");
+    assert!(
+        !pseudo_id.is_identity(),
+        "morphism with id_X name but different source/target must NOT be identity"
+    );
 }
 
 #[test]
@@ -229,8 +246,10 @@ fn infinity_morphism_is_identity_name_required() {
         target: verum_common::Text::from("X"),
         cell: CellLevel::Morphism,
     };
-    assert!(!endo.is_identity(),
-        "endomorphism without id_ name must NOT be classified as identity");
+    assert!(
+        !endo.is_identity(),
+        "endomorphism without id_ name must NOT be classified as identity"
+    );
 }
 
 #[test]
@@ -284,8 +303,10 @@ fn compose_associativity_at_higher_cell_level() {
         target: verum_common::Text::from("D"),
         cell: CellLevel::TwoCell,
     };
-    assert!(compose_is_associative(&f, &g, &h),
-        "V0 strict-associativity holds at level 2 (V1 will weaken to associator-up-to-2-cell)");
+    assert!(
+        compose_is_associative(&f, &g, &h),
+        "V0 strict-associativity holds at level 2 (V1 will weaken to associator-up-to-2-cell)"
+    );
 }
 
 #[test]
@@ -341,12 +362,13 @@ fn id_x_at_finite_level_is_decidable() {
     for n in 0..10 {
         let mut audit = BridgeAudit::new();
         let id = InfinityMorphism::identity("X");
-        let result = is_equivalence_at(
-            &id, &Ordinal::Finite(n), &mut audit, "msfs-thm-5.1",
-        );
+        let result = is_equivalence_at(&id, &Ordinal::Finite(n), &mut audit, "msfs-thm-5.1");
         assert!(result, "id_X must be (∞,{})-equivalence", n);
-        assert!(audit.is_decidable(),
-            "id_X at level {} must be decidable (zero bridge admits)", n);
+        assert!(
+            audit.is_decidable(),
+            "id_X at level {} must be decidable (zero bridge admits)",
+            n
+        );
     }
 }
 
@@ -362,8 +384,10 @@ fn non_identity_at_omega_records_bridge() {
         cell: CellLevel::Morphism,
     };
     is_equivalence_at(&f, &Ordinal::Omega, &mut audit, "non-id-omega");
-    assert!(!audit.is_decidable(),
-        "non-identity at limit level must invoke a bridge admit");
+    assert!(
+        !audit.is_decidable(),
+        "non-identity at limit level must invoke a bridge admit"
+    );
 }
 
 #[test]
@@ -373,8 +397,10 @@ fn identity_at_kappa_decidable() {
     let mut audit = BridgeAudit::new();
     let id = InfinityMorphism::identity("X");
     is_equivalence_at(&id, &Ordinal::Kappa(1), &mut audit, "id-kappa");
-    assert!(audit.is_decidable(),
-        "identity at κ_1 should still be decidable — id is identity at every level");
+    assert!(
+        audit.is_decidable(),
+        "identity at κ_1 should still be decidable — id is identity at every level"
+    );
 }
 
 // =============================================================================
@@ -421,6 +447,8 @@ fn equivalence_audit_grows_monotonically_under_compose_calls() {
     let count_after_f = audit.admits().len();
     is_equivalence_at(&g, &Ordinal::Omega, &mut audit, "ctx-g");
     let count_after_g = audit.admits().len();
-    assert!(count_after_g >= count_after_f,
-        "audit count must grow monotonically");
+    assert!(
+        count_after_g >= count_after_f,
+        "audit count must grow monotonically"
+    );
 }

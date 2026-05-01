@@ -211,7 +211,10 @@ impl std::fmt::Debug for MetaContext {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MetaContext")
             .field("elaborators", &self.elaborators.keys().collect::<Vec<_>>())
-            .field("reflected_goals", &self.reflected_goals.keys().collect::<Vec<_>>())
+            .field(
+                "reflected_goals",
+                &self.reflected_goals.keys().collect::<Vec<_>>(),
+            )
             .finish()
     }
 }
@@ -299,19 +302,14 @@ mod tests {
             other => other.clone(),
         });
         let suffix: Elaborator = std::sync::Arc::new(|arg| match arg {
-            MetaTerm::Quote(s) => {
-                MetaTerm::Quote(Text::from(format!("{}!", s.as_str())))
-            }
+            MetaTerm::Quote(s) => MetaTerm::Quote(Text::from(format!("{}!", s.as_str()))),
             other => other.clone(),
         });
         ctx.register_elaborator("upcase", upcase);
         ctx.register_elaborator("bang", suffix);
 
         // bang(upcase(⌜hi⌝)) ↦ bang(⌜HI⌝) ↦ ⌜HI!⌝
-        let term = MetaTerm::custom(
-            "bang",
-            MetaTerm::custom("upcase", MetaTerm::quote("hi")),
-        );
+        let term = MetaTerm::custom("bang", MetaTerm::custom("upcase", MetaTerm::quote("hi")));
         assert_eq!(ctx.eval(&term), MetaTerm::quote("HI!"));
     }
 
@@ -354,10 +352,7 @@ mod tests {
         ctx.register_elaborator("id", id);
 
         // id(▸⌜x⌝) ↦ id(⌜x⌝) ↦ ⌜x⌝
-        let term = MetaTerm::custom(
-            "id",
-            MetaTerm::splice(MetaTerm::quote("x")),
-        );
+        let term = MetaTerm::custom("id", MetaTerm::splice(MetaTerm::quote("x")));
         assert_eq!(ctx.eval(&term), MetaTerm::quote("x"));
     }
 

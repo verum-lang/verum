@@ -476,19 +476,21 @@ impl VTestConfig {
         // Validate level
         let level = self.filter.level.to_uppercase();
         if level != "ALL" && Level::from_str(&level).is_err() {
-            return Err(ConfigError::ValidationError(format!(
-                "Invalid level: {}. Valid options: L0, L1, L2, L3, L4, all",
-                self.filter.level
-            ).into()));
+            return Err(ConfigError::ValidationError(
+                format!(
+                    "Invalid level: {}. Valid options: L0, L1, L2, L3, L4, all",
+                    self.filter.level
+                )
+                .into(),
+            ));
         }
 
         // Validate tiers
         for tier in &self.filter.tiers {
             if *tier > 3 {
-                return Err(ConfigError::ValidationError(format!(
-                    "Invalid tier: {}. Valid options: 0, 1, 2, 3",
-                    tier
-                ).into()));
+                return Err(ConfigError::ValidationError(
+                    format!("Invalid tier: {}. Valid options: 0, 1, 2, 3", tier).into(),
+                ));
             }
         }
 
@@ -574,12 +576,20 @@ impl VTestConfig {
 
     /// Get include tags as set.
     pub fn include_tags(&self) -> Set<Text> {
-        self.filter.include_tags.iter().map(|s| s.clone().into()).collect()
+        self.filter
+            .include_tags
+            .iter()
+            .map(|s| s.clone().into())
+            .collect()
     }
 
     /// Get exclude tags as set.
     pub fn exclude_tags(&self) -> Set<Text> {
-        self.filter.exclude_tags.iter().map(|s| s.clone().into()).collect()
+        self.filter
+            .exclude_tags
+            .iter()
+            .map(|s| s.clone().into())
+            .collect()
     }
 
     /// Get number of jobs.
@@ -591,8 +601,8 @@ impl VTestConfig {
 /// Write a default config file.
 pub fn write_default_config(path: &Path) -> Result<(), ConfigError> {
     let config = VTestConfig::default();
-    let content =
-        toml::to_string_pretty(&config).map_err(|e| ConfigError::ValidationError(e.to_string().into()))?;
+    let content = toml::to_string_pretty(&config)
+        .map_err(|e| ConfigError::ValidationError(e.to_string().into()))?;
 
     // Add helpful comments
     let content = format!(

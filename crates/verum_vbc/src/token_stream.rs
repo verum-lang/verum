@@ -988,7 +988,9 @@ pub fn serialize_tokens(
 ///
 
 /// This is the primary deserialization entry point for the extraction phase.
-pub fn deserialize_tokens(data: &[u8]) -> TokenStreamResult<(Vec<verum_lexer::Token>, Option<verum_common::span::Span>)> {
+pub fn deserialize_tokens(
+    data: &[u8],
+) -> TokenStreamResult<(Vec<verum_lexer::Token>, Option<verum_common::span::Span>)> {
     // Validate minimum size (header only)
     if data.len() < 16 {
         return Err(TokenStreamError::DataTooShort {
@@ -1051,8 +1053,11 @@ pub fn create_token_stream_object(
     span: Option<&verum_common::span::Span>,
 ) -> Result<crate::interpreter::Object, crate::interpreter::InterpreterError> {
     // Serialize tokens
-    let data = serialize_tokens(tokens, span)
-        .map_err(|e| crate::interpreter::InterpreterError::Panic { message: e.to_string() })?;
+    let data = serialize_tokens(tokens, span).map_err(|e| {
+        crate::interpreter::InterpreterError::Panic {
+            message: e.to_string(),
+        }
+    })?;
 
     // Allocate heap object with the serialized data
     heap.alloc_with_init(TypeId::TOKEN_STREAM, data.len(), |buf| {
@@ -1120,8 +1125,8 @@ pub fn extract_token_stream_from_object(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use verum_common::span::{FileId, Span};
     use verum_common::Maybe;
+    use verum_common::span::{FileId, Span};
     use verum_lexer::{IntegerLiteral, Token, TokenKind};
 
     fn make_span(start: u32, end: u32) -> Span {
@@ -1186,13 +1191,15 @@ mod tests {
 
     #[test]
     fn test_roundtrip_keywords() {
-        let keywords = [TokenKind::Let,
+        let keywords = [
+            TokenKind::Let,
             TokenKind::Fn,
             TokenKind::Is,
             TokenKind::Type,
             TokenKind::If,
             TokenKind::Else,
-            TokenKind::Return];
+            TokenKind::Return,
+        ];
 
         let tokens: Vec<Token> = keywords
             .iter()
@@ -1214,13 +1221,15 @@ mod tests {
 
     #[test]
     fn test_roundtrip_operators() {
-        let operators = [TokenKind::Plus,
+        let operators = [
+            TokenKind::Plus,
             TokenKind::Minus,
             TokenKind::Star,
             TokenKind::Slash,
             TokenKind::EqEq,
             TokenKind::FatArrow,
-            TokenKind::RArrow];
+            TokenKind::RArrow,
+        ];
 
         let tokens: Vec<Token> = operators
             .iter()
@@ -1257,10 +1266,20 @@ mod tests {
 
         // Actual size should be <= estimate
         let tokens: Vec<Token> = (0u32..10)
-            .map(|i| Token::new(TokenKind::Ident(format!("x{}", i).into()), make_span(i, i + 1)))
+            .map(|i| {
+                Token::new(
+                    TokenKind::Ident(format!("x{}", i).into()),
+                    make_span(i, i + 1),
+                )
+            })
             .collect();
         let actual = serialize_tokens(&tokens, None).unwrap().len();
-        assert!(actual <= estimate, "actual {} > estimate {}", actual, estimate);
+        assert!(
+            actual <= estimate,
+            "actual {} > estimate {}",
+            actual,
+            estimate
+        );
     }
 
     // =========================================================================
@@ -1451,15 +1470,27 @@ mod tests {
 
         let tokens = vec![
             Token::new(
-                TokenKind::Float(FloatLiteral { value: 3.14, suffix: Maybe::None, raw: "3.14".into() }),
+                TokenKind::Float(FloatLiteral {
+                    value: 3.14,
+                    suffix: Maybe::None,
+                    raw: "3.14".into(),
+                }),
                 make_span(0, 4),
             ),
             Token::new(
-                TokenKind::Float(FloatLiteral { value: 2.71828, suffix: Maybe::Some("f32".into()), raw: "2.71828".into() }),
+                TokenKind::Float(FloatLiteral {
+                    value: 2.71828,
+                    suffix: Maybe::Some("f32".into()),
+                    raw: "2.71828".into(),
+                }),
                 make_span(5, 14),
             ),
             Token::new(
-                TokenKind::Float(FloatLiteral { value: 1e10, suffix: Maybe::None, raw: "1e10".into() }),
+                TokenKind::Float(FloatLiteral {
+                    value: 1e10,
+                    suffix: Maybe::None,
+                    raw: "1e10".into(),
+                }),
                 make_span(15, 19),
             ),
         ];
@@ -1537,7 +1568,12 @@ mod tests {
 
         // Create a large token sequence (1000 tokens)
         let tokens: Vec<Token> = (0u32..1000)
-            .map(|i| Token::new(TokenKind::Ident(format!("var_{}", i).into()), make_span(i * 10, i * 10 + 5)))
+            .map(|i| {
+                Token::new(
+                    TokenKind::Ident(format!("var_{}", i).into()),
+                    make_span(i * 10, i * 10 + 5),
+                )
+            })
             .collect();
 
         let span = make_span(0, 10000);
@@ -1560,7 +1596,10 @@ mod tests {
 
         // Create a very long identifier (10KB)
         let long_name: String = (0..10000).map(|_| 'x').collect();
-        let tokens = vec![Token::new(TokenKind::Ident(long_name.clone().into()), make_span(0, 10000))];
+        let tokens = vec![Token::new(
+            TokenKind::Ident(long_name.clone().into()),
+            make_span(0, 10000),
+        )];
 
         let serialized = serialize_tokens(&tokens, None).unwrap();
         let obj = heap.alloc_token_stream(&serialized).unwrap();

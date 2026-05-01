@@ -8,8 +8,7 @@
 use crate::config::Manifest;
 use crate::error::{CliError, Result};
 use crate::registry::{
-    CacheManager, LockedCog, Lockfile, CogMetadata, CogSigner, RegistryClient,
-    SearchResult,
+    CacheManager, CogMetadata, CogSigner, LockedCog, Lockfile, RegistryClient, SearchResult,
 };
 use crate::ui;
 use colored::Colorize;
@@ -102,10 +101,7 @@ pub fn publish(dry_run: bool, allow_dirty: bool) -> Result<()> {
         ui::info(&format!("{}", "[DRY RUN] Would publish:".bold()));
         ui::info(&format!("  Name: {}", manifest.cog.name));
         ui::info(&format!("  Version: {}", manifest.cog.version));
-        ui::info(&format!(
-            "  Size: {} bytes",
-            fs::metadata(&cog_file)?.len()
-        ));
+        ui::info(&format!("  Size: {} bytes", fs::metadata(&cog_file)?.len()));
         ui::info(&format!("  Dependencies: {}", metadata.dependencies.len()));
         ui::info("");
         ui::success("Dry run complete - cog is valid for publishing");
@@ -328,9 +324,7 @@ pub fn install(name: &str, version: Option<Text>) -> Result<()> {
         if valid {
             ui::success("  Signature verified");
         } else {
-            return Err(CliError::Custom(
-                "Cog signature verification failed".into(),
-            ));
+            return Err(CliError::Custom("Cog signature verification failed".into()));
         }
     }
 
@@ -466,9 +460,7 @@ fn calculate_checksum(path: &Path) -> Result<String> {
 }
 
 /// Sign cog if signing key exists
-fn sign_cog_if_key_exists(
-    cog_path: &Path,
-) -> Result<Option<crate::registry::CogSignature>> {
+fn sign_cog_if_key_exists(cog_path: &Path) -> Result<Option<crate::registry::CogSignature>> {
     // Look for signing key in standard locations
     let key_paths = [
         dirs::config_dir()

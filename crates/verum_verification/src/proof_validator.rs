@@ -1067,7 +1067,14 @@ impl ExprTypeContext {
             }
 
             // Call expressions (constructors) unify if func and args match
-            (ExprKind::Call { func: f1, args: a1, .. }, ExprKind::Call { func: f2, args: a2, .. }) => {
+            (
+                ExprKind::Call {
+                    func: f1, args: a1, ..
+                },
+                ExprKind::Call {
+                    func: f2, args: a2, ..
+                },
+            ) => {
                 self.unify(f1, f2, span)?;
                 if a1.len() != a2.len() {
                     return Err(ValidationError::TypeError {
@@ -1151,7 +1158,14 @@ impl ExprTypeContext {
                         .zip(t2.iter())
                         .all(|(a, b)| self.exprs_structurally_equal(a, b))
             }
-            (ExprKind::Call { func: f1, args: a1, .. }, ExprKind::Call { func: f2, args: a2, .. }) => {
+            (
+                ExprKind::Call {
+                    func: f1, args: a1, ..
+                },
+                ExprKind::Call {
+                    func: f2, args: a2, ..
+                },
+            ) => {
                 self.exprs_structurally_equal(f1, f2)
                     && a1.len() == a2.len()
                     && a1
@@ -1298,9 +1312,7 @@ impl HypothesisContext {
     /// recognise a target proposition as available, regardless of which
     /// name it was bound to.
     pub fn iter_propositions(&self) -> impl Iterator<Item = (&Text, &Expr)> + '_ {
-        self.scopes
-            .iter()
-            .flat_map(|scope| scope.hypotheses.iter())
+        self.scopes.iter().flat_map(|scope| scope.hypotheses.iter())
     }
 }
 
@@ -2293,8 +2305,7 @@ impl ProofValidator {
                 let expected_target = self.apply_bindings(&rule.lhs, &reverse_bindings);
                 if self.expr_eq(&expected_target, target) {
                     for condition in &rule.conditions {
-                        let instantiated_cond =
-                            self.apply_bindings(condition, &reverse_bindings);
+                        let instantiated_cond = self.apply_bindings(condition, &reverse_bindings);
                         self.discharge_rewrite_condition(&rule.name, &instantiated_cond)?;
                     }
                     return Ok(());
@@ -2462,11 +2473,8 @@ impl ProofValidator {
                     Ok(())
                 } else {
                     Err(ValidationError::RewriteError {
-                        message: format!(
-                            "{} tactic requires arithmetic expressions",
-                            rule_str
-                        )
-                        .into(),
+                        message: format!("{} tactic requires arithmetic expressions", rule_str)
+                            .into(),
                     })
                 }
             }
@@ -2729,8 +2737,13 @@ impl ProofValidator {
             }
 
             // Call pattern
-            ExprKind::Call { func: pf, args: pa, .. } => {
-                if let ExprKind::Call { func: ef, args: ea, .. } = &expr.kind {
+            ExprKind::Call {
+                func: pf, args: pa, ..
+            } => {
+                if let ExprKind::Call {
+                    func: ef, args: ea, ..
+                } = &expr.kind
+                {
                     self.pattern_match(pf, ef, bindings)
                         && pa.len() == ea.len()
                         && pa
@@ -4042,7 +4055,11 @@ impl ProofValidator {
                     StmtKind::Errdefer(expr) => {
                         StmtKind::Errdefer(self.normalize_types_impl(expr, depth))
                     }
-                    StmtKind::Provide { context, alias, value } => StmtKind::Provide {
+                    StmtKind::Provide {
+                        context,
+                        alias,
+                        value,
+                    } => StmtKind::Provide {
                         context: context.clone(),
                         alias: alias.clone(),
                         value: Heap::new(self.normalize_types_impl(value, depth)),
@@ -4545,8 +4562,7 @@ impl ProofValidator {
         // identical to the original, the var is unused.
         if self.config.check_well_founded {
             let probe = self.make_zero();
-            let probed =
-                self.substitute_induction_var(&property_template, var, &probe);
+            let probed = self.substitute_induction_var(&property_template, var, &probe);
             if self.expr_eq(&property_template, &probed) {
                 return Err(ValidationError::InductionError {
                     message: format!(
@@ -5174,17 +5190,18 @@ impl ProofValidator {
             // gate between a proof term and its claimed conclusion, so an
             // unknown rule has to be a hard error, never a silent pass.
             _ => {
-                let (schema_premises, conclusion) = self.lookup_registered_rule(rule).ok_or_else(
-                    || ValidationError::ValidationFailed {
-                        message: format!(
-                            "unknown inference rule '{}'. Register it via \
+                let (schema_premises, conclusion) =
+                    self.lookup_registered_rule(rule).ok_or_else(|| {
+                        ValidationError::ValidationFailed {
+                            message: format!(
+                                "unknown inference rule '{}'. Register it via \
                              ProofValidator::register_inference_rule before \
                              referencing it in a proof.",
-                            rule
-                        )
-                        .into(),
-                    },
-                )?;
+                                rule
+                            )
+                            .into(),
+                        }
+                    })?;
 
                 // Arity check: caller must supply exactly the number of
                 // premises the rule schema declares. Unification with the
@@ -6422,10 +6439,7 @@ impl ProofValidator {
         // Full apply-def soundness — verifying
         // `expected = original[name := body]` — requires
         // substitution machinery and is tracked separately.
-        if !matches!(
-            def_conclusion.kind,
-            ExprKind::Binary { op: BinOp::Eq, .. }
-        ) {
+        if !matches!(def_conclusion.kind, ExprKind::Binary { op: BinOp::Eq, .. }) {
             return Err(ValidationError::ValidationFailed {
                 message: format!(
                     "apply_def: def_proof concludes {}, which is not an equality. \
@@ -6688,7 +6702,10 @@ impl ProofValidator {
         let is_pullable = match &formula.kind {
             ExprKind::Binary { left, right, .. } => {
                 matches!(left.kind, ExprKind::Forall { .. } | ExprKind::Exists { .. })
-                    || matches!(right.kind, ExprKind::Forall { .. } | ExprKind::Exists { .. })
+                    || matches!(
+                        right.kind,
+                        ExprKind::Forall { .. } | ExprKind::Exists { .. }
+                    )
             }
             _ => false,
         };
@@ -6777,7 +6794,10 @@ impl ProofValidator {
         // eliminate from a non-quantified formula. Full
         // free-variable check (verifying the bound variable is
         // actually unused in the body) is tracked separately.
-        if !matches!(formula.kind, ExprKind::Forall { .. } | ExprKind::Exists { .. }) {
+        if !matches!(
+            formula.kind,
+            ExprKind::Forall { .. } | ExprKind::Exists { .. }
+        ) {
             return Err(ValidationError::ValidationFailed {
                 message: format!(
                     "elim_unused_vars: input {} is not a quantifier — \
@@ -7671,7 +7691,11 @@ impl ProofValidator {
             StmtKind::Errdefer(expr) => {
                 StmtKind::Errdefer(self.substitute_expr(expr, instantiation, shadowed))
             }
-            StmtKind::Provide { context, alias, value } => {
+            StmtKind::Provide {
+                context,
+                alias,
+                value,
+            } => {
                 let new_value = self.substitute_expr(value, instantiation, shadowed);
                 StmtKind::Provide {
                     context: context.clone(),
@@ -7870,7 +7894,8 @@ impl ProofValidator {
             PatternKind::Range { .. } => {}
             PatternKind::Paren(inner) => {
                 self.collect_pattern_bindings(inner, shadowed);
-            }            PatternKind::View { pattern, .. } => {
+            }
+            PatternKind::View { pattern, .. } => {
                 self.collect_pattern_bindings(pattern, shadowed);
             }
             PatternKind::Active { .. } => {
@@ -7886,7 +7911,10 @@ impl ProofValidator {
                 // TypeTest pattern binds the identifier to the narrowed type
                 shadowed.insert(Text::from(binding.name.as_str()));
             }
-            PatternKind::Stream { head_patterns, rest } => {
+            PatternKind::Stream {
+                head_patterns,
+                rest,
+            } => {
                 // Stream pattern: stream[first, second, ...rest]
                 // Collect bindings from head patterns and the rest identifier
                 for p in head_patterns.iter() {
@@ -8049,7 +8077,14 @@ impl ProofValidator {
             }
 
             // Function calls
-            (ExprKind::Call { func: f1, args: a1, .. }, ExprKind::Call { func: f2, args: a2, .. }) => {
+            (
+                ExprKind::Call {
+                    func: f1, args: a1, ..
+                },
+                ExprKind::Call {
+                    func: f2, args: a2, ..
+                },
+            ) => {
                 self.expr_eq_impl(f1, f2, left_bindings, right_bindings, depth)
                     && a1.len() == a2.len()
                     && a1.iter().zip(a2.iter()).all(|(e1, e2)| {
@@ -9512,15 +9547,24 @@ mod tests {
         // Build a real distributivity-shaped formula:
         //  a * (b + c) = a * b + a * c
         let a = Expr::new(
-            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new("a", Span::dummy()))),
+            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new(
+                "a",
+                Span::dummy(),
+            ))),
             Span::dummy(),
         );
         let b = Expr::new(
-            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new("b", Span::dummy()))),
+            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new(
+                "b",
+                Span::dummy(),
+            ))),
             Span::dummy(),
         );
         let c = Expr::new(
-            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new("c", Span::dummy()))),
+            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new(
+                "c",
+                Span::dummy(),
+            ))),
             Span::dummy(),
         );
         let mul = |l: Expr, r: Expr| {
@@ -9674,7 +9718,10 @@ mod tests {
 
         // Build an actual ∃x. P(x): Exists { bindings: [x: Int], body: P }.
         let p = Expr::new(
-            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new("P", Span::dummy()))),
+            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new(
+                "P",
+                Span::dummy(),
+            ))),
             Span::dummy(),
         );
         let pat = verum_ast::Pattern {
@@ -9776,11 +9823,17 @@ mod tests {
 
         // Build (∀x. P) ∧ Q — a Binary whose left operand is a Forall.
         let p = Expr::new(
-            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new("P", Span::dummy()))),
+            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new(
+                "P",
+                Span::dummy(),
+            ))),
             Span::dummy(),
         );
         let q = Expr::new(
-            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new("Q", Span::dummy()))),
+            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new(
+                "Q",
+                Span::dummy(),
+            ))),
             Span::dummy(),
         );
         let formula = Expr::new(
@@ -9800,7 +9853,11 @@ mod tests {
         };
 
         let result = validator.validate(&proof, &result_expr);
-        assert!(result.is_ok(), "PullQuantifier with quantified subterm should validate: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "PullQuantifier with quantified subterm should validate: {:?}",
+            result
+        );
     }
 
     #[test]
@@ -9828,11 +9885,17 @@ mod tests {
 
         // Build ∀x. (P ∧ Q) — a Forall whose body is a Binary.
         let p = Expr::new(
-            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new("P", Span::dummy()))),
+            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new(
+                "P",
+                Span::dummy(),
+            ))),
             Span::dummy(),
         );
         let q = Expr::new(
-            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new("Q", Span::dummy()))),
+            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new(
+                "Q",
+                Span::dummy(),
+            ))),
             Span::dummy(),
         );
         let body = Expr::new(
@@ -9853,7 +9916,11 @@ mod tests {
         };
 
         let result = validator.validate(&proof, &result_expr);
-        assert!(result.is_ok(), "PushQuantifier with binary body should validate: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "PushQuantifier with binary body should validate: {:?}",
+            result
+        );
     }
 
     #[test]
@@ -9878,7 +9945,10 @@ mod tests {
 
         // Build ∀x. P — quantifier with body that doesn't mention x.
         let p = Expr::new(
-            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new("P", Span::dummy()))),
+            ExprKind::Path(verum_ast::Path::single(verum_ast::Ident::new(
+                "P",
+                Span::dummy(),
+            ))),
             Span::dummy(),
         );
         let formula = make_forall_x(p.clone());
@@ -9890,7 +9960,11 @@ mod tests {
         };
 
         let result = validator.validate(&proof, &result_expr);
-        assert!(result.is_ok(), "ElimUnusedVars from quantifier should validate: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "ElimUnusedVars from quantifier should validate: {:?}",
+            result
+        );
     }
 
     #[test]

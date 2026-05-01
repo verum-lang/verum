@@ -61,14 +61,20 @@ impl Subtyping {
     /// Get variance for each type parameter of a Named type.
     /// Uses well-known type names for standard library types,
     /// defaults to covariant for unknown types (safe for read-only containers).
-    fn get_named_type_variances(&self, path: &verum_ast::ty::Path, arg_count: usize) -> List<Variance> {
+    fn get_named_type_variances(
+        &self,
+        path: &verum_ast::ty::Path,
+        arg_count: usize,
+    ) -> List<Variance> {
         use verum_common::well_known_types::type_names as wkt;
-        let type_name = path.segments.last().map(|seg| {
-            match seg {
+        let type_name = path
+            .segments
+            .last()
+            .map(|seg| match seg {
                 verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
                 _ => "",
-            }
-        }).unwrap_or("");
+            })
+            .unwrap_or("");
         Self::variances_for_type_name(type_name, arg_count)
     }
 
@@ -83,8 +89,9 @@ impl Subtyping {
         use verum_common::well_known_types::type_names as wkt;
         match name {
             // Invariant types (mutable interior)
-            "Cell" | "RefCell" | "Atomic" | "Shared" | "Mutex" | "RwLock" =>
-                vec![Variance::Invariant; arg_count].into(),
+            "Cell" | "RefCell" | "Atomic" | "Shared" | "Mutex" | "RwLock" => {
+                vec![Variance::Invariant; arg_count].into()
+            }
             // Map: keys invariant, values covariant
             n if n == wkt::MAP || n == "HashMap" || n == "TreeMap" => {
                 if arg_count >= 2 {
@@ -116,7 +123,11 @@ impl Subtyping {
     pub fn is_subtype(&self, t1: &Type, t2: &Type) -> bool {
         // Depth guard to prevent stack overflow on deeply nested or cyclic types
         const MAX_SUBTYPE_DEPTH: u32 = 128;
-        let depth = SUBTYPE_DEPTH.with(|d| { let v = d.get(); d.set(v + 1); v + 1 });
+        let depth = SUBTYPE_DEPTH.with(|d| {
+            let v = d.get();
+            d.set(v + 1);
+            v + 1
+        });
         struct SubtypeDepthGuard;
         impl Drop for SubtypeDepthGuard {
             fn drop(&mut self) {
@@ -149,7 +160,9 @@ impl Subtyping {
                         match variances.get(i).copied().unwrap_or(Variance::Covariant) {
                             Variance::Covariant => self.is_subtype(arg1, arg2),
                             Variance::Contravariant => self.is_subtype(arg2, arg1),
-                            Variance::Invariant => self.is_subtype(arg1, arg2) && self.is_subtype(arg2, arg1),
+                            Variance::Invariant => {
+                                self.is_subtype(arg1, arg2) && self.is_subtype(arg2, arg1)
+                            }
                         }
                     })
             }
@@ -178,7 +191,9 @@ impl Subtyping {
                         match variances.get(i).copied().unwrap_or(Variance::Covariant) {
                             Variance::Covariant => self.is_subtype(arg1, arg2),
                             Variance::Contravariant => self.is_subtype(arg2, arg1),
-                            Variance::Invariant => self.is_subtype(arg1, arg2) && self.is_subtype(arg2, arg1),
+                            Variance::Invariant => {
+                                self.is_subtype(arg1, arg2) && self.is_subtype(arg2, arg1)
+                            }
                         }
                     })
             }
@@ -187,12 +202,14 @@ impl Subtyping {
             // Handles cases where the same type is represented differently
             (Generic { name, args: a1 }, Named { path, args: a2 })
             | (Named { path, args: a2 }, Generic { name, args: a1 }) => {
-                let path_name = path.segments.last().map(|seg| {
-                    match seg {
+                let path_name = path
+                    .segments
+                    .last()
+                    .map(|seg| match seg {
                         verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
                         _ => "",
-                    }
-                }).unwrap_or("");
+                    })
+                    .unwrap_or("");
 
                 if name.as_str() != path_name || a1.len() != a2.len() {
                     return false;
@@ -321,14 +338,20 @@ impl Subtyping {
             // Array literal to List coercion: [1, 2, 3] infers as List<Int>, array literals coerce to List<T> - Array literals infer/coerce to List<T>
             // [T; N] <: List<T> - arrays can be coerced to lists
             (
-                Array { element: e1, size: _ },
+                Array {
+                    element: e1,
+                    size: _,
+                },
                 Generic { name, args },
             ) if self.is_array_coercible(name.as_str()) && args.len() == 1 => {
                 self.is_subtype(e1, &args[0])
             }
             // Array -> Named collection coercion (when collection type is parsed as Named)
             (
-                Array { element: e1, size: _ },
+                Array {
+                    element: e1,
+                    size: _,
+                },
                 Named { path, args },
             ) if self.path_is_array_coercible(path) && args.len() == 1 => {
                 self.is_subtype(e1, &args[0])
@@ -338,7 +361,13 @@ impl Subtyping {
             // [T; N] <: [T] - arrays can be coerced to slices
             // This enables &[T; N] -> &[T] through reference subtyping
             // Array/slice coercion: fixed-size arrays [T; N] coerce to slices &[T] automatically
-            (Array { element: e1, size: _ }, Slice { element: e2 }) => self.is_subtype(e1, e2),
+            (
+                Array {
+                    element: e1,
+                    size: _,
+                },
+                Slice { element: e2 },
+            ) => self.is_subtype(e1, e2),
 
             // Slice subtyping (covariant in element type)
             // [S] <: [T] if S <: T
@@ -894,10 +923,8 @@ impl Subtyping {
                 }
 
                 // Create fresh type variables for the bound vars
-                let fresh_vars: List<Type> = vars1
-                    .iter()
-                    .map(|_| Type::Var(TypeVar::fresh()))
-                    .collect();
+                let fresh_vars: List<Type> =
+                    vars1.iter().map(|_| Type::Var(TypeVar::fresh())).collect();
 
                 // Substitute the fresh vars for both bodies
                 let mut subst1 = crate::ty::Substitution::new();
@@ -985,10 +1012,7 @@ impl Subtyping {
             // Capability-restricted to base type coercion
             // T with [Caps] <: T (forgetful upcast)
             // A capability-restricted value can be used where the unrestricted base is expected
-            (
-                CapabilityRestricted { base, .. },
-                t2,
-            ) => self.is_subtype(base, t2),
+            (CapabilityRestricted { base, .. }, t2) => self.is_subtype(base, t2),
 
             // Base type to capability-restricted: NOT allowed automatically
             // T </: T with [Caps] (would need to prove capabilities are available)
@@ -1015,7 +1039,6 @@ impl Subtyping {
             // unknown <: T only if T == unknown
             // This case is already handled by reflexivity (t1 == t2 => true)
             // So we don't need an explicit case here
-
             _ => false,
         }
     }

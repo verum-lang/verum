@@ -69,8 +69,8 @@
 
 use std::path::{Path, PathBuf};
 
-use verum_ast::decl::MountTreeKind;
 use verum_ast::ItemKind;
+use verum_ast::decl::MountTreeKind;
 use verum_common::Text;
 
 use crate::error::{ModuleError, ModuleResult};
@@ -210,17 +210,15 @@ fn synth_module_name(decl: &verum_ast::decl::MountDecl, rel_path: &str) -> Strin
 mod tests {
     use super::*;
     use verum_ast::FileId;
-    use verum_lexer::Lexer;
     use verum_fast_parser::VerumParser;
+    use verum_lexer::Lexer;
 
     fn parse_module_text(text: &str, file_id: FileId) -> verum_ast::Module {
         let lexer = Lexer::new(text, file_id);
         let parser = VerumParser::new();
         parser
             .parse_module(lexer, file_id)
-            .unwrap_or_else(|errs| {
-                panic!("parse failed: {:?}", errs)
-            })
+            .unwrap_or_else(|errs| panic!("parse failed: {:?}", errs))
     }
 
     #[test]
@@ -228,11 +226,7 @@ mod tests {
         let root = tempfile::TempDir::new().unwrap();
         let main_path = root.path().join("main.vr");
         let helper_path = root.path().join("helper.vr");
-        std::fs::write(
-            &main_path,
-            "module main;\nmount ./helper.vr;\n",
-        )
-        .unwrap();
+        std::fs::write(&main_path, "module main;\nmount ./helper.vr;\n").unwrap();
         std::fs::write(
             &helper_path,
             "module helper;\npublic fn ping() -> Int { 42 }\n",
@@ -245,13 +239,9 @@ mod tests {
             FileId::new(1),
         );
 
-        let resolved = resolve_file_mounts(
-            &mut loader,
-            &[(main_path.clone(), main_ast)],
-            |src| {
-                Ok(parse_module_text(src.source.as_str(), src.file_id))
-            },
-        )
+        let resolved = resolve_file_mounts(&mut loader, &[(main_path.clone(), main_ast)], |src| {
+            Ok(parse_module_text(src.source.as_str(), src.file_id))
+        })
         .expect("resolution should succeed");
 
         assert_eq!(resolved.len(), 1, "expected exactly one resolved file");
@@ -268,10 +258,7 @@ mod tests {
         std::fs::write(&helper, "module helper;\n").unwrap();
 
         let mut loader = ModuleLoader::new(root.path());
-        let main_ast = parse_module_text(
-            &std::fs::read_to_string(&main).unwrap(),
-            FileId::new(1),
-        );
+        let main_ast = parse_module_text(&std::fs::read_to_string(&main).unwrap(), FileId::new(1));
 
         let resolved = resolve_file_mounts(&mut loader, &[(main, main_ast)], |src| {
             Ok(parse_module_text(src.source.as_str(), src.file_id))
@@ -296,29 +283,17 @@ mod tests {
         std::fs::write(&shared, "module shared;\n").unwrap();
 
         let mut loader = ModuleLoader::new(root.path());
-        let a_ast = parse_module_text(
-            &std::fs::read_to_string(&a).unwrap(),
-            FileId::new(1),
-        );
-        let b_ast = parse_module_text(
-            &std::fs::read_to_string(&b).unwrap(),
-            FileId::new(2),
-        );
+        let a_ast = parse_module_text(&std::fs::read_to_string(&a).unwrap(), FileId::new(1));
+        let b_ast = parse_module_text(&std::fs::read_to_string(&b).unwrap(), FileId::new(2));
 
-        let resolved = resolve_file_mounts(
-            &mut loader,
-            &[(a, a_ast), (b, b_ast)],
-            |src| Ok(parse_module_text(src.source.as_str(), src.file_id)),
-        )
+        let resolved = resolve_file_mounts(&mut loader, &[(a, a_ast), (b, b_ast)], |src| {
+            Ok(parse_module_text(src.source.as_str(), src.file_id))
+        })
         .unwrap();
 
         // Shared file appears exactly once despite two
         // call sites referencing it.
-        assert_eq!(
-            resolved.len(),
-            1,
-            "diamond pattern must dedupe shared file"
-        );
+        assert_eq!(resolved.len(), 1, "diamond pattern must dedupe shared file");
         assert_eq!(resolved[0].synthetic_name, "shared");
     }
 
@@ -334,10 +309,7 @@ mod tests {
         std::fs::write(&leaf, "module leaf;\n").unwrap();
 
         let mut loader = ModuleLoader::new(root.path());
-        let a_ast = parse_module_text(
-            &std::fs::read_to_string(&a).unwrap(),
-            FileId::new(1),
-        );
+        let a_ast = parse_module_text(&std::fs::read_to_string(&a).unwrap(), FileId::new(1));
 
         let resolved = resolve_file_mounts(&mut loader, &[(a, a_ast)], |src| {
             Ok(parse_module_text(src.source.as_str(), src.file_id))
@@ -358,10 +330,7 @@ mod tests {
         std::fs::write(&a, "module a;\nmount ./missing.vr;\n").unwrap();
 
         let mut loader = ModuleLoader::new(root.path());
-        let a_ast = parse_module_text(
-            &std::fs::read_to_string(&a).unwrap(),
-            FileId::new(1),
-        );
+        let a_ast = parse_module_text(&std::fs::read_to_string(&a).unwrap(), FileId::new(1));
 
         let result = resolve_file_mounts(&mut loader, &[(a, a_ast)], |src| {
             Ok(parse_module_text(src.source.as_str(), src.file_id))

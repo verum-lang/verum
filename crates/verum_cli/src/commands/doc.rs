@@ -45,7 +45,12 @@ struct FunctionDoc {
     examples: List<Text>,
 }
 
-pub fn execute(open: bool, document_private_items: bool, _no_deps: bool, format: &str) -> Result<()> {
+pub fn execute(
+    open: bool,
+    document_private_items: bool,
+    _no_deps: bool,
+    format: &str,
+) -> Result<()> {
     let _doc_format = match format {
         "markdown" | "md" => DocFormat::Markdown,
         "json" => DocFormat::Json,
@@ -168,8 +173,8 @@ fn extract_functions_from_ast(
     _path: &Path,
 ) -> Result<List<FunctionDoc>> {
     use verum_ast::{FileId, ItemKind, Visibility, decl::FunctionParamKind};
-    use verum_lexer::Lexer;
     use verum_fast_parser::VerumParser;
+    use verum_lexer::Lexer;
 
     let file_id = FileId::new(0);
     let lexer = Lexer::new(content, file_id);
@@ -436,12 +441,18 @@ fn generate_file_doc(path: &Path, functions: &[FunctionDoc]) -> Result<Text> {
     html.push_str("<html>\n");
     html.push_str("<head>\n");
     html.push_str("  <meta charset=\"utf-8\">\n");
-    html.push_str(&format!("  <title>{}</title>\n", escape_html(&path.display().to_string())));
+    html.push_str(&format!(
+        "  <title>{}</title>\n",
+        escape_html(&path.display().to_string())
+    ));
     html.push_str("  <link rel=\"stylesheet\" href=\"../styles.css\">\n");
     html.push_str("</head>\n");
     html.push_str("<body>\n");
 
-    html.push_str(&format!("<h1>Module: {}</h1>\n", escape_html(&path.display().to_string())));
+    html.push_str(&format!(
+        "<h1>Module: {}</h1>\n",
+        escape_html(&path.display().to_string())
+    ));
 
     for func in functions {
         html.push_str("<div class=\"function-doc\">\n");
@@ -465,12 +476,16 @@ fn generate_file_doc(path: &Path, functions: &[FunctionDoc]) -> Result<Text> {
         };
         html.push_str(&format!(
             "<span class=\"badge {}\">{}</span>\n",
-            badge_class, escape_html(func.verification_status.as_str())
+            badge_class,
+            escape_html(func.verification_status.as_str())
         ));
 
         // Description
         if !func.description.is_empty() {
-            html.push_str(&format!("<p>{}</p>\n", escape_html(func.description.as_str())));
+            html.push_str(&format!(
+                "<p>{}</p>\n",
+                escape_html(func.description.as_str())
+            ));
         }
 
         // Cost information
@@ -558,7 +573,10 @@ fn generate_index(
     ));
 
     if let Some(ref desc) = metadata.description {
-        html.push_str(&format!("<p class=\"description\">{}</p>\n", escape_html(desc.as_str())));
+        html.push_str(&format!(
+            "<p class=\"description\">{}</p>\n",
+            escape_html(desc.as_str())
+        ));
     }
 
     html.push_str("<div class=\"stats\">\n");

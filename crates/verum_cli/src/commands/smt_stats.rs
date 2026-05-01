@@ -23,10 +23,13 @@ pub fn execute(json: bool, reset: bool) -> Result<()> {
 
     if !stats_path.exists() {
         if json {
-            println!("{}", serde_json::json!({
-                "status": "no_data",
-                "message": "no verification statistics found. Run `verum build` or `verum verify` first.",
-            }));
+            println!(
+                "{}",
+                serde_json::json!({
+                    "status": "no_data",
+                    "message": "no verification statistics found. Run `verum build` or `verum verify` first.",
+                })
+            );
         } else {
             println!();
             println!(
@@ -48,8 +51,8 @@ pub fn execute(json: bool, reset: bool) -> Result<()> {
 
     if json {
         // Pretty-print the JSON directly.
-        let value: serde_json::Value = serde_json::from_str(&raw)
-            .context("stats file is not valid JSON")?;
+        let value: serde_json::Value =
+            serde_json::from_str(&raw).context("stats file is not valid JSON")?;
         println!("{}", serde_json::to_string_pretty(&value)?);
     } else {
         print_human_report(&raw, &stats_path)?;
@@ -86,12 +89,27 @@ fn print_human_report(raw: &str, path: &Path) -> Result<()> {
 
     let total_nanos = json["total_nanos"].as_u64().unwrap_or(0);
     let total_ms = total_nanos as f64 / 1_000_000.0;
-    let avg_ms = if total > 0 { total_ms / total as f64 } else { 0.0 };
+    let avg_ms = if total > 0 {
+        total_ms / total as f64
+    } else {
+        0.0
+    };
 
     println!();
-    println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
-    println!("  {}", "Verum Formal Verification — Routing Statistics".bold().cyan());
-    println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
+    println!(
+        "{}",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan()
+    );
+    println!(
+        "  {}",
+        "Verum Formal Verification — Routing Statistics"
+            .bold()
+            .cyan()
+    );
+    println!(
+        "{}",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan()
+    );
     println!();
     println!("  Source: {}", path.display().to_string().dimmed());
     println!();
@@ -107,11 +125,31 @@ fn print_human_report(raw: &str, path: &Path) -> Result<()> {
 
     // Outcomes
     println!("  {}", "Outcomes".bold().underline());
-    println!("    {} {:<14} {}", "✓".green(), "SAT", sat.to_string().green());
-    println!("    {} {:<14} {}", "✓".green(), "UNSAT", unsat.to_string().green());
-    println!("    {} {:<14} {}", "?".yellow(), "Unknown", unknown.to_string().yellow());
+    println!(
+        "    {} {:<14} {}",
+        "✓".green(),
+        "SAT",
+        sat.to_string().green()
+    );
+    println!(
+        "    {} {:<14} {}",
+        "✓".green(),
+        "UNSAT",
+        unsat.to_string().green()
+    );
+    println!(
+        "    {} {:<14} {}",
+        "?".yellow(),
+        "Unknown",
+        unknown.to_string().yellow()
+    );
     if errors > 0 {
-        println!("    {} {:<14} {}", "✗".red(), "Errors", errors.to_string().red());
+        println!(
+            "    {} {:<14} {}",
+            "✗".red(),
+            "Errors",
+            errors.to_string().red()
+        );
     }
     println!();
 
@@ -120,8 +158,16 @@ fn print_human_report(raw: &str, path: &Path) -> Result<()> {
         println!("  {}", "Strategy dispatch".bold().underline());
         let primary_count = z3_only + cvc5_only;
         let pct = |n: u64| format!("({:>5.1}%)", 100.0 * n as f64 / total as f64);
-        println!("    Single-engine routing:   {:>6}  {}", primary_count, pct(primary_count));
-        println!("    Parallel (thorough):     {:>6}  {}", portfolio, pct(portfolio));
+        println!(
+            "    Single-engine routing:   {:>6}  {}",
+            primary_count,
+            pct(primary_count)
+        );
+        println!(
+            "    Parallel (thorough):     {:>6}  {}",
+            portfolio,
+            pct(portfolio)
+        );
         println!("    Cross-validated:         {:>6}  {}", cross, pct(cross));
         println!();
     }
@@ -141,7 +187,11 @@ fn print_human_report(raw: &str, path: &Path) -> Result<()> {
             println!("    ✓ Divergences:    0  {}", "(healthy)".green().dimmed());
         }
         if cv_incomplete > 0 {
-            println!("    ? Incomplete:     {}  {}", cv_incomplete, "(timeouts)".yellow().dimmed());
+            println!(
+                "    ? Incomplete:     {}  {}",
+                cv_incomplete,
+                "(timeouts)".yellow().dimmed()
+            );
         }
         println!();
     }
@@ -189,7 +239,10 @@ fn print_human_report(raw: &str, path: &Path) -> Result<()> {
         }
     }
 
-    println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
+    println!(
+        "{}",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan()
+    );
     println!();
 
     Ok(())
@@ -236,7 +289,6 @@ pub fn persist_stats(stats_json: &serde_json::Value) -> Result<()> {
             .with_context(|| format!("failed to create stats dir {}", parent.display()))?;
     }
     let contents = serde_json::to_string_pretty(stats_json)?;
-    fs::write(&path, contents)
-        .with_context(|| format!("failed to write {}", path.display()))?;
+    fs::write(&path, contents).with_context(|| format!("failed to write {}", path.display()))?;
     Ok(())
 }

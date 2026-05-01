@@ -446,7 +446,8 @@ fn test_complete_program() {
     items.push(Item::new(
         ItemKind::Mount(MountDecl {
             visibility: Visibility::Private,
-            tree: MountTree { alias: Maybe::None,
+            tree: MountTree {
+                alias: Maybe::None,
                 kind: MountTreeKind::Path(Path::single(test_ident("std"))),
                 span,
             },

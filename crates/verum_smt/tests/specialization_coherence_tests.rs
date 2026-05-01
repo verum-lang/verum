@@ -25,13 +25,13 @@
 
 use verum_ast::span::Span;
 use verum_ast::ty::{Ident, Path, Type};
+use verum_common::{List, Map, Maybe};
 use verum_protocol_types::protocol_base::ProtocolImpl;
 use verum_protocol_types::specialization::SpecializationInfo;
 use verum_smt::specialization_coherence::{
     SpecializationVerifier, SpecificityOrdering, detect_overlaps, is_coherent,
     verify_specialization,
 };
-use verum_common::{List, Map, Maybe};
 
 fn create_impl(ty: Type, protocol_name: &str) -> ProtocolImpl {
     let protocol_path = Path::single(Ident {

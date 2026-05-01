@@ -180,9 +180,7 @@ mod tests {
 
     #[test]
     fn test_erase_proofs_removes_theorem_keeps_function() {
-        let m = parse_module(
-            "fn f() {} theorem t() proof by auto; fn g() {}",
-        );
+        let m = parse_module("fn f() {} theorem t() proof by auto; fn g() {}");
         assert_eq!(m.items.len(), 3);
 
         let (erased, stats) = erase_proofs_from_module(m);

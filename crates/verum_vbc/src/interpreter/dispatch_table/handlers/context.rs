@@ -11,12 +11,14 @@
 //! `provide Context = impl`. Lookup cost is ~5-30ns via vtable in task-local context stack.
 //! This is NOT algebraic effects -- it is pure dependency injection with lexical scoping.
 
-use crate::value::Value;
 use super::super::super::error::{CbgrViolationKind, InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
-use super::cbgr_helpers::{is_cbgr_ref, is_cbgr_ref_mutable, decode_cbgr_ref, strip_cbgr_ref_mutability};
+use super::cbgr_helpers::{
+    decode_cbgr_ref, is_cbgr_ref, is_cbgr_ref_mutable, strip_cbgr_ref_mutability,
+};
+use crate::value::Value;
 use verum_common::cbgr::caps;
 
 // ============================================================================
@@ -34,7 +36,9 @@ use verum_common::cbgr::caps;
 /// `NullPointerDereference` downstream. The panic carries the actual
 /// context name so `@expected-panic: Context X not provided` tests
 /// can match against it.
-pub(in super::super) fn handle_ctx_get(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_ctx_get(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let ctx_type = read_varint(state)? as u32;
 
@@ -44,7 +48,10 @@ pub(in super::super) fn handle_ctx_get(state: &mut InterpreterState) -> Interpre
             state.set_reg(dst, value);
         }
         None => {
-            let ctx_name = state.module.strings.get(crate::types::StringId(ctx_type))
+            let ctx_name = state
+                .module
+                .strings
+                .get(crate::types::StringId(ctx_type))
                 .unwrap_or("unknown");
             return Err(InterpreterError::Panic {
                 message: format!("Context {} not provided", ctx_name),
@@ -56,7 +63,9 @@ pub(in super::super) fn handle_ctx_get(state: &mut InterpreterState) -> Interpre
 }
 
 /// CtxProvide (0xB1) - Provide a context value for a scope.
-pub(in super::super) fn handle_ctx_provide(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_ctx_provide(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let ctx_type = read_varint(state)? as u32;
     let value_reg = read_reg(state)?;
     let _body_offset = read_signed_varint(state)?; // Reserved for future use
@@ -74,7 +83,9 @@ pub(in super::super) fn handle_ctx_provide(state: &mut InterpreterState) -> Inte
 /// Pops the most recently-provided context entry. CtxProvide + CtxEnd come
 /// in matched pairs for `provide X = v in { body }` blocks, so a LIFO pop
 /// correctly handles both flat and nested provides.
-pub(in super::super) fn handle_ctx_pop(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_ctx_pop(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     state.context_stack.pop_one();
     Ok(DispatchResult::Continue)
 }
@@ -83,7 +94,9 @@ pub(in super::super) fn handle_ctx_pop(state: &mut InterpreterState) -> Interpre
 ///
 
 /// In the simple implementation, this is a no-op.
-pub(in super::super) fn handle_ctx_push(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_ctx_push(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let _handler_offset = read_signed_varint(state)?;
     Ok(DispatchResult::Continue)
 }
@@ -93,7 +106,9 @@ pub(in super::super) fn handle_ctx_push(state: &mut InterpreterState) -> Interpr
 // ============================================================================
 
 /// Attenuate (0xB5) - Attenuate reference capabilities.
-pub(in super::super) fn handle_attenuate(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_attenuate(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let mask = read_varint(state)? as u32;
@@ -123,7 +138,9 @@ pub(in super::super) fn handle_attenuate(state: &mut InterpreterState) -> Interp
 }
 
 /// HasCapability (0xB6) - Check if reference has specific capability.
-pub(in super::super) fn handle_has_capability(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_has_capability(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let ref_reg = read_reg(state)?;
     let cap_mask = read_varint(state)? as u32;
@@ -137,7 +154,9 @@ pub(in super::super) fn handle_has_capability(state: &mut InterpreterState) -> I
         let ptr_addr = ref_val.as_ptr::<u8>() as usize;
         let is_mut = state.cbgr_mutable_ptrs.contains(&ptr_addr);
         check_capabilities_for_mutability(cap_mask, is_mut)
-    } else { !ref_val.is_nil() };
+    } else {
+        !ref_val.is_nil()
+    };
 
     state.set_reg(dst, Value::from_bool(has_all_caps));
     Ok(DispatchResult::Continue)
@@ -159,7 +178,9 @@ pub(in super::super) fn check_capabilities_for_mutability(cap_mask: u32, is_mut:
 }
 
 /// RequireCapability (0xB7) - Require capability, panic if not present.
-pub(in super::super) fn handle_require_capability(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_require_capability(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let ref_reg = read_reg(state)?;
     let cap_mask = read_varint(state)? as u32;
 
@@ -168,11 +189,17 @@ pub(in super::super) fn handle_require_capability(state: &mut InterpreterState) 
     let (has_caps, ptr_addr) = if is_cbgr_ref(&ref_val) {
         let is_mut = is_cbgr_ref_mutable(ref_val.as_i64());
         let (abs_index, _) = decode_cbgr_ref(ref_val.as_i64());
-        (check_capabilities_for_mutability(cap_mask, is_mut), abs_index as usize)
+        (
+            check_capabilities_for_mutability(cap_mask, is_mut),
+            abs_index as usize,
+        )
     } else if ref_val.is_ptr() && !ref_val.is_nil() {
         let ptr_addr = ref_val.as_ptr::<u8>() as usize;
         let is_mut = state.cbgr_mutable_ptrs.contains(&ptr_addr);
-        (check_capabilities_for_mutability(cap_mask, is_mut), ptr_addr)
+        (
+            check_capabilities_for_mutability(cap_mask, is_mut),
+            ptr_addr,
+        )
     } else if ref_val.is_nil() {
         (false, 0)
     } else {

@@ -103,10 +103,7 @@ fn bench_wide_expressions(c: &mut Criterion) {
     for width in [10, 50, 100, 200].iter() {
         let elements: Vec<Expr> = (0..*width).map(make_int_literal).collect();
 
-        let expr = Expr::new(
-            ExprKind::Tuple(elements.into()),
-            dummy_span(),
-        );
+        let expr = Expr::new(ExprKind::Tuple(elements.into()), dummy_span());
 
         group.bench_with_input(BenchmarkId::from_parameter(width), width, |b, _width| {
             b.iter(|| {

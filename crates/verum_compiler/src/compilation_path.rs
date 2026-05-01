@@ -205,9 +205,9 @@ impl TargetConfig {
     /// drive intra-target capability checks at codegen time, not
     /// presence checks at routing time).
     pub fn supports_target(&self, target: &GpuTarget) -> bool {
-        self.gpu_targets.iter().any(|t| {
-            std::mem::discriminant(t) == std::mem::discriminant(target)
-        })
+        self.gpu_targets
+            .iter()
+            .any(|t| std::mem::discriminant(t) == std::mem::discriminant(target))
     }
 }
 
@@ -322,7 +322,9 @@ pub fn determine_compilation_path(
     if analysis.contains_gpu_ops() {
         if target_config.has_gpu {
             // Check if it's a hybrid function
-            if !analysis.gpu_regions.is_empty() && analysis.instruction_count > analysis.gpu_op_count {
+            if !analysis.gpu_regions.is_empty()
+                && analysis.instruction_count > analysis.gpu_op_count
+            {
                 return CompilationPath::Hybrid {
                     gpu_regions: analysis.gpu_regions.clone(),
                 };
@@ -556,9 +558,7 @@ fn analyze_instruction(instr: &Instruction, offset: usize, analysis: &mut Functi
         // For now, has_cbgr_ops is set based on function-level analysis.
 
         // Async operations
-        Instruction::Spawn { .. }
-        | Instruction::Await { .. }
-        | Instruction::Select { .. } => {
+        Instruction::Spawn { .. } | Instruction::Await { .. } | Instruction::Select { .. } => {
             analysis.has_async_ops = true;
         }
 
@@ -579,7 +579,9 @@ pub enum AnalysisError {
 impl std::fmt::Display for AnalysisError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InvalidBytecodeRange => write!(f, "Invalid bytecode range in function descriptor"),
+            Self::InvalidBytecodeRange => {
+                write!(f, "Invalid bytecode range in function descriptor")
+            }
             Self::DecodeError(msg) => write!(f, "Instruction decode error: {}", msg),
         }
     }
@@ -655,7 +657,9 @@ mod tests {
             instruction_count: 5,
             ..Default::default()
         };
-        let config = TargetConfig::with_gpu(vec![GpuTarget::Cuda { sm_versions: vec![80] }]);
+        let config = TargetConfig::with_gpu(vec![GpuTarget::Cuda {
+            sm_versions: vec![80],
+        }]);
 
         let path = determine_compilation_path(&analysis, &config);
         assert_eq!(path, CompilationPath::Gpu);
@@ -668,8 +672,10 @@ mod tests {
             instruction_count: 20,
             ..Default::default()
         };
-        let config = TargetConfig::with_gpu(vec![GpuTarget::Cuda { sm_versions: vec![80] }])
-            .with_threshold(10);
+        let config = TargetConfig::with_gpu(vec![GpuTarget::Cuda {
+            sm_versions: vec![80],
+        }])
+        .with_threshold(10);
 
         let path = determine_compilation_path(&analysis, &config);
         assert_eq!(path, CompilationPath::Gpu);
@@ -699,7 +705,9 @@ mod tests {
         assert!(CompilationPath::Gpu.requires_gpu());
         assert!(!CompilationPath::Gpu.requires_cpu());
 
-        let hybrid = CompilationPath::Hybrid { gpu_regions: vec![(0, 10)] };
+        let hybrid = CompilationPath::Hybrid {
+            gpu_regions: vec![(0, 10)],
+        };
         assert!(hybrid.requires_cpu());
         assert!(hybrid.requires_gpu());
     }
@@ -719,8 +727,12 @@ mod tests {
         // in `gpu_targets` is the preferred target. Manifest
         // ordering is authoritative — embedders that need a
         // different priority reorder the list at construction.
-        let cuda = GpuTarget::Cuda { sm_versions: vec![80] };
-        let rocm = GpuTarget::Rocm { gfx_versions: vec!["gfx906".into()] };
+        let cuda = GpuTarget::Cuda {
+            sm_versions: vec![80],
+        };
+        let rocm = GpuTarget::Rocm {
+            gfx_versions: vec!["gfx906".into()],
+        };
         let cfg = TargetConfig::with_gpu(vec![cuda.clone(), rocm.clone()]);
         let preferred = cfg.preferred_gpu_target().expect("preferred target");
         assert!(matches!(preferred, GpuTarget::Cuda { .. }));
@@ -736,10 +748,14 @@ mod tests {
         // query for `Cuda { sm_versions: [90] }` because both
         // are CUDA targets; codegen then handles the version
         // matching.
-        let cfg = TargetConfig::with_gpu(vec![
-            GpuTarget::Cuda { sm_versions: vec![70, 80] },
-        ]);
-        assert!(cfg.supports_target(&GpuTarget::Cuda { sm_versions: vec![90] }));
-        assert!(!cfg.supports_target(&GpuTarget::Rocm { gfx_versions: vec![] }));
+        let cfg = TargetConfig::with_gpu(vec![GpuTarget::Cuda {
+            sm_versions: vec![70, 80],
+        }]);
+        assert!(cfg.supports_target(&GpuTarget::Cuda {
+            sm_versions: vec![90]
+        }));
+        assert!(!cfg.supports_target(&GpuTarget::Rocm {
+            gfx_versions: vec![]
+        }));
     }
 }

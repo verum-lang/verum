@@ -66,26 +66,16 @@
 
 /// Stdlib type names that participate in tensor-family coercions.
 /// Becomes obsolete once `TensorLike` protocol is wired (#101 step 3).
-pub const TENSOR_FAMILY_STDLIB_NAMES: &[&str] = &[
-    "DynTensor",
-    "Tensor",
-    "Vector",
-    "Cotangent",
-    "Tangent",
-];
+pub const TENSOR_FAMILY_STDLIB_NAMES: &[&str] =
+    &["DynTensor", "Tensor", "Vector", "Cotangent", "Tangent"];
 
 /// Stdlib type names that support integer indexing.
 /// Becomes obsolete once `Indexable` protocol is wired (#101 step 3).
-pub const INDEXABLE_STDLIB_NAMES: &[&str] = &[
-    "Range",
-    "Slice",
-];
+pub const INDEXABLE_STDLIB_NAMES: &[&str] = &["Range", "Slice"];
 
 /// Stdlib type names that match the range-like shape (start, end).
 /// Becomes obsolete once `RangeLike` protocol is wired (#101 step 3).
-pub const RANGE_LIKE_STDLIB_NAMES: &[&str] = &[
-    "Range",
-];
+pub const RANGE_LIKE_STDLIB_NAMES: &[&str] = &["Range"];
 
 /// Stdlib type names that cross-coerce with `Int` in unification.
 ///
@@ -108,18 +98,39 @@ pub const RANGE_LIKE_STDLIB_NAMES: &[&str] = &[
 /// Becomes obsolete once `IntCoercible` protocol is wired (#101 step 3).
 pub const INT_COERCIBLE_STDLIB_NAMES: &[&str] = &[
     // FFI integer typedefs
-    "Port", "FileDesc", "MachPort", "VmAddress", "VmSize",
-    "Timespec", "TimeSpec", "ClockId",
+    "Port",
+    "FileDesc",
+    "MachPort",
+    "VmAddress",
+    "VmSize",
+    "Timespec",
+    "TimeSpec",
+    "ClockId",
     // Bitflags / sockaddr
-    "MemProt", "MapFlags", "Sockaddr", "Path", "PathBuf",
+    "MemProt",
+    "MapFlags",
+    "Sockaddr",
+    "Path",
+    "PathBuf",
     // Resource handles
-    "GPUBuffer", "DeviceRegistry", "ProcessGroup",
+    "GPUBuffer",
+    "DeviceRegistry",
+    "ProcessGroup",
     // Time/duration scalars
-    "Duration", "Instant", "Epoch",
+    "Duration",
+    "Instant",
+    "Epoch",
     // Tensor family (for index ops)
-    "DynTensor", "Tensor", "Vector",
+    "DynTensor",
+    "Tensor",
+    "Vector",
     // Containers (for len/index coercion)
-    "List", "Range", "Slice", "Maybe", "Lazy", "Once",
+    "List",
+    "Range",
+    "Slice",
+    "Maybe",
+    "Lazy",
+    "Once",
 ];
 
 /// Stdlib type names that cross-coerce with each other in
@@ -132,11 +143,7 @@ pub const INT_COERCIBLE_STDLIB_NAMES: &[&str] = &[
 /// Becomes obsolete once `Numeric` protocol query lands (separate
 /// follow-up — `Numeric` exists at `core/base/protocols.vr` but isn't
 /// queryable from the unifier yet).
-pub const SIZED_NUMERIC_STDLIB_NAMES: &[&str] = &[
-    "Duration",
-    "Instant",
-    "Epoch",
-];
+pub const SIZED_NUMERIC_STDLIB_NAMES: &[&str] = &["Duration", "Instant", "Epoch"];
 
 /// Register every stdlib type in the four lists above with the
 /// unifier. Single entry point so callers in `pipeline.rs` Pass 5.5
@@ -210,7 +217,7 @@ fn match_coercion_protocol(path: &verum_ast::ty::Path) -> Option<&'static str> {
 /// registration since the unifier treats e.g. `Vector<T>` the same
 /// way regardless of T.
 fn impl_target_head_name(ty: &verum_ast::ty::Type) -> Option<String> {
-    use verum_ast::ty::{Type, TypeKind, PathSegment};
+    use verum_ast::ty::{PathSegment, Type, TypeKind};
     fn head_of_path(path: &verum_ast::ty::Path) -> Option<String> {
         path.segments.iter().rev().find_map(|s| match s {
             PathSegment::Name(id) => Some(id.name.to_string()),
@@ -247,10 +254,21 @@ where
     let mut registered = 0usize;
     for module in ast_modules {
         for item in module.items.iter() {
-            let ItemKind::Impl(impl_decl) = &item.kind else { continue };
-            let ImplKind::Protocol { protocol, for_type, .. } = &impl_decl.kind else { continue };
-            let Some(coercion_name) = match_coercion_protocol(protocol) else { continue };
-            let Some(target) = impl_target_head_name(for_type) else { continue };
+            let ItemKind::Impl(impl_decl) = &item.kind else {
+                continue;
+            };
+            let ImplKind::Protocol {
+                protocol, for_type, ..
+            } = &impl_decl.kind
+            else {
+                continue;
+            };
+            let Some(coercion_name) = match_coercion_protocol(protocol) else {
+                continue;
+            };
+            let Some(target) = impl_target_head_name(for_type) else {
+                continue;
+            };
             let target_text = verum_common::Text::from(target.as_str());
             match coercion_name {
                 "IntCoercible" => unifier.register_int_coercible_type(target_text),

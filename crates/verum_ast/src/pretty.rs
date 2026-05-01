@@ -18,7 +18,7 @@ use crate::Module;
 use crate::decl::{
     ConstDecl, ContextDecl, ContextGroupDecl, ContextRequirement, ExternBlockDecl, FunctionBody,
     FunctionDecl, FunctionParam, FunctionParamKind, ImplDecl, ImplItem, ImplItemKind, ImplKind,
-    MountDecl, MountTree, MountTreeKind, Item, ItemKind, ModuleDecl, PatternDecl, ProtocolBody,
+    Item, ItemKind, ModuleDecl, MountDecl, MountTree, MountTreeKind, PatternDecl, ProtocolBody,
     ProtocolDecl, ProtocolItem, ProtocolItemKind, RecordField, ResourceModifier, StaticDecl,
     TypeDecl, TypeDeclBody, Variant, VariantData, Visibility,
 };
@@ -26,7 +26,8 @@ use crate::decl::{
 use crate::expr::BinOp;
 use crate::expr::{
     ArrayExpr, Block, ClosureParam, ComprehensionClause, ComprehensionClauseKind, ConditionKind,
-    Expr, ExprKind, FieldInit, IfCondition, MacroDelimiter, NurseryErrorBehavior, RecoverBody, UnOp,
+    Expr, ExprKind, FieldInit, IfCondition, MacroDelimiter, NurseryErrorBehavior, RecoverBody,
+    UnOp,
 };
 use crate::literal::{CompositeDelimiter, FloatSuffix, IntSuffix, Literal, LiteralKind, StringLit};
 use crate::pattern::MatchArm;
@@ -409,7 +410,11 @@ impl PrettyPrinter {
 
     fn format_function_param(&mut self, param: &FunctionParam) {
         match &param.kind {
-            FunctionParamKind::Regular { pattern, ty, default_value } => {
+            FunctionParamKind::Regular {
+                pattern,
+                ty,
+                default_value,
+            } => {
                 self.format_pattern(pattern);
                 self.write(": ");
                 self.format_type(ty);
@@ -673,7 +678,10 @@ impl PrettyPrinter {
                 self.format_expr(rhs);
                 self.write(")");
             }
-            TypeKind::DependentApp { carrier, value_args } => {
+            TypeKind::DependentApp {
+                carrier,
+                value_args,
+            } => {
                 // `carrier` already renders its own `Head<TypeArgs>`; we
                 // only tack on the value-argument parenthesized suffix.
                 self.format_type(carrier);
@@ -1456,7 +1464,10 @@ impl PrettyPrinter {
                 self.format_expr(value);
                 self.write(";");
             }
-            ImplItemKind::Proof { axiom_name, tactic: _ } => {
+            ImplItemKind::Proof {
+                axiom_name,
+                tactic: _,
+            } => {
                 // Proof clause — `proof axiom_name by tactic;`
                 // Full tactic pretty-print is handled via the same
                 // path as stand-alone tactic_expr.
@@ -1796,7 +1807,11 @@ impl PrettyPrinter {
                 self.write(": ");
                 self.format_expr(value);
             }
-            ExprKind::Call { func, type_args, args } => {
+            ExprKind::Call {
+                func,
+                type_args,
+                args,
+            } => {
                 self.format_expr(func);
                 if !type_args.is_empty() {
                     self.write("::<");
@@ -2345,7 +2360,10 @@ impl PrettyPrinter {
                 self.write("meta ");
                 self.format_block(block);
             }
-            ExprKind::Quote { target_stage, tokens } => {
+            ExprKind::Quote {
+                target_stage,
+                tokens,
+            } => {
                 self.write("quote");
                 if let Some(stage) = target_stage {
                     self.write(&format!("@({stage})"));
@@ -2487,7 +2505,13 @@ impl PrettyPrinter {
                     self.write(")");
                 }
             }
-            ExprKind::Nursery { options, body, on_cancel, recover, .. } => {
+            ExprKind::Nursery {
+                options,
+                body,
+                on_cancel,
+                recover,
+                ..
+            } => {
                 self.write("nursery");
                 // Format options if present
                 if !options.is_empty() {
@@ -2499,7 +2523,9 @@ impl PrettyPrinter {
                         first = false;
                     }
                     if options.on_error != NurseryErrorBehavior::CancelAll {
-                        if !first { self.write(", "); }
+                        if !first {
+                            self.write(", ");
+                        }
                         self.write("on_error: ");
                         self.write(match options.on_error {
                             NurseryErrorBehavior::CancelAll => "cancel_all",
@@ -2509,7 +2535,9 @@ impl PrettyPrinter {
                         first = false;
                     }
                     if let Maybe::Some(ref max) = options.max_tasks {
-                        if !first { self.write(", "); }
+                        if !first {
+                            self.write(", ");
+                        }
                         self.write("max_tasks: ");
                         self.format_expr(max);
                     }
@@ -2529,11 +2557,21 @@ impl PrettyPrinter {
                 }
             }
             // Inline assembly expression
-            ExprKind::InlineAsm { template, operands, options } => {
+            ExprKind::InlineAsm {
+                template,
+                operands,
+                options,
+            } => {
                 self.write("@asm(");
                 // Write template string
                 self.write("\"");
-                self.write(template.as_str().replace('\\', "\\\\").replace('"', "\\\"").as_str());
+                self.write(
+                    template
+                        .as_str()
+                        .replace('\\', "\\\\")
+                        .replace('"', "\\\"")
+                        .as_str(),
+                );
                 self.write("\"");
                 // Write operands if present
                 if !operands.is_empty() {
@@ -2576,7 +2614,11 @@ impl PrettyPrinter {
                             self.write("...");
                         }
                     }
-                    crate::expr::StreamLiteralKind::Range { start, end, inclusive } => {
+                    crate::expr::StreamLiteralKind::Range {
+                        start,
+                        end,
+                        inclusive,
+                    } => {
                         self.format_expr(start);
                         if *inclusive {
                             self.write("..=");
@@ -2729,7 +2771,11 @@ impl PrettyPrinter {
                 self.write(") ");
                 self.format_expr(expr);
             }
-            AsmOperandKind::Out { constraint, place, late } => {
+            AsmOperandKind::Out {
+                constraint,
+                place,
+                late,
+            } => {
                 if *late {
                     self.write("lateout(");
                 } else {
@@ -2745,7 +2791,11 @@ impl PrettyPrinter {
                 self.write(") ");
                 self.format_expr(place);
             }
-            AsmOperandKind::InLateOut { constraint, in_expr, out_place } => {
+            AsmOperandKind::InLateOut {
+                constraint,
+                in_expr,
+                out_place,
+            } => {
                 self.write("inlateout(");
                 self.write(constraint.constraint.as_str());
                 self.write(") ");
@@ -2881,7 +2931,8 @@ impl PrettyPrinter {
                     }
                 }
             }
-            LiteralKind::Text(string_lit) => {
+            LiteralKind::Text(string_lit) =>
+            {
                 #[allow(deprecated)]
                 match string_lit {
                     StringLit::Regular(s) => {
@@ -3182,7 +3233,8 @@ impl PrettyPrinter {
                 self.write("(");
                 self.format_pattern(inner);
                 self.write(")");
-            }            PatternKind::View {
+            }
+            PatternKind::View {
                 view_function,
                 pattern,
             } => {
@@ -3190,7 +3242,11 @@ impl PrettyPrinter {
                 self.write(" -> ");
                 self.format_pattern(pattern);
             }
-            PatternKind::Active { name, params, bindings } => {
+            PatternKind::Active {
+                name,
+                params,
+                bindings,
+            } => {
                 self.write(name.as_str());
                 // Pattern parameters (e.g., InRange(0, 100))
                 if !params.is_empty() {
@@ -3236,7 +3292,10 @@ impl PrettyPrinter {
             }
             // Stream pattern: stream[first, second, ...rest]
             // Stream pattern pretty-printing
-            PatternKind::Stream { head_patterns, rest } => {
+            PatternKind::Stream {
+                head_patterns,
+                rest,
+            } => {
                 self.write("stream[");
                 let mut first = true;
                 for p in head_patterns.iter() {
@@ -3333,7 +3392,11 @@ impl PrettyPrinter {
                 self.format_expr(expr);
                 self.write(";");
             }
-            StmtKind::Provide { context, value, alias } => {
+            StmtKind::Provide {
+                context,
+                value,
+                alias,
+            } => {
                 self.write("provide ");
                 self.write(context.as_str());
                 if let Maybe::Some(alias_name) = alias {
@@ -3634,7 +3697,8 @@ mod tests {
         let patterns = vec![
             Pattern::ident(Ident::new("a", span), false, span),
             Pattern::ident(Ident::new("b", span), false, span),
-        ].into();
+        ]
+        .into();
         let pattern = Pattern::new(PatternKind::Tuple(patterns), span);
         assert_eq!(format_pattern(&pattern).as_str(), "(a, b)");
     }
@@ -3645,7 +3709,8 @@ mod tests {
         let patterns = vec![
             Pattern::ident(Ident::new("a", span), false, span),
             Pattern::ident(Ident::new("b", span), false, span),
-        ].into();
+        ]
+        .into();
         let pattern = Pattern::new(PatternKind::Or(patterns), span);
         assert_eq!(format_pattern(&pattern).as_str(), "a | b");
     }
@@ -3781,7 +3846,8 @@ mod tests {
                 bounds: vec![TypeBound {
                     kind: TypeBoundKind::Protocol(display_path),
                     span,
-                }].into(),
+                }]
+                .into(),
                 bindings: Maybe::None,
             },
             span,
@@ -4100,7 +4166,8 @@ mod tests {
             Expr::literal(Literal::int(1, span)),
             Expr::literal(Literal::int(2, span)),
             Expr::literal(Literal::int(3, span)),
-        ].into();
+        ]
+        .into();
 
         let arr_expr = Expr::new(ExprKind::Array(ArrayExpr::List(elements)), span);
 
@@ -4130,7 +4197,8 @@ mod tests {
         let elements = vec![
             Expr::literal(Literal::int(1, span)),
             Expr::literal(Literal::int(2, span)),
-        ].into();
+        ]
+        .into();
 
         let tuple_expr = Expr::new(ExprKind::Tuple(elements), span);
         assert_eq!(format_expr(&tuple_expr).as_str(), "(1, 2)");
@@ -4158,7 +4226,8 @@ mod tests {
             Expr::literal(Literal::int(1, span)),
             Expr::literal(Literal::int(2, span)),
             Expr::literal(Literal::int(3, span)),
-        ].into();
+        ]
+        .into();
 
         let set_expr = Expr::new(ExprKind::SetLiteral { elements }, span);
         assert_eq!(format_expr(&set_expr).as_str(), "{1, 2, 3}");
@@ -4176,7 +4245,8 @@ mod tests {
                 Expr::literal(Literal::string(Text::from("b"), span)),
                 Expr::literal(Literal::int(2, span)),
             ),
-        ].into();
+        ]
+        .into();
 
         let map_expr = Expr::new(ExprKind::MapLiteral { entries }, span);
         assert_eq!(format_expr(&map_expr).as_str(), "{\"a\": 1, \"b\": 2}");
@@ -4217,10 +4287,7 @@ mod tests {
             span,
         );
 
-        assert_eq!(
-            format_expr(&forall_expr).as_str(),
-            "forall x: Int. x >= 0"
-        );
+        assert_eq!(format_expr(&forall_expr).as_str(), "forall x: Int. x >= 0");
     }
 
     #[test]
@@ -4248,10 +4315,7 @@ mod tests {
             span,
         );
 
-        assert_eq!(
-            format_expr(&exists_expr).as_str(),
-            "exists x: Int. x > 0"
-        );
+        assert_eq!(format_expr(&exists_expr).as_str(), "exists x: Int. x > 0");
     }
 
     #[test]

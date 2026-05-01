@@ -6,8 +6,8 @@
 
 use crate::option_to_maybe;
 use std::fmt;
-use verum_common::{List, Map, Maybe, Text};
 use verum_common::ToText;
+use verum_common::{List, Map, Maybe, Text};
 
 /// A counterexample showing why verification failed.
 #[derive(Debug, Clone)]
@@ -975,10 +975,7 @@ mod minimize_tests {
         let ce = CounterExample::new(assignments, Text::from("x > 10"));
 
         let min = ce.minimize_syntactic();
-        assert!(
-            min.get("x").is_some(),
-            "x is mentioned — must be preserved"
-        );
+        assert!(min.get("x").is_some(), "x is mentioned — must be preserved");
         assert!(
             min.get("unused").is_none(),
             "`unused` is not mentioned — must be dropped"

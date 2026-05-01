@@ -16,8 +16,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use verum_ast::{FileId, PrettyConfig, PrettyPrinter};
 use verum_common::{List, Text};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 use walkdir::WalkDir;
 
 /// Behaviour when the parser cannot turn a source file into an AST.
@@ -119,21 +119,36 @@ fn parse_config(content: &str) -> FormatterConfig {
         let trimmed = line.trim();
         if trimmed.starts_with('[') {
             in_fmt_section = trimmed == "[fmt]" || trimmed == "[format]";
-            in_policy_section =
-                trimmed == "[fmt.policy]" || trimmed == "[format.policy]";
+            in_policy_section = trimmed == "[fmt.policy]" || trimmed == "[format.policy]";
             continue;
         }
-        if !in_fmt_section && !in_policy_section { continue; }
+        if !in_fmt_section && !in_policy_section {
+            continue;
+        }
 
         if let Some((key, value)) = trimmed.split_once('=') {
             let key = key.trim();
             let value = value.trim().trim_matches('"');
             match key {
-                "max_width" => { if let Ok(v) = value.parse() { config.max_width = v; } }
-                "indent_size" => { if let Ok(v) = value.parse() { config.indent_size = v; } }
-                "use_spaces" => { config.use_spaces = value == "true"; }
-                "trailing_comma" => { config.trailing_comma = value == "true"; }
-                "sort_imports" => { config.sort_imports = value == "true"; }
+                "max_width" => {
+                    if let Ok(v) = value.parse() {
+                        config.max_width = v;
+                    }
+                }
+                "indent_size" => {
+                    if let Ok(v) = value.parse() {
+                        config.indent_size = v;
+                    }
+                }
+                "use_spaces" => {
+                    config.use_spaces = value == "true";
+                }
+                "trailing_comma" => {
+                    config.trailing_comma = value == "true";
+                }
+                "sort_imports" => {
+                    config.sort_imports = value == "true";
+                }
                 "on_parse_error" if in_policy_section => {
                     if let Some(p) = OnParseError::parse(value) {
                         config.on_parse_error = p;
@@ -156,11 +171,7 @@ pub fn execute(check: bool, verbose: bool) -> Result<()> {
 /// Like `execute` but with an explicit parse-error policy override
 /// (the `--on-parse-error` CLI flag). When `policy` is `Some`, it
 /// wins over the manifest setting for this run only.
-pub fn execute_with_policy(
-    check: bool,
-    verbose: bool,
-    policy: Option<OnParseError>,
-) -> Result<()> {
+pub fn execute_with_policy(check: bool, verbose: bool, policy: Option<OnParseError>) -> Result<()> {
     if check {
         ui::step("Checking formatting");
     } else {
@@ -264,7 +275,10 @@ pub fn execute_with_policy(
 
     if check {
         if formatted_files == 0 && error_files.is_empty() {
-            ui::success(&format!("All {} files are formatted correctly", total_files));
+            ui::success(&format!(
+                "All {} files are formatted correctly",
+                total_files
+            ));
             Ok(())
         } else if formatted_files > 0 {
             ui::error(&format!("{} files need formatting:", formatted_files));
@@ -273,15 +287,24 @@ pub fn execute_with_policy(
             }
             println!();
             println!("Run {} to format these files", "verum fmt".cyan().bold());
-            Err(CliError::Custom(format!("{} files need formatting", formatted_files)))
+            Err(CliError::Custom(format!(
+                "{} files need formatting",
+                formatted_files
+            )))
         } else {
-            Err(CliError::Custom(format!("{} files had parse errors", error_files.len())))
+            Err(CliError::Custom(format!(
+                "{} files had parse errors",
+                error_files.len()
+            )))
         }
     } else {
         if formatted_files == 0 {
             ui::success(&format!("All {} files already formatted", total_files));
         } else {
-            ui::success(&format!("Formatted {} of {} files", formatted_files, total_files));
+            ui::success(&format!(
+                "Formatted {} of {} files",
+                formatted_files, total_files
+            ));
         }
         Ok(())
     }
@@ -302,7 +325,12 @@ fn is_verum_file(path: &Path) -> bool {
 }
 
 /// Format a single file. Returns whether the file was changed.
-fn format_file(path: &Path, config: &FormatterConfig, check: bool, verbose: bool) -> Result<FormatResult> {
+fn format_file(
+    path: &Path,
+    config: &FormatterConfig,
+    check: bool,
+    verbose: bool,
+) -> Result<FormatResult> {
     let content = fs::read_to_string(path)?;
 
     // Try AST-based formatting first. On failure, the
@@ -538,7 +566,10 @@ fn compute_diff(path: &Path, original: &str, formatted: &str) -> String {
 /// Format specific path (for workspace support).
 pub fn format_path(path: &Path, check: bool, verbose: bool) -> Result<()> {
     if !path.exists() {
-        return Err(CliError::Custom(format!("Path not found: {}", path.display())));
+        return Err(CliError::Custom(format!(
+            "Path not found: {}",
+            path.display()
+        )));
     }
 
     let config = load_config();
@@ -546,7 +577,9 @@ pub fn format_path(path: &Path, check: bool, verbose: bool) -> Result<()> {
     if path.is_file() {
         if is_verum_file(path) {
             match format_file(path, &config, check, verbose)? {
-                FormatResult::Unchanged => ui::info(&format!("{} already formatted", path.display())),
+                FormatResult::Unchanged => {
+                    ui::info(&format!("{} already formatted", path.display()))
+                }
                 FormatResult::Changed { .. } => {
                     if check {
                         println!("{} needs formatting", path.display());
@@ -556,12 +589,19 @@ pub fn format_path(path: &Path, check: bool, verbose: bool) -> Result<()> {
                 }
             }
         } else {
-            return Err(CliError::Custom(format!("Not a Verum file: {}", path.display())));
+            return Err(CliError::Custom(format!(
+                "Not a Verum file: {}",
+                path.display()
+            )));
         }
     } else if path.is_dir() {
         let mut formatted = 0;
         let mut errors = 0;
-        for entry in WalkDir::new(path).follow_links(false).into_iter().filter_map(|e| e.ok()) {
+        for entry in WalkDir::new(path)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
             let file_path = entry.path();
             if file_path.is_file() && is_verum_file(file_path) {
                 match format_file(file_path, &config, check, verbose) {
@@ -572,10 +612,16 @@ pub fn format_path(path: &Path, check: bool, verbose: bool) -> Result<()> {
             }
         }
         if check {
-            if formatted > 0 { ui::error(&format!("{} files need formatting", formatted)); }
-            else { ui::success("All files formatted correctly"); }
+            if formatted > 0 {
+                ui::error(&format!("{} files need formatting", formatted));
+            } else {
+                ui::success("All files formatted correctly");
+            }
         } else {
-            ui::success(&format!("Formatted {} files ({} errors)", formatted, errors));
+            ui::success(&format!(
+                "Formatted {} files ({} errors)",
+                formatted, errors
+            ));
         }
     }
     Ok(())
@@ -620,9 +666,7 @@ pub fn execute_stdin(filename_hint: Option<String>) -> Result<()> {
                 .as_deref()
                 .map(|p| format!(" ({})", p))
                 .unwrap_or_default();
-            eprintln!(
-                "warning: parse failed{hint}; emitting whitespace-normalised form"
-            );
+            eprintln!("warning: parse failed{hint}; emitting whitespace-normalised form");
             normalize_and_sort(&source, &config)
         }
     };

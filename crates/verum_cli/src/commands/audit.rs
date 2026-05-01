@@ -531,9 +531,9 @@ use std::path::{Path, PathBuf};
 use verum_ast::attr::FrameworkAttr;
 use verum_ast::decl::ItemKind;
 use verum_common::Maybe;
+use verum_compiler::CompilerOptions;
 use verum_compiler::pipeline::CompilationPipeline;
 use verum_compiler::session::Session;
-use verum_compiler::CompilerOptions;
 
 /// One framework-axiom usage point.
 #[derive(Debug, Clone)]
@@ -607,18 +607,12 @@ pub fn audit_framework_axioms_with_format(format: AuditFormat) -> Result<()> {
                 Text,
                 &verum_common::List<verum_ast::attr::Attribute>,
             ) = match &item.kind {
-                ItemKind::Theorem(decl) => {
-                    ("theorem", decl.name.name.clone(), &decl.attributes)
-                }
-                ItemKind::Lemma(decl) => {
-                    ("lemma", decl.name.name.clone(), &decl.attributes)
-                }
+                ItemKind::Theorem(decl) => ("theorem", decl.name.name.clone(), &decl.attributes),
+                ItemKind::Lemma(decl) => ("lemma", decl.name.name.clone(), &decl.attributes),
                 ItemKind::Corollary(decl) => {
                     ("corollary", decl.name.name.clone(), &decl.attributes)
                 }
-                ItemKind::Axiom(decl) => {
-                    ("axiom", decl.name.name.clone(), &decl.attributes)
-                }
+                ItemKind::Axiom(decl) => ("axiom", decl.name.name.clone(), &decl.attributes),
                 _ => continue,
             };
             collect_framework_markers_from(
@@ -641,18 +635,12 @@ pub fn audit_framework_axioms_with_format(format: AuditFormat) -> Result<()> {
     }
 
     match format {
-        AuditFormat::Plain => print_framework_report(
-            parsed_files,
-            skipped_files,
-            &by_framework,
-            &malformed,
-        ),
-        AuditFormat::Json => print_framework_report_json(
-            parsed_files,
-            skipped_files,
-            &by_framework,
-            &malformed,
-        ),
+        AuditFormat::Plain => {
+            print_framework_report(parsed_files, skipped_files, &by_framework, &malformed)
+        }
+        AuditFormat::Json => {
+            print_framework_report_json(parsed_files, skipped_files, &by_framework, &malformed)
+        }
     }
 
     if !malformed.is_empty() {
@@ -730,18 +718,12 @@ pub fn audit_framework_conflicts_with_format(format: AuditFormat) -> Result<()> 
                 Text,
                 &verum_common::List<verum_ast::attr::Attribute>,
             ) = match &item.kind {
-                ItemKind::Theorem(decl) => {
-                    ("theorem", decl.name.name.clone(), &decl.attributes)
-                }
-                ItemKind::Lemma(decl) => {
-                    ("lemma", decl.name.name.clone(), &decl.attributes)
-                }
+                ItemKind::Theorem(decl) => ("theorem", decl.name.name.clone(), &decl.attributes),
+                ItemKind::Lemma(decl) => ("lemma", decl.name.name.clone(), &decl.attributes),
                 ItemKind::Corollary(decl) => {
                     ("corollary", decl.name.name.clone(), &decl.attributes)
                 }
-                ItemKind::Axiom(decl) => {
-                    ("axiom", decl.name.name.clone(), &decl.attributes)
-                }
+                ItemKind::Axiom(decl) => ("axiom", decl.name.name.clone(), &decl.attributes),
                 _ => continue,
             };
             collect_framework_markers_from(
@@ -870,9 +852,7 @@ pub fn audit_framework_conflicts_with_format(format: AuditFormat) -> Result<()> 
 
 /// Output: `target/audit-reports/foundation-profiles.json`.
 pub fn audit_foundation_profiles_with_format(format: AuditFormat) -> Result<()> {
-    use verum_kernel::foundation_profile::{
-        FoundationDistribution, FoundationProfile,
-    };
+    use verum_kernel::foundation_profile::{FoundationDistribution, FoundationProfile};
     use verum_kernel::framework_citation::collect_framework_citations;
 
     if matches!(format, AuditFormat::Plain) {
@@ -987,12 +967,7 @@ pub fn audit_foundation_profiles_with_format(format: AuditFormat) -> Result<()> 
                     "!".yellow(),
                 );
                 for c in &dist.conflicts {
-                    println!(
-                        "  {} ⊥ {}: {}",
-                        c.left.tag(),
-                        c.right.tag(),
-                        c.reason,
-                    );
+                    println!("  {} ⊥ {}: {}", c.left.tag(), c.right.tag(), c.reason,);
                 }
             }
             // Quick reachability hint that helps the auditor file
@@ -1087,21 +1062,13 @@ pub fn audit_accessibility_with_format(format: AuditFormat) -> Result<()> {
                 Text,
                 &verum_common::List<verum_ast::attr::Attribute>,
             ) = match &item.kind {
-                ItemKind::Theorem(decl) => {
-                    ("theorem", decl.name.name.clone(), &decl.attributes)
-                }
-                ItemKind::Lemma(decl) => {
-                    ("lemma", decl.name.name.clone(), &decl.attributes)
-                }
+                ItemKind::Theorem(decl) => ("theorem", decl.name.name.clone(), &decl.attributes),
+                ItemKind::Lemma(decl) => ("lemma", decl.name.name.clone(), &decl.attributes),
                 ItemKind::Corollary(decl) => {
                     ("corollary", decl.name.name.clone(), &decl.attributes)
                 }
-                ItemKind::Axiom(decl) => {
-                    ("axiom", decl.name.name.clone(), &decl.attributes)
-                }
-                ItemKind::Function(func) => {
-                    ("fn", func.name.name.clone(), &func.attributes)
-                }
+                ItemKind::Axiom(decl) => ("axiom", decl.name.name.clone(), &decl.attributes),
+                ItemKind::Function(func) => ("fn", func.name.name.clone(), &func.attributes),
                 _ => continue,
             };
             // Item participates in the audit iff it carries any
@@ -1113,8 +1080,7 @@ pub fn audit_accessibility_with_format(format: AuditFormat) -> Result<()> {
             if !has_enact {
                 continue;
             }
-            let acc_lambda =
-                find_accessibility_lambda(&item.attributes, decl_attrs);
+            let acc_lambda = find_accessibility_lambda(&item.attributes, decl_attrs);
             rows.push(AccessibilityRow {
                 file: rel_path.clone(),
                 item_kind: kind_label,
@@ -1219,7 +1185,11 @@ fn print_accessibility_report(
 
     println!(
         "  {} {} of {} @enact site(s) carry an @accessibility(λ) certificate.",
-        if missing.is_empty() { "✓".green() } else { "·".yellow() },
+        if missing.is_empty() {
+            "✓".green()
+        } else {
+            "·".yellow()
+        },
         covered.len(),
         rows.len()
     );
@@ -1233,10 +1203,7 @@ fn print_accessibility_report(
                 "✓".green(),
                 r.item_kind,
                 r.item_name.as_str().cyan(),
-                r.accessibility
-                    .as_ref()
-                    .map(|t| t.as_str())
-                    .unwrap_or("?"),
+                r.accessibility.as_ref().map(|t| t.as_str()).unwrap_or("?"),
                 r.file.display()
             );
         }
@@ -1302,7 +1269,11 @@ fn print_accessibility_report_json(
                 out.push_str("      \"accessibility\": null\n");
             }
         }
-        out.push_str(if i + 1 == total { "    }\n" } else { "    },\n" });
+        out.push_str(if i + 1 == total {
+            "    }\n"
+        } else {
+            "    },\n"
+        });
     }
     out.push_str("  ]\n");
     out.push_str("}");
@@ -1334,31 +1305,156 @@ pub fn audit_kernel_rules(format: AuditFormat) -> Result<()> {
     // ships more (depth.rs / eps_mu.rs / cert.rs all carry rules
     // that hadn't been surfaced to the audit display).
     const RULES: &[Rule] = &[
-        Rule { number:  1, family: "structural", name: "K-Var",            signature: "Γ, x:A ⊢ x : A" },
-        Rule { number:  2, family: "structural", name: "K-Lam",            signature: "Γ,x:A ⊢ t:B  ⟹  Γ ⊢ λx:A.t : Π x:A.B" },
-        Rule { number:  3, family: "structural", name: "K-App",            signature: "Γ ⊢ f:Π x:A.B, Γ ⊢ a:A  ⟹  Γ ⊢ f a : B[x↦a]" },
-        Rule { number:  4, family: "structural", name: "K-Pi-Form",        signature: "Γ ⊢ A:U_i, Γ,x:A ⊢ B:U_j  ⟹  Γ ⊢ Π x:A.B : U_max" },
-        Rule { number:  5, family: "structural", name: "K-Universe-Cumul", signature: "Γ ⊢ A:U_i  ⟹  Γ ⊢ A:U_{i+1}" },
-        Rule { number:  6, family: "structural", name: "K-Sigma-Form",     signature: "Γ ⊢ A:U_i, Γ,x:A ⊢ B:U_j  ⟹  Γ ⊢ Σ x:A.B : U_max" },
-        Rule { number:  7, family: "inductive",  name: "K-Ind-Form",       signature: "well-formed mutual-inductive declaration" },
-        Rule { number:  8, family: "inductive",  name: "K-Pos",            signature: "strict positivity walker (depth.rs::check_strict_positivity)" },
-        Rule { number:  9, family: "inductive",  name: "K-Ind-Intro",      signature: "Ctor(args) well-typed vs declared signature" },
-        Rule { number: 10, family: "inductive",  name: "K-Ind-Elim",       signature: "exhaustive pattern-match, arm typed in motive" },
-        Rule { number: 11, family: "equality",   name: "K-Refl",           signature: "Refl(t) : Eq(A, t, t)" },
-        Rule { number: 12, family: "equality",   name: "K-Eq-Elim (J)",    signature: "Martin-Löf J" },
-        Rule { number: 13, family: "equality",   name: "K-UIP-Free",       signature: "reject any axiom reducing to UIP without @uip framework" },
-        Rule { number: 14, family: "cubical",    name: "K-PathTy-Form",    signature: "PathTy(A, a, b) : U" },
-        Rule { number: 15, family: "cubical",    name: "K-HComp",          signature: "CCHM homogeneous composition" },
-        Rule { number: 16, family: "cubical",    name: "K-Transp",         signature: "transport along a path of types" },
-        Rule { number: 17, family: "cubical",    name: "K-Glue",           signature: "glue at face φ — univalence-enabling" },
-        Rule { number: 18, family: "cubical",    name: "K-Univalence",     signature: "ua : Equiv(A,B) → Path(U, A, B)  (via Glue)" },
-        Rule { number: 19, family: "refinement", name: "K-Refine",         signature: "Γ ⊢ Refined(A,x,P) : Type_n  iff  dp(P) < dp(A)+1  (VVA §4.4)" },
-        Rule { number: 20, family: "refinement", name: "K-RefineIntro",    signature: "Γ ⊢ a:A, proof:P[a/x]  ⟹  Γ ⊢ ⟨a|proof⟩ : Refined(A,x,P)" },
-        Rule { number: 21, family: "refinement", name: "K-RefineErase",    signature: "Γ ⊢ r : Refined(A,x,P)  ⟹  Γ ⊢ r.value : A" },
-        Rule { number: 22, family: "refinement", name: "K-Refine-omega",   signature: "ordinal-valued depth (depth.rs::m_depth_omega) — opt-in via @require_extension(vfe_7)" },
-        Rule { number: 23, family: "framework",  name: "K-FwAx",           signature: "admit FrameworkAxiom(name,citation,body) — body:Prop + subsingleton" },
-        Rule { number: 24, family: "framework",  name: "K-Eps-Mu",         signature: "ε∘M ≃ A∘ε naturality witness (eps_mu.rs::check_eps_mu_coherence) — Diakrisis Prop 5.1" },
-        Rule { number: 25, family: "smt",        name: "K-Smt",            signature: "SmtCertificate(query, backend, witness) re-check via support.rs::replay_smt_cert_with_obligation" },
+        Rule {
+            number: 1,
+            family: "structural",
+            name: "K-Var",
+            signature: "Γ, x:A ⊢ x : A",
+        },
+        Rule {
+            number: 2,
+            family: "structural",
+            name: "K-Lam",
+            signature: "Γ,x:A ⊢ t:B  ⟹  Γ ⊢ λx:A.t : Π x:A.B",
+        },
+        Rule {
+            number: 3,
+            family: "structural",
+            name: "K-App",
+            signature: "Γ ⊢ f:Π x:A.B, Γ ⊢ a:A  ⟹  Γ ⊢ f a : B[x↦a]",
+        },
+        Rule {
+            number: 4,
+            family: "structural",
+            name: "K-Pi-Form",
+            signature: "Γ ⊢ A:U_i, Γ,x:A ⊢ B:U_j  ⟹  Γ ⊢ Π x:A.B : U_max",
+        },
+        Rule {
+            number: 5,
+            family: "structural",
+            name: "K-Universe-Cumul",
+            signature: "Γ ⊢ A:U_i  ⟹  Γ ⊢ A:U_{i+1}",
+        },
+        Rule {
+            number: 6,
+            family: "structural",
+            name: "K-Sigma-Form",
+            signature: "Γ ⊢ A:U_i, Γ,x:A ⊢ B:U_j  ⟹  Γ ⊢ Σ x:A.B : U_max",
+        },
+        Rule {
+            number: 7,
+            family: "inductive",
+            name: "K-Ind-Form",
+            signature: "well-formed mutual-inductive declaration",
+        },
+        Rule {
+            number: 8,
+            family: "inductive",
+            name: "K-Pos",
+            signature: "strict positivity walker (depth.rs::check_strict_positivity)",
+        },
+        Rule {
+            number: 9,
+            family: "inductive",
+            name: "K-Ind-Intro",
+            signature: "Ctor(args) well-typed vs declared signature",
+        },
+        Rule {
+            number: 10,
+            family: "inductive",
+            name: "K-Ind-Elim",
+            signature: "exhaustive pattern-match, arm typed in motive",
+        },
+        Rule {
+            number: 11,
+            family: "equality",
+            name: "K-Refl",
+            signature: "Refl(t) : Eq(A, t, t)",
+        },
+        Rule {
+            number: 12,
+            family: "equality",
+            name: "K-Eq-Elim (J)",
+            signature: "Martin-Löf J",
+        },
+        Rule {
+            number: 13,
+            family: "equality",
+            name: "K-UIP-Free",
+            signature: "reject any axiom reducing to UIP without @uip framework",
+        },
+        Rule {
+            number: 14,
+            family: "cubical",
+            name: "K-PathTy-Form",
+            signature: "PathTy(A, a, b) : U",
+        },
+        Rule {
+            number: 15,
+            family: "cubical",
+            name: "K-HComp",
+            signature: "CCHM homogeneous composition",
+        },
+        Rule {
+            number: 16,
+            family: "cubical",
+            name: "K-Transp",
+            signature: "transport along a path of types",
+        },
+        Rule {
+            number: 17,
+            family: "cubical",
+            name: "K-Glue",
+            signature: "glue at face φ — univalence-enabling",
+        },
+        Rule {
+            number: 18,
+            family: "cubical",
+            name: "K-Univalence",
+            signature: "ua : Equiv(A,B) → Path(U, A, B)  (via Glue)",
+        },
+        Rule {
+            number: 19,
+            family: "refinement",
+            name: "K-Refine",
+            signature: "Γ ⊢ Refined(A,x,P) : Type_n  iff  dp(P) < dp(A)+1  (VVA §4.4)",
+        },
+        Rule {
+            number: 20,
+            family: "refinement",
+            name: "K-RefineIntro",
+            signature: "Γ ⊢ a:A, proof:P[a/x]  ⟹  Γ ⊢ ⟨a|proof⟩ : Refined(A,x,P)",
+        },
+        Rule {
+            number: 21,
+            family: "refinement",
+            name: "K-RefineErase",
+            signature: "Γ ⊢ r : Refined(A,x,P)  ⟹  Γ ⊢ r.value : A",
+        },
+        Rule {
+            number: 22,
+            family: "refinement",
+            name: "K-Refine-omega",
+            signature: "ordinal-valued depth (depth.rs::m_depth_omega) — opt-in via @require_extension(vfe_7)",
+        },
+        Rule {
+            number: 23,
+            family: "framework",
+            name: "K-FwAx",
+            signature: "admit FrameworkAxiom(name,citation,body) — body:Prop + subsingleton",
+        },
+        Rule {
+            number: 24,
+            family: "framework",
+            name: "K-Eps-Mu",
+            signature: "ε∘M ≃ A∘ε naturality witness (eps_mu.rs::check_eps_mu_coherence) — Diakrisis Prop 5.1",
+        },
+        Rule {
+            number: 25,
+            family: "smt",
+            name: "K-Smt",
+            signature: "SmtCertificate(query, backend, witness) re-check via support.rs::replay_smt_cert_with_obligation",
+        },
     ];
 
     match format {
@@ -1366,14 +1462,13 @@ pub fn audit_kernel_rules(format: AuditFormat) -> Result<()> {
             ui::step("Trusted-kernel primitive inference rules");
             println!();
             println!("  Rule  Family       Name                 Signature");
-            println!("  ────  ───────────  ───────────────────  ──────────────────────────────────");
+            println!(
+                "  ────  ───────────  ───────────────────  ──────────────────────────────────"
+            );
             for r in RULES {
                 println!(
                     "  {:>3}   {:11}  {:19}  {}",
-                    r.number,
-                    r.family,
-                    r.name,
-                    r.signature
+                    r.number, r.family, r.name, r.signature
                 );
             }
             println!();
@@ -1381,23 +1476,14 @@ pub fn audit_kernel_rules(format: AuditFormat) -> Result<()> {
                 "  Total: {} rules across 8 families (structural / inductive /",
                 RULES.len()
             );
-            println!(
-                "  equality / cubical / refinement / framework / smt). See"
-            );
-            println!(
-                "  docs/architecture/verum-verification-architecture.md §4.4 +"
-            );
-            println!(
-                "  §4.4a for the full semantics and the LCF context."
-            );
+            println!("  equality / cubical / refinement / framework / smt). See");
+            println!("  docs/architecture/verum-verification-architecture.md §4.4 +");
+            println!("  §4.4a for the full semantics and the LCF context.");
         }
         AuditFormat::Json => {
             let mut out = String::from("{\n");
             out.push_str("  \"schema_version\": 1,\n");
-            out.push_str(&format!(
-                "  \"rule_count\": {},\n",
-                RULES.len()
-            ));
+            out.push_str(&format!("  \"rule_count\": {},\n", RULES.len()));
             out.push_str("  \"rules\": [\n");
             for (i, r) in RULES.iter().enumerate() {
                 out.push_str(&format!(
@@ -1425,23 +1511,11 @@ fn print_framework_report_json(
 ) {
     let mut out = String::from("{\n");
     out.push_str("  \"schema_version\": 1,\n");
-    out.push_str(&format!(
-        "  \"parsed_files\": {},\n",
-        parsed_files
-    ));
-    out.push_str(&format!(
-        "  \"skipped_files\": {},\n",
-        skipped_files
-    ));
+    out.push_str(&format!("  \"parsed_files\": {},\n", parsed_files));
+    out.push_str(&format!("  \"skipped_files\": {},\n", skipped_files));
     let total_markers: usize = by_framework.values().map(|v| v.len()).sum();
-    out.push_str(&format!(
-        "  \"total_markers\": {},\n",
-        total_markers
-    ));
-    out.push_str(&format!(
-        "  \"framework_count\": {},\n",
-        by_framework.len()
-    ));
+    out.push_str(&format!("  \"total_markers\": {},\n", total_markers));
+    out.push_str(&format!("  \"framework_count\": {},\n", by_framework.len()));
     out.push_str("  \"frameworks\": [\n");
     let mut first = true;
     for (framework, uses) in by_framework {
@@ -1454,10 +1528,7 @@ fn print_framework_report_json(
             "      \"framework\": \"{}\",\n",
             json_escape(framework.as_str())
         ));
-        out.push_str(&format!(
-            "      \"marker_count\": {},\n",
-            uses.len()
-        ));
+        out.push_str(&format!("      \"marker_count\": {},\n", uses.len()));
         out.push_str("      \"markers\": [\n");
         let mut first_use = true;
         for u in uses {
@@ -1466,10 +1537,7 @@ fn print_framework_report_json(
             }
             first_use = false;
             out.push_str("        {\n");
-            out.push_str(&format!(
-                "          \"item_kind\": \"{}\",\n",
-                u.item_kind
-            ));
+            out.push_str(&format!("          \"item_kind\": \"{}\",\n", u.item_kind));
             out.push_str(&format!(
                 "          \"item_name\": \"{}\",\n",
                 json_escape(u.item_name.as_str())
@@ -1537,9 +1605,7 @@ pub(crate) fn discover_vr_files(root: &Path) -> Vec<PathBuf> {
             Ok(e) => e,
             Err(_) => continue,
         };
-        if entry.file_type().is_file()
-            && entry.path().extension().map_or(false, |e| e == "vr")
-        {
+        if entry.file_type().is_file() && entry.path().extension().map_or(false, |e| e == "vr") {
             out.push(entry.into_path());
         }
     }
@@ -2284,8 +2350,8 @@ fn print_kernel_soundness_report_json(
 /// Output: `target/audit-reports/kernel-v0-roster.json`.
 pub fn audit_kernel_v0_roster_with_format(format: AuditFormat) -> Result<()> {
     use verum_kernel::soundness::kernel_v0_manifest::{
-        KernelV0Status, ManifestIssue, admitted_count, manifest, proved_count,
-        verify_manifest, KERNEL_V0_RULE_COUNT,
+        KERNEL_V0_RULE_COUNT, KernelV0Status, ManifestIssue, admitted_count, manifest,
+        proved_count, verify_manifest,
     };
 
     if matches!(format, AuditFormat::Plain) {
@@ -2387,18 +2453,17 @@ pub fn audit_kernel_v0_roster_with_format(format: AuditFormat) -> Result<()> {
                 println!("{} Manifest drift:", "✗".red());
                 for issue in &issues {
                     match issue {
-                        ManifestIssue::MissingSourceFile { rule_name, expected_path } => {
+                        ManifestIssue::MissingSourceFile {
+                            rule_name,
+                            expected_path,
+                        } => {
                             println!(
                                 "  ✗ rule {:?} references {:?} but file not found",
-                                rule_name,
-                                expected_path,
+                                rule_name, expected_path,
                             );
                         }
                         ManifestIssue::OrphanSourceFile { path } => {
-                            println!(
-                                "  ✗ orphan source file {:?} has no manifest entry",
-                                path,
-                            );
+                            println!("  ✗ orphan source file {:?} has no manifest entry", path,);
                         }
                     }
                 }
@@ -2407,10 +2472,7 @@ pub fn audit_kernel_v0_roster_with_format(format: AuditFormat) -> Result<()> {
             }
         }
         AuditFormat::Json => {
-            println!(
-                "{}",
-                serde_json::to_string(&payload).unwrap_or_default(),
-            );
+            println!("{}", serde_json::to_string(&payload).unwrap_or_default(),);
         }
     }
 
@@ -2460,8 +2522,8 @@ pub fn audit_kernel_v0_roster_with_format(format: AuditFormat) -> Result<()> {
 /// Output: `target/audit-reports/codegen-attestation.json`.
 pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> {
     use verum_kernel::codegen_attestation::{
-        AttestationStatus, admitted_count, attested_count, manifest,
-        pass_count, pending_count, CODEGEN_PASS_COUNT,
+        AttestationStatus, CODEGEN_PASS_COUNT, admitted_count, attested_count, manifest,
+        pass_count, pending_count,
     };
 
     if matches!(format, AuditFormat::Plain) {
@@ -2544,13 +2606,10 @@ pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> 
             for p in &passes {
                 let (glyph, suffix) = match &p.status {
                     AttestationStatus::Discharged => ("✓".to_string(), String::new()),
-                    AttestationStatus::AdmittedWithIou { iou } => (
-                        "○".to_string(),
-                        format!("  IOU: {}", iou),
-                    ),
-                    AttestationStatus::NotYetAttested => {
-                        ("·".to_string(), String::new())
+                    AttestationStatus::AdmittedWithIou { iou } => {
+                        ("○".to_string(), format!("  IOU: {}", iou))
                     }
+                    AttestationStatus::NotYetAttested => ("·".to_string(), String::new()),
                 };
                 println!(
                     "  {} {:<24}  {}",
@@ -2569,17 +2628,13 @@ pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> 
             println!();
             println!(
                 "{} of {} passes attested — the verified-compilation chain is the L4 IOU surface",
-                attested,
-                CODEGEN_PASS_COUNT,
+                attested, CODEGEN_PASS_COUNT,
             );
             println!();
             println!("Report: {}", report_path.display());
         }
         AuditFormat::Json => {
-            println!(
-                "{}",
-                serde_json::to_string(&payload).unwrap_or_default(),
-            );
+            println!("{}", serde_json::to_string(&payload).unwrap_or_default(),);
         }
     }
 
@@ -2785,16 +2840,17 @@ fn print_bridge_discharge_report_plain(
 
     if !report.unknown_bridges.is_empty() {
         println!();
-        println!("  {} bridge(s) cited but missing from dispatcher:", "!".yellow());
+        println!(
+            "  {} bridge(s) cited but missing from dispatcher:",
+            "!".yellow()
+        );
         for n in &report.unknown_bridges {
             println!("    - {}", n);
         }
     }
 }
 
-fn print_bridge_discharge_report_json(
-    report: &crate::commands::bridge_discharge::DischargeReport,
-) {
+fn print_bridge_discharge_report_json(report: &crate::commands::bridge_discharge::DischargeReport) {
     let payload = serde_json::json!({
         "schema_version": 1,
         "command": "audit-bridge-discharge",
@@ -2888,20 +2944,17 @@ pub fn audit_ladder_monotonicity_with_format(format: AuditFormat) -> Result<()> 
         parsed_files += 1;
 
         for item in &module.items {
-            let (item_name, decl_attrs): (
-                Text,
-                &verum_common::List<verum_ast::attr::Attribute>,
-            ) = match &item.kind {
-                verum_ast::decl::ItemKind::Theorem(d)
-                | verum_ast::decl::ItemKind::Lemma(d)
-                | verum_ast::decl::ItemKind::Corollary(d) => {
-                    (d.name.name.clone(), &d.attributes)
-                }
-                _ => continue,
-            };
+            let (item_name, decl_attrs): (Text, &verum_common::List<verum_ast::attr::Attribute>) =
+                match &item.kind {
+                    verum_ast::decl::ItemKind::Theorem(d)
+                    | verum_ast::decl::ItemKind::Lemma(d)
+                    | verum_ast::decl::ItemKind::Corollary(d) => {
+                        (d.name.name.clone(), &d.attributes)
+                    }
+                    _ => continue,
+                };
 
-            let Some(strategy_label) =
-                strictest_verify_strategy(&item.attributes, decl_attrs)
+            let Some(strategy_label) = strictest_verify_strategy(&item.attributes, decl_attrs)
             else {
                 continue;
             };
@@ -2909,21 +2962,14 @@ pub fn audit_ladder_monotonicity_with_format(format: AuditFormat) -> Result<()> 
                 continue;
             };
 
-            let obligation = LadderObligation::text(
-                item_name.clone(),
-                declared,
-                "(elaborated obligation)",
-            );
+            let obligation =
+                LadderObligation::text(item_name.clone(), declared, "(elaborated obligation)");
             let report = dispatch_ladder_walk(&dispatcher, &obligation);
             total_walks += 1;
             let violations = check_runtime_monotonicity(&report);
             if !violations.is_empty() {
                 total_violations += violations.len();
-                violations_text.push((
-                    rel_path.clone(),
-                    item_name.clone(),
-                    violations.clone(),
-                ));
+                violations_text.push((rel_path.clone(), item_name.clone(), violations.clone()));
                 for v in violations {
                     violation_rows.push(serde_json::json!({
                         "file": rel_path.display().to_string(),
@@ -3125,33 +3171,31 @@ fn audit_cross_format_roundtrip_inner(
             .to_string();
 
         for item in &module.items {
-            let (name, decl_attrs, proof_body, proposition_expr, theorem_params, theorem_generics)
-                = match &item.kind {
-                verum_ast::decl::ItemKind::Theorem(d)
-                | verum_ast::decl::ItemKind::Lemma(d)
-                | verum_ast::decl::ItemKind::Corollary(d) => (
-                    d.name.name.as_str().to_string(),
-                    &d.attributes,
-                    match &d.proof {
-                        verum_common::Maybe::Some(b) => Some(b),
-                        verum_common::Maybe::None => None,
-                    },
-                    d.proposition.as_ref(),
-                    &d.params,
-                    &d.generics,
-                ),
-                _ => continue,
-            };
+            let (name, decl_attrs, proof_body, proposition_expr, theorem_params, theorem_generics) =
+                match &item.kind {
+                    verum_ast::decl::ItemKind::Theorem(d)
+                    | verum_ast::decl::ItemKind::Lemma(d)
+                    | verum_ast::decl::ItemKind::Corollary(d) => (
+                        d.name.name.as_str().to_string(),
+                        &d.attributes,
+                        match &d.proof {
+                            verum_common::Maybe::Some(b) => Some(b),
+                            verum_common::Maybe::None => None,
+                        },
+                        d.proposition.as_ref(),
+                        &d.params,
+                        &d.generics,
+                    ),
+                    _ => continue,
+                };
             let has_proof = proof_body.is_some();
-            let declared_strategy =
-                strictest_verify_strategy(&item.attributes, decl_attrs)
-                    .map(|t| t.as_str().to_string());
+            let declared_strategy = strictest_verify_strategy(&item.attributes, decl_attrs)
+                .map(|t| t.as_str().to_string());
             // Render the proposition's source text via the AST
             // pretty-printer so the foreign-tool comment carries
             // exactly what the user wrote — not a synthetic
             // placeholder.
-            let proposition_text =
-                verum_ast::pretty::format_expr(proposition_expr).to_string();
+            let proposition_text = verum_ast::pretty::format_expr(proposition_expr).to_string();
             // Extract `(name, &Type)` pairs from theorem params for
             // the type translator (#141 / MSFS-L4.8). Only Regular
             // params carry a (pattern, ty) pair; self-parameters
@@ -3289,12 +3333,20 @@ fn audit_cross_format_roundtrip_inner(
                     detail = checker.install_hint().to_string();
                 } else {
                     match checker.check_file(&path) {
-                        CheckResult::Passed { tool_version, elapsed, .. } => {
+                        CheckResult::Passed {
+                            tool_version,
+                            elapsed,
+                            ..
+                        } => {
                             verdict_kind = "passed";
-                            detail = format!("tool={} elapsed={}ms",
-                                tool_version, elapsed.as_millis());
+                            detail =
+                                format!("tool={} elapsed={}ms", tool_version, elapsed.as_millis());
                         }
-                        CheckResult::Failed { exit_code, stderr_excerpt, .. } => {
+                        CheckResult::Failed {
+                            exit_code,
+                            stderr_excerpt,
+                            ..
+                        } => {
                             verdict_kind = "failed";
                             detail = format!("exit={} stderr={}", exit_code, stderr_excerpt);
                             foreign_failures += 1;
@@ -3471,7 +3523,10 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
     // Emit JSON to disk for bundle composition.
     let manifest_dir = Manifest::find_manifest_dir().ok();
     let report_path = match &manifest_dir {
-        Some(d) => d.join("target").join("audit-reports").join("proof-term-library.json"),
+        Some(d) => d
+            .join("target")
+            .join("audit-reports")
+            .join("proof-term-library.json"),
         None => library_dir.join("proof-term-library.json"),
     };
     if let Some(parent) = report_path.parent() {
@@ -3500,7 +3555,10 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
             println!("  Library: {}", library_dir.display());
             println!(
                 "  ✓ {} verified · ✗ {} rejected · ⚠ {} malformed (total {})",
-                verified, rejected, malformed, entries.len(),
+                verified,
+                rejected,
+                malformed,
+                entries.len(),
             );
             if rejected > 0 || malformed > 0 {
                 println!();
@@ -3593,7 +3651,7 @@ fn proof_term_library_candidates() -> Vec<std::path::PathBuf> {
 /// drift) or missing signature header (file emitted by older kernel).
 /// Always emits per-file verdict to JSON.
 pub fn audit_signatures_with_format(format: AuditFormat) -> Result<()> {
-    use verum_kernel::soundness::corpus_export::{compute_provenance_signature, TheoremSpec};
+    use verum_kernel::soundness::corpus_export::{TheoremSpec, compute_provenance_signature};
 
     if matches!(format, AuditFormat::Plain) {
         ui::step("Verifying provenance signatures on emitted cross-format files");
@@ -3622,22 +3680,20 @@ pub fn audit_signatures_with_format(format: AuditFormat) -> Result<()> {
             .trim_end_matches(".vr")
             .to_string();
         for item in &module.items {
-            let (name, decl_attrs, has_proof, proposition_expr) =
-                match &item.kind {
-                    verum_ast::decl::ItemKind::Theorem(d)
-                    | verum_ast::decl::ItemKind::Lemma(d)
-                    | verum_ast::decl::ItemKind::Corollary(d) => (
-                        d.name.name.as_str().to_string(),
-                        &d.attributes,
-                        matches!(&d.proof, verum_common::Maybe::Some(_)),
-                        d.proposition.as_ref(),
-                    ),
-                    _ => continue,
-                };
+            let (name, decl_attrs, has_proof, proposition_expr) = match &item.kind {
+                verum_ast::decl::ItemKind::Theorem(d)
+                | verum_ast::decl::ItemKind::Lemma(d)
+                | verum_ast::decl::ItemKind::Corollary(d) => (
+                    d.name.name.as_str().to_string(),
+                    &d.attributes,
+                    matches!(&d.proof, verum_common::Maybe::Some(_)),
+                    d.proposition.as_ref(),
+                ),
+                _ => continue,
+            };
             let declared_strategy = strictest_verify_strategy(&item.attributes, decl_attrs)
                 .map(|t| t.as_str().to_string());
-            let proposition_text =
-                verum_ast::pretty::format_expr(proposition_expr).to_string();
+            let proposition_text = verum_ast::pretty::format_expr(proposition_expr).to_string();
             theorem_specs.push(TheoremSpec {
                 name: sanitise_theorem_name(&name),
                 module_path: module_path_text.clone(),
@@ -3778,7 +3834,11 @@ fn extract_signature_header(text: &str) -> Option<String> {
         let body = trimmed
             .strip_prefix("(*")
             .and_then(|s| s.strip_suffix("*)"))
-            .or_else(|| trimmed.strip_prefix("/-!").and_then(|s| s.strip_suffix("-/")));
+            .or_else(|| {
+                trimmed
+                    .strip_prefix("/-!")
+                    .and_then(|s| s.strip_suffix("-/"))
+            });
         if let Some(body) = body {
             let body = body.trim();
             if let Some(sig) = body.strip_prefix("verum_signature:") {
@@ -3849,11 +3909,17 @@ pub fn audit_soundness_iou_with_format(format: AuditFormat) -> Result<()> {
             LemmaStatus::Proved { .. } => total_proved += 1,
             LemmaStatus::Admitted { .. } => {
                 total_admitted += 1;
-                by_category.entry(rule.category.tag()).or_default().push(rule);
+                by_category
+                    .entry(rule.category.tag())
+                    .or_default()
+                    .push(rule);
             }
             LemmaStatus::DischargedByFramework { .. } => {
                 total_discharged += 1;
-                by_category.entry(rule.category.tag()).or_default().push(rule);
+                by_category
+                    .entry(rule.category.tag())
+                    .or_default()
+                    .push(rule);
             }
         }
     }
@@ -3866,8 +3932,7 @@ pub fn audit_soundness_iou_with_format(format: AuditFormat) -> Result<()> {
     let _ = std::fs::create_dir_all(&report_dir);
     let json_path = report_dir.join("soundness-iou.json");
 
-    let mut category_payloads: serde_json::Map<String, serde_json::Value> =
-        serde_json::Map::new();
+    let mut category_payloads: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
     for category_tag in [
         RuleCategory::Structural.tag(),
         RuleCategory::Cubical.tag(),
@@ -3887,7 +3952,11 @@ pub fn audit_soundness_iou_with_format(format: AuditFormat) -> Result<()> {
                     LemmaStatus::DischargedByFramework { .. } => "DischargedByFramework",
                 };
                 let discharge = match &r.status {
-                    LemmaStatus::DischargedByFramework { lemma_path, framework, citation } => {
+                    LemmaStatus::DischargedByFramework {
+                        lemma_path,
+                        framework,
+                        citation,
+                    } => {
                         serde_json::json!({
                             "lemma_path": lemma_path,
                             "framework": framework,
@@ -3925,10 +3994,7 @@ pub fn audit_soundness_iou_with_format(format: AuditFormat) -> Result<()> {
         "total_discharged_by_framework": total_discharged,
         "categories": category_payloads,
     });
-    let _ = std::fs::write(
-        &json_path,
-        serde_json::to_string_pretty(&payload).unwrap(),
-    );
+    let _ = std::fs::write(&json_path, serde_json::to_string_pretty(&payload).unwrap());
 
     match format {
         AuditFormat::Plain => {
@@ -3954,10 +4020,7 @@ fn print_soundness_iou_plain(
     total_proved: usize,
     total_admitted: usize,
     total_discharged: usize,
-    by_category: &std::collections::BTreeMap<
-        &'static str,
-        Vec<&verum_kernel::soundness::RuleSpec>,
-    >,
+    by_category: &std::collections::BTreeMap<&'static str, Vec<&verum_kernel::soundness::RuleSpec>>,
     json_path: &std::path::Path,
 ) {
     use verum_kernel::soundness::RuleCategory;
@@ -3970,12 +4033,18 @@ fn print_soundness_iou_plain(
     );
     println!();
     if total_admitted == 0 && total_discharged == 0 {
-        println!("  ✓ Every kernel rule is structurally proved — trusted base reduced to ZFC + 2-inacc + Verum kernel rules.");
+        println!(
+            "  ✓ Every kernel rule is structurally proved — trusted base reduced to ZFC + 2-inacc + Verum kernel rules."
+        );
         return;
     }
     if total_admitted == 0 {
-        println!("  ✓ Zero open IOUs — every admitted rule is discharged by upstream framework citation.");
-        println!("    L4-acceptable: the trust base is ZFC + 2-inacc + cited mathlib4 / Coq stdlib proofs.");
+        println!(
+            "  ✓ Zero open IOUs — every admitted rule is discharged by upstream framework citation."
+        );
+        println!(
+            "    L4-acceptable: the trust base is ZFC + 2-inacc + cited mathlib4 / Coq stdlib proofs."
+        );
         println!();
     }
 
@@ -3994,7 +4063,8 @@ fn print_soundness_iou_plain(
             if rules.is_empty() {
                 continue;
             }
-            println!("  {} ({} admit{})",
+            println!(
+                "  {} ({} admit{})",
                 category_tag,
                 rules.len(),
                 if rules.len() == 1 { "" } else { "s" },
@@ -4539,10 +4609,7 @@ pub fn audit_apply_graph_with_format(format: AuditFormat) -> Result<()> {
                             // apply-targets become the children in
                             // the graph.
                             let apply_targets = extract_apply_targets(body);
-                            graph.insert(
-                                name.clone(),
-                                SymbolEntry::Theorem { apply_targets },
-                            );
+                            graph.insert(name.clone(), SymbolEntry::Theorem { apply_targets });
                             // Only track corpus-side theorems for the
                             // per-theorem report; stdlib theorems
                             // populate the symbol table for transitive
@@ -4555,22 +4622,15 @@ pub fn audit_apply_graph_with_format(format: AuditFormat) -> Result<()> {
                             // Theorem-shaped axiom — classify as a
                             // leaf based on the @framework attribute
                             // and the kernel_ prefix.
-                            let entry = classify_axiom_entry(
-                                &name,
-                                &d.attributes,
-                                &item.attributes,
-                            );
+                            let entry =
+                                classify_axiom_entry(&name, &d.attributes, &item.attributes);
                             graph.insert(name, entry);
                         }
                     }
                 }
                 verum_ast::decl::ItemKind::Axiom(a) => {
                     let name = a.name.name.as_str().to_string();
-                    let entry = classify_axiom_entry(
-                        &name,
-                        &a.attributes,
-                        &item.attributes,
-                    );
+                    let entry = classify_axiom_entry(&name, &a.attributes, &item.attributes);
                     graph.insert(name, entry);
                 }
                 _ => {}
@@ -4604,12 +4664,7 @@ pub fn audit_apply_graph_with_format(format: AuditFormat) -> Result<()> {
             placeholder_leaves: comp
                 .leaves
                 .iter()
-                .filter(|h| {
-                    matches!(
-                        h.kind,
-                        LeafKind::PlaceholderAxiom | LeafKind::Unresolved
-                    )
-                })
+                .filter(|h| matches!(h.kind, LeafKind::PlaceholderAxiom | LeafKind::Unresolved))
                 .map(|h| ApplyGraphLeakHit {
                     leaf: h.symbol.clone(),
                     chain: h.chain.clone(),
@@ -4620,9 +4675,7 @@ pub fn audit_apply_graph_with_format(format: AuditFormat) -> Result<()> {
     }
     rows.sort_by(|a, b| a.theorem.cmp(&b.theorem));
 
-    let report_dir = manifest_dir
-        .join("target")
-        .join("audit-reports");
+    let report_dir = manifest_dir.join("target").join("audit-reports");
     let _ = std::fs::create_dir_all(&report_dir);
     let json_path = report_dir.join("apply-graph.json");
     let payload = serde_json::json!({
@@ -4635,10 +4688,7 @@ pub fn audit_apply_graph_with_format(format: AuditFormat) -> Result<()> {
         "max_depth": MAX_DEPTH,
         "rows": rows,
     });
-    let _ = std::fs::write(
-        &json_path,
-        serde_json::to_string_pretty(&payload).unwrap(),
-    );
+    let _ = std::fs::write(&json_path, serde_json::to_string_pretty(&payload).unwrap());
 
     match format {
         AuditFormat::Plain => {
@@ -4743,17 +4793,10 @@ fn print_apply_graph_plain(
         leaking_theorems,
     );
     for row in rows.iter().filter(|r| !r.load_bearing) {
-        println!(
-            "    - {} (in {})",
-            row.theorem,
-            row.source.display(),
-        );
+        println!("    - {} (in {})", row.theorem, row.source.display(),);
         println!(
             "        {} kernel_strict · {} framework · {} placeholder · {} unresolved",
-            row.kernel_strict,
-            row.framework_axiom,
-            row.placeholder_axiom,
-            row.unresolved,
+            row.kernel_strict, row.framework_axiom, row.placeholder_axiom, row.unresolved,
         );
         for leak in &row.placeholder_leaves {
             let chain_text = leak.chain.join(" → ");
@@ -4842,10 +4885,7 @@ fn print_cross_format_roundtrip_plain(
         theorem_specs.len(),
         backend_meta.len(),
     );
-    println!(
-        "  {} foreign-tool failure(s) detected.",
-        foreign_failures,
-    );
+    println!("  {} foreign-tool failure(s) detected.", foreign_failures,);
     println!();
 
     // Per-backend summary line first, then per-theorem rows.
@@ -4856,7 +4896,10 @@ fn print_cross_format_roundtrip_plain(
     for (backend_id, rows) in &by_backend {
         let passed = rows.iter().filter(|r| r.verdict_kind == "passed").count();
         let failed = rows.iter().filter(|r| r.verdict_kind == "failed").count();
-        let missing = rows.iter().filter(|r| r.verdict_kind == "tool_missing").count();
+        let missing = rows
+            .iter()
+            .filter(|r| r.verdict_kind == "tool_missing")
+            .count();
         let mark = if failed > 0 {
             "✗".red().to_string()
         } else if passed > 0 {
@@ -4886,8 +4929,10 @@ fn print_cross_format_roundtrip_plain(
 
     if foreign_failures == 0 {
         println!();
-        println!("  {} all available foreign tools accepted every emitted theorem.",
-            "✓".green());
+        println!(
+            "  {} all available foreign tools accepted every emitted theorem.",
+            "✓".green()
+        );
     }
 }
 
@@ -4956,21 +5001,13 @@ pub fn audit_epsilon_with_format(format: AuditFormat) -> Result<()> {
                 Text,
                 &verum_common::List<verum_ast::attr::Attribute>,
             ) = match &item.kind {
-                ItemKind::Theorem(decl) => {
-                    ("theorem", decl.name.name.clone(), &decl.attributes)
-                }
-                ItemKind::Lemma(decl) => {
-                    ("lemma", decl.name.name.clone(), &decl.attributes)
-                }
+                ItemKind::Theorem(decl) => ("theorem", decl.name.name.clone(), &decl.attributes),
+                ItemKind::Lemma(decl) => ("lemma", decl.name.name.clone(), &decl.attributes),
                 ItemKind::Corollary(decl) => {
                     ("corollary", decl.name.name.clone(), &decl.attributes)
                 }
-                ItemKind::Axiom(decl) => {
-                    ("axiom", decl.name.name.clone(), &decl.attributes)
-                }
-                ItemKind::Function(func) => {
-                    ("fn", func.name.name.clone(), &func.attributes)
-                }
+                ItemKind::Axiom(decl) => ("axiom", decl.name.name.clone(), &decl.attributes),
+                ItemKind::Function(func) => ("fn", func.name.name.clone(), &func.attributes),
                 _ => continue,
             };
             collect_enact_markers_from(
@@ -4997,12 +5034,7 @@ pub fn audit_epsilon_with_format(format: AuditFormat) -> Result<()> {
             print_epsilon_report(parsed_files, skipped_files, &by_epsilon, &malformed);
         }
         AuditFormat::Json => {
-            print_epsilon_report_json(
-                parsed_files,
-                skipped_files,
-                &by_epsilon,
-                &malformed,
-            );
+            print_epsilon_report_json(parsed_files, skipped_files, &by_epsilon, &malformed);
         }
     }
     Ok(())
@@ -5023,14 +5055,11 @@ fn collect_enact_markers_from(
         }
         match EnactAttr::from_attribute(attr) {
             Maybe::Some(ea) => {
-                by_epsilon
-                    .entry(ea.epsilon)
-                    .or_default()
-                    .push(EnactUsage {
-                        item_name: item_name.clone(),
-                        item_kind: kind_label,
-                        file: rel_path.to_path_buf(),
-                    });
+                by_epsilon.entry(ea.epsilon).or_default().push(EnactUsage {
+                    item_name: item_name.clone(),
+                    item_kind: kind_label,
+                    file: rel_path.to_path_buf(),
+                });
             }
             Maybe::None => {
                 malformed.push((rel_path.to_path_buf(), item_name.clone()));
@@ -5055,14 +5084,15 @@ fn print_epsilon_report(
     println!();
 
     if by_epsilon.is_empty() {
-        println!("  {} no @enact(epsilon = \"...\") markers found.", "·".dimmed());
+        println!(
+            "  {} no @enact(epsilon = \"...\") markers found.",
+            "·".dimmed()
+        );
         println!(
             "  {} the corpus declares no DC-side ε-coordinate; every",
             "·".dimmed()
         );
-        println!(
-            "    function's ε will be inferred from its body during"
-        );
+        println!("    function's ε will be inferred from its body during");
         println!("    compile-time `core.action.verify.verify_epsilon`.");
         println!();
     } else {
@@ -5113,8 +5143,7 @@ fn print_epsilon_report(
         );
         println!(
             "  ordinal coords:   {}",
-            "0, 1, 2, …, ω, ω+k, ω·n, ω·n+k, ω², Ω (also ASCII: omega, omega_squared, …)"
-                .dimmed()
+            "0, 1, 2, …, ω, ω+k, ω·n, ω·n+k, ω², Ω (also ASCII: omega, omega_squared, …)".dimmed()
         );
         println!();
     }
@@ -5146,10 +5175,7 @@ fn print_epsilon_report_json(
         let total_u = uses.len();
         for (j, u) in uses.iter().enumerate() {
             out.push_str("        {\n");
-            out.push_str(&format!(
-                "          \"item_kind\": \"{}\",\n",
-                u.item_kind
-            ));
+            out.push_str(&format!("          \"item_kind\": \"{}\",\n", u.item_kind));
             out.push_str(&format!(
                 "          \"item_name\": \"{}\",\n",
                 json_escape(u.item_name.as_str())
@@ -5158,10 +5184,18 @@ fn print_epsilon_report_json(
                 "          \"file\": \"{}\"\n",
                 json_escape(&u.file.display().to_string())
             ));
-            out.push_str(if j + 1 == total_u { "        }\n" } else { "        },\n" });
+            out.push_str(if j + 1 == total_u {
+                "        }\n"
+            } else {
+                "        },\n"
+            });
         }
         out.push_str("      ]\n");
-        out.push_str(if i + 1 == total_eps { "    }\n" } else { "    },\n" });
+        out.push_str(if i + 1 == total_eps {
+            "    }\n"
+        } else {
+            "    },\n"
+        });
     }
     out.push_str("  ],\n");
     out.push_str("  \"malformed\": [\n");
@@ -5175,7 +5209,11 @@ fn print_epsilon_report_json(
             "      \"item_name\": \"{}\"\n",
             json_escape(item_name.as_str())
         ));
-        out.push_str(if i + 1 == malformed.len() { "    }\n" } else { "    },\n" });
+        out.push_str(if i + 1 == malformed.len() {
+            "    }\n"
+        } else {
+            "    },\n"
+        });
     }
     out.push_str("  ]\n");
     out.push_str("}\n");
@@ -5209,13 +5247,22 @@ pub(crate) struct CliOrdinal {
 
 impl CliOrdinal {
     const fn finite(n: u32) -> Self {
-        Self { omega_coeff: 0, finite_offset: n }
+        Self {
+            omega_coeff: 0,
+            finite_offset: n,
+        }
     }
     const fn omega() -> Self {
-        Self { omega_coeff: 1, finite_offset: 0 }
+        Self {
+            omega_coeff: 1,
+            finite_offset: 0,
+        }
     }
     const fn omega_plus(k: u32) -> Self {
-        Self { omega_coeff: 1, finite_offset: k }
+        Self {
+            omega_coeff: 1,
+            finite_offset: k,
+        }
     }
 
     fn render(&self) -> String {
@@ -5257,15 +5304,15 @@ impl CliOrdinal {
 /// / schreiber_dcct / baez_dolan.
 fn msfs_lookup(framework_name: &str) -> (CliOrdinal, bool) {
     match framework_name {
-        "actic.raw"             => (CliOrdinal::finite(0),  false),
-        "lurie_htt"             => (CliOrdinal::omega(),    true),
-        "schreiber_dcct"        => (CliOrdinal::omega_plus(2), true),
-        "connes_reconstruction" => (CliOrdinal::omega(),    false),
-        "petz_classification"   => (CliOrdinal::finite(2),  false),
-        "arnold_catastrophe"    => (CliOrdinal::finite(2),  true),
-        "baez_dolan"            => (CliOrdinal::omega_plus(1), true),
-        "owl2_fs"               => (CliOrdinal::finite(1),  true),
-        _                       => (CliOrdinal::finite(0),  true),
+        "actic.raw" => (CliOrdinal::finite(0), false),
+        "lurie_htt" => (CliOrdinal::omega(), true),
+        "schreiber_dcct" => (CliOrdinal::omega_plus(2), true),
+        "connes_reconstruction" => (CliOrdinal::omega(), false),
+        "petz_classification" => (CliOrdinal::finite(2), false),
+        "arnold_catastrophe" => (CliOrdinal::finite(2), true),
+        "baez_dolan" => (CliOrdinal::omega_plus(1), true),
+        "owl2_fs" => (CliOrdinal::finite(1), true),
+        _ => (CliOrdinal::finite(0), true),
     }
 }
 
@@ -5298,8 +5345,7 @@ pub fn audit_coord_with_format(format: AuditFormat) -> Result<()> {
     // `certified` ↦ ω·2+2 / `synthesize` ↦ ≤ω·3+1). Theorem-level ν is
     // max(framework_nu, verify_nu); without `@verify(...)` we project to
     // the framework's bare ν (axiom-postulated case).
-    let mut verify_by_item: BTreeMap<(PathBuf, Text, &'static str), Text> =
-        BTreeMap::new();
+    let mut verify_by_item: BTreeMap<(PathBuf, Text, &'static str), Text> = BTreeMap::new();
     let mut parsed_files = 0usize;
     let mut skipped_files = 0usize;
 
@@ -5323,18 +5369,12 @@ pub fn audit_coord_with_format(format: AuditFormat) -> Result<()> {
                 Text,
                 &verum_common::List<verum_ast::attr::Attribute>,
             ) = match &item.kind {
-                ItemKind::Theorem(decl) => {
-                    ("theorem", decl.name.name.clone(), &decl.attributes)
-                }
-                ItemKind::Lemma(decl) => {
-                    ("lemma", decl.name.name.clone(), &decl.attributes)
-                }
+                ItemKind::Theorem(decl) => ("theorem", decl.name.name.clone(), &decl.attributes),
+                ItemKind::Lemma(decl) => ("lemma", decl.name.name.clone(), &decl.attributes),
                 ItemKind::Corollary(decl) => {
                     ("corollary", decl.name.name.clone(), &decl.attributes)
                 }
-                ItemKind::Axiom(decl) => {
-                    ("axiom", decl.name.name.clone(), &decl.attributes)
-                }
+                ItemKind::Axiom(decl) => ("axiom", decl.name.name.clone(), &decl.attributes),
                 _ => continue,
             };
             collect_framework_markers_from(
@@ -5356,13 +5396,8 @@ pub fn audit_coord_with_format(format: AuditFormat) -> Result<()> {
             // Capture `@verify(...)` strategy per item — strictest mode
             // wins when multiple are declared (e.g. `@verify(formal +
             // proof)` lifts to `proof`).
-            if let Some(strategy) =
-                strictest_verify_strategy(&item.attributes, decl_attrs)
-            {
-                verify_by_item.insert(
-                    (rel_path.clone(), item_name.clone(), kind_label),
-                    strategy,
-                );
+            if let Some(strategy) = strictest_verify_strategy(&item.attributes, decl_attrs) {
+                verify_by_item.insert((rel_path.clone(), item_name.clone(), kind_label), strategy);
             }
         }
     }
@@ -5390,21 +5425,33 @@ pub fn audit_coord_with_format(format: AuditFormat) -> Result<()> {
 /// Returns `CliOrdinal::finite(0)` for unknown / `runtime`.
 fn verify_strategy_ordinal(strategy: &str) -> CliOrdinal {
     match strategy {
-        "runtime"           => CliOrdinal::finite(0),
-        "static"            => CliOrdinal::finite(1),
-        "fast"              => CliOrdinal::finite(2),
-        "complexity_typed"  => CliOrdinal::finite(2),
-        "formal"            => CliOrdinal::omega(),
-        "proof"             => CliOrdinal::omega_plus(1),
-        "thorough"          => CliOrdinal { omega_coeff: 2, finite_offset: 0 },
-        "reliable"          => CliOrdinal { omega_coeff: 2, finite_offset: 1 },
-        "certified"         => CliOrdinal { omega_coeff: 2, finite_offset: 2 },
-        "coherent_static"   => CliOrdinal::omega(),
-        "coherent_runtime"  => CliOrdinal::finite(0),
-        "coherent"          => CliOrdinal::omega_plus(1),
-        "synthesize"        => CliOrdinal { omega_coeff: 3, finite_offset: 1 },
-        "assume"            => CliOrdinal::finite(0),
-        _                   => CliOrdinal::finite(0),
+        "runtime" => CliOrdinal::finite(0),
+        "static" => CliOrdinal::finite(1),
+        "fast" => CliOrdinal::finite(2),
+        "complexity_typed" => CliOrdinal::finite(2),
+        "formal" => CliOrdinal::omega(),
+        "proof" => CliOrdinal::omega_plus(1),
+        "thorough" => CliOrdinal {
+            omega_coeff: 2,
+            finite_offset: 0,
+        },
+        "reliable" => CliOrdinal {
+            omega_coeff: 2,
+            finite_offset: 1,
+        },
+        "certified" => CliOrdinal {
+            omega_coeff: 2,
+            finite_offset: 2,
+        },
+        "coherent_static" => CliOrdinal::omega(),
+        "coherent_runtime" => CliOrdinal::finite(0),
+        "coherent" => CliOrdinal::omega_plus(1),
+        "synthesize" => CliOrdinal {
+            omega_coeff: 3,
+            finite_offset: 1,
+        },
+        "assume" => CliOrdinal::finite(0),
+        _ => CliOrdinal::finite(0),
     }
 }
 
@@ -5481,7 +5528,11 @@ fn print_coord_report(
 
     for (framework, uses) in by_framework {
         let (ordinal, tau) = msfs_lookup(framework.as_str());
-        let tau_str = if tau { "τ=intensional" } else { "τ=extensional" };
+        let tau_str = if tau {
+            "τ=intensional"
+        } else {
+            "τ=extensional"
+        };
         println!(
             "  {} {}  ν={}  {}  ({} marker{})",
             "▸".magenta(),
@@ -5540,7 +5591,11 @@ fn print_coord_report(
                 },
                 verify_label,
                 entry.frameworks_cited.len(),
-                if entry.frameworks_cited.len() == 1 { "" } else { "s" },
+                if entry.frameworks_cited.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                },
                 entry.file.display()
             );
         }
@@ -5700,10 +5755,7 @@ fn print_coord_report_json(
         let total_u = uses.len();
         for (j, u) in uses.iter().enumerate() {
             out.push_str("        {\n");
-            out.push_str(&format!(
-                "          \"item_kind\": \"{}\",\n",
-                u.item_kind
-            ));
+            out.push_str(&format!("          \"item_kind\": \"{}\",\n", u.item_kind));
             out.push_str(&format!(
                 "          \"item_name\": \"{}\",\n",
                 json_escape(u.item_name.as_str())
@@ -5716,10 +5768,18 @@ fn print_coord_report_json(
                 "          \"file\": \"{}\"\n",
                 json_escape(&u.file.display().to_string())
             ));
-            out.push_str(if j + 1 == total_u { "        }\n" } else { "        },\n" });
+            out.push_str(if j + 1 == total_u {
+                "        }\n"
+            } else {
+                "        },\n"
+            });
         }
         out.push_str("      ]\n");
-        out.push_str(if i + 1 == total_fw { "    }\n" } else { "    },\n" });
+        out.push_str(if i + 1 == total_fw {
+            "    }\n"
+        } else {
+            "    },\n"
+        });
     }
     out.push_str("  ],\n");
     // Per-theorem inferred coordinates (schema_version 2 — adds the
@@ -5729,10 +5789,7 @@ fn print_coord_report_json(
     let total_pt = per_theorem.len();
     for (i, entry) in per_theorem.iter().enumerate() {
         out.push_str("    {\n");
-        out.push_str(&format!(
-            "      \"item_kind\": \"{}\",\n",
-            entry.item_kind
-        ));
+        out.push_str(&format!("      \"item_kind\": \"{}\",\n", entry.item_kind));
         out.push_str(&format!(
             "      \"item_name\": \"{}\",\n",
             json_escape(entry.item_name.as_str())
@@ -5770,11 +5827,17 @@ fn print_coord_report_json(
         }
         out.push_str("      \"frameworks_cited\": [");
         for (j, fw) in entry.frameworks_cited.iter().enumerate() {
-            if j > 0 { out.push_str(", "); }
+            if j > 0 {
+                out.push_str(", ");
+            }
             out.push_str(&format!("\"{}\"", json_escape(fw.as_str())));
         }
         out.push_str("]\n");
-        out.push_str(if i + 1 == total_pt { "    }\n" } else { "    },\n" });
+        out.push_str(if i + 1 == total_pt {
+            "    }\n"
+        } else {
+            "    },\n"
+        });
     }
     out.push_str("  ],\n");
     out.push_str("  \"malformed\": [\n");
@@ -5788,7 +5851,11 @@ fn print_coord_report_json(
             "      \"item_name\": \"{}\"\n",
             json_escape(item_name.as_str())
         ));
-        out.push_str(if i + 1 == malformed.len() { "    }\n" } else { "    },\n" });
+        out.push_str(if i + 1 == malformed.len() {
+            "    }\n"
+        } else {
+            "    },\n"
+        });
     }
     out.push_str("  ]\n");
     out.push_str("}\n");
@@ -5830,34 +5897,34 @@ fn print_coord_report_json(
 
 #[derive(Debug, Clone, Copy)]
 enum HygieneClass {
-    Inductive,             // (T_succ, ω, least_fp)
-    Coinductive,           // (T_prod, ω^{op}, greatest_fp)
-    Newtype,               // (Id, 1, base)
-    HigherInductive,       // (path_action, ω, base)
-    Recursive,             // @recursive — (unfold_f, ω, fix_f)
-    Corecursive,           // @corecursive — (corec_g, ω^{op}, fix_g)
+    Inductive,       // (T_succ, ω, least_fp)
+    Coinductive,     // (T_prod, ω^{op}, greatest_fp)
+    Newtype,         // (Id, 1, base)
+    HigherInductive, // (path_action, ω, base)
+    Recursive,       // @recursive — (unfold_f, ω, fix_f)
+    Corecursive,     // @corecursive — (corec_g, ω^{op}, fix_g)
 }
 
 impl HygieneClass {
     fn as_str(&self) -> &'static str {
         match self {
-            Self::Inductive       => "inductive",
-            Self::Coinductive     => "coinductive",
-            Self::Newtype         => "newtype",
+            Self::Inductive => "inductive",
+            Self::Coinductive => "coinductive",
+            Self::Newtype => "newtype",
             Self::HigherInductive => "higher-inductive",
-            Self::Recursive       => "recursive-fn",
-            Self::Corecursive     => "corecursive-fn",
+            Self::Recursive => "recursive-fn",
+            Self::Corecursive => "corecursive-fn",
         }
     }
 
     fn factorisation(&self) -> &'static str {
         match self {
-            Self::Inductive       => "(T_succ, ω, least_fp)",
-            Self::Coinductive     => "(T_prod, ω^op, greatest_fp)",
-            Self::Newtype         => "(Id, 1, base)",
+            Self::Inductive => "(T_succ, ω, least_fp)",
+            Self::Coinductive => "(T_prod, ω^op, greatest_fp)",
+            Self::Newtype => "(Id, 1, base)",
             Self::HigherInductive => "(path_action, ω, base)",
-            Self::Recursive       => "(unfold_f, ω, fix_f)",
-            Self::Corecursive     => "(corec_g, ω^op, fix_g)",
+            Self::Recursive => "(unfold_f, ω, fix_f)",
+            Self::Corecursive => "(corec_g, ω^op, fix_g)",
         }
     }
 }
@@ -5893,7 +5960,11 @@ fn type_mentions_name(t: &verum_ast::ty::Type, target: &str) -> bool {
         TypeKind::Tuple(types) => types.iter().any(|x| type_mentions_name(x, target)),
         TypeKind::Array { element, .. } => type_mentions_name(element, target),
         TypeKind::Slice(inner) => type_mentions_name(inner, target),
-        TypeKind::Function { params, return_type, .. } => {
+        TypeKind::Function {
+            params,
+            return_type,
+            ..
+        } => {
             params.iter().any(|x| type_mentions_name(x, target))
                 || type_mentions_name(return_type, target)
         }
@@ -5908,7 +5979,7 @@ fn variant_is_self_recursive(v: &verum_ast::decl::Variant, type_name: &str) -> b
     use verum_ast::decl::VariantData;
     let data = match &v.data {
         Maybe::Some(d) => d,
-        Maybe::None    => return false,
+        Maybe::None => return false,
     };
     match data {
         VariantData::Tuple(types) => types.iter().any(|t| type_mentions_name(t, type_name)),
@@ -5930,7 +6001,9 @@ fn classify_type_decl(
     match &decl.body {
         TypeDeclBody::Variant(variants) | TypeDeclBody::Inductive(variants) => {
             let any_path_cell = variants.iter().any(variant_is_path_cell);
-            let any_recursive = variants.iter().any(|v| variant_is_self_recursive(v, &name_str));
+            let any_recursive = variants
+                .iter()
+                .any(|v| variant_is_self_recursive(v, &name_str));
             if any_path_cell {
                 out.push(HygieneEntry {
                     class: HygieneClass::HigherInductive,
@@ -5968,11 +6041,15 @@ fn classify_function_decl(
     rel_path: &Path,
     out: &mut Vec<HygieneEntry>,
 ) {
-    let mut has_recursive   = false;
+    let mut has_recursive = false;
     let mut has_corecursive = false;
     for attr in decl.attributes.iter() {
-        if attr.is_named("recursive")   { has_recursive   = true; }
-        if attr.is_named("corecursive") { has_corecursive = true; }
+        if attr.is_named("recursive") {
+            has_recursive = true;
+        }
+        if attr.is_named("corecursive") {
+            has_corecursive = true;
+        }
     }
     if has_corecursive {
         out.push(HygieneEntry {
@@ -6049,18 +6126,14 @@ fn expr_contains_raw_self(expr: &verum_ast::expr::Expr) -> bool {
         ExprKind::Index { expr, index } => {
             expr_contains_raw_self(expr) || expr_contains_raw_self(index)
         }
-        ExprKind::Try(inner) | ExprKind::TryBlock(inner) => {
-            expr_contains_raw_self(inner)
-        }
+        ExprKind::Try(inner) | ExprKind::TryBlock(inner) => expr_contains_raw_self(inner),
         ExprKind::Paren(inner) => expr_contains_raw_self(inner),
         ExprKind::NamedArg { value, .. } => expr_contains_raw_self(value),
         ExprKind::Call { func, args, .. } => {
-            expr_contains_raw_self(func)
-                || args.iter().any(expr_contains_raw_self)
+            expr_contains_raw_self(func) || args.iter().any(expr_contains_raw_self)
         }
         ExprKind::MethodCall { receiver, args, .. } => {
-            expr_contains_raw_self(receiver)
-                || args.iter().any(expr_contains_raw_self)
+            expr_contains_raw_self(receiver) || args.iter().any(expr_contains_raw_self)
         }
         ExprKind::Block(b) => block_contains_raw_self(b),
         ExprKind::If {
@@ -6072,7 +6145,10 @@ fn expr_contains_raw_self(expr: &verum_ast::expr::Expr) -> bool {
                 || block_contains_raw_self(then_branch)
                 || matches!(else_branch, verum_common::Maybe::Some(e) if expr_contains_raw_self(e))
         }
-        ExprKind::Match { expr: scrutinee, arms } => {
+        ExprKind::Match {
+            expr: scrutinee,
+            arms,
+        } => {
             expr_contains_raw_self(scrutinee)
                 || arms.iter().any(|arm| expr_contains_raw_self(&arm.body))
         }
@@ -6108,9 +6184,9 @@ fn block_contains_raw_self(block: &verum_ast::expr::Block) -> bool {
             StmtKind::LetElse {
                 value, else_block, ..
             } => expr_contains_raw_self(value) || block_contains_raw_self(else_block),
-            StmtKind::Expr { expr, .. }
-            | StmtKind::Defer(expr)
-            | StmtKind::Errdefer(expr) => expr_contains_raw_self(expr),
+            StmtKind::Expr { expr, .. } | StmtKind::Defer(expr) | StmtKind::Errdefer(expr) => {
+                expr_contains_raw_self(expr)
+            }
             _ => false,
         };
         if hit {
@@ -6189,7 +6265,9 @@ pub fn audit_hygiene_strict_with_format(format: AuditFormat) -> Result<()> {
 
     match format {
         AuditFormat::Plain => print_hygiene_strict_report(parsed_files, skipped_files, &violations),
-        AuditFormat::Json => print_hygiene_strict_report_json(parsed_files, skipped_files, &violations),
+        AuditFormat::Json => {
+            print_hygiene_strict_report_json(parsed_files, skipped_files, &violations)
+        }
     }
 
     if !violations.is_empty() {
@@ -6219,7 +6297,10 @@ fn print_hygiene_strict_report(
     );
     println!();
     if violations.is_empty() {
-        println!("  {} no E_HYGIENE_UNFACTORED_SELF violations.", "·".dimmed());
+        println!(
+            "  {} no E_HYGIENE_UNFACTORED_SELF violations.",
+            "·".dimmed()
+        );
         println!();
         return;
     }
@@ -6252,7 +6333,10 @@ fn print_hygiene_strict_report_json(
     out.push_str(&format!("  \"parsed_files\": {},\n", parsed_files));
     out.push_str(&format!("  \"skipped_files\": {},\n", skipped_files));
     out.push_str(&format!("  \"violation_count\": {},\n", violations.len()));
-    out.push_str(&format!("  \"error_code\": \"{}\",\n", E_HYGIENE_UNFACTORED_SELF));
+    out.push_str(&format!(
+        "  \"error_code\": \"{}\",\n",
+        E_HYGIENE_UNFACTORED_SELF
+    ));
     out.push_str("  \"violations\": [\n");
     let total = violations.len();
     for (i, v) in violations.iter().enumerate() {
@@ -6265,7 +6349,11 @@ fn print_hygiene_strict_report_json(
             "      \"file\": \"{}\"\n",
             json_escape(&v.file.display().to_string())
         ));
-        out.push_str(if i + 1 == total { "    }\n" } else { "    },\n" });
+        out.push_str(if i + 1 == total {
+            "    }\n"
+        } else {
+            "    },\n"
+        });
     }
     out.push_str("  ]\n");
     out.push_str("}\n");
@@ -6315,8 +6403,12 @@ pub fn audit_hygiene_with_format(format: AuditFormat) -> Result<()> {
     }
 
     match format {
-        AuditFormat::Plain => print_hygiene_report(parsed_files, skipped_files, &by_class, &entries),
-        AuditFormat::Json  => print_hygiene_report_json(parsed_files, skipped_files, &by_class, &entries),
+        AuditFormat::Plain => {
+            print_hygiene_report(parsed_files, skipped_files, &by_class, &entries)
+        }
+        AuditFormat::Json => {
+            print_hygiene_report_json(parsed_files, skipped_files, &by_class, &entries)
+        }
     }
     Ok(())
 }
@@ -6399,10 +6491,18 @@ fn print_hygiene_report_json(
                 "          \"file\": \"{}\"\n",
                 json_escape(&e.file.display().to_string())
             ));
-            out.push_str(if j + 1 == total_e { "        }\n" } else { "        },\n" });
+            out.push_str(if j + 1 == total_e {
+                "        }\n"
+            } else {
+                "        },\n"
+            });
         }
         out.push_str("      ]\n");
-        out.push_str(if i + 1 == total { "    }\n" } else { "    },\n" });
+        out.push_str(if i + 1 == total {
+            "    }\n"
+        } else {
+            "    },\n"
+        });
     }
     out.push_str("  ],\n");
     out.push_str(&format!("  \"total_entries\": {}\n", entries.len()));
@@ -6446,11 +6546,9 @@ fn print_hygiene_report_json(
 // for the Owl2*Attr → Owl2Graph mapping.
 // =============================================================================
 
+use crate::commands::owl2::{Owl2EntityKind, Owl2Graph, collect_owl2_attrs};
 use std::collections::BTreeSet;
 use verum_ast::attr::Owl2Semantics;
-use crate::commands::owl2::{
-    collect_owl2_attrs, Owl2EntityKind, Owl2Graph,
-};
 
 pub fn audit_owl2_classify() -> Result<()> {
     audit_owl2_classify_with_format(AuditFormat::Plain)
@@ -6472,10 +6570,16 @@ pub fn audit_owl2_classify_with_format(format: AuditFormat) -> Result<()> {
     let mut skipped_files = 0usize;
 
     for abs_path in &vr_files {
-        let rel_path = abs_path.strip_prefix(&manifest_dir).unwrap_or(abs_path).to_path_buf();
+        let rel_path = abs_path
+            .strip_prefix(&manifest_dir)
+            .unwrap_or(abs_path)
+            .to_path_buf();
         let module = match parse_file_for_audit(abs_path) {
             Ok(m) => m,
-            Err(_) => { skipped_files += 1; continue; }
+            Err(_) => {
+                skipped_files += 1;
+                continue;
+            }
         };
         parsed_files += 1;
         for item in &module.items {
@@ -6483,19 +6587,29 @@ pub fn audit_owl2_classify_with_format(format: AuditFormat) -> Result<()> {
         }
     }
 
-    let closure  = graph.subclass_closure();
-    let cycles   = graph.detect_cycles(&closure);
-    let partition= graph.equivalence_partition();
+    let closure = graph.subclass_closure();
+    let cycles = graph.detect_cycles(&closure);
+    let partition = graph.equivalence_partition();
     let violations = graph.detect_disjoint_violations(&closure);
 
     match format {
         AuditFormat::Plain => print_owl2_report(
-            parsed_files, skipped_files, &graph, &closure,
-            &cycles, &partition, &violations,
+            parsed_files,
+            skipped_files,
+            &graph,
+            &closure,
+            &cycles,
+            &partition,
+            &violations,
         ),
-        AuditFormat::Json  => print_owl2_report_json(
-            parsed_files, skipped_files, &graph, &closure,
-            &cycles, &partition, &violations,
+        AuditFormat::Json => print_owl2_report_json(
+            parsed_files,
+            skipped_files,
+            &graph,
+            &closure,
+            &cycles,
+            &partition,
+            &violations,
         ),
     }
     if !cycles.is_empty() || !violations.is_empty() {
@@ -6503,8 +6617,10 @@ pub fn audit_owl2_classify_with_format(format: AuditFormat) -> Result<()> {
             format!(
                 "OWL 2 classification graph is inconsistent — {} cycle(s), \
                  {} disjoint/subclass violation(s).",
-                cycles.len(), violations.len()
-            ).into()
+                cycles.len(),
+                violations.len()
+            )
+            .into(),
         ));
     }
     Ok(())
@@ -6528,8 +6644,16 @@ fn print_owl2_report(
     );
     println!();
 
-    let n_classes:    usize = graph.entities.values().filter(|e| matches!(e.kind, Owl2EntityKind::Class   )).count();
-    let n_properties: usize = graph.entities.values().filter(|e| matches!(e.kind, Owl2EntityKind::Property)).count();
+    let n_classes: usize = graph
+        .entities
+        .values()
+        .filter(|e| matches!(e.kind, Owl2EntityKind::Class))
+        .count();
+    let n_properties: usize = graph
+        .entities
+        .values()
+        .filter(|e| matches!(e.kind, Owl2EntityKind::Property))
+        .count();
 
     if n_classes == 0 && n_properties == 0 {
         println!("  {} no OWL 2 entities detected.", "·".dimmed());
@@ -6547,12 +6671,14 @@ fn print_owl2_report(
     if n_classes > 0 {
         println!("  {}", "▸ Classes (with full ancestor closure)".bold());
         for (name, e) in &graph.entities {
-            if !matches!(e.kind, Owl2EntityKind::Class) { continue; }
+            if !matches!(e.kind, Owl2EntityKind::Class) {
+                continue;
+            }
             let anc = closure.get(name).cloned().unwrap_or_default();
             let other_anc: Vec<&Text> = anc.iter().filter(|a| *a != name).collect();
             let semantics_label = match e.semantics {
                 Some(Owl2Semantics::OpenWorld) => " [OpenWorld]",
-                _                              => "",
+                _ => "",
             };
             print!(
                 "    {} {}{}",
@@ -6565,8 +6691,15 @@ fn print_owl2_report(
                 print!("  ⊑ {}", parents.join(", ").dimmed());
             }
             if !e.keys.is_empty() {
-                let key_strs: Vec<String> = e.keys.iter()
-                    .map(|k| format!("({})", k.iter().map(|p| p.as_str()).collect::<Vec<_>>().join(", ")))
+                let key_strs: Vec<String> = e
+                    .keys
+                    .iter()
+                    .map(|k| {
+                        format!(
+                            "({})",
+                            k.iter().map(|p| p.as_str()).collect::<Vec<_>>().join(", ")
+                        )
+                    })
                     .collect();
                 print!("  HasKey={}", key_strs.join(" ").dimmed());
             }
@@ -6579,16 +6712,31 @@ fn print_owl2_report(
     if n_properties > 0 {
         println!("  {}", "▸ Properties".bold());
         for (name, e) in &graph.entities {
-            if !matches!(e.kind, Owl2EntityKind::Property) { continue; }
-            let dom = e.property_domain.as_ref().map(|d| d.as_str()).unwrap_or("?");
+            if !matches!(e.kind, Owl2EntityKind::Property) {
+                continue;
+            }
+            let dom = e
+                .property_domain
+                .as_ref()
+                .map(|d| d.as_str())
+                .unwrap_or("?");
             let rng = e.property_range.as_ref().map(|r| r.as_str()).unwrap_or("?");
-            let chars: Vec<&str> = e.property_characteristics.iter().map(|c| c.as_str()).collect();
-            let inv = e.property_inverse_of.as_ref().map(|i| format!(" ⁻¹={}", i.as_str())).unwrap_or_default();
+            let chars: Vec<&str> = e
+                .property_characteristics
+                .iter()
+                .map(|c| c.as_str())
+                .collect();
+            let inv = e
+                .property_inverse_of
+                .as_ref()
+                .map(|i| format!(" ⁻¹={}", i.as_str()))
+                .unwrap_or_default();
             println!(
                 "    {} {}: {} → {}  [{}]{}  — {}",
                 "·".dimmed(),
                 name.as_str().cyan(),
-                dom, rng,
+                dom,
+                rng,
                 chars.join(", "),
                 inv.dimmed(),
                 e.file.display(),
@@ -6614,7 +6762,11 @@ fn print_owl2_report(
             cycles.len()
         ));
         for c in cycles {
-            println!("    · {} ⊑* {}  (cyclic)", c.as_str().red(), c.as_str().red());
+            println!(
+                "    · {} ⊑* {}  (cyclic)",
+                c.as_str().red(),
+                c.as_str().red()
+            );
         }
         println!();
     }
@@ -6628,7 +6780,10 @@ fn print_owl2_report(
         for (a, b) in violations {
             println!(
                 "    · {} disjoint from {} but {} ⊑* {}",
-                a.as_str().red(), b.as_str().red(), a.as_str(), b.as_str(),
+                a.as_str().red(),
+                b.as_str().red(),
+                a.as_str(),
+                b.as_str(),
             );
         }
         println!();
@@ -6651,26 +6806,37 @@ fn print_owl2_report_json(
     out.push_str(&format!("  \"skipped_files\": {},\n", skipped_files));
 
     out.push_str("  \"classes\": [\n");
-    let class_count = graph.entities.values().filter(|e| matches!(e.kind, Owl2EntityKind::Class)).count();
+    let class_count = graph
+        .entities
+        .values()
+        .filter(|e| matches!(e.kind, Owl2EntityKind::Class))
+        .count();
     let mut emitted = 0usize;
     for (name, e) in &graph.entities {
-        if !matches!(e.kind, Owl2EntityKind::Class) { continue; }
+        if !matches!(e.kind, Owl2EntityKind::Class) {
+            continue;
+        }
         emitted += 1;
         let anc = closure.get(name).cloned().unwrap_or_default();
         let mut anc_list: Vec<&Text> = anc.iter().filter(|a| *a != name).collect();
         anc_list.sort();
         let semantics = match e.semantics {
-            Some(Owl2Semantics::OpenWorld)   => "OpenWorld",
+            Some(Owl2Semantics::OpenWorld) => "OpenWorld",
             Some(Owl2Semantics::ClosedWorld) => "ClosedWorld",
-            None                              => "ClosedWorld",
+            None => "ClosedWorld",
         };
         out.push_str("    {\n");
-        out.push_str(&format!("      \"name\": \"{}\",\n", json_escape(name.as_str())));
+        out.push_str(&format!(
+            "      \"name\": \"{}\",\n",
+            json_escape(name.as_str())
+        ));
         out.push_str(&format!("      \"semantics\": \"{}\",\n", semantics));
         out.push_str("      \"ancestors\": [");
         for (i, a) in anc_list.iter().enumerate() {
             out.push_str(&format!("\"{}\"", json_escape(a.as_str())));
-            if i + 1 < anc_list.len() { out.push_str(", "); }
+            if i + 1 < anc_list.len() {
+                out.push_str(", ");
+            }
         }
         out.push_str("],\n");
         out.push_str("      \"keys\": [");
@@ -6678,46 +6844,88 @@ fn print_owl2_report_json(
             out.push('[');
             for (j, p) in k.iter().enumerate() {
                 out.push_str(&format!("\"{}\"", json_escape(p.as_str())));
-                if j + 1 < k.len() { out.push_str(", "); }
+                if j + 1 < k.len() {
+                    out.push_str(", ");
+                }
             }
             out.push(']');
-            if i + 1 < e.keys.len() { out.push_str(", "); }
+            if i + 1 < e.keys.len() {
+                out.push_str(", ");
+            }
         }
         out.push_str("],\n");
-        out.push_str(&format!("      \"file\": \"{}\"\n", json_escape(&e.file.display().to_string())));
-        out.push_str(if emitted == class_count { "    }\n" } else { "    },\n" });
+        out.push_str(&format!(
+            "      \"file\": \"{}\"\n",
+            json_escape(&e.file.display().to_string())
+        ));
+        out.push_str(if emitted == class_count {
+            "    }\n"
+        } else {
+            "    },\n"
+        });
     }
     out.push_str("  ],\n");
 
     out.push_str("  \"properties\": [\n");
-    let prop_count = graph.entities.values().filter(|e| matches!(e.kind, Owl2EntityKind::Property)).count();
+    let prop_count = graph
+        .entities
+        .values()
+        .filter(|e| matches!(e.kind, Owl2EntityKind::Property))
+        .count();
     let mut emitted = 0usize;
     for (name, e) in &graph.entities {
-        if !matches!(e.kind, Owl2EntityKind::Property) { continue; }
+        if !matches!(e.kind, Owl2EntityKind::Property) {
+            continue;
+        }
         emitted += 1;
         out.push_str("    {\n");
-        out.push_str(&format!("      \"name\": \"{}\",\n", json_escape(name.as_str())));
+        out.push_str(&format!(
+            "      \"name\": \"{}\",\n",
+            json_escape(name.as_str())
+        ));
         out.push_str(&format!(
             "      \"domain\": {},\n",
-            e.property_domain.as_ref().map(|d| format!("\"{}\"", json_escape(d.as_str()))).unwrap_or_else(|| "null".to_string())
+            e.property_domain
+                .as_ref()
+                .map(|d| format!("\"{}\"", json_escape(d.as_str())))
+                .unwrap_or_else(|| "null".to_string())
         ));
         out.push_str(&format!(
             "      \"range\": {},\n",
-            e.property_range.as_ref().map(|r| format!("\"{}\"", json_escape(r.as_str()))).unwrap_or_else(|| "null".to_string())
+            e.property_range
+                .as_ref()
+                .map(|r| format!("\"{}\"", json_escape(r.as_str())))
+                .unwrap_or_else(|| "null".to_string())
         ));
         out.push_str(&format!(
             "      \"inverse_of\": {},\n",
-            e.property_inverse_of.as_ref().map(|i| format!("\"{}\"", json_escape(i.as_str()))).unwrap_or_else(|| "null".to_string())
+            e.property_inverse_of
+                .as_ref()
+                .map(|i| format!("\"{}\"", json_escape(i.as_str())))
+                .unwrap_or_else(|| "null".to_string())
         ));
-        let chars: Vec<&str> = e.property_characteristics.iter().map(|c| c.as_str()).collect();
+        let chars: Vec<&str> = e
+            .property_characteristics
+            .iter()
+            .map(|c| c.as_str())
+            .collect();
         out.push_str("      \"characteristics\": [");
         for (i, c) in chars.iter().enumerate() {
             out.push_str(&format!("\"{}\"", c));
-            if i + 1 < chars.len() { out.push_str(", "); }
+            if i + 1 < chars.len() {
+                out.push_str(", ");
+            }
         }
         out.push_str("],\n");
-        out.push_str(&format!("      \"file\": \"{}\"\n", json_escape(&e.file.display().to_string())));
-        out.push_str(if emitted == prop_count { "    }\n" } else { "    },\n" });
+        out.push_str(&format!(
+            "      \"file\": \"{}\"\n",
+            json_escape(&e.file.display().to_string())
+        ));
+        out.push_str(if emitted == prop_count {
+            "    }\n"
+        } else {
+            "    },\n"
+        });
     }
     out.push_str("  ],\n");
 
@@ -6727,10 +6935,16 @@ fn print_owl2_report_json(
         let names: Vec<&str> = group.iter().map(|n| n.as_str()).collect();
         for (j, n) in names.iter().enumerate() {
             out.push_str(&format!("\"{}\"", json_escape(n)));
-            if j + 1 < names.len() { out.push_str(", "); }
+            if j + 1 < names.len() {
+                out.push_str(", ");
+            }
         }
         out.push(']');
-        out.push_str(if i + 1 == partition.len() { "\n" } else { ",\n" });
+        out.push_str(if i + 1 == partition.len() {
+            "\n"
+        } else {
+            ",\n"
+        });
     }
     out.push_str("  ],\n");
 
@@ -6738,7 +6952,9 @@ fn print_owl2_report_json(
     let cyc_vec: Vec<&Text> = cycles.iter().collect();
     for (i, c) in cyc_vec.iter().enumerate() {
         out.push_str(&format!("\"{}\"", json_escape(c.as_str())));
-        if i + 1 < cyc_vec.len() { out.push_str(", "); }
+        if i + 1 < cyc_vec.len() {
+            out.push_str(", ");
+        }
     }
     out.push_str("],\n");
 
@@ -6747,7 +6963,8 @@ fn print_owl2_report_json(
     for (i, (a, b)) in v_vec.iter().enumerate() {
         out.push_str(&format!(
             "    {{ \"class\": \"{}\", \"violates_disjoint_with\": \"{}\" }}",
-            json_escape(a.as_str()), json_escape(b.as_str())
+            json_escape(a.as_str()),
+            json_escape(b.as_str())
         ));
         out.push_str(if i + 1 == v_vec.len() { "\n" } else { ",\n" });
     }
@@ -6903,9 +7120,7 @@ fn collect_round_trip_triggers(
             // in the round-trip.
             if let Maybe::Some(fw) = FrameworkAttr::from_attribute(attr) {
                 let s_str = fw.citation.as_str();
-                if s_str.contains("108.T") || s_str.contains("109.T")
-                    || s_str.contains("AC/OC")
-                {
+                if s_str.contains("108.T") || s_str.contains("109.T") || s_str.contains("AC/OC") {
                     triggers.push(fw.citation);
                 }
             }
@@ -6925,9 +7140,18 @@ fn print_round_trip_report(parsed: usize, skipped: usize, entries: &[RoundTripEn
     ui::output(&format!(
         "round-trip: {} theorems audit (Decidable: {}, SemiDecidable: {}, Undecidable: {})",
         entries.len(),
-        entries.iter().filter(|e| matches!(e.status, RoundTripStatus::Decidable)).count(),
-        entries.iter().filter(|e| matches!(e.status, RoundTripStatus::SemiDecidable)).count(),
-        entries.iter().filter(|e| matches!(e.status, RoundTripStatus::Undecidable)).count(),
+        entries
+            .iter()
+            .filter(|e| matches!(e.status, RoundTripStatus::Decidable))
+            .count(),
+        entries
+            .iter()
+            .filter(|e| matches!(e.status, RoundTripStatus::SemiDecidable))
+            .count(),
+        entries
+            .iter()
+            .filter(|e| matches!(e.status, RoundTripStatus::Undecidable))
+            .count(),
     ));
     for e in entries {
         ui::output(&format!(
@@ -6945,9 +7169,15 @@ fn print_round_trip_report_json(entries: &[RoundTripEntry]) {
     out.push_str("{\n  \"theorems\": [\n");
     for (i, e) in entries.iter().enumerate() {
         out.push_str("    {\n");
-        out.push_str(&format!("      \"name\": \"{}\",\n", json_escape(e.item_name.as_str())));
+        out.push_str(&format!(
+            "      \"name\": \"{}\",\n",
+            json_escape(e.item_name.as_str())
+        ));
         out.push_str(&format!("      \"kind\": \"{}\",\n", e.item_kind));
-        out.push_str(&format!("      \"file\": \"{}\",\n", json_escape(&e.file.display().to_string())));
+        out.push_str(&format!(
+            "      \"file\": \"{}\",\n",
+            json_escape(&e.file.display().to_string())
+        ));
         out.push_str(&format!("      \"status\": \"{}\",\n", e.status.label()));
         out.push_str("      \"triggers\": [");
         for (j, t) in e.triggers.iter().enumerate() {
@@ -7021,7 +7251,7 @@ pub fn audit_coherent_with_format(format: AuditFormat) -> Result<()> {
                     // Use the typed `VerifyAttr::from_attribute`
                     // parser to extract the verification modes; pick
                     // up any of the three coherent-* variants.
-                    use verum_ast::attr::{FromAttribute, VerifyAttr, VerificationMode};
+                    use verum_ast::attr::{FromAttribute, VerificationMode, VerifyAttr};
                     if let Ok(verify) = VerifyAttr::from_attribute(attr) {
                         for mode in verify.modes.iter() {
                             let level_name = match mode {
@@ -7048,10 +7278,7 @@ pub fn audit_coherent_with_format(format: AuditFormat) -> Result<()> {
             if entries.is_empty() {
                 ui::output("coherent: 0 theorems carry @verify(coherent*) annotation");
             } else {
-                ui::output(&format!(
-                    "coherent: {} theorems audit",
-                    entries.len()
-                ));
+                ui::output(&format!("coherent: {} theorems audit", entries.len()));
                 for (path, name, kind, level) in &entries {
                     ui::output(&format!(
                         "  [Pending] {} ({} via @verify({}) in {})",
@@ -7068,10 +7295,19 @@ pub fn audit_coherent_with_format(format: AuditFormat) -> Result<()> {
             out.push_str("{\n  \"theorems\": [\n");
             for (i, (path, name, kind, level)) in entries.iter().enumerate() {
                 out.push_str("    {\n");
-                out.push_str(&format!("      \"name\": \"{}\",\n", json_escape(name.as_str())));
+                out.push_str(&format!(
+                    "      \"name\": \"{}\",\n",
+                    json_escape(name.as_str())
+                ));
                 out.push_str(&format!("      \"kind\": \"{}\",\n", kind));
-                out.push_str(&format!("      \"file\": \"{}\",\n", json_escape(&path.display().to_string())));
-                out.push_str(&format!("      \"verify_level\": \"{}\",\n", level.as_str()));
+                out.push_str(&format!(
+                    "      \"file\": \"{}\",\n",
+                    json_escape(&path.display().to_string())
+                ));
+                out.push_str(&format!(
+                    "      \"verify_level\": \"{}\",\n",
+                    level.as_str()
+                ));
                 out.push_str("      \"status\": \"Pending\"\n    }");
                 out.push_str(if i + 1 < entries.len() { ",\n" } else { "\n" });
             }
@@ -7166,7 +7402,9 @@ fn count_tactic_applies(t: &verum_ast::decl::TacticExpr) -> usize {
         | TacticExpr::InductionOn(_)
         | TacticExpr::Exact(_)
         | TacticExpr::Unfold(_) => 1,
-        TacticExpr::Try(inner) | TacticExpr::Repeat(inner) | TacticExpr::AllGoals(inner)
+        TacticExpr::Try(inner)
+        | TacticExpr::Repeat(inner)
+        | TacticExpr::AllGoals(inner)
         | TacticExpr::Focus(inner) => count_tactic_applies(inner),
         TacticExpr::TryElse { body, fallback } => {
             count_tactic_applies(body) + count_tactic_applies(fallback)
@@ -7262,38 +7500,38 @@ pub fn audit_proof_honesty_with_format(format: AuditFormat) -> Result<()> {
                         file: rel_path.clone(),
                     });
                 }
-                ItemKind::Theorem(decl)
-                | ItemKind::Lemma(decl)
-                | ItemKind::Corollary(decl) => match &decl.proof {
-                    verum_common::Maybe::None => {
-                        rows.push(ProofHonestyRow {
-                            name: decl.name.name.clone(),
-                            kind: ProofHonestyKind::TheoremNoProofBody,
-                            apply_count: 0,
-                            let_count: 0,
-                            proof_step_count: 0,
-                            file: rel_path.clone(),
-                        });
+                ItemKind::Theorem(decl) | ItemKind::Lemma(decl) | ItemKind::Corollary(decl) => {
+                    match &decl.proof {
+                        verum_common::Maybe::None => {
+                            rows.push(ProofHonestyRow {
+                                name: decl.name.name.clone(),
+                                kind: ProofHonestyKind::TheoremNoProofBody,
+                                apply_count: 0,
+                                let_count: 0,
+                                proof_step_count: 0,
+                                file: rel_path.clone(),
+                            });
+                        }
+                        verum_common::Maybe::Some(body) => {
+                            let (applies, lets, total) = classify_proof_body(body);
+                            let kind = if total == 0 {
+                                ProofHonestyKind::TheoremTrivialTrue
+                            } else if applies <= 1 && lets == 0 {
+                                ProofHonestyKind::TheoremAxiomOnly
+                            } else {
+                                ProofHonestyKind::TheoremMultiStep
+                            };
+                            rows.push(ProofHonestyRow {
+                                name: decl.name.name.clone(),
+                                kind,
+                                apply_count: applies,
+                                let_count: lets,
+                                proof_step_count: total,
+                                file: rel_path.clone(),
+                            });
+                        }
                     }
-                    verum_common::Maybe::Some(body) => {
-                        let (applies, lets, total) = classify_proof_body(body);
-                        let kind = if total == 0 {
-                            ProofHonestyKind::TheoremTrivialTrue
-                        } else if applies <= 1 && lets == 0 {
-                            ProofHonestyKind::TheoremAxiomOnly
-                        } else {
-                            ProofHonestyKind::TheoremMultiStep
-                        };
-                        rows.push(ProofHonestyRow {
-                            name: decl.name.name.clone(),
-                            kind,
-                            apply_count: applies,
-                            let_count: lets,
-                            proof_step_count: total,
-                            file: rel_path.clone(),
-                        });
-                    }
-                },
+                }
                 _ => {}
             }
         }
@@ -7505,15 +7743,9 @@ pub fn audit_coord_consistency_with_format(format: AuditFormat) -> Result<()> {
                 &mut by_framework,
                 &mut malformed,
             );
-            let has_verify =
-                strictest_verify_strategy(&item.attributes, decl_attrs).is_some();
-            if let Some(strategy) =
-                strictest_verify_strategy(&item.attributes, decl_attrs)
-            {
-                verify_by_item.insert(
-                    (rel_path.clone(), item_name.clone(), kind_label),
-                    strategy,
-                );
+            let has_verify = strictest_verify_strategy(&item.attributes, decl_attrs).is_some();
+            if let Some(strategy) = strictest_verify_strategy(&item.attributes, decl_attrs) {
+                verify_by_item.insert((rel_path.clone(), item_name.clone(), kind_label), strategy);
             }
             all_items.push((rel_path.clone(), item_name, kind_label, has_verify));
         }
@@ -7573,7 +7805,9 @@ pub fn audit_coord_consistency_with_format(format: AuditFormat) -> Result<()> {
             ui::output(&format!("  missing_framework    {}", missing_fw));
             if missing_fw > 0 {
                 ui::output("");
-                ui::output("missing-framework violations (theorems with @verify but NO @framework citation):");
+                ui::output(
+                    "missing-framework violations (theorems with @verify but NO @framework citation):",
+                );
                 for (path, name, kind) in &violations {
                     ui::output(&format!(
                         "  {} {} in {}",
@@ -7602,13 +7836,19 @@ pub fn audit_coord_consistency_with_format(format: AuditFormat) -> Result<()> {
                     "      \"name\": \"{}\",\n",
                     json_escape(name.as_str())
                 ));
-                out.push_str(&format!("      \"violation_kind\": \"{}\",\n",
-                    CoordConsistencyKind::MissingFramework.as_str()));
+                out.push_str(&format!(
+                    "      \"violation_kind\": \"{}\",\n",
+                    CoordConsistencyKind::MissingFramework.as_str()
+                ));
                 out.push_str(&format!(
                     "      \"file\": \"{}\"\n    }}",
                     json_escape(&path.display().to_string())
                 ));
-                out.push_str(if i + 1 < violations.len() { ",\n" } else { "\n" });
+                out.push_str(if i + 1 < violations.len() {
+                    ",\n"
+                } else {
+                    "\n"
+                });
             }
             out.push_str("  ]\n}\n");
             print!("{}", out);
@@ -7773,8 +8013,13 @@ pub fn audit_framework_soundness_with_format(format: AuditFormat) -> Result<()> 
             ui::output(&format!("  trivial_placeholder     {}", trivial));
             if trivial > 0 {
                 ui::output("");
-                ui::output("trivial-placeholder axioms (consider strengthening or promoting to @theorem):");
-                for r in rows.iter().filter(|r| r.kind == FrameworkSoundnessKind::Trivial) {
+                ui::output(
+                    "trivial-placeholder axioms (consider strengthening or promoting to @theorem):",
+                );
+                for r in rows
+                    .iter()
+                    .filter(|r| r.kind == FrameworkSoundnessKind::Trivial)
+                {
                     ui::output(&format!(
                         "  {:<60} [{}] in {}",
                         r.name.as_str(),
@@ -7876,9 +8121,9 @@ pub fn audit_bridge_admits_with_format(format: AuditFormat) -> Result<()> {
 
         for item in &module.items {
             let (name, proof_body) = match &item.kind {
-                ItemKind::Theorem(decl)
-                | ItemKind::Lemma(decl)
-                | ItemKind::Corollary(decl) => (decl.name.name.clone(), &decl.proof),
+                ItemKind::Theorem(decl) | ItemKind::Lemma(decl) | ItemKind::Corollary(decl) => {
+                    (decl.name.name.clone(), &decl.proof)
+                }
                 _ => continue,
             };
 
@@ -7889,16 +8134,11 @@ pub fn audit_bridge_admits_with_format(format: AuditFormat) -> Result<()> {
                 _ => continue,
             };
 
-            let context = format!(
-                "{}::{}",
-                rel_path.display(),
-                name.as_str()
-            );
+            let context = format!("{}::{}", rel_path.display(), name.as_str());
             let audit = verum_kernel::round_trip::enumerate_bridge_admits(&core, &context);
             if !audit.is_decidable() {
                 let bridges_list = audit.bridges();
-                let bridges: Vec<&'static str> =
-                    bridges_list.iter().copied().collect();
+                let bridges: Vec<&'static str> = bridges_list.iter().copied().collect();
                 rows.push(BridgeAdmitRow {
                     theorem_name: name,
                     file: rel_path.clone(),
@@ -8060,22 +8300,19 @@ pub fn audit_verify_ladder(format: AuditFormat) -> Result<()> {
                 Text,
                 &verum_common::List<verum_ast::attr::Attribute>,
             ) = match &item.kind {
-                ItemKind::Theorem(decl) => ("theorem",   decl.name.name.clone(), &decl.attributes),
-                ItemKind::Lemma(decl)   => ("lemma",     decl.name.name.clone(), &decl.attributes),
-                ItemKind::Corollary(decl) => ("corollary", decl.name.name.clone(), &decl.attributes),
+                ItemKind::Theorem(decl) => ("theorem", decl.name.name.clone(), &decl.attributes),
+                ItemKind::Lemma(decl) => ("lemma", decl.name.name.clone(), &decl.attributes),
+                ItemKind::Corollary(decl) => {
+                    ("corollary", decl.name.name.clone(), &decl.attributes)
+                }
                 _ => continue,
             };
-            if let Some(strategy) =
-                strictest_verify_strategy(&item.attributes, decl_attrs)
-            {
+            if let Some(strategy) = strictest_verify_strategy(&item.attributes, decl_attrs) {
                 // Project to the typed LadderStrategy + ask the
                 // dispatcher (single source of truth) for impl status.
                 let typed_strategy = LadderStrategy::from_name(strategy.as_str());
                 let (nu_label, status) = match typed_strategy {
-                    Some(s) => (
-                        s.nu_ordinal_label(),
-                        dispatcher.implementation_status(s),
-                    ),
+                    Some(s) => (s.nu_ordinal_label(), dispatcher.implementation_status(s)),
                     None => ("?", LadderImplStatus::Pending),
                 };
                 entries.push(LadderEntry {
@@ -8108,10 +8345,7 @@ pub fn audit_verify_ladder(format: AuditFormat) -> Result<()> {
             println!();
             println!(
                 "  {:<48}  {:<18}  {:<14}  {}",
-                "Theorem / lemma / corollary",
-                "Strategy",
-                "ν-ordinal",
-                "Dispatch status"
+                "Theorem / lemma / corollary", "Strategy", "ν-ordinal", "Dispatch status"
             );
             println!(
                 "  {}  {}  {}  {}",
@@ -8135,12 +8369,7 @@ pub fn audit_verify_ladder(format: AuditFormat) -> Result<()> {
                 let status = LadderStrategy::from_name(strat.as_str())
                     .map(|s| dispatcher.implementation_status(s).name())
                     .unwrap_or("unknown");
-                println!(
-                    "    {:<20} {:>4}   [{}]",
-                    strat.as_str(),
-                    count,
-                    status
-                );
+                println!("    {:<20} {:>4}   [{}]", strat.as_str(), count, status);
             }
             println!();
             println!("  Implementation-status totals:");
@@ -8150,7 +8379,11 @@ pub fn audit_verify_ladder(format: AuditFormat) -> Result<()> {
             println!();
             println!(
                 "  ν-monotonicity invariant: {}",
-                if monotonicity_ok { "✓ holds" } else { "✗ VIOLATED" }
+                if monotonicity_ok {
+                    "✓ holds"
+                } else {
+                    "✗ VIOLATED"
+                }
             );
             println!(
                 "  Files: {} scanned, {} parsed, {} skipped",
@@ -8382,16 +8615,14 @@ pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
         parsed_files += 1;
 
         for item in &module.items {
-            let (item_name, decl_attrs): (
-                Text,
-                &verum_common::List<verum_ast::attr::Attribute>,
-            ) = match &item.kind {
-                ItemKind::Axiom(decl) => (decl.name.name.clone(), &decl.attributes),
-                ItemKind::Theorem(decl) => (decl.name.name.clone(), &decl.attributes),
-                ItemKind::Lemma(decl) => (decl.name.name.clone(), &decl.attributes),
-                ItemKind::Corollary(decl) => (decl.name.name.clone(), &decl.attributes),
-                _ => continue,
-            };
+            let (item_name, decl_attrs): (Text, &verum_common::List<verum_ast::attr::Attribute>) =
+                match &item.kind {
+                    ItemKind::Axiom(decl) => (decl.name.name.clone(), &decl.attributes),
+                    ItemKind::Theorem(decl) => (decl.name.name.clone(), &decl.attributes),
+                    ItemKind::Lemma(decl) => (decl.name.name.clone(), &decl.attributes),
+                    ItemKind::Corollary(decl) => (decl.name.name.clone(), &decl.attributes),
+                    _ => continue,
+                };
 
             // Scan both the outer item.attributes and the inner decl.attributes.
             let attr_iters: [&verum_common::List<verum_ast::attr::Attribute>; 2] =
@@ -8487,7 +8718,11 @@ pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
                 "─".repeat(8)
             );
             for cite in &cites {
-                let status = if cite.recognised { "✓ ok" } else { "✗ MISSING" };
+                let status = if cite.recognised {
+                    "✓ ok"
+                } else {
+                    "✗ MISSING"
+                };
                 println!(
                     "  {:<48}  {:<46}  {}",
                     cite.axiom_name.as_str(),
@@ -8591,9 +8826,7 @@ pub fn audit_kernel_discharged_axioms(format: AuditFormat) -> Result<()> {
 /// HTT (2009) mechanisation status from
 /// `verum_kernel::mechanisation_roadmap::htt_roadmap()`.
 pub fn audit_htt_roadmap(format: AuditFormat) -> Result<()> {
-    use verum_kernel::mechanisation_roadmap::{
-        CoverageReport, htt_roadmap,
-    };
+    use verum_kernel::mechanisation_roadmap::{CoverageReport, htt_roadmap};
 
     let entries = htt_roadmap();
     let report = CoverageReport::compute(&entries);
@@ -8661,9 +8894,7 @@ pub fn audit_htt_roadmap(format: AuditFormat) -> Result<()> {
 /// `verum audit --ar-roadmap` — emits per-section coverage of
 /// Adámek-Rosický 1994 mechanisation status.
 pub fn audit_ar_roadmap(format: AuditFormat) -> Result<()> {
-    use verum_kernel::mechanisation_roadmap::{
-        CoverageReport, adamek_rosicky_roadmap,
-    };
+    use verum_kernel::mechanisation_roadmap::{CoverageReport, adamek_rosicky_roadmap};
 
     let entries = adamek_rosicky_roadmap();
     let report = CoverageReport::compute(&entries);
@@ -8732,8 +8963,7 @@ pub fn audit_ar_roadmap(format: AuditFormat) -> Result<()> {
 /// of the seven kernel rules into ZFC axioms + Grothendieck universes.
 pub fn audit_self_recognition(format: AuditFormat) -> Result<()> {
     use verum_kernel::zfc_self_recognition::{
-        KernelRuleId, SelfRecognitionAudit, is_zfc_plus_2_inacc_provable,
-        required_meta_theory,
+        KernelRuleId, SelfRecognitionAudit, is_zfc_plus_2_inacc_provable, required_meta_theory,
     };
 
     let mut audit = SelfRecognitionAudit::new();
@@ -8863,7 +9093,7 @@ pub fn audit_self_recognition(format: AuditFormat) -> Result<()> {
 /// kernel-side dispatcher.
 pub fn audit_kernel_intrinsics(format: AuditFormat) -> Result<()> {
     use verum_kernel::intrinsic_dispatch::{
-        available_intrinsics, dispatch_intrinsic, IntrinsicValue,
+        IntrinsicValue, available_intrinsics, dispatch_intrinsic,
     };
 
     let names = available_intrinsics();
@@ -8893,10 +9123,7 @@ pub fn audit_kernel_intrinsics(format: AuditFormat) -> Result<()> {
         AuditFormat::Json => {
             let mut out = String::from("{\n");
             out.push_str("  \"schema_version\": 1,\n");
-            out.push_str(&format!(
-                "  \"intrinsic_count\": {},\n",
-                names.len()
-            ));
+            out.push_str(&format!("  \"intrinsic_count\": {},\n", names.len()));
             out.push_str("  \"intrinsics\": [\n");
             for (i, name) in names.iter().enumerate() {
                 let probe = dispatch_intrinsic(name, &[]);
@@ -8928,9 +9155,9 @@ pub fn audit_kernel_intrinsics(format: AuditFormat) -> Result<()> {
 /// pass (Coq / Lean 4 / Isabelle / Dedukti).
 pub fn audit_cross_format(format: AuditFormat) -> Result<()> {
     use verum_kernel::cross_format_gate::{
-        evaluate_gate, CrossFormatReport, FormatStatus, required_formats_for_msfs,
+        CrossFormatReport, FormatStatus, evaluate_gate, required_formats_for_msfs,
     };
-    use verum_smt::cross_format_runner::{checker_for, CheckResult};
+    use verum_smt::cross_format_runner::{CheckResult, checker_for};
 
     if matches!(format, AuditFormat::Plain) {
         ui::step("Cross-format CI hard gate (MSFS) — live tool invocation");
@@ -8962,9 +9189,12 @@ pub fn audit_cross_format(format: AuditFormat) -> Result<()> {
         let checker = match checker_for(*f) {
             Some(c) => c,
             None => {
-                report.record(*f, FormatStatus::NotRun {
-                    reason: Text::from("no checker registered for this format"),
-                });
+                report.record(
+                    *f,
+                    FormatStatus::NotRun {
+                        reason: Text::from("no checker registered for this format"),
+                    },
+                );
                 rows.push(FormatRow {
                     format_name: dir_name,
                     extension,
@@ -8979,14 +9209,22 @@ pub fn audit_cross_format(format: AuditFormat) -> Result<()> {
             }
         };
 
-        let tool_status = if checker.is_available() { "available" } else { "missing" };
+        let tool_status = if checker.is_available() {
+            "available"
+        } else {
+            "missing"
+        };
 
         // Discover certificate files.
         let pattern_ext = extension.to_string();
         let cert_files: Vec<PathBuf> = match std::fs::read_dir(&certs_dir) {
             Ok(rd) => rd
                 .filter_map(|e| e.ok().map(|e| e.path()))
-                .filter(|p| p.extension().map(|e| e == pattern_ext.as_str()).unwrap_or(false))
+                .filter(|p| {
+                    p.extension()
+                        .map(|e| e == pattern_ext.as_str())
+                        .unwrap_or(false)
+                })
                 .collect(),
             Err(_) => Vec::new(),
         };
@@ -8999,10 +9237,7 @@ pub fn audit_cross_format(format: AuditFormat) -> Result<()> {
 
         if !checker.is_available() {
             overall_status = Some(FormatStatus::NotRun {
-                reason: Text::from(format!(
-                    "tool missing — {}",
-                    checker.install_hint()
-                )),
+                reason: Text::from(format!("tool missing — {}", checker.install_hint())),
             });
         } else if cert_files.is_empty() {
             overall_status = Some(FormatStatus::NotRun {
@@ -9021,7 +9256,9 @@ pub fn audit_cross_format(format: AuditFormat) -> Result<()> {
                         if first_failure_excerpt.is_none() {
                             first_failure_excerpt = Some(format!(
                                 "{}: {}",
-                                cert.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default(),
+                                cert.file_name()
+                                    .map(|s| s.to_string_lossy().into_owned())
+                                    .unwrap_or_default(),
                                 stderr_excerpt.trim()
                             ));
                         }
@@ -9066,9 +9303,12 @@ pub fn audit_cross_format(format: AuditFormat) -> Result<()> {
             }
         }
 
-        report.record(*f, overall_status.unwrap_or(FormatStatus::NotRun {
-            reason: Text::from("(unreachable)"),
-        }));
+        report.record(
+            *f,
+            overall_status.unwrap_or(FormatStatus::NotRun {
+                reason: Text::from("(unreachable)"),
+            }),
+        );
 
         rows.push(FormatRow {
             format_name: dir_name,
@@ -9102,10 +9342,7 @@ pub fn audit_cross_format(format: AuditFormat) -> Result<()> {
                 "─".repeat(40),
             );
             for r in &rows {
-                let notes = r
-                    .first_failure_excerpt
-                    .clone()
-                    .unwrap_or_default();
+                let notes = r.first_failure_excerpt.clone().unwrap_or_default();
                 println!(
                     "  {:<10}  {:<5}  {:<10}  {:>5}  {:>4}  {:>4}  {}",
                     r.format_name,
@@ -9127,10 +9364,7 @@ pub fn audit_cross_format(format: AuditFormat) -> Result<()> {
         AuditFormat::Json => {
             let mut out = String::from("{\n");
             out.push_str("  \"schema_version\": 1,\n");
-            out.push_str(&format!(
-                "  \"gate_passes\": {},\n",
-                gate_passes
-            ));
+            out.push_str(&format!("  \"gate_passes\": {},\n", gate_passes));
             out.push_str(&format!(
                 "  \"required_format_count\": {},\n",
                 formats.len()
@@ -9227,62 +9461,320 @@ fn manifest_field_table() -> Vec<ManifestFieldEntry> {
     use ManifestFieldStatus as S;
     vec![
         // [types] — all 9 wired.
-        ManifestFieldEntry { section: "types", field: "dependent", status: S::LoadBearing, closure_task: "", consumer_site: "TypeChecker.dependent_enabled → infer.rs" },
-        ManifestFieldEntry { section: "types", field: "cubical", status: S::LoadBearing, closure_task: "", consumer_site: "Unifier.cubical_enabled → unify.rs" },
-        ManifestFieldEntry { section: "types", field: "higher_kinded", status: S::LoadBearing, closure_task: "", consumer_site: "TypeChecker.higher_kinded_enabled → infer.rs" },
-        ManifestFieldEntry { section: "types", field: "coinductive", status: S::LoadBearing, closure_task: "", consumer_site: "TypeChecker.coinductive_enabled → infer.rs" },
-        ManifestFieldEntry { section: "types", field: "instance_search", status: S::LoadBearing, closure_task: "", consumer_site: "ProtocolChecker.instance_search_enabled → protocol.rs" },
-        ManifestFieldEntry { section: "types", field: "quotient", status: S::LoadBearing, closure_task: "", consumer_site: "TypeChecker.quotient_enabled → infer.rs" },
-        ManifestFieldEntry { section: "types", field: "universe_polymorphism", status: S::LoadBearing, closure_task: "", consumer_site: "TypeChecker.universe_poly_enabled → infer.rs" },
-        ManifestFieldEntry { section: "types", field: "refinement", status: S::LoadBearing, closure_task: "", consumer_site: "refinement_typing_on → semantic_analysis" },
-        ManifestFieldEntry { section: "types", field: "coherence_check_depth", status: S::LoadBearing, closure_task: "", consumer_site: "TypeChecker.coherence_check_depth → semantic_analysis" },
-
+        ManifestFieldEntry {
+            section: "types",
+            field: "dependent",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "TypeChecker.dependent_enabled → infer.rs",
+        },
+        ManifestFieldEntry {
+            section: "types",
+            field: "cubical",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "Unifier.cubical_enabled → unify.rs",
+        },
+        ManifestFieldEntry {
+            section: "types",
+            field: "higher_kinded",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "TypeChecker.higher_kinded_enabled → infer.rs",
+        },
+        ManifestFieldEntry {
+            section: "types",
+            field: "coinductive",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "TypeChecker.coinductive_enabled → infer.rs",
+        },
+        ManifestFieldEntry {
+            section: "types",
+            field: "instance_search",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "ProtocolChecker.instance_search_enabled → protocol.rs",
+        },
+        ManifestFieldEntry {
+            section: "types",
+            field: "quotient",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "TypeChecker.quotient_enabled → infer.rs",
+        },
+        ManifestFieldEntry {
+            section: "types",
+            field: "universe_polymorphism",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "TypeChecker.universe_poly_enabled → infer.rs",
+        },
+        ManifestFieldEntry {
+            section: "types",
+            field: "refinement",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "refinement_typing_on → semantic_analysis",
+        },
+        ManifestFieldEntry {
+            section: "types",
+            field: "coherence_check_depth",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "TypeChecker.coherence_check_depth → semantic_analysis",
+        },
         // [runtime] — 7/8 wired (async_worker_threads forward-looking).
-        ManifestFieldEntry { section: "runtime", field: "cbgr_mode", status: S::LoadBearing, closure_task: "", consumer_site: "InterpreterConfig → pipeline/interpreter.rs" },
-        ManifestFieldEntry { section: "runtime", field: "async_scheduler", status: S::LoadBearing, closure_task: "", consumer_site: "InterpreterConfig → pipeline/interpreter.rs" },
-        ManifestFieldEntry { section: "runtime", field: "heap_policy", status: S::LoadBearing, closure_task: "", consumer_site: "InterpreterConfig → pipeline/interpreter.rs" },
-        ManifestFieldEntry { section: "runtime", field: "panic", status: S::LoadBearing, closure_task: "", consumer_site: "PanicStrategy::from_manifest_text → PlatformIR" },
-        ManifestFieldEntry { section: "runtime", field: "futures", status: S::LoadBearing, closure_task: "#262 + #281", consumer_site: "Tier 0: handle_spawn / Tier 1: lower_spawn (codegen-time)" },
-        ManifestFieldEntry { section: "runtime", field: "nurseries", status: S::LoadBearing, closure_task: "#262 + #281", consumer_site: "Tier 0: handle_nursery_init / Tier 1: NurseryInit lowering" },
-        ManifestFieldEntry { section: "runtime", field: "async_worker_threads", status: S::ForwardLooking, closure_task: "#277", consumer_site: "LLVM globals (#261) — stdlib WorkerPool consumer pending" },
-        ManifestFieldEntry { section: "runtime", field: "task_stack_size", status: S::LoadBearing, closure_task: "#259", consumer_site: "AsyncRuntimeConfig.task_stack_size via runtime bridge" },
-
+        ManifestFieldEntry {
+            section: "runtime",
+            field: "cbgr_mode",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "InterpreterConfig → pipeline/interpreter.rs",
+        },
+        ManifestFieldEntry {
+            section: "runtime",
+            field: "async_scheduler",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "InterpreterConfig → pipeline/interpreter.rs",
+        },
+        ManifestFieldEntry {
+            section: "runtime",
+            field: "heap_policy",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "InterpreterConfig → pipeline/interpreter.rs",
+        },
+        ManifestFieldEntry {
+            section: "runtime",
+            field: "panic",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "PanicStrategy::from_manifest_text → PlatformIR",
+        },
+        ManifestFieldEntry {
+            section: "runtime",
+            field: "futures",
+            status: S::LoadBearing,
+            closure_task: "#262 + #281",
+            consumer_site: "Tier 0: handle_spawn / Tier 1: lower_spawn (codegen-time)",
+        },
+        ManifestFieldEntry {
+            section: "runtime",
+            field: "nurseries",
+            status: S::LoadBearing,
+            closure_task: "#262 + #281",
+            consumer_site: "Tier 0: handle_nursery_init / Tier 1: NurseryInit lowering",
+        },
+        ManifestFieldEntry {
+            section: "runtime",
+            field: "async_worker_threads",
+            status: S::ForwardLooking,
+            closure_task: "#277",
+            consumer_site: "LLVM globals (#261) — stdlib WorkerPool consumer pending",
+        },
+        ManifestFieldEntry {
+            section: "runtime",
+            field: "task_stack_size",
+            status: S::LoadBearing,
+            closure_task: "#259",
+            consumer_site: "AsyncRuntimeConfig.task_stack_size via runtime bridge",
+        },
         // [codegen] — all 4 wired.
-        ManifestFieldEntry { section: "codegen", field: "monomorphization_cache", status: S::LoadBearing, closure_task: "", consumer_site: "VbcMonomorphizationPhase::without_cache" },
-        ManifestFieldEntry { section: "codegen", field: "tail_call_optimization", status: S::LoadBearing, closure_task: "", consumer_site: "vbc_lowering: disable-tail-calls LLVM attr" },
-        ManifestFieldEntry { section: "codegen", field: "vectorize", status: S::LoadBearing, closure_task: "", consumer_site: "vbc_lowering: no-loop-vectorize / no-slp-vectorize attrs" },
-        ManifestFieldEntry { section: "codegen", field: "inline_depth", status: S::LoadBearing, closure_task: "#267", consumer_site: "vbc_lowering: inline-threshold per-function attr" },
-
+        ManifestFieldEntry {
+            section: "codegen",
+            field: "monomorphization_cache",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "VbcMonomorphizationPhase::without_cache",
+        },
+        ManifestFieldEntry {
+            section: "codegen",
+            field: "tail_call_optimization",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "vbc_lowering: disable-tail-calls LLVM attr",
+        },
+        ManifestFieldEntry {
+            section: "codegen",
+            field: "vectorize",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "vbc_lowering: no-loop-vectorize / no-slp-vectorize attrs",
+        },
+        ManifestFieldEntry {
+            section: "codegen",
+            field: "inline_depth",
+            status: S::LoadBearing,
+            closure_task: "#267",
+            consumer_site: "vbc_lowering: inline-threshold per-function attr",
+        },
         // [protocols] — all 5 wired.
-        ManifestFieldEntry { section: "protocols", field: "resolution_strategy", status: S::LoadBearing, closure_task: "", consumer_site: "ProtocolChecker.resolution_strategy → find_impl" },
-        ManifestFieldEntry { section: "protocols", field: "blanket_impls", status: S::LoadBearing, closure_task: "", consumer_site: "ProtocolChecker.blanket_impls → candidate filter" },
-        ManifestFieldEntry { section: "protocols", field: "coherence", status: S::LoadBearing, closure_task: "#263", consumer_site: "ProtocolChecker.coherence_mode → register_impl" },
-        ManifestFieldEntry { section: "protocols", field: "higher_kinded_protocols", status: S::LoadBearing, closure_task: "#264", consumer_site: "TypeChecker.higher_kinded_protocols_enabled" },
-        ManifestFieldEntry { section: "protocols", field: "generic_associated_types", status: S::LoadBearing, closure_task: "#265", consumer_site: "TypeChecker.generic_associated_types_enabled" },
-
+        ManifestFieldEntry {
+            section: "protocols",
+            field: "resolution_strategy",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "ProtocolChecker.resolution_strategy → find_impl",
+        },
+        ManifestFieldEntry {
+            section: "protocols",
+            field: "blanket_impls",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "ProtocolChecker.blanket_impls → candidate filter",
+        },
+        ManifestFieldEntry {
+            section: "protocols",
+            field: "coherence",
+            status: S::LoadBearing,
+            closure_task: "#263",
+            consumer_site: "ProtocolChecker.coherence_mode → register_impl",
+        },
+        ManifestFieldEntry {
+            section: "protocols",
+            field: "higher_kinded_protocols",
+            status: S::LoadBearing,
+            closure_task: "#264",
+            consumer_site: "TypeChecker.higher_kinded_protocols_enabled",
+        },
+        ManifestFieldEntry {
+            section: "protocols",
+            field: "generic_associated_types",
+            status: S::LoadBearing,
+            closure_task: "#265",
+            consumer_site: "TypeChecker.generic_associated_types_enabled",
+        },
         // [safety] — all 6 wired (Phase 1+2a+2b+3a stack).
-        ManifestFieldEntry { section: "safety", field: "unsafe_allowed", status: S::LoadBearing, closure_task: "", consumer_site: "SafetyPolicy.unsafe_allowed → safety_gate" },
-        ManifestFieldEntry { section: "safety", field: "ffi", status: S::LoadBearing, closure_task: "", consumer_site: "SafetyPolicy.ffi → safety_gate" },
-        ManifestFieldEntry { section: "safety", field: "ffi_boundary", status: S::LoadBearing, closure_task: "", consumer_site: "SafetyPolicy.ffi_boundary strict/lenient → safety_gate" },
-        ManifestFieldEntry { section: "safety", field: "capability_required", status: S::LoadBearing, closure_task: "", consumer_site: "SafetyPolicy.capability_required → safety_gate" },
-        ManifestFieldEntry { section: "safety", field: "forbid_stdlib_extern", status: S::LoadBearing, closure_task: "", consumer_site: "SafetyPolicy.forbid_stdlib_extern → safety_gate" },
-        ManifestFieldEntry { section: "safety", field: "mls_level", status: S::LoadBearing, closure_task: "#266 + #282 + #283 + #289..#295", consumer_site: "11-layer MLS stack: declaration gate + lattice + param/function consistency + sidecar storage + seeding + expression propagation + downflow check + module walker + @declassify + sink detection" },
-
+        ManifestFieldEntry {
+            section: "safety",
+            field: "unsafe_allowed",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "SafetyPolicy.unsafe_allowed → safety_gate",
+        },
+        ManifestFieldEntry {
+            section: "safety",
+            field: "ffi",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "SafetyPolicy.ffi → safety_gate",
+        },
+        ManifestFieldEntry {
+            section: "safety",
+            field: "ffi_boundary",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "SafetyPolicy.ffi_boundary strict/lenient → safety_gate",
+        },
+        ManifestFieldEntry {
+            section: "safety",
+            field: "capability_required",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "SafetyPolicy.capability_required → safety_gate",
+        },
+        ManifestFieldEntry {
+            section: "safety",
+            field: "forbid_stdlib_extern",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "SafetyPolicy.forbid_stdlib_extern → safety_gate",
+        },
+        ManifestFieldEntry {
+            section: "safety",
+            field: "mls_level",
+            status: S::LoadBearing,
+            closure_task: "#266 + #282 + #283 + #289..#295",
+            consumer_site: "11-layer MLS stack: declaration gate + lattice + param/function consistency + sidecar storage + seeding + expression propagation + downflow check + module walker + @declassify + sink detection",
+        },
         // [test] — all 8 wired (Phase 1+2+3+4 closures #298+#273+#299).
-        ManifestFieldEntry { section: "test", field: "timeout_secs", status: S::LoadBearing, closure_task: "", consumer_site: "TestRunCfg.timeout_secs → commands/test.rs" },
-        ManifestFieldEntry { section: "test", field: "deny_warnings", status: S::LoadBearing, closure_task: "", consumer_site: "TestRunCfg.deny_warnings → commands/test.rs" },
-        ManifestFieldEntry { section: "test", field: "coverage", status: S::LoadBearing, closure_task: "", consumer_site: "TestRunCfg.coverage CLI||manifest" },
-        ManifestFieldEntry { section: "test", field: "parallel", status: S::LoadBearing, closure_task: "", consumer_site: "rayon thread-pool gate" },
-        ManifestFieldEntry { section: "test", field: "differential", status: S::LoadBearing, closure_task: "#273", consumer_site: "TestRunCfg.differential → run_test_differential (T0 + T1 cross-tier agreement)" },
-        ManifestFieldEntry { section: "test", field: "property_testing", status: S::LoadBearing, closure_task: "#298", consumer_site: "TestRunCfg.property_testing → run_single_test (skips @property when false)" },
-        ManifestFieldEntry { section: "test", field: "proptest_cases", status: S::LoadBearing, closure_task: "#298", consumer_site: "TestRunCfg.proptest_cases → run_test_property default_runs" },
-        ManifestFieldEntry { section: "test", field: "fuzzing", status: S::LoadBearing, closure_task: "#299", consumer_site: "TestRunCfg.fuzzing → commands/fuzz::run (cargo-fuzz orchestration)" },
-
+        ManifestFieldEntry {
+            section: "test",
+            field: "timeout_secs",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "TestRunCfg.timeout_secs → commands/test.rs",
+        },
+        ManifestFieldEntry {
+            section: "test",
+            field: "deny_warnings",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "TestRunCfg.deny_warnings → commands/test.rs",
+        },
+        ManifestFieldEntry {
+            section: "test",
+            field: "coverage",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "TestRunCfg.coverage CLI||manifest",
+        },
+        ManifestFieldEntry {
+            section: "test",
+            field: "parallel",
+            status: S::LoadBearing,
+            closure_task: "",
+            consumer_site: "rayon thread-pool gate",
+        },
+        ManifestFieldEntry {
+            section: "test",
+            field: "differential",
+            status: S::LoadBearing,
+            closure_task: "#273",
+            consumer_site: "TestRunCfg.differential → run_test_differential (T0 + T1 cross-tier agreement)",
+        },
+        ManifestFieldEntry {
+            section: "test",
+            field: "property_testing",
+            status: S::LoadBearing,
+            closure_task: "#298",
+            consumer_site: "TestRunCfg.property_testing → run_single_test (skips @property when false)",
+        },
+        ManifestFieldEntry {
+            section: "test",
+            field: "proptest_cases",
+            status: S::LoadBearing,
+            closure_task: "#298",
+            consumer_site: "TestRunCfg.proptest_cases → run_test_property default_runs",
+        },
+        ManifestFieldEntry {
+            section: "test",
+            field: "fuzzing",
+            status: S::LoadBearing,
+            closure_task: "#299",
+            consumer_site: "TestRunCfg.fuzzing → commands/fuzz::run (cargo-fuzz orchestration)",
+        },
         // CompilerOptions surface fields.
-        ManifestFieldEntry { section: "options", field: "continue_on_error", status: S::LoadBearing, closure_task: "#270", consumer_site: "Session::collect_phase_error → validate_module" },
-        ManifestFieldEntry { section: "options", field: "emit_proof_certificate", status: S::LoadBearing, closure_task: "#285", consumer_site: "phase_verify::emit_theorem_certificates" },
-        ManifestFieldEntry { section: "options", field: "proof_certificate_format", status: S::LoadBearing, closure_task: "#285", consumer_site: "phase_verify::emit_theorem_certificates" },
-        ManifestFieldEntry { section: "options", field: "proof_certificate_path", status: S::LoadBearing, closure_task: "#285", consumer_site: "phase_verify::emit_theorem_certificates" },
+        ManifestFieldEntry {
+            section: "options",
+            field: "continue_on_error",
+            status: S::LoadBearing,
+            closure_task: "#270",
+            consumer_site: "Session::collect_phase_error → validate_module",
+        },
+        ManifestFieldEntry {
+            section: "options",
+            field: "emit_proof_certificate",
+            status: S::LoadBearing,
+            closure_task: "#285",
+            consumer_site: "phase_verify::emit_theorem_certificates",
+        },
+        ManifestFieldEntry {
+            section: "options",
+            field: "proof_certificate_format",
+            status: S::LoadBearing,
+            closure_task: "#285",
+            consumer_site: "phase_verify::emit_theorem_certificates",
+        },
+        ManifestFieldEntry {
+            section: "options",
+            field: "proof_certificate_path",
+            status: S::LoadBearing,
+            closure_task: "#285",
+            consumer_site: "phase_verify::emit_theorem_certificates",
+        },
     ]
 }
 
@@ -9314,7 +9806,8 @@ pub fn audit_manifest_coverage(format: AuditFormat) -> Result<()> {
     }
     summary.fully_wired = summary.forward_looking == 0;
 
-    let manifest_dir = Manifest::find_manifest_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let manifest_dir =
+        Manifest::find_manifest_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let report_dir = manifest_dir.join("target").join("audit-reports");
     let _ = std::fs::create_dir_all(&report_dir);
     let report_path = report_dir.join("manifest-coverage.json");
@@ -9357,9 +9850,8 @@ pub fn audit_manifest_coverage(format: AuditFormat) -> Result<()> {
                 );
                 ui::output(&line);
             }
-            let wired_count = summary.load_bearing
-                + summary.load_bearing_partial
-                + summary.embedder_load_bearing;
+            let wired_count =
+                summary.load_bearing + summary.load_bearing_partial + summary.embedder_load_bearing;
             ui::output(&format!(
                 "\nSummary: {}/{} fields wired ({} load-bearing, {} partial, {} embedder, {} forward-looking)",
                 wired_count,
@@ -9383,9 +9875,11 @@ mod manifest_coverage_tests {
     #[test]
     fn manifest_field_table_is_non_empty() {
         let entries = manifest_field_table();
-        assert!(entries.len() >= 30,
+        assert!(
+            entries.len() >= 30,
             "manifest_field_table must enumerate ≥ 30 fields; got {}",
-            entries.len());
+            entries.len()
+        );
     }
 
     #[test]
@@ -9393,19 +9887,20 @@ mod manifest_coverage_tests {
         for entry in manifest_field_table() {
             assert!(!entry.section.is_empty(), "empty section");
             assert!(!entry.field.is_empty(), "empty field");
-            assert!(!entry.consumer_site.is_empty(),
+            assert!(
+                !entry.consumer_site.is_empty(),
                 "empty consumer_site for {}.{}",
-                entry.section, entry.field);
+                entry.section,
+                entry.field
+            );
         }
     }
 
     #[test]
     fn known_wired_fields_present() {
         let entries = manifest_field_table();
-        let labels: std::collections::HashSet<(&str, &str)> = entries
-            .iter()
-            .map(|e| (e.section, e.field))
-            .collect();
+        let labels: std::collections::HashSet<(&str, &str)> =
+            entries.iter().map(|e| (e.section, e.field)).collect();
         for (section, field) in &[
             ("types", "dependent"),
             ("runtime", "panic"),
@@ -9431,7 +9926,8 @@ mod manifest_coverage_tests {
                 assert!(
                     !entry.closure_task.is_empty(),
                     "{}.{} is ForwardLooking but has no closure_task",
-                    entry.section, entry.field,
+                    entry.section,
+                    entry.field,
                 );
             }
         }
@@ -9511,8 +10007,14 @@ struct MlsCoverageSummary {
 }
 
 const MLS_LOW_CLASSIFICATION_SINKS: &[&str] = &[
-    "Logger", "FS", "FileSystem", "Network",
-    "Stdout", "Stderr", "Tracing", "Telemetry",
+    "Logger",
+    "FS",
+    "FileSystem",
+    "Network",
+    "Stdout",
+    "Stderr",
+    "Tracing",
+    "Telemetry",
 ];
 
 fn read_function_classification_audit(
@@ -9541,9 +10043,7 @@ fn read_function_classification_audit(
     found.map(|l| l.as_manifest_str().to_string())
 }
 
-fn count_classified_params_audit(
-    func: &verum_ast::decl::FunctionDecl,
-) -> usize {
+fn count_classified_params_audit(func: &verum_ast::decl::FunctionDecl) -> usize {
     let mut count = 0;
     for p in func.params.iter() {
         if let verum_ast::decl::FunctionParamKind::Regular { .. } = &p.kind {
@@ -9555,9 +10055,7 @@ fn count_classified_params_audit(
     count
 }
 
-fn collect_sink_contexts_audit(
-    func: &verum_ast::decl::FunctionDecl,
-) -> Vec<String> {
+fn collect_sink_contexts_audit(func: &verum_ast::decl::FunctionDecl) -> Vec<String> {
     let mut sinks = Vec::new();
     for ctx in func.contexts.iter() {
         if ctx.is_negative {
@@ -9576,7 +10074,8 @@ pub fn audit_mls_coverage(format: AuditFormat) -> Result<()> {
     if matches!(format, AuditFormat::Plain) {
         ui::step("MLS coverage audit — classification topology");
     }
-    let manifest_dir = Manifest::find_manifest_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let manifest_dir =
+        Manifest::find_manifest_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let vr_files = discover_vr_files(&manifest_dir);
 
     let mut per_function: Vec<MlsCoverageFunction> = Vec::new();
@@ -9590,8 +10089,7 @@ pub fn audit_mls_coverage(format: AuditFormat) -> Result<()> {
         for item in &module.items {
             if let verum_ast::decl::ItemKind::Function(func) = &item.kind {
                 summary.total_functions += 1;
-                let function_classification =
-                    read_function_classification_audit(&func.attributes);
+                let function_classification = read_function_classification_audit(&func.attributes);
                 if function_classification.is_some() {
                     summary.classified_functions += 1;
                 }
@@ -9600,10 +10098,7 @@ pub fn audit_mls_coverage(format: AuditFormat) -> Result<()> {
                 if classified_param_count > 0 {
                     summary.functions_with_classified_params += 1;
                 }
-                let has_declassify = func
-                    .attributes
-                    .iter()
-                    .any(|a| a.is_named("declassify"));
+                let has_declassify = func.attributes.iter().any(|a| a.is_named("declassify"));
                 if has_declassify {
                     summary.declassify_boundaries += 1;
                 }
@@ -9647,18 +10142,14 @@ pub fn audit_mls_coverage(format: AuditFormat) -> Result<()> {
             }
         }
         AuditFormat::Plain => {
-            ui::output(&format!(
-                "  Total functions: {}",
-                summary.total_functions
-            ));
+            ui::output(&format!("  Total functions: {}", summary.total_functions));
             ui::output(&format!(
                 "  Classified functions: {}",
                 summary.classified_functions
             ));
             ui::output(&format!(
                 "  Functions with classified parameters: {} ({} params total)",
-                summary.functions_with_classified_params,
-                summary.total_classified_params,
+                summary.functions_with_classified_params, summary.total_classified_params,
             ));
             ui::output(&format!(
                 "  @declassify boundaries: {}",
@@ -9687,9 +10178,10 @@ mod mls_coverage_tests {
     #[test]
     fn read_function_classification_audit_extracts_secret() {
         use verum_ast::expr::{Expr, ExprKind};
-        let path = verum_ast::ty::Path::single(
-            verum_ast::ty::Ident::new("secret", verum_ast::Span::default()),
-        );
+        let path = verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
+            "secret",
+            verum_ast::Span::default(),
+        ));
         let arg = Expr::new(ExprKind::Path(path), verum_ast::Span::default());
         let mut args = verum_common::List::new();
         args.push(arg);
@@ -9710,9 +10202,10 @@ mod mls_coverage_tests {
     fn read_function_classification_audit_takes_max() {
         use verum_ast::expr::{Expr, ExprKind};
         let mk = |level: &str| -> verum_ast::attr::Attribute {
-            let path = verum_ast::ty::Path::single(
-                verum_ast::ty::Ident::new(level, verum_ast::Span::default()),
-            );
+            let path = verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
+                level,
+                verum_ast::Span::default(),
+            ));
             let arg = Expr::new(ExprKind::Path(path), verum_ast::Span::default());
             let mut args = verum_common::List::new();
             args.push(arg);
@@ -9764,7 +10257,10 @@ mod bundle_gate_metric_tests {
     use serde_json::json;
     use std::collections::BTreeMap;
 
-    fn one(gate: &'static str, value: serde_json::Value) -> BTreeMap<&'static str, serde_json::Value> {
+    fn one(
+        gate: &'static str,
+        value: serde_json::Value,
+    ) -> BTreeMap<&'static str, serde_json::Value> {
         let mut m = BTreeMap::new();
         m.insert(gate, value);
         m
@@ -9805,10 +10301,7 @@ mod bundle_gate_metric_tests {
             }),
         );
         let s = bundle_gate_metric("mls_coverage", &gates);
-        assert_eq!(
-            s,
-            "8/100 classified, 11 params, 2 declassify, 5 sinks"
-        );
+        assert_eq!(s, "8/100 classified, 11 params, 2 declassify, 5 sinks");
     }
 
     #[test]
@@ -9851,10 +10344,7 @@ mod bundle_gate_metric_tests {
             }),
         );
         let s = bundle_gate_metric("signatures", &gates);
-        assert_eq!(
-            s,
-            "37 theorems, 74 verified, 0 mismatched, 0 no-header"
-        );
+        assert_eq!(s, "37 theorems, 74 verified, 0 mismatched, 0 no-header");
     }
 
     #[test]

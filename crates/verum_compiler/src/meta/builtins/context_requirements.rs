@@ -146,7 +146,7 @@ impl RequiredContext {
     /// Get the context name as it appears in `using [...]` clause
     pub fn context_name(&self) -> &'static str {
         match self {
-            RequiredContext::None => "MetaCore",  // Implicit, always available
+            RequiredContext::None => "MetaCore", // Implicit, always available
             RequiredContext::MetaTypes => "MetaTypes",
             RequiredContext::MetaRuntime => "MetaRuntime",
             RequiredContext::CompileDiag => "CompileDiag",
@@ -185,7 +185,10 @@ impl RequiredContext {
     /// as reflection — they're orthogonal capabilities that survive
     /// when reflection is disabled.
     pub fn is_reflection(&self) -> bool {
-        matches!(self, RequiredContext::MetaTypes | RequiredContext::CompileDiag)
+        matches!(
+            self,
+            RequiredContext::MetaTypes | RequiredContext::CompileDiag
+        )
     }
 }
 
@@ -446,8 +449,10 @@ impl EnabledContexts {
         for name in names {
             // Check for duplicates first
             if seen_contexts.contains(name) {
-                result.duplicates.push(DuplicateContextError { name: name.clone() });
-                continue;  // Don't process duplicate again
+                result
+                    .duplicates
+                    .push(DuplicateContextError { name: name.clone() });
+                continue; // Don't process duplicate again
             }
             seen_contexts.insert(name.clone());
 
@@ -527,7 +532,10 @@ pub enum UnknownContextError {
 impl fmt::Display for UnknownContextError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            UnknownContextError::PossibleTypo { provided, suggestion } => {
+            UnknownContextError::PossibleTypo {
+                provided,
+                suggestion,
+            } => {
                 write!(
                     f,
                     "unknown context `{}`, did you mean `{}`?",
@@ -550,8 +558,8 @@ const STANDARD_CONTEXT_NAMES: &[&str] = &[
     "ProjectInfo",
     "MetaBench",
     "StageInfo",
-    "MetaReflection",  // Bundle
-    "MetaCore",        // Implicit tier 0
+    "MetaReflection", // Bundle
+    "MetaCore",       // Implicit tier 0
 ];
 
 /// Check if a name looks like a typo of a standard context name
@@ -570,33 +578,35 @@ fn suggest_context_name(name: &str) -> Option<Text> {
         // Check for close matches (Levenshtein-like heuristics)
         // - Missing or extra characters at the end
         // - Common typos
-        if name_lower.starts_with(&standard_lower[..standard_lower.len().saturating_sub(2)]) ||
-           standard_lower.starts_with(&name_lower[..name_lower.len().saturating_sub(2)]) {
+        if name_lower.starts_with(&standard_lower[..standard_lower.len().saturating_sub(2)])
+            || standard_lower.starts_with(&name_lower[..name_lower.len().saturating_sub(2)])
+        {
             return Some(Text::from(standard));
         }
 
         // Check for specific common typos
-        if ((name_lower == "metatype" || name_lower == "metatypes") && standard == "MetaTypes") ||
-           (name_lower == "metaruntime" && standard == "MetaRuntime") ||
-           (name_lower == "runtime" && standard == "MetaRuntime") ||
-           (name_lower == "compilediag" && standard == "CompileDiag") ||
-           (name_lower == "diagnostic" && standard == "CompileDiag") ||
-           (name_lower == "diagnostics" && standard == "CompileDiag") ||
-           (name_lower == "buildasset" && standard == "BuildAssets") ||
-           (name_lower == "buildassets" && standard == "BuildAssets") ||
-           (name_lower == "assets" && standard == "BuildAssets") ||
-           (name_lower == "reflection" && standard == "MetaReflection") ||
-           (name_lower == "metareflection" && standard == "MetaReflection") ||
-           (name_lower == "sourcemap" && standard == "SourceMap") ||
-           (name_lower == "source_map" && standard == "SourceMap") ||
-           (name_lower == "projectinfo" && standard == "ProjectInfo") ||
-           (name_lower == "project_info" && standard == "ProjectInfo") ||
-           (name_lower == "metabench" && standard == "MetaBench") ||
-           (name_lower == "meta_bench" && standard == "MetaBench") ||
-           (name_lower == "bench" && standard == "MetaBench") ||
-           (name_lower == "stageinfo" && standard == "StageInfo") ||
-           (name_lower == "stage_info" && standard == "StageInfo") ||
-           (name_lower == "stage" && standard == "StageInfo") {
+        if ((name_lower == "metatype" || name_lower == "metatypes") && standard == "MetaTypes")
+            || (name_lower == "metaruntime" && standard == "MetaRuntime")
+            || (name_lower == "runtime" && standard == "MetaRuntime")
+            || (name_lower == "compilediag" && standard == "CompileDiag")
+            || (name_lower == "diagnostic" && standard == "CompileDiag")
+            || (name_lower == "diagnostics" && standard == "CompileDiag")
+            || (name_lower == "buildasset" && standard == "BuildAssets")
+            || (name_lower == "buildassets" && standard == "BuildAssets")
+            || (name_lower == "assets" && standard == "BuildAssets")
+            || (name_lower == "reflection" && standard == "MetaReflection")
+            || (name_lower == "metareflection" && standard == "MetaReflection")
+            || (name_lower == "sourcemap" && standard == "SourceMap")
+            || (name_lower == "source_map" && standard == "SourceMap")
+            || (name_lower == "projectinfo" && standard == "ProjectInfo")
+            || (name_lower == "project_info" && standard == "ProjectInfo")
+            || (name_lower == "metabench" && standard == "MetaBench")
+            || (name_lower == "meta_bench" && standard == "MetaBench")
+            || (name_lower == "bench" && standard == "MetaBench")
+            || (name_lower == "stageinfo" && standard == "StageInfo")
+            || (name_lower == "stage_info" && standard == "StageInfo")
+            || (name_lower == "stage" && standard == "StageInfo")
+        {
             return Some(Text::from(standard));
         }
     }
@@ -713,11 +723,14 @@ mod tests {
     fn test_parse_using_clause_typo_detection() {
         // Test that typos generate warnings
         let result = EnabledContexts::parse_using_clause(&[
-            Text::from("metatype"),  // Typo of MetaTypes
+            Text::from("metatype"), // Typo of MetaTypes
         ]);
         assert_eq!(result.warnings.len(), 1);
         match &result.warnings[0] {
-            UnknownContextError::PossibleTypo { provided, suggestion } => {
+            UnknownContextError::PossibleTypo {
+                provided,
+                suggestion,
+            } => {
                 assert_eq!(provided.as_str(), "metatype");
                 assert_eq!(suggestion.as_str(), "MetaTypes");
             }
@@ -731,8 +744,16 @@ mod tests {
             Text::from("MetaTypes"),
             Text::from("MyCustomContext"),
         ]);
-        assert!(result.enabled_contexts.is_enabled(RequiredContext::MetaTypes));
-        assert!(result.user_contexts.contains(&Text::from("MyCustomContext")));
+        assert!(
+            result
+                .enabled_contexts
+                .is_enabled(RequiredContext::MetaTypes)
+        );
+        assert!(
+            result
+                .user_contexts
+                .contains(&Text::from("MyCustomContext"))
+        );
         assert!(result.warnings.is_empty());
     }
 
@@ -740,7 +761,7 @@ mod tests {
     fn test_parse_using_clause_case_sensitivity() {
         // Test that case-insensitive typos are detected
         let result = EnabledContexts::parse_using_clause(&[
-            Text::from("METATYPES"),  // Wrong case
+            Text::from("METATYPES"), // Wrong case
         ]);
         assert_eq!(result.warnings.len(), 1);
         match &result.warnings[0] {
@@ -755,13 +776,17 @@ mod tests {
         // Test that duplicate contexts are detected
         let result = EnabledContexts::parse_using_clause(&[
             Text::from("MetaTypes"),
-            Text::from("MetaTypes"),  // Duplicate
+            Text::from("MetaTypes"), // Duplicate
         ]);
         assert!(result.has_errors());
         assert_eq!(result.duplicates.len(), 1);
         assert_eq!(result.duplicates[0].name.as_str(), "MetaTypes");
         // Context should still be enabled (just once)
-        assert!(result.enabled_contexts.is_enabled(RequiredContext::MetaTypes));
+        assert!(
+            result
+                .enabled_contexts
+                .is_enabled(RequiredContext::MetaTypes)
+        );
     }
 
     #[test]
@@ -770,12 +795,20 @@ mod tests {
         let result = EnabledContexts::parse_using_clause(&[
             Text::from("MetaTypes"),
             Text::from("CompileDiag"),
-            Text::from("MetaTypes"),  // Duplicate
+            Text::from("MetaTypes"),   // Duplicate
             Text::from("CompileDiag"), // Duplicate
         ]);
         assert_eq!(result.duplicates.len(), 2);
         // Both contexts should still be enabled
-        assert!(result.enabled_contexts.is_enabled(RequiredContext::MetaTypes));
-        assert!(result.enabled_contexts.is_enabled(RequiredContext::CompileDiag));
+        assert!(
+            result
+                .enabled_contexts
+                .is_enabled(RequiredContext::MetaTypes)
+        );
+        assert!(
+            result
+                .enabled_contexts
+                .is_enabled(RequiredContext::CompileDiag)
+        );
     }
 }

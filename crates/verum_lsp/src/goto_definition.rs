@@ -423,7 +423,8 @@ impl SyntaxTreeDefinitionProvider {
         let offset = line_index.offset_at(position);
 
         // Find the identifier at the position
-        let (symbol_name, _symbol_range) = self.find_identifier_at_offset(&root, offset, &line_index)?;
+        let (symbol_name, _symbol_range) =
+            self.find_identifier_at_offset(&root, offset, &line_index)?;
 
         // Find all definitions of this symbol
         let definitions = self.find_symbol_definitions(&root, &symbol_name, &line_index);
@@ -676,9 +677,7 @@ impl SyntaxTreeDefinitionProvider {
                 SyntaxElement::Token(token) if token.kind() == SyntaxKind::IDENT => {
                     return Some(token.text().to_string());
                 }
-                SyntaxElement::Node(child_node)
-                    if child_node.kind() == SyntaxKind::IDENT_PAT =>
-                {
+                SyntaxElement::Node(child_node) if child_node.kind() == SyntaxKind::IDENT_PAT => {
                     // Pattern binding
                     return self.find_definition_name(&child_node);
                 }
@@ -755,7 +754,14 @@ mod tests {
     fn test_syntax_tree_definition_provider() {
         let provider = SyntaxTreeDefinitionProvider::new();
         // Provider creation should succeed
-        assert!(provider.parser.parse("fn foo() {}", FileId::new(0)).syntax().kind() == SyntaxKind::SOURCE_FILE);
+        assert!(
+            provider
+                .parser
+                .parse("fn foo() {}", FileId::new(0))
+                .syntax()
+                .kind()
+                == SyntaxKind::SOURCE_FILE
+        );
     }
 
     #[test]
@@ -793,7 +799,10 @@ mod tests {
     #[test]
     fn test_position_to_offset() {
         let text = "line1\nline2\nline3";
-        let pos = Position { line: 1, character: 0 };
+        let pos = Position {
+            line: 1,
+            character: 0,
+        };
         let offset = position_to_offset(pos, text);
         assert_eq!(offset, 6);
     }

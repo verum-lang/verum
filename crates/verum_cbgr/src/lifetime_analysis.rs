@@ -222,9 +222,16 @@ impl LifetimeConstraint {
 
     /// Create a minimum constraint.
     #[must_use]
-    pub fn minimum(lifetime: LifetimeId, min_blocks: Set<BlockId>, origin: ConstraintOrigin) -> Self {
+    pub fn minimum(
+        lifetime: LifetimeId,
+        min_blocks: Set<BlockId>,
+        origin: ConstraintOrigin,
+    ) -> Self {
         Self {
-            kind: ConstraintKind::Minimum { lifetime, min_blocks },
+            kind: ConstraintKind::Minimum {
+                lifetime,
+                min_blocks,
+            },
             origin,
             span: None,
         }
@@ -247,10 +254,7 @@ pub enum ConstraintKind {
         shorter: LifetimeId,
     },
     /// 'a == 'b.
-    Equal {
-        a: LifetimeId,
-        b: LifetimeId,
-    },
+    Equal { a: LifetimeId, b: LifetimeId },
     /// Lifetime must be live at minimum these blocks.
     Minimum {
         lifetime: LifetimeId,
@@ -389,7 +393,12 @@ pub struct LifetimeViolation {
 impl LifetimeViolation {
     /// Create a new violation.
     #[must_use]
-    pub fn new(kind: ViolationKind, ref_id: RefId, location: BlockId, message: impl Into<String>) -> Self {
+    pub fn new(
+        kind: ViolationKind,
+        ref_id: RefId,
+        location: BlockId,
+        message: impl Into<String>,
+    ) -> Self {
         Self {
             kind,
             ref_id,
@@ -480,7 +489,8 @@ impl LifetimeAnalysisResult {
     /// Get lifetime for a reference.
     #[must_use]
     pub fn get_lifetime(&self, ref_id: RefId) -> Option<&Lifetime> {
-        self.ref_lifetimes.get(&ref_id)
+        self.ref_lifetimes
+            .get(&ref_id)
             .and_then(|lid| self.lifetimes.get(lid))
     }
 
@@ -668,12 +678,15 @@ impl LifetimeAnalyzer {
     /// Create lifetimes for all references.
     fn create_lifetimes(&mut self) {
         // Collect definition data first to avoid borrow conflict
-        let def_data: List<(BlockId, RefId, Option<Span>)> = self.cfg.blocks
+        let def_data: List<(BlockId, RefId, Option<Span>)> = self
+            .cfg
+            .blocks
             .iter()
             .flat_map(|(block_id, block)| {
-                block.definitions.iter().map(move |def| {
-                    (*block_id, def.reference, def.span)
-                })
+                block
+                    .definitions
+                    .iter()
+                    .map(move |def| (*block_id, def.reference, def.span))
             })
             .collect();
 
@@ -724,7 +737,8 @@ impl LifetimeAnalyzer {
                     // Propagate through control flow edges
                     for &pred_id in &block.predecessors {
                         // Lifetimes live at block entry should be live at predecessor exit
-                        let live_at_entry: List<_> = self.lifetimes
+                        let live_at_entry: List<_> = self
+                            .lifetimes
                             .values()
                             .filter(|l| l.live_blocks.contains(block_id))
                             .map(|l| l.id)
@@ -757,13 +771,11 @@ impl LifetimeAnalyzer {
                             let mut min_blocks = Set::new();
                             min_blocks.insert(*block_id);
 
-                            self.constraints.push(
-                                LifetimeConstraint::minimum(
-                                    def_lifetime,
-                                    min_blocks,
-                                    ConstraintOrigin::RefCreation,
-                                )
-                            );
+                            self.constraints.push(LifetimeConstraint::minimum(
+                                def_lifetime,
+                                min_blocks,
+                                ConstraintOrigin::RefCreation,
+                            ));
                         }
                     }
                 }
@@ -781,13 +793,11 @@ impl LifetimeAnalyzer {
                             min_blocks.insert(*block_id);
                             min_blocks.insert(succ_id);
 
-                            self.constraints.push(
-                                LifetimeConstraint::minimum(
-                                    lifetime_id,
-                                    min_blocks,
-                                    ConstraintOrigin::Assignment,
-                                )
-                            );
+                            self.constraints.push(LifetimeConstraint::minimum(
+                                lifetime_id,
+                                min_blocks,
+                                ConstraintOrigin::Assignment,
+                            ));
                         }
                     }
                 }
@@ -814,10 +824,7 @@ impl LifetimeAnalyzer {
                                 ViolationKind::BorrowedValueNotLongEnough,
                                 RefId(longer.0 as u64),
                                 longer_lt.entry.unwrap_or(BlockId(0)),
-                                format!(
-                                    "Lifetime {:?} does not outlive {:?}",
-                                    longer, shorter
-                                ),
+                                format!("Lifetime {:?} does not outlive {:?}", longer, shorter),
                             ));
                         }
                     }
@@ -833,15 +840,15 @@ impl LifetimeAnalyzer {
                                 ViolationKind::ConflictingLifetimes,
                                 RefId(a.0 as u64),
                                 a_lt.entry.unwrap_or(BlockId(0)),
-                                format!(
-                                    "Lifetimes {:?} and {:?} are not equal",
-                                    a, b
-                                ),
+                                format!("Lifetimes {:?} and {:?} are not equal", a, b),
                             ));
                         }
                     }
                 }
-                ConstraintKind::Minimum { lifetime, min_blocks } => {
+                ConstraintKind::Minimum {
+                    lifetime,
+                    min_blocks,
+                } => {
                     // Check if lifetime is live at all minimum blocks
                     if let Some(lt) = self.lifetimes.get(lifetime) {
                         for block in min_blocks {
@@ -861,10 +868,9 @@ impl LifetimeAnalyzer {
                 }
                 ConstraintKind::Bound { lifetime, region } => {
                     // Check if lifetime is within region
-                    if let (Some(lt), Some(reg)) = (
-                        self.lifetimes.get(lifetime),
-                        self.regions.get(region),
-                    ) {
+                    if let (Some(lt), Some(reg)) =
+                        (self.lifetimes.get(lifetime), self.regions.get(region))
+                    {
                         for block in &lt.live_blocks {
                             let point = ProgramPoint::entry(*block);
                             if !reg.contains_point(&point) {
@@ -872,10 +878,7 @@ impl LifetimeAnalyzer {
                                     ViolationKind::RefOutlivesReferent,
                                     RefId(lifetime.0 as u64),
                                     *block,
-                                    format!(
-                                        "Lifetime {:?} escapes region {:?}",
-                                        lifetime, region
-                                    ),
+                                    format!("Lifetime {:?} escapes region {:?}", lifetime, region),
                                 ));
                             }
                         }
@@ -965,13 +968,18 @@ impl BorrowChecker {
 
     /// Record a borrow.
     pub fn record_borrow(&mut self, record: BorrowRecord) -> Result<(), BorrowError> {
-        let state = self.states.get(&record.borrowed_ref).copied().unwrap_or(BorrowState::Unborrowed);
+        let state = self
+            .states
+            .get(&record.borrowed_ref)
+            .copied()
+            .unwrap_or(BorrowState::Unborrowed);
 
         match (state, record.kind) {
             // Can create shared borrow if unborrowed or already shared
-            (BorrowState::Unborrowed, BorrowKind::Shared) |
-            (BorrowState::SharedBorrow, BorrowKind::Shared) => {
-                self.states.insert(record.borrowed_ref, BorrowState::SharedBorrow);
+            (BorrowState::Unborrowed, BorrowKind::Shared)
+            | (BorrowState::SharedBorrow, BorrowKind::Shared) => {
+                self.states
+                    .insert(record.borrowed_ref, BorrowState::SharedBorrow);
                 self.borrows
                     .entry(record.borrowed_ref)
                     .or_insert_with(List::new)
@@ -980,7 +988,8 @@ impl BorrowChecker {
             }
             // Can create mutable borrow only if unborrowed
             (BorrowState::Unborrowed, BorrowKind::Mutable) => {
-                self.states.insert(record.borrowed_ref, BorrowState::MutableBorrow);
+                self.states
+                    .insert(record.borrowed_ref, BorrowState::MutableBorrow);
                 self.borrows
                     .entry(record.borrowed_ref)
                     .or_insert_with(List::new)
@@ -996,15 +1005,9 @@ impl BorrowChecker {
             (BorrowState::SharedBorrow, BorrowKind::Mutable) => {
                 Err(BorrowError::CannotMutablyBorrowWhileShared)
             }
-            (BorrowState::MutableBorrow, _) => {
-                Err(BorrowError::CannotBorrowWhileMutablyBorrowed)
-            }
-            (BorrowState::Moved, _) => {
-                Err(BorrowError::UseAfterMove)
-            }
-            _ => {
-                Err(BorrowError::InvalidBorrowState)
-            }
+            (BorrowState::MutableBorrow, _) => Err(BorrowError::CannotBorrowWhileMutablyBorrowed),
+            (BorrowState::Moved, _) => Err(BorrowError::UseAfterMove),
+            _ => Err(BorrowError::InvalidBorrowState),
         }
     }
 
@@ -1022,14 +1025,22 @@ impl BorrowChecker {
     /// Check if a reference can be used.
     #[must_use]
     pub fn can_use(&self, ref_id: RefId) -> bool {
-        let state = self.states.get(&ref_id).copied().unwrap_or(BorrowState::Unborrowed);
+        let state = self
+            .states
+            .get(&ref_id)
+            .copied()
+            .unwrap_or(BorrowState::Unborrowed);
         !matches!(state, BorrowState::Moved)
     }
 
     /// Check if a reference can be mutated.
     #[must_use]
     pub fn can_mutate(&self, ref_id: RefId) -> bool {
-        let state = self.states.get(&ref_id).copied().unwrap_or(BorrowState::Unborrowed);
+        let state = self
+            .states
+            .get(&ref_id)
+            .copied()
+            .unwrap_or(BorrowState::Unborrowed);
         matches!(state, BorrowState::Unborrowed | BorrowState::MutableBorrow)
     }
 }
@@ -1126,11 +1137,8 @@ mod tests {
 
     #[test]
     fn test_constraint_creation() {
-        let c = LifetimeConstraint::outlives(
-            LifetimeId(1),
-            LifetimeId(2),
-            ConstraintOrigin::Borrow,
-        );
+        let c =
+            LifetimeConstraint::outlives(LifetimeId(1), LifetimeId(2), ConstraintOrigin::Borrow);
 
         matches!(c.kind, ConstraintKind::Outlives { .. });
         assert_eq!(c.origin, ConstraintOrigin::Borrow);

@@ -1,27 +1,28 @@
 //! A `Builder` enables you to build instructions.
 
-
 use verum_llvm_sys::core::LLVMBuildCallWithOperandBundles;
 use verum_llvm_sys::core::{
-    LLVMAddCase, LLVMAddClause, LLVMAddDestination, LLVMBuildAShr, LLVMBuildAdd, LLVMBuildAddrSpaceCast,
-    LLVMBuildAggregateRet, LLVMBuildAlloca, LLVMBuildAnd, LLVMBuildArrayAlloca, LLVMBuildArrayMalloc,
-    LLVMBuildAtomicCmpXchg, LLVMBuildAtomicRMW, LLVMBuildBinOp, LLVMBuildBitCast, LLVMBuildBr, LLVMBuildCast,
-    LLVMBuildCondBr, LLVMBuildExactSDiv, LLVMBuildExtractElement, LLVMBuildExtractValue, LLVMBuildFAdd, LLVMBuildFCmp,
-    LLVMBuildFDiv, LLVMBuildFMul, LLVMBuildFNeg, LLVMBuildFPCast, LLVMBuildFPExt, LLVMBuildFPToSI, LLVMBuildFPToUI,
-    LLVMBuildFPTrunc, LLVMBuildFRem, LLVMBuildFSub, LLVMBuildFence, LLVMBuildFree, LLVMBuildGlobalString,
-    LLVMBuildICmp, LLVMBuildIndirectBr, LLVMBuildInsertElement, LLVMBuildInsertValue, LLVMBuildIntCast,
-    LLVMBuildIntToPtr, LLVMBuildIsNotNull, LLVMBuildIsNull, LLVMBuildLShr, LLVMBuildLandingPad, LLVMBuildMalloc,
-    LLVMBuildMul, LLVMBuildNSWAdd, LLVMBuildNSWMul, LLVMBuildNSWNeg, LLVMBuildNSWSub, LLVMBuildNUWAdd, LLVMBuildNUWMul,
-    LLVMBuildNUWSub, LLVMBuildNeg, LLVMBuildNot, LLVMBuildOr, LLVMBuildPhi, LLVMBuildPointerCast, LLVMBuildPtrToInt,
-    LLVMBuildResume, LLVMBuildRet, LLVMBuildRetVoid, LLVMBuildSDiv, LLVMBuildSExt, LLVMBuildSExtOrBitCast,
-    LLVMBuildSIToFP, LLVMBuildSRem, LLVMBuildSelect, LLVMBuildShl, LLVMBuildShuffleVector, LLVMBuildStore,
-    LLVMBuildSub, LLVMBuildSwitch, LLVMBuildTrunc, LLVMBuildTruncOrBitCast, LLVMBuildUDiv, LLVMBuildUIToFP,
-    LLVMBuildURem, LLVMBuildUnreachable, LLVMBuildVAArg, LLVMBuildXor, LLVMBuildZExt, LLVMBuildZExtOrBitCast,
-    LLVMClearInsertionPosition, LLVMDisposeBuilder, LLVMGetInsertBlock, LLVMInsertIntoBuilder,
-    LLVMInsertIntoBuilderWithName, LLVMPositionBuilder, LLVMPositionBuilderAtEnd, LLVMPositionBuilderBefore,
-    LLVMSetCleanup,
+    LLVMAddCase, LLVMAddClause, LLVMAddDestination, LLVMBuildAShr, LLVMBuildAdd,
+    LLVMBuildAddrSpaceCast, LLVMBuildAggregateRet, LLVMBuildAlloca, LLVMBuildAnd,
+    LLVMBuildArrayAlloca, LLVMBuildArrayMalloc, LLVMBuildAtomicCmpXchg, LLVMBuildAtomicRMW,
+    LLVMBuildBinOp, LLVMBuildBitCast, LLVMBuildBr, LLVMBuildCast, LLVMBuildCondBr,
+    LLVMBuildExactSDiv, LLVMBuildExtractElement, LLVMBuildExtractValue, LLVMBuildFAdd,
+    LLVMBuildFCmp, LLVMBuildFDiv, LLVMBuildFMul, LLVMBuildFNeg, LLVMBuildFPCast, LLVMBuildFPExt,
+    LLVMBuildFPToSI, LLVMBuildFPToUI, LLVMBuildFPTrunc, LLVMBuildFRem, LLVMBuildFSub,
+    LLVMBuildFence, LLVMBuildFree, LLVMBuildGlobalString, LLVMBuildICmp, LLVMBuildIndirectBr,
+    LLVMBuildInsertElement, LLVMBuildInsertValue, LLVMBuildIntCast, LLVMBuildIntToPtr,
+    LLVMBuildIsNotNull, LLVMBuildIsNull, LLVMBuildLShr, LLVMBuildLandingPad, LLVMBuildMalloc,
+    LLVMBuildMul, LLVMBuildNSWAdd, LLVMBuildNSWMul, LLVMBuildNSWNeg, LLVMBuildNSWSub,
+    LLVMBuildNUWAdd, LLVMBuildNUWMul, LLVMBuildNUWSub, LLVMBuildNeg, LLVMBuildNot, LLVMBuildOr,
+    LLVMBuildPhi, LLVMBuildPointerCast, LLVMBuildPtrToInt, LLVMBuildResume, LLVMBuildRet,
+    LLVMBuildRetVoid, LLVMBuildSDiv, LLVMBuildSExt, LLVMBuildSExtOrBitCast, LLVMBuildSIToFP,
+    LLVMBuildSRem, LLVMBuildSelect, LLVMBuildShl, LLVMBuildShuffleVector, LLVMBuildStore,
+    LLVMBuildSub, LLVMBuildSwitch, LLVMBuildTrunc, LLVMBuildTruncOrBitCast, LLVMBuildUDiv,
+    LLVMBuildUIToFP, LLVMBuildURem, LLVMBuildUnreachable, LLVMBuildVAArg, LLVMBuildXor,
+    LLVMBuildZExt, LLVMBuildZExtOrBitCast, LLVMClearInsertionPosition, LLVMDisposeBuilder,
+    LLVMGetInsertBlock, LLVMInsertIntoBuilder, LLVMInsertIntoBuilderWithName, LLVMPositionBuilder,
+    LLVMPositionBuilderAtEnd, LLVMPositionBuilderBefore, LLVMSetCleanup,
 };
-
 
 // LLVMBuildGlobalStringPtr deprecated, use LLVMBuildGlobalString
 use verum_llvm_sys::core::LLVMBuildGlobalString as LLVMBuildGlobalStringPtr;
@@ -30,23 +31,28 @@ use verum_llvm_sys::core::LLVMSetNUW;
 // LLVM 21: Call/Invoke require explicit function types (Call2/Invoke2)
 use verum_llvm_sys::core::{LLVMBuildCall2, LLVMBuildInvoke2};
 // LLVM 21: Opaque pointers only, use GEP2/Load2/etc.
-use verum_llvm_sys::core::{LLVMBuildGEP2, LLVMBuildInBoundsGEP2, LLVMBuildLoad2, LLVMBuildPtrDiff2, LLVMBuildStructGEP2};
+use thiserror::Error;
+use verum_llvm_sys::core::{
+    LLVMBuildGEP2, LLVMBuildInBoundsGEP2, LLVMBuildLoad2, LLVMBuildPtrDiff2, LLVMBuildStructGEP2,
+};
 use verum_llvm_sys::core::{LLVMBuildIntCast2, LLVMBuildMemCpy, LLVMBuildMemMove, LLVMBuildMemSet};
 use verum_llvm_sys::prelude::{LLVMBuilderRef, LLVMValueRef};
-use thiserror::Error;
 
 use crate::basic_block::BasicBlock;
 use crate::debug_info::DILocation;
 use crate::support::to_c_str;
 
 use crate::types::FunctionType;
-use crate::types::{AsTypeRef, BasicType, FloatMathType, IntMathType, PointerMathType, PointerType};
+use crate::types::{
+    AsTypeRef, BasicType, FloatMathType, IntMathType, PointerMathType, PointerType,
+};
 
 use crate::values::operand_bundle::OperandBundle;
 use crate::values::{
-    AggregateValue, AggregateValueEnum, AsValueRef, AtomicError, BasicMetadataValueEnum, BasicValue, BasicValueEnum,
-    CallSiteValue, FloatMathValue, FunctionValue, GlobalValue, InstructionOpcode, InstructionValue, IntMathValue,
-    IntValue, PhiValue, PointerMathValue, PointerValue, StructValue, VectorBaseValue,
+    AggregateValue, AggregateValueEnum, AsValueRef, AtomicError, BasicMetadataValueEnum,
+    BasicValue, BasicValueEnum, CallSiteValue, FloatMathValue, FunctionValue, GlobalValue,
+    InstructionOpcode, InstructionValue, IntMathValue, IntValue, PhiValue, PointerMathValue,
+    PointerValue, StructValue, VectorBaseValue,
 };
 
 use crate::error::AlignmentError;
@@ -155,7 +161,10 @@ impl<'ctx> Builder<'ctx> {
     /// builder.position_at_end(entry);
     /// builder.build_return(Some(&i32_arg)).unwrap();
     /// ```
-    pub fn build_return(&self, value: Option<&dyn BasicValue<'ctx>>) -> Result<InstructionValue<'ctx>, BuilderError> {
+    pub fn build_return(
+        &self,
+        value: Option<&dyn BasicValue<'ctx>>,
+    ) -> Result<InstructionValue<'ctx>, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
@@ -204,7 +213,8 @@ impl<'ctx> Builder<'ctx> {
             return Err(BuilderError::UnsetPosition);
         }
         let mut args: Vec<LLVMValueRef> = values.iter().map(|val| val.as_value_ref()).collect();
-        let value = unsafe { LLVMBuildAggregateRet(self.builder, args.as_mut_ptr(), args.len() as u32) };
+        let value =
+            unsafe { LLVMBuildAggregateRet(self.builder, args.as_mut_ptr(), args.len() as u32) };
 
         unsafe { Ok(InstructionValue::new(value)) }
     }
@@ -436,7 +446,6 @@ impl<'ctx> Builder<'ctx> {
         )
     }
 
-    
     fn build_call_help(
         &self,
         function_type: FunctionType<'ctx>,
@@ -472,7 +481,6 @@ impl<'ctx> Builder<'ctx> {
         unsafe { Ok(CallSiteValue::new(value)) }
     }
 
-    
     fn build_call_with_operand_bundles_help(
         &self,
         function_type: FunctionType<'ctx>,
@@ -742,7 +750,6 @@ impl<'ctx> Builder<'ctx> {
         self.build_direct_invoke(function, args, then_block, catch_block, name)
     }
 
-    
     pub fn build_direct_invoke(
         &self,
         function: FunctionValue<'ctx>,
@@ -764,7 +771,6 @@ impl<'ctx> Builder<'ctx> {
         )
     }
 
-    
     pub fn build_indirect_invoke(
         &self,
         function_type: FunctionType<'ctx>,
@@ -787,7 +793,6 @@ impl<'ctx> Builder<'ctx> {
         )
     }
 
-    
     fn build_invoke_help(
         &self,
         fn_ty: FunctionType<'ctx>,
@@ -803,7 +808,11 @@ impl<'ctx> Builder<'ctx> {
         let fn_ty_ref = fn_ty.as_type_ref();
 
         // LLVM gets upset when void return calls are named because they don't return anything
-        let name = if fn_ty.get_return_type().is_none() { "" } else { name };
+        let name = if fn_ty.get_return_type().is_none() {
+            ""
+        } else {
+            name
+        };
 
         let c_string = to_c_str(name);
         let mut args: Vec<LLVMValueRef> = args.iter().map(|val| val.as_value_ref()).collect();
@@ -1133,7 +1142,10 @@ impl<'ctx> Builder<'ctx> {
     ///  builder.build_resume(res).unwrap();
     /// }
     /// ```
-    pub fn build_resume<V: BasicValue<'ctx>>(&self, value: V) -> Result<InstructionValue<'ctx>, BuilderError> {
+    pub fn build_resume<V: BasicValue<'ctx>>(
+        &self,
+        value: V,
+    ) -> Result<InstructionValue<'ctx>, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
@@ -1156,7 +1168,10 @@ impl<'ctx> Builder<'ctx> {
         }
         let c_string = to_c_str(name);
 
-        let mut index_values: Vec<LLVMValueRef> = ordered_indexes.iter().map(|val| val.as_value_ref()).collect();
+        let mut index_values: Vec<LLVMValueRef> = ordered_indexes
+            .iter()
+            .map(|val| val.as_value_ref())
+            .collect();
 
         let value = LLVMBuildGEP2(
             self.builder,
@@ -1185,7 +1200,10 @@ impl<'ctx> Builder<'ctx> {
         }
         let c_string = to_c_str(name);
 
-        let mut index_values: Vec<LLVMValueRef> = ordered_indexes.iter().map(|val| val.as_value_ref()).collect();
+        let mut index_values: Vec<LLVMValueRef> = ordered_indexes
+            .iter()
+            .map(|val| val.as_value_ref())
+            .collect();
 
         let value = LLVMBuildInBoundsGEP2(
             self.builder,
@@ -1333,7 +1351,11 @@ impl<'ctx> Builder<'ctx> {
 
     /// Builds a phi instruction. Phi instructions must be the first instructions in a
     /// basic block. All incoming values must match the specified type.
-    pub fn build_phi<T: BasicType<'ctx>>(&self, type_: T, name: &str) -> Result<PhiValue<'ctx>, BuilderError> {
+    pub fn build_phi<T: BasicType<'ctx>>(
+        &self,
+        type_: T,
+        name: &str,
+    ) -> Result<PhiValue<'ctx>, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
@@ -1381,7 +1403,8 @@ impl<'ctx> Builder<'ctx> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
-        let value = unsafe { LLVMBuildStore(self.builder, value.as_value_ref(), ptr.as_value_ref()) };
+        let value =
+            unsafe { LLVMBuildStore(self.builder, value.as_value_ref(), ptr.as_value_ref()) };
 
         unsafe { Ok(InstructionValue::new(value)) }
     }
@@ -1442,7 +1465,11 @@ impl<'ctx> Builder<'ctx> {
     }
 
     /// Builds a stack allocation (`alloca`) for one element of the given type.
-    pub fn build_alloca<T: BasicType<'ctx>>(&self, ty: T, name: &str) -> Result<PointerValue<'ctx>, BuilderError> {
+    pub fn build_alloca<T: BasicType<'ctx>>(
+        &self,
+        ty: T,
+        name: &str,
+    ) -> Result<PointerValue<'ctx>, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
@@ -1463,8 +1490,14 @@ impl<'ctx> Builder<'ctx> {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value =
-            unsafe { LLVMBuildArrayAlloca(self.builder, ty.as_type_ref(), size.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildArrayAlloca(
+                self.builder,
+                ty.as_type_ref(),
+                size.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(PointerValue::new(value)) }
     }
@@ -1495,15 +1528,15 @@ impl<'ctx> Builder<'ctx> {
             return Err(BuilderError::UnsetPosition);
         }
         if !is_alignment_ok(src_align_bytes) {
-            return Err(BuilderError::AlignmentError(AlignmentError::SrcNonPowerOfTwo(
-                src_align_bytes,
-            )));
+            return Err(BuilderError::AlignmentError(
+                AlignmentError::SrcNonPowerOfTwo(src_align_bytes),
+            ));
         }
 
         if !is_alignment_ok(dest_align_bytes) {
-            return Err(BuilderError::AlignmentError(AlignmentError::DestNonPowerOfTwo(
-                dest_align_bytes,
-            )));
+            return Err(BuilderError::AlignmentError(
+                AlignmentError::DestNonPowerOfTwo(dest_align_bytes),
+            ));
         }
 
         let value = unsafe {
@@ -1546,15 +1579,15 @@ impl<'ctx> Builder<'ctx> {
             return Err(BuilderError::UnsetPosition);
         }
         if !is_alignment_ok(src_align_bytes) {
-            return Err(BuilderError::AlignmentError(AlignmentError::SrcNonPowerOfTwo(
-                src_align_bytes,
-            )));
+            return Err(BuilderError::AlignmentError(
+                AlignmentError::SrcNonPowerOfTwo(src_align_bytes),
+            ));
         }
 
         if !is_alignment_ok(dest_align_bytes) {
-            return Err(BuilderError::AlignmentError(AlignmentError::DestNonPowerOfTwo(
-                dest_align_bytes,
-            )));
+            return Err(BuilderError::AlignmentError(
+                AlignmentError::DestNonPowerOfTwo(dest_align_bytes),
+            ));
         }
 
         let value = unsafe {
@@ -1596,9 +1629,9 @@ impl<'ctx> Builder<'ctx> {
             return Err(BuilderError::UnsetPosition);
         }
         if !is_alignment_ok(dest_align_bytes) {
-            return Err(BuilderError::AlignmentError(AlignmentError::DestNonPowerOfTwo(
-                dest_align_bytes,
-            )));
+            return Err(BuilderError::AlignmentError(
+                AlignmentError::DestNonPowerOfTwo(dest_align_bytes),
+            ));
         }
 
         let value = unsafe {
@@ -1616,7 +1649,11 @@ impl<'ctx> Builder<'ctx> {
 
     /// Builds a heap allocation (`malloc`) for one element of the given type.
     /// Returns `Err(BuilderError::AlignmentError)` if the type is unsized.
-    pub fn build_malloc<T: BasicType<'ctx>>(&self, ty: T, name: &str) -> Result<PointerValue<'ctx>, BuilderError> {
+    pub fn build_malloc<T: BasicType<'ctx>>(
+        &self,
+        ty: T,
+        name: &str,
+    ) -> Result<PointerValue<'ctx>, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
@@ -1650,18 +1687,32 @@ impl<'ctx> Builder<'ctx> {
 
         let c_string = to_c_str(name);
 
-        let value =
-            unsafe { LLVMBuildArrayMalloc(self.builder, ty.as_type_ref(), size.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildArrayMalloc(
+                self.builder,
+                ty.as_type_ref(),
+                size.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(PointerValue::new(value)) }
     }
 
     // SubType: <P>(&self, ptr: PointerValue<P>) -> InstructionValue {
-    pub fn build_free(&self, ptr: PointerValue<'ctx>) -> Result<InstructionValue<'ctx>, BuilderError> {
+    pub fn build_free(
+        &self,
+        ptr: PointerValue<'ctx>,
+    ) -> Result<InstructionValue<'ctx>, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
-        unsafe { Ok(InstructionValue::new(LLVMBuildFree(self.builder, ptr.as_value_ref()))) }
+        unsafe {
+            Ok(InstructionValue::new(LLVMBuildFree(
+                self.builder,
+                ptr.as_value_ref(),
+            )))
+        }
     }
 
     pub fn insert_instruction(&self, instruction: &InstructionValue<'ctx>, name: Option<&str>) {
@@ -1669,8 +1720,14 @@ impl<'ctx> Builder<'ctx> {
             Some(name) => {
                 let c_string = to_c_str(name);
 
-                unsafe { LLVMInsertIntoBuilderWithName(self.builder, instruction.as_value_ref(), c_string.as_ptr()) }
-            },
+                unsafe {
+                    LLVMInsertIntoBuilderWithName(
+                        self.builder,
+                        instruction.as_value_ref(),
+                        c_string.as_ptr(),
+                    )
+                }
+            }
             None => unsafe {
                 LLVMInsertIntoBuilder(self.builder, instruction.as_value_ref());
             },
@@ -1684,24 +1741,48 @@ impl<'ctx> Builder<'ctx> {
     // Signed/unsigned variants are separate because LLVM IR distinguishes them; Rust's type
     // SubType: <I: IntSubType>(&self, lhs: &IntValue<I>, rhs: &IntValue<I>, name: &str) -> IntValue<I> {
     //  if I::sign() == Unsigned { LLVMBuildUDiv() } else { LLVMBuildSDiv() }
-    pub fn build_int_unsigned_div<T: IntMathValue<'ctx>>(&self, lhs: T, rhs: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_int_unsigned_div<T: IntMathValue<'ctx>>(
+        &self,
+        lhs: T,
+        rhs: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildUDiv(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildUDiv(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
 
     // Signed/unsigned variants are separate because LLVM IR distinguishes them; Rust's type
     // SubType: <I>(&self, lhs: &IntValue<I>, rhs: &IntValue<I>, name: &str) -> IntValue<I> {
-    pub fn build_int_signed_div<T: IntMathValue<'ctx>>(&self, lhs: T, rhs: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_int_signed_div<T: IntMathValue<'ctx>>(
+        &self,
+        lhs: T,
+        rhs: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildSDiv(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildSDiv(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
@@ -1718,32 +1799,62 @@ impl<'ctx> Builder<'ctx> {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value =
-            unsafe { LLVMBuildExactSDiv(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildExactSDiv(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
 
     // Signed/unsigned variants are separate because LLVM IR distinguishes them; Rust's type
     // SubType: <I>(&self, lhs: &IntValue<I>, rhs: &IntValue<I>, name: &str) -> IntValue<I> {
-    pub fn build_int_unsigned_rem<T: IntMathValue<'ctx>>(&self, lhs: T, rhs: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_int_unsigned_rem<T: IntMathValue<'ctx>>(
+        &self,
+        lhs: T,
+        rhs: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildURem(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildURem(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
 
     // Signed/unsigned variants are separate because LLVM IR distinguishes them; Rust's type
     // SubType: <I>(&self, lhs: &IntValue<I>, rhs: &IntValue<I>, name: &str) -> IntValue<I> {
-    pub fn build_int_signed_rem<T: IntMathValue<'ctx>>(&self, lhs: T, rhs: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_int_signed_rem<T: IntMathValue<'ctx>>(
+        &self,
+        lhs: T,
+        rhs: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildSRem(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildSRem(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
@@ -1827,7 +1938,12 @@ impl<'ctx> Builder<'ctx> {
 
     /// assert!(module.verify().is_ok());
     /// ```
-    pub fn build_bit_cast<T, V>(&self, val: V, ty: T, name: &str) -> Result<BasicValueEnum<'ctx>, BuilderError>
+    pub fn build_bit_cast<T, V>(
+        &self,
+        val: V,
+        ty: T,
+        name: &str,
+    ) -> Result<BasicValueEnum<'ctx>, BuilderError>
     where
         T: BasicType<'ctx>,
         V: BasicValue<'ctx>,
@@ -1836,7 +1952,14 @@ impl<'ctx> Builder<'ctx> {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildBitCast(self.builder, val.as_value_ref(), ty.as_type_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildBitCast(
+                self.builder,
+                val.as_value_ref(),
+                ty.as_type_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(BasicValueEnum::new(value)) }
     }
@@ -1953,12 +2076,24 @@ impl<'ctx> Builder<'ctx> {
         unsafe { Ok(T::new(value)) }
     }
 
-    pub fn build_float_rem<T: FloatMathValue<'ctx>>(&self, lhs: T, rhs: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_float_rem<T: FloatMathValue<'ctx>>(
+        &self,
+        lhs: T,
+        rhs: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildFRem(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildFRem(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
@@ -1969,8 +2104,10 @@ impl<'ctx> Builder<'ctx> {
         float: T,
         int_type: <T::BaseType as FloatMathType<'ctx>>::MathConvType,
         name: &str,
-    ) -> Result<<<T::BaseType as FloatMathType<'ctx>>::MathConvType as IntMathType<'ctx>>::ValueType, BuilderError>
-    {
+    ) -> Result<
+        <<T::BaseType as FloatMathType<'ctx>>::MathConvType as IntMathType<'ctx>>::ValueType,
+        BuilderError,
+    > {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
@@ -1984,7 +2121,13 @@ impl<'ctx> Builder<'ctx> {
             )
         };
 
-        unsafe { Ok(<<T::BaseType as FloatMathType>::MathConvType as IntMathType>::ValueType::new(value)) }
+        unsafe {
+            Ok(
+                <<T::BaseType as FloatMathType>::MathConvType as IntMathType>::ValueType::new(
+                    value,
+                ),
+            )
+        }
     }
 
     pub fn build_float_to_signed_int<T: FloatMathValue<'ctx>>(
@@ -1992,8 +2135,10 @@ impl<'ctx> Builder<'ctx> {
         float: T,
         int_type: <T::BaseType as FloatMathType<'ctx>>::MathConvType,
         name: &str,
-    ) -> Result<<<T::BaseType as FloatMathType<'ctx>>::MathConvType as IntMathType<'ctx>>::ValueType, BuilderError>
-    {
+    ) -> Result<
+        <<T::BaseType as FloatMathType<'ctx>>::MathConvType as IntMathType<'ctx>>::ValueType,
+        BuilderError,
+    > {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
@@ -2007,7 +2152,13 @@ impl<'ctx> Builder<'ctx> {
             )
         };
 
-        unsafe { Ok(<<T::BaseType as FloatMathType>::MathConvType as IntMathType>::ValueType::new(value)) }
+        unsafe {
+            Ok(
+                <<T::BaseType as FloatMathType>::MathConvType as IntMathType>::ValueType::new(
+                    value,
+                ),
+            )
+        }
     }
 
     // REVIEW: Consolidate these two casts into one via subtypes
@@ -2016,8 +2167,10 @@ impl<'ctx> Builder<'ctx> {
         int: T,
         float_type: <T::BaseType as IntMathType<'ctx>>::MathConvType,
         name: &str,
-    ) -> Result<<<T::BaseType as IntMathType<'ctx>>::MathConvType as FloatMathType<'ctx>>::ValueType, BuilderError>
-    {
+    ) -> Result<
+        <<T::BaseType as IntMathType<'ctx>>::MathConvType as FloatMathType<'ctx>>::ValueType,
+        BuilderError,
+    > {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
@@ -2031,7 +2184,13 @@ impl<'ctx> Builder<'ctx> {
             )
         };
 
-        unsafe { Ok(<<T::BaseType as IntMathType>::MathConvType as FloatMathType>::ValueType::new(value)) }
+        unsafe {
+            Ok(
+                <<T::BaseType as IntMathType>::MathConvType as FloatMathType>::ValueType::new(
+                    value,
+                ),
+            )
+        }
     }
 
     pub fn build_signed_int_to_float<T: IntMathValue<'ctx>>(
@@ -2039,8 +2198,10 @@ impl<'ctx> Builder<'ctx> {
         int: T,
         float_type: <T::BaseType as IntMathType<'ctx>>::MathConvType,
         name: &str,
-    ) -> Result<<<T::BaseType as IntMathType<'ctx>>::MathConvType as FloatMathType<'ctx>>::ValueType, BuilderError>
-    {
+    ) -> Result<
+        <<T::BaseType as IntMathType<'ctx>>::MathConvType as FloatMathType<'ctx>>::ValueType,
+        BuilderError,
+    > {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
@@ -2054,7 +2215,13 @@ impl<'ctx> Builder<'ctx> {
             )
         };
 
-        unsafe { Ok(<<T::BaseType as IntMathType>::MathConvType as FloatMathType>::ValueType::new(value)) }
+        unsafe {
+            Ok(
+                <<T::BaseType as IntMathType>::MathConvType as FloatMathType>::ValueType::new(
+                    value,
+                ),
+            )
+        }
     }
 
     pub fn build_float_trunc<T: FloatMathValue<'ctx>>(
@@ -2171,88 +2338,184 @@ impl<'ctx> Builder<'ctx> {
         unsafe { Ok(T::new(value)) }
     }
 
-    pub fn build_float_div<T: FloatMathValue<'ctx>>(&self, lhs: T, rhs: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_float_div<T: FloatMathValue<'ctx>>(
+        &self,
+        lhs: T,
+        rhs: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildFDiv(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildFDiv(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
 
     // SubType: <I>(&self, lhs: &IntValue<I>, rhs: &IntValue<I>, name: &str) -> IntValue<I> {
-    pub fn build_int_add<T: IntMathValue<'ctx>>(&self, lhs: T, rhs: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_int_add<T: IntMathValue<'ctx>>(
+        &self,
+        lhs: T,
+        rhs: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildAdd(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildAdd(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
 
     // REVIEW: Possibly incorporate into build_int_add via flag param
     // SubType: <I>(&self, lhs: &IntValue<I>, rhs: &IntValue<I>, name: &str) -> IntValue<I> {
-    pub fn build_int_nsw_add<T: IntMathValue<'ctx>>(&self, lhs: T, rhs: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_int_nsw_add<T: IntMathValue<'ctx>>(
+        &self,
+        lhs: T,
+        rhs: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildNSWAdd(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildNSWAdd(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
 
     // REVIEW: Possibly incorporate into build_int_add via flag param
     // SubType: <I>(&self, lhs: &IntValue<I>, rhs: &IntValue<I>, name: &str) -> IntValue<I> {
-    pub fn build_int_nuw_add<T: IntMathValue<'ctx>>(&self, lhs: T, rhs: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_int_nuw_add<T: IntMathValue<'ctx>>(
+        &self,
+        lhs: T,
+        rhs: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildNUWAdd(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildNUWAdd(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
 
     // SubType: <F>(&self, lhs: &FloatValue<F>, rhs: &FloatValue<F>, name: &str) -> FloatValue<F> {
-    pub fn build_float_add<T: FloatMathValue<'ctx>>(&self, lhs: T, rhs: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_float_add<T: FloatMathValue<'ctx>>(
+        &self,
+        lhs: T,
+        rhs: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildFAdd(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildFAdd(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
 
     // SubType: (&self, lhs: &IntValue<bool>, rhs: &IntValue<bool>, name: &str) -> IntValue<bool> {
-    pub fn build_xor<T: IntMathValue<'ctx>>(&self, lhs: T, rhs: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_xor<T: IntMathValue<'ctx>>(
+        &self,
+        lhs: T,
+        rhs: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildXor(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildXor(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
 
     // SubType: (&self, lhs: &IntValue<bool>, rhs: &IntValue<bool>, name: &str) -> IntValue<bool> {
-    pub fn build_and<T: IntMathValue<'ctx>>(&self, lhs: T, rhs: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_and<T: IntMathValue<'ctx>>(
+        &self,
+        lhs: T,
+        rhs: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildAnd(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildAnd(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
 
     // SubType: (&self, lhs: &IntValue<bool>, rhs: &IntValue<bool>, name: &str) -> IntValue<bool> {
-    pub fn build_or<T: IntMathValue<'ctx>>(&self, lhs: T, rhs: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_or<T: IntMathValue<'ctx>>(
+        &self,
+        lhs: T,
+        rhs: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildOr(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildOr(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
@@ -2311,12 +2574,24 @@ impl<'ctx> Builder<'ctx> {
 
     /// builder.build_return(Some(&shift)).unwrap();
     /// ```
-    pub fn build_left_shift<T: IntMathValue<'ctx>>(&self, lhs: T, rhs: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_left_shift<T: IntMathValue<'ctx>>(
+        &self,
+        lhs: T,
+        rhs: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildShl(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildShl(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
@@ -2412,9 +2687,19 @@ impl<'ctx> Builder<'ctx> {
         let c_string = to_c_str(name);
         let value = unsafe {
             if sign_extend {
-                LLVMBuildAShr(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr())
+                LLVMBuildAShr(
+                    self.builder,
+                    lhs.as_value_ref(),
+                    rhs.as_value_ref(),
+                    c_string.as_ptr(),
+                )
             } else {
-                LLVMBuildLShr(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr())
+                LLVMBuildLShr(
+                    self.builder,
+                    lhs.as_value_ref(),
+                    rhs.as_value_ref(),
+                    c_string.as_ptr(),
+                )
             }
         };
 
@@ -2422,92 +2707,188 @@ impl<'ctx> Builder<'ctx> {
     }
 
     // SubType: <I>(&self, lhs: &IntValue<I>, rhs: &IntValue<I>, name: &str) -> IntValue<I> {
-    pub fn build_int_sub<T: IntMathValue<'ctx>>(&self, lhs: T, rhs: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_int_sub<T: IntMathValue<'ctx>>(
+        &self,
+        lhs: T,
+        rhs: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildSub(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildSub(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
 
     // REVIEW: Possibly incorporate into build_int_sub via flag param
-    pub fn build_int_nsw_sub<T: IntMathValue<'ctx>>(&self, lhs: T, rhs: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_int_nsw_sub<T: IntMathValue<'ctx>>(
+        &self,
+        lhs: T,
+        rhs: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildNSWSub(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildNSWSub(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
 
     // REVIEW: Possibly incorporate into build_int_sub via flag param
     // SubType: <I>(&self, lhs: &IntValue<I>, rhs: &IntValue<I>, name: &str) -> IntValue<I> {
-    pub fn build_int_nuw_sub<T: IntMathValue<'ctx>>(&self, lhs: T, rhs: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_int_nuw_sub<T: IntMathValue<'ctx>>(
+        &self,
+        lhs: T,
+        rhs: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildNUWSub(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildNUWSub(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
 
     // SubType: <F>(&self, lhs: &FloatValue<F>, rhs: &FloatValue<F>, name: &str) -> FloatValue<F> {
-    pub fn build_float_sub<T: FloatMathValue<'ctx>>(&self, lhs: T, rhs: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_float_sub<T: FloatMathValue<'ctx>>(
+        &self,
+        lhs: T,
+        rhs: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildFSub(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildFSub(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
 
     // SubType: <I>(&self, lhs: &IntValue<I>, rhs: &IntValue<I>, name: &str) -> IntValue<I> {
-    pub fn build_int_mul<T: IntMathValue<'ctx>>(&self, lhs: T, rhs: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_int_mul<T: IntMathValue<'ctx>>(
+        &self,
+        lhs: T,
+        rhs: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildMul(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildMul(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
 
     // REVIEW: Possibly incorporate into build_int_mul via flag param
     // SubType: <I>(&self, lhs: &IntValue<I>, rhs: &IntValue<I>, name: &str) -> IntValue<I> {
-    pub fn build_int_nsw_mul<T: IntMathValue<'ctx>>(&self, lhs: T, rhs: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_int_nsw_mul<T: IntMathValue<'ctx>>(
+        &self,
+        lhs: T,
+        rhs: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildNSWMul(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildNSWMul(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
 
     // REVIEW: Possibly incorporate into build_int_mul via flag param
     // SubType: <I>(&self, lhs: &IntValue<I>, rhs: &IntValue<I>, name: &str) -> IntValue<I> {
-    pub fn build_int_nuw_mul<T: IntMathValue<'ctx>>(&self, lhs: T, rhs: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_int_nuw_mul<T: IntMathValue<'ctx>>(
+        &self,
+        lhs: T,
+        rhs: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildNUWMul(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildNUWMul(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
 
     // SubType: <F>(&self, lhs: &FloatValue<F>, rhs: &FloatValue<F>, name: &str) -> FloatValue<F> {
-    pub fn build_float_mul<T: FloatMathValue<'ctx>>(&self, lhs: T, rhs: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_float_mul<T: FloatMathValue<'ctx>>(
+        &self,
+        lhs: T,
+        rhs: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildFMul(self.builder, lhs.as_value_ref(), rhs.as_value_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildFMul(
+                self.builder,
+                lhs.as_value_ref(),
+                rhs.as_value_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
@@ -2571,8 +2952,14 @@ impl<'ctx> Builder<'ctx> {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value =
-            unsafe { LLVMBuildPointerCast(self.builder, from.as_value_ref(), to.as_type_ref(), c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildPointerCast(
+                self.builder,
+                from.as_value_ref(),
+                to.as_type_ref(),
+                c_string.as_ptr(),
+            )
+        };
 
         unsafe { Ok(T::new(value)) }
     }
@@ -2613,8 +3000,10 @@ impl<'ctx> Builder<'ctx> {
         lhs: T,
         rhs: T,
         name: &str,
-    ) -> Result<<<T::BaseType as FloatMathType<'ctx>>::MathConvType as IntMathType<'ctx>>::ValueType, BuilderError>
-    {
+    ) -> Result<
+        <<T::BaseType as FloatMathType<'ctx>>::MathConvType as IntMathType<'ctx>>::ValueType,
+        BuilderError,
+    > {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
@@ -2630,7 +3019,13 @@ impl<'ctx> Builder<'ctx> {
             )
         };
 
-        unsafe { Ok(<<T::BaseType as FloatMathType>::MathConvType as IntMathType>::ValueType::new(value)) }
+        unsafe {
+            Ok(
+                <<T::BaseType as FloatMathType>::MathConvType as IntMathType>::ValueType::new(
+                    value,
+                ),
+            )
+        }
     }
 
     pub fn build_unconditional_branch(
@@ -2674,7 +3069,13 @@ impl<'ctx> Builder<'ctx> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
-        let value = unsafe { LLVMBuildIndirectBr(self.builder, address.as_value_ref(), destinations.len() as u32) };
+        let value = unsafe {
+            LLVMBuildIndirectBr(
+                self.builder,
+                address.as_value_ref(),
+                destinations.len() as u32,
+            )
+        };
 
         for destination in destinations {
             unsafe { LLVMAddDestination(value, destination.basic_block) }
@@ -2684,7 +3085,11 @@ impl<'ctx> Builder<'ctx> {
     }
 
     // SubType: <I>(&self, value: &IntValue<I>, name) -> IntValue<I> {
-    pub fn build_int_neg<T: IntMathValue<'ctx>>(&self, value: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_int_neg<T: IntMathValue<'ctx>>(
+        &self,
+        value: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
@@ -2696,19 +3101,28 @@ impl<'ctx> Builder<'ctx> {
 
     // REVIEW: Possibly incorporate into build_int_neg via flag and subtypes
     // SubType: <I>(&self, value: &IntValue<I>, name) -> IntValue<I> {
-    pub fn build_int_nsw_neg<T: IntMathValue<'ctx>>(&self, value: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_int_nsw_neg<T: IntMathValue<'ctx>>(
+        &self,
+        value: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let value = unsafe { LLVMBuildNSWNeg(self.builder, value.as_value_ref(), c_string.as_ptr()) };
+        let value =
+            unsafe { LLVMBuildNSWNeg(self.builder, value.as_value_ref(), c_string.as_ptr()) };
 
         unsafe { Ok(T::new(value)) }
     }
 
     // SubType: <I>(&self, value: &IntValue<I>, name) -> IntValue<I> {
     // Note: LLVMBuildNUWNeg was deprecated in LLVM 19, use LLVMBuildNeg + LLVMSetNUW instead
-    pub fn build_int_nuw_neg<T: IntMathValue<'ctx>>(&self, value: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_int_nuw_neg<T: IntMathValue<'ctx>>(
+        &self,
+        value: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
@@ -2722,7 +3136,11 @@ impl<'ctx> Builder<'ctx> {
     }
 
     // SubType: <F>(&self, value: &FloatValue<F>, name) -> FloatValue<F> {
-    pub fn build_float_neg<T: FloatMathValue<'ctx>>(&self, value: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_float_neg<T: FloatMathValue<'ctx>>(
+        &self,
+        value: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
@@ -2733,7 +3151,11 @@ impl<'ctx> Builder<'ctx> {
     }
 
     // SubType: <I>(&self, value: &IntValue<I>, name) -> IntValue<bool> { ?
-    pub fn build_not<T: IntMathValue<'ctx>>(&self, value: T, name: &str) -> Result<T, BuilderError> {
+    pub fn build_not<T: IntMathValue<'ctx>>(
+        &self,
+        value: T,
+        name: &str,
+    ) -> Result<T, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
@@ -2752,7 +3174,13 @@ impl<'ctx> Builder<'ctx> {
     pub fn position_at(&self, basic_block: BasicBlock<'ctx>, instruction: &InstructionValue<'ctx>) {
         self.positioned.set(PositionState::Set);
 
-        unsafe { LLVMPositionBuilder(self.builder, basic_block.basic_block, instruction.as_value_ref()) }
+        unsafe {
+            LLVMPositionBuilder(
+                self.builder,
+                basic_block.basic_block,
+                instruction.as_value_ref(),
+            )
+        }
     }
 
     /// Set the position of the builder to before an instruction.
@@ -2851,7 +3279,9 @@ impl<'ctx> Builder<'ctx> {
 
         let c_string = to_c_str(name);
 
-        let value = unsafe { LLVMBuildExtractValue(self.builder, agg.as_value_ref(), index, c_string.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildExtractValue(self.builder, agg.as_value_ref(), index, c_string.as_ptr())
+        };
 
         unsafe { Ok(BasicValueEnum::new(value)) }
     }
@@ -3074,8 +3504,12 @@ impl<'ctx> Builder<'ctx> {
             AtomicOrdering::Acquire
             | AtomicOrdering::Release
             | AtomicOrdering::AcquireRelease
-            | AtomicOrdering::SequentiallyConsistent => {},
-            _ => return Err(BuilderError::AtomicOrdering(AtomicError::InvalidOrderingOnFence)),
+            | AtomicOrdering::SequentiallyConsistent => {}
+            _ => {
+                return Err(BuilderError::AtomicOrdering(
+                    AtomicError::InvalidOrderingOnFence,
+                ));
+            }
         }
 
         let val = unsafe {
@@ -3095,15 +3529,19 @@ impl<'ctx> Builder<'ctx> {
         &self,
         ptr: T,
         name: &str,
-    ) -> Result<<<T::BaseType as PointerMathType<'ctx>>::PtrConvType as IntMathType<'ctx>>::ValueType, BuilderError>
-    {
+    ) -> Result<
+        <<T::BaseType as PointerMathType<'ctx>>::PtrConvType as IntMathType<'ctx>>::ValueType,
+        BuilderError,
+    > {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
         let val = unsafe { LLVMBuildIsNull(self.builder, ptr.as_value_ref(), c_string.as_ptr()) };
 
-        unsafe { Ok(<<T::BaseType as PointerMathType>::PtrConvType as IntMathType>::ValueType::new(val)) }
+        unsafe {
+            Ok(<<T::BaseType as PointerMathType>::PtrConvType as IntMathType>::ValueType::new(val))
+        }
     }
 
     // SubType: <P>(&self, ptr: &PointerValue<P>, name) -> IntValue<bool> {
@@ -3111,15 +3549,20 @@ impl<'ctx> Builder<'ctx> {
         &self,
         ptr: T,
         name: &str,
-    ) -> Result<<<T::BaseType as PointerMathType<'ctx>>::PtrConvType as IntMathType<'ctx>>::ValueType, BuilderError>
-    {
+    ) -> Result<
+        <<T::BaseType as PointerMathType<'ctx>>::PtrConvType as IntMathType<'ctx>>::ValueType,
+        BuilderError,
+    > {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string = to_c_str(name);
-        let val = unsafe { LLVMBuildIsNotNull(self.builder, ptr.as_value_ref(), c_string.as_ptr()) };
+        let val =
+            unsafe { LLVMBuildIsNotNull(self.builder, ptr.as_value_ref(), c_string.as_ptr()) };
 
-        unsafe { Ok(<<T::BaseType as PointerMathType>::PtrConvType as IntMathType>::ValueType::new(val)) }
+        unsafe {
+            Ok(<<T::BaseType as PointerMathType>::PtrConvType as IntMathType>::ValueType::new(val))
+        }
     }
 
     // SubType: <I, P>(&self, int: &IntValue<I>, ptr_type: &PointerType<P>, name) -> PointerValue<P> {
@@ -3128,8 +3571,10 @@ impl<'ctx> Builder<'ctx> {
         int: T,
         ptr_type: <T::BaseType as IntMathType<'ctx>>::PtrConvType,
         name: &str,
-    ) -> Result<<<T::BaseType as IntMathType<'ctx>>::PtrConvType as PointerMathType<'ctx>>::ValueType, BuilderError>
-    {
+    ) -> Result<
+        <<T::BaseType as IntMathType<'ctx>>::PtrConvType as PointerMathType<'ctx>>::ValueType,
+        BuilderError,
+    > {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
@@ -3144,7 +3589,13 @@ impl<'ctx> Builder<'ctx> {
             )
         };
 
-        unsafe { Ok(<<T::BaseType as IntMathType>::PtrConvType as PointerMathType>::ValueType::new(value)) }
+        unsafe {
+            Ok(
+                <<T::BaseType as IntMathType>::PtrConvType as PointerMathType>::ValueType::new(
+                    value,
+                ),
+            )
+        }
     }
 
     // SubType: <I, P>(&self, ptr: &PointerValue<P>, int_type: &IntType<I>, name) -> IntValue<I> {
@@ -3153,8 +3604,10 @@ impl<'ctx> Builder<'ctx> {
         ptr: T,
         int_type: <T::BaseType as PointerMathType<'ctx>>::PtrConvType,
         name: &str,
-    ) -> Result<<<T::BaseType as PointerMathType<'ctx>>::PtrConvType as IntMathType<'ctx>>::ValueType, BuilderError>
-    {
+    ) -> Result<
+        <<T::BaseType as PointerMathType<'ctx>>::PtrConvType as IntMathType<'ctx>>::ValueType,
+        BuilderError,
+    > {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
@@ -3169,7 +3622,13 @@ impl<'ctx> Builder<'ctx> {
             )
         };
 
-        unsafe { Ok(<<T::BaseType as PointerMathType>::PtrConvType as IntMathType>::ValueType::new(value)) }
+        unsafe {
+            Ok(
+                <<T::BaseType as PointerMathType>::PtrConvType as IntMathType>::ValueType::new(
+                    value,
+                ),
+            )
+        }
     }
 
     pub fn clear_insertion_position(&self) {
@@ -3231,26 +3690,44 @@ impl<'ctx> Builder<'ctx> {
     }
 
     // The unsafety of this function should be fixable with subtypes. See GH #32
-    pub unsafe fn build_global_string(&self, value: &str, name: &str) -> Result<GlobalValue<'ctx>, BuilderError> {
+    pub unsafe fn build_global_string(
+        &self,
+        value: &str,
+        name: &str,
+    ) -> Result<GlobalValue<'ctx>, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string_value = to_c_str(value);
         let c_string_name = to_c_str(name);
-        let value = LLVMBuildGlobalString(self.builder, c_string_value.as_ptr(), c_string_name.as_ptr());
+        let value = LLVMBuildGlobalString(
+            self.builder,
+            c_string_value.as_ptr(),
+            c_string_name.as_ptr(),
+        );
 
         Ok(GlobalValue::new(value))
     }
 
     // REVIEW: Does this similar fn have the same issue build_global_string does? If so, mark as unsafe
     // and fix with subtypes.
-    pub fn build_global_string_ptr(&self, value: &str, name: &str) -> Result<GlobalValue<'ctx>, BuilderError> {
+    pub fn build_global_string_ptr(
+        &self,
+        value: &str,
+        name: &str,
+    ) -> Result<GlobalValue<'ctx>, BuilderError> {
         if self.positioned.get() != PositionState::Set {
             return Err(BuilderError::UnsetPosition);
         }
         let c_string_value = to_c_str(value);
         let c_string_name = to_c_str(name);
-        let value = unsafe { LLVMBuildGlobalStringPtr(self.builder, c_string_value.as_ptr(), c_string_name.as_ptr()) };
+        let value = unsafe {
+            LLVMBuildGlobalStringPtr(
+                self.builder,
+                c_string_value.as_ptr(),
+                c_string_name.as_ptr(),
+            )
+        };
 
         unsafe { Ok(GlobalValue::new(value)) }
     }
@@ -3351,7 +3828,9 @@ impl<'ctx> Builder<'ctx> {
         // Note: LLVM 9+ also supports fadd, fsub, and fxchg on floating point types (not yet exposed).
 
         // "The type of '<value>' must be an integer type whose bit width is a power of two greater than or equal to eight and less than or equal to a target-specific size limit. The type of the '<pointer>' operand must be a pointer to that type." -- https://releases.llvm.org/3.6.2/docs/LangRef.html#atomicrmw-instruction
-        if value.get_type().get_bit_width() < 8 || !value.get_type().get_bit_width().is_power_of_two() {
+        if value.get_type().get_bit_width() < 8
+            || !value.get_type().get_bit_width().is_power_of_two()
+        {
             return Err(BuilderError::BitwidthError);
         }
 
@@ -3361,9 +3840,11 @@ impl<'ctx> Builder<'ctx> {
         // "This ordering [unordered] cannot be specified for read-modify-write operations."
         match ordering {
             AtomicOrdering::NotAtomic | AtomicOrdering::Unordered => {
-                return Err(BuilderError::AtomicOrdering(AtomicError::InvalidOrderingOnAtomicRMW))
-            },
-            _ => {},
+                return Err(BuilderError::AtomicOrdering(
+                    AtomicError::InvalidOrderingOnAtomicRMW,
+                ));
+            }
+            _ => {}
         }
 
         let val = unsafe {
@@ -3445,7 +3926,9 @@ impl<'ctx> Builder<'ctx> {
 
         // "Both ordering parameters must be at least monotonic, the ordering constraint on failure must be no stronger than that on success, and the failure ordering cannot be either release or acq_rel." -- https://llvm.org/docs/LangRef.html#cmpxchg-instruction
         if success < AtomicOrdering::Monotonic || failure < AtomicOrdering::Monotonic {
-            return Err(BuilderError::CmpxchgOrdering(CmpxchgOrderingError::WeakerThanMonotic));
+            return Err(BuilderError::CmpxchgOrdering(
+                CmpxchgOrderingError::WeakerThanMonotic,
+            ));
         }
         if failure > success {
             return Err(BuilderError::CmpxchgOrdering(
@@ -3453,7 +3936,9 @@ impl<'ctx> Builder<'ctx> {
             ));
         }
         if failure == AtomicOrdering::Release || failure == AtomicOrdering::AcquireRelease {
-            return Err(BuilderError::CmpxchgOrdering(CmpxchgOrderingError::ReleaseOrAcqRel));
+            return Err(BuilderError::CmpxchgOrdering(
+                CmpxchgOrderingError::ReleaseOrAcqRel,
+            ));
         }
 
         let val = unsafe {

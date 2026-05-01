@@ -58,8 +58,8 @@
 use crate::proof_term_unified::ProofTerm;
 use crate::z3_backend::Z3Solver;
 use verum_ast::{Expr, ExprKind, Literal, LiteralKind, Span};
-use verum_common::{Heap, List, Map, Maybe, Set, Text};
 use verum_common::ToText;
+use verum_common::{Heap, List, Map, Maybe, Set, Text};
 
 // ==================== Core Types ====================
 
@@ -242,7 +242,8 @@ impl TopologicalSpace {
         // Check all pairs
         for i in 0..open_list.len() {
             for j in i..open_list.len() {
-                let intersection: Set<Text> = open_list[i].intersection(open_list[j]).cloned().collect();
+                let intersection: Set<Text> =
+                    open_list[i].intersection(open_list[j]).cloned().collect();
 
                 if !self.contains_open_set(&intersection) {
                     return Err(TopologyError::AxiomViolation {
@@ -1060,7 +1061,8 @@ impl MetricSpace {
                 }
 
                 // Intersections
-                let intersection: Set<Text> = open_sets[i].intersection(&open_sets[j]).cloned().collect();
+                let intersection: Set<Text> =
+                    open_sets[i].intersection(&open_sets[j]).cloned().collect();
                 if !open_sets.iter().any(|s| s == &intersection) {
                     open_sets.push(intersection);
                 }

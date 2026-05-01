@@ -220,19 +220,11 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
     // Maybe constructors
     map.insert(
         Text::from(variant_tags::SOME),
-        BuiltinInfo::tier0(
-            meta_some,
-            "Construct a Some value",
-            "(T) -> Maybe<T>",
-        ),
+        BuiltinInfo::tier0(meta_some, "Construct a Some value", "(T) -> Maybe<T>"),
     );
     map.insert(
         Text::from(variant_tags::NONE),
-        BuiltinInfo::tier0(
-            meta_none,
-            "Return a None value",
-            "() -> Maybe<T>",
-        ),
+        BuiltinInfo::tier0(meta_none, "Return a None value", "() -> Maybe<T>"),
     );
 
     // ========================================================================
@@ -825,10 +817,7 @@ fn meta_list_first(
 }
 
 /// Get last element of list, returns Maybe<T> (Some(value) or None)
-fn meta_list_last(
-    _ctx: &mut MetaContext,
-    args: List<ConstValue>,
-) -> Result<ConstValue, MetaError> {
+fn meta_list_last(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
         return Err(MetaError::ArityMismatch {
             expected: 1,
@@ -1004,10 +993,7 @@ fn meta_maybe_is_none(
 }
 
 /// Construct a Some value
-fn meta_some(
-    _ctx: &mut MetaContext,
-    args: List<ConstValue>,
-) -> Result<ConstValue, MetaError> {
+fn meta_some(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
         return Err(MetaError::ArityMismatch {
             expected: 1,
@@ -1023,10 +1009,7 @@ fn meta_some(
 }
 
 /// Return a None value
-fn meta_none(
-    _ctx: &mut MetaContext,
-    args: List<ConstValue>,
-) -> Result<ConstValue, MetaError> {
+fn meta_none(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if !args.is_empty() {
         return Err(MetaError::ArityMismatch {
             expected: 0,
@@ -1816,10 +1799,7 @@ fn meta_text_contains(
 }
 
 /// Check if two text values are equal
-fn meta_text_eq(
-    _ctx: &mut MetaContext,
-    args: List<ConstValue>,
-) -> Result<ConstValue, MetaError> {
+fn meta_text_eq(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if args.len() != 2 {
         return Err(MetaError::ArityMismatch {
             expected: 2,
@@ -2121,10 +2101,7 @@ mod tests {
     fn test_list_get_out_of_bounds() {
         let mut ctx = MetaContext::new();
         let args = List::from(vec![
-            ConstValue::Array(List::from(vec![
-                ConstValue::Int(10),
-                ConstValue::Int(20),
-            ])),
+            ConstValue::Array(List::from(vec![ConstValue::Int(10), ConstValue::Int(20)])),
             ConstValue::Int(5),
         ]);
         let result = meta_list_get(&mut ctx, args).unwrap();

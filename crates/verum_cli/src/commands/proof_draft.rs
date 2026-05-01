@@ -15,8 +15,7 @@
 use crate::error::{CliError, Result};
 use verum_common::Text;
 use verum_verification::proof_drafting::{
-    DefaultSuggestionEngine, LemmaSummary, ProofGoalSummary, ProofStateView,
-    SuggestionEngine,
+    DefaultSuggestionEngine, LemmaSummary, ProofGoalSummary, ProofStateView, SuggestionEngine,
 };
 
 /// Run the proof-draft command. Returns `Ok(())` on success;
@@ -34,14 +33,10 @@ pub fn run_proof_draft(
         ));
     }
     if goal.is_empty() {
-        return Err(CliError::InvalidArgument(
-            "--goal must be non-empty".into(),
-        ));
+        return Err(CliError::InvalidArgument("--goal must be non-empty".into()));
     }
     if max_results == 0 {
-        return Err(CliError::InvalidArgument(
-            "--max must be > 0".into(),
-        ));
+        return Err(CliError::InvalidArgument("--max must be > 0".into()));
     }
 
     let parsed_lemmas = parse_lemma_flags(lemmas)?;
@@ -68,9 +63,7 @@ pub fn run_proof_draft(
             println!("Suggestions ({}):", suggestions.len());
             println!();
             if suggestions.is_empty() {
-                println!(
-                    "  (no suggestions — try widening lemma scope with `--lemma`)"
-                );
+                println!("  (no suggestions — try widening lemma scope with `--lemma`)");
             } else {
                 for (i, s) in suggestions.iter().enumerate() {
                     println!(
@@ -88,15 +81,9 @@ pub fn run_proof_draft(
         "json" => {
             let mut out = String::from("{\n");
             out.push_str("  \"schema_version\": 1,\n");
-            out.push_str(&format!(
-                "  \"theorem\": \"{}\",\n",
-                json_escape(theorem)
-            ));
+            out.push_str(&format!("  \"theorem\": \"{}\",\n", json_escape(theorem)));
             out.push_str(&format!("  \"goal\": \"{}\",\n", json_escape(goal)));
-            out.push_str(&format!(
-                "  \"suggestion_count\": {},\n",
-                suggestions.len()
-            ));
+            out.push_str(&format!("  \"suggestion_count\": {},\n", suggestions.len()));
             out.push_str("  \"suggestions\": [\n");
             for (i, s) in suggestions.iter().enumerate() {
                 out.push_str(&format!(
@@ -122,10 +109,7 @@ pub fn run_proof_draft(
 /// Parse `--lemma name:::signature[:::lineage]` flags into typed
 /// `LemmaSummary`s. `lineage` defaults to `"corpus"` when absent.
 fn parse_lemma_flags(flags: &[String]) -> Result<Vec<LemmaSummary>> {
-    flags
-        .iter()
-        .map(|s| parse_one_lemma(s))
-        .collect()
+    flags.iter().map(|s| parse_one_lemma(s)).collect()
 }
 
 fn parse_one_lemma(input: &str) -> Result<LemmaSummary> {
@@ -191,13 +175,7 @@ mod tests {
     #[test]
     fn run_proof_draft_smoke() {
         // No-lemma run, plain format. Smoke test: should not panic.
-        let r = run_proof_draft(
-            "test_theorem",
-            "forall x. P(x)",
-            &[],
-            5,
-            "plain",
-        );
+        let r = run_proof_draft("test_theorem", "forall x. P(x)", &[], 5, "plain");
         assert!(r.is_ok());
     }
 
@@ -225,9 +203,7 @@ mod tests {
         // the unrelated one. This is the integration test that
         // proves the proof_draft → SuggestionEngine wiring works
         // end-to-end.
-        let lemmas = vec![
-            "succ_pos:::forall x. x > 0 -> succ(x) > 0:::core".to_string(),
-        ];
+        let lemmas = vec!["succ_pos:::forall x. x > 0 -> succ(x) > 0:::core".to_string()];
         let r = run_proof_draft(
             "thm",
             "forall x. x > 0 -> succ(x) + 1 > 0",

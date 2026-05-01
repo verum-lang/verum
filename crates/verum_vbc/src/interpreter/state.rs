@@ -30,9 +30,9 @@ use std::sync::Arc;
 use crate::module::{FunctionId, VbcModule};
 use crate::value::Value;
 
+use super::heap::Heap;
 use super::registers::RegisterFile;
 use super::stack::CallStack;
-use super::heap::Heap;
 
 // Thread-local pointer to the current interpreter state.
 // This is used for FFI callback re-entry: when C code calls back into Verum,
@@ -646,7 +646,9 @@ pub struct FfiArrayBuffer {
 impl Drop for FfiArrayBuffer {
     fn drop(&mut self) {
         if !self.buffer.is_null() && self.layout.size() > 0 {
-            unsafe { std::alloc::dealloc(self.buffer, self.layout); }
+            unsafe {
+                std::alloc::dealloc(self.buffer, self.layout);
+            }
         }
     }
 }
@@ -679,7 +681,9 @@ pub struct ExceptionHandlerStack {
 impl ExceptionHandlerStack {
     /// Creates a new empty exception handler stack.
     pub fn new() -> Self {
-        Self { handlers: Vec::new() }
+        Self {
+            handlers: Vec::new(),
+        }
     }
 
     /// Pushes a new exception handler onto the stack.
@@ -744,7 +748,9 @@ pub struct ContextStack {
 impl ContextStack {
     /// Creates a new empty context stack.
     pub fn new() -> Self {
-        Self { entries: Vec::new() }
+        Self {
+            entries: Vec::new(),
+        }
     }
 
     /// Provides a context value, pushing it onto the stack.
@@ -824,7 +830,11 @@ impl ContextStack {
     /// The precision mode will be active until the scope ends.
     pub fn provide_precision_mode(&mut self, mode: PrecisionMode, stack_depth: usize) {
         let packed = mode.pack();
-        self.provide(CTX_TYPE_PRECISION_MODE, Value::from_i64(packed as i64), stack_depth);
+        self.provide(
+            CTX_TYPE_PRECISION_MODE,
+            Value::from_i64(packed as i64),
+            stack_depth,
+        );
     }
 
     /// Gets the current PrecisionMode context, or returns the default.
@@ -880,7 +890,11 @@ impl ContextStack {
     /// context_stack.provide_compute_device(0x1000, 1); // GPU 0
     /// ```
     pub fn provide_compute_device(&mut self, device_id: u16, stack_depth: usize) {
-        self.provide(CTX_TYPE_COMPUTE_DEVICE, Value::from_i64(device_id as i64), stack_depth);
+        self.provide(
+            CTX_TYPE_COMPUTE_DEVICE,
+            Value::from_i64(device_id as i64),
+            stack_depth,
+        );
     }
 
     /// Gets the current ComputeDevice context, or returns CPU (0) as default.
@@ -952,7 +966,11 @@ impl ContextStack {
     /// context_stack.provide_random_source(42, 1);
     /// ```
     pub fn provide_random_source(&mut self, seed: u64, stack_depth: usize) {
-        self.provide(CTX_TYPE_RANDOM_SOURCE, Value::from_i64(seed as i64), stack_depth);
+        self.provide(
+            CTX_TYPE_RANDOM_SOURCE,
+            Value::from_i64(seed as i64),
+            stack_depth,
+        );
     }
 
     /// Gets the current RandomSource seed, or returns a default seed.
@@ -1029,7 +1047,11 @@ impl ContextStack {
     /// context_stack.provide_training_mode(true, 1);
     /// ```
     pub fn provide_training_mode(&mut self, is_training: bool, stack_depth: usize) {
-        self.provide(CTX_TYPE_TRAINING_MODE, Value::from_bool(is_training), stack_depth);
+        self.provide(
+            CTX_TYPE_TRAINING_MODE,
+            Value::from_bool(is_training),
+            stack_depth,
+        );
     }
 
     /// Gets the current TrainingMode context, or returns false (inference) as default.
@@ -1296,9 +1318,10 @@ impl TaskQueue {
     pub fn next_ready(&mut self) -> Option<TaskId> {
         while let Some(id) = self.ready.pop_back() {
             if let Some(task) = self.tasks.get(&id)
-                && task.status == TaskStatus::Pending {
-                    return Some(id);
-                }
+                && task.status == TaskStatus::Pending
+            {
+                return Some(id);
+            }
         }
         None
     }
@@ -1320,9 +1343,10 @@ impl TaskQueue {
     pub fn steal_ready(&mut self) -> Option<TaskId> {
         while let Some(id) = self.ready.pop_front() {
             if let Some(task) = self.tasks.get(&id)
-                && task.status == TaskStatus::Pending {
-                    return Some(id);
-                }
+                && task.status == TaskStatus::Pending
+            {
+                return Some(id);
+            }
         }
         None
     }
@@ -1340,16 +1364,20 @@ impl TaskQueue {
     /// Takes the execution info from a pending task, marking it as Running.
     /// Returns (func_id, arg_values, closure_val) or None if the task is not pending.
     #[allow(clippy::type_complexity)]
-    pub fn take_task_exec_info(&mut self, id: TaskId) -> Option<(FunctionId, Vec<Value>, Option<Value>, Vec<ContextEntry>)> {
+    pub fn take_task_exec_info(
+        &mut self,
+        id: TaskId,
+    ) -> Option<(FunctionId, Vec<Value>, Option<Value>, Vec<ContextEntry>)> {
         if let Some(task) = self.tasks.get_mut(&id)
-            && task.status == TaskStatus::Pending {
-                task.status = TaskStatus::Running;
-                let func_id = task.func_id;
-                let args = std::mem::take(&mut task.arg_values);
-                let closure = task.closure_val.take();
-                let contexts = std::mem::take(&mut task.saved_contexts);
-                return Some((func_id, args, closure, contexts));
-            }
+            && task.status == TaskStatus::Pending
+        {
+            task.status = TaskStatus::Running;
+            let func_id = task.func_id;
+            let args = std::mem::take(&mut task.arg_values);
+            let closure = task.closure_val.take();
+            let contexts = std::mem::take(&mut task.saved_contexts);
+            return Some((func_id, args, closure, contexts));
+        }
         None
     }
 
@@ -1462,7 +1490,10 @@ impl Generator {
     /// Returns true if the generator can be resumed.
     #[inline]
     pub fn can_resume(&self) -> bool {
-        matches!(self.status, GeneratorStatus::Created | GeneratorStatus::Yielded)
+        matches!(
+            self.status,
+            GeneratorStatus::Created | GeneratorStatus::Yielded
+        )
     }
 
     /// Returns true if the generator is exhausted.
@@ -1520,7 +1551,12 @@ impl GeneratorRegistry {
     /// The generator starts in Created status and must be resumed to begin execution.
     /// The initial arguments are stored in saved_registers and will be restored to the
     /// generator's frame when first resumed via GenNext.
-    pub fn create_with_args(&mut self, func_id: FunctionId, reg_count: u16, initial_args: Vec<Value>) -> GeneratorId {
+    pub fn create_with_args(
+        &mut self,
+        func_id: FunctionId,
+        reg_count: u16,
+        initial_args: Vec<Value>,
+    ) -> GeneratorId {
         let id = GeneratorId(self.next_id);
         self.next_id += 1;
 
@@ -1750,9 +1786,9 @@ impl Nursery {
 
     /// Returns true if all tasks are completed.
     pub fn all_completed(&self) -> bool {
-        self.tasks.iter().all(|t| {
-            matches!(t.status, TaskStatus::Completed | TaskStatus::Failed)
-        })
+        self.tasks
+            .iter()
+            .all(|t| matches!(t.status, TaskStatus::Completed | TaskStatus::Failed))
     }
 
     /// Returns true if any task failed.
@@ -1897,10 +1933,11 @@ impl NurseryRegistry {
     pub fn exit_scope(&mut self, nursery_id: u64) {
         // Pop from scope stack - validate it matches
         if let Some(top_id) = self.scope_stack.pop()
-            && top_id != nursery_id {
-                // Mismatched exit - push back and log error (or could panic)
-                self.scope_stack.push(top_id);
-            }
+            && top_id != nursery_id
+        {
+            // Mismatched exit - push back and log error (or could panic)
+            self.scope_stack.push(top_id);
+        }
     }
 
     /// Gets the current nursery scope (top of stack).
@@ -1910,7 +1947,8 @@ impl NurseryRegistry {
 
     /// Gets the accumulated error from a nursery.
     pub fn get_error(&self, nursery_id: u64) -> Option<Value> {
-        self.nurseries.get(&nursery_id)
+        self.nurseries
+            .get(&nursery_id)
             .and_then(|n| n.accumulated_error)
     }
 
@@ -1963,7 +2001,6 @@ pub struct InterpreterConfig {
     // ========================================================================
     // Runtime language-feature config (from [runtime] in verum.toml)
     // ========================================================================
-
     /// Async scheduling mode: "work_stealing" (default), "single_threaded",
     /// "multi_threaded". Controls the task queue dispatch strategy.
     pub async_scheduler: String,
@@ -2001,7 +2038,7 @@ impl Default for InterpreterConfig {
             max_stack_depth: 16 * 1024,
             max_heap_size: 64 * 1024 * 1024, // 64 MB
             trace_enabled: false,
-            timeout_ms: 30_000,           // 30 second timeout to prevent infinite loops
+            timeout_ms: 30_000, // 30 second timeout to prevent infinite loops
             count_instructions: false,
             cbgr_enabled: true,
             max_instructions: 100_000_000,
@@ -2082,7 +2119,6 @@ pub struct CbgrStats {
     pub tier2_derefs: u64,
 
     // ========== Adaptive Validation Fields ==========
-
     /// Consecutive validations without violation (used for adaptive checking).
     pub consecutive_clean_validations: u64,
 
@@ -2246,7 +2282,8 @@ impl CbgrStats {
             0.0
         } else {
             // Calculate the fraction of skipped validations
-            let skip_ratio = self.adaptive_skip_count as f64 / (self.adaptive_skip_count as f64 + 1.0);
+            let skip_ratio =
+                self.adaptive_skip_count as f64 / (self.adaptive_skip_count as f64 + 1.0);
             // Only applies if we've been in adaptive mode
             if self.consecutive_clean_validations >= self.adaptive_threshold {
                 skip_ratio
@@ -2607,27 +2644,35 @@ impl InterpreterState {
     /// # Returns
     /// A mutable reference to the FFI runtime, or an error if initialization fails.
     #[cfg(feature = "ffi")]
-    pub fn get_or_create_ffi_runtime(&mut self) -> super::error::InterpreterResult<&mut FfiRuntime> {
+    pub fn get_or_create_ffi_runtime(
+        &mut self,
+    ) -> super::error::InterpreterResult<&mut FfiRuntime> {
         if self.ffi_runtime.is_none() {
             // Create and initialize FFI runtime
-            let mut runtime = FfiRuntime::new()
-                .map_err(|e| super::error::InterpreterError::FfiRuntimeError(
-                    format!("Failed to initialize FFI runtime: {}", e)
-                ))?;
+            let mut runtime = FfiRuntime::new().map_err(|e| {
+                super::error::InterpreterError::FfiRuntimeError(format!(
+                    "Failed to initialize FFI runtime: {}",
+                    e
+                ))
+            })?;
 
             // Load libraries required by the current module
-            runtime.load_module_libraries(&self.module)
-                .map_err(|e| super::error::InterpreterError::FfiRuntimeError(
-                    format!("Failed to load module libraries: {}", e)
-                ))?;
+            runtime.load_module_libraries(&self.module).map_err(|e| {
+                super::error::InterpreterError::FfiRuntimeError(format!(
+                    "Failed to load module libraries: {}",
+                    e
+                ))
+            })?;
 
             self.ffi_runtime = Some(runtime);
         }
 
         // ffi_runtime was just initialized above, but use ok_or for defensive safety
-        self.ffi_runtime.as_mut().ok_or_else(|| super::error::InterpreterError::FfiRuntimeError(
-            "FFI runtime initialization failed unexpectedly".into(),
-        ))
+        self.ffi_runtime.as_mut().ok_or_else(|| {
+            super::error::InterpreterError::FfiRuntimeError(
+                "FFI runtime initialization failed unexpectedly".into(),
+            )
+        })
     }
 
     /// Returns a reference to the current module.
@@ -2808,9 +2853,12 @@ impl InterpreterState {
 
 /// The result value, or `None` if the function returns unit or an error occurred.
 #[cfg(feature = "ffi")]
-fn invoke_callback_function(function_id: u32, args: &[crate::value::Value]) -> Option<crate::value::Value> {
-    use crate::module::FunctionId;
+fn invoke_callback_function(
+    function_id: u32,
+    args: &[crate::value::Value],
+) -> Option<crate::value::Value> {
     use crate::instruction::Reg;
+    use crate::module::FunctionId;
 
     CURRENT_INTERPRETER.with(|cell| {
         let ptr = *cell.borrow();
@@ -2873,20 +2921,17 @@ fn invoke_callback_function(function_id: u32, args: &[crate::value::Value]) -> O
         // a dispatch_loop that's currently blocked on an FFI call.
         // The entry_depth parameter ensures we return when the callback
         // completes, rather than continuing with the caller's frame.
-        let result = match super::dispatch_table::dispatch_loop_table_with_entry_depth(state, entry_depth) {
-            Ok(value) => {
-                // Check if the result is unit
-                if value.is_unit() {
-                    None
-                } else {
-                    Some(value)
+        let result =
+            match super::dispatch_table::dispatch_loop_table_with_entry_depth(state, entry_depth) {
+                Ok(value) => {
+                    // Check if the result is unit
+                    if value.is_unit() { None } else { Some(value) }
                 }
-            }
-            Err(e) => {
-                eprintln!("FFI callback error: execution failed: {:?}", e);
-                None
-            }
-        };
+                Err(e) => {
+                    eprintln!("FFI callback error: execution failed: {:?}", e);
+                    None
+                }
+            };
 
         // CRITICAL: Restore the PC to what it was before the callback.
         // The callback's return handler may have modified the PC, but the
@@ -2965,7 +3010,10 @@ mod tests {
         let mut state = InterpreterState::new(module);
 
         // Push some state
-        state.call_stack.push_frame(FunctionId(0), 16, 0, crate::instruction::Reg(0)).unwrap();
+        state
+            .call_stack
+            .push_frame(FunctionId(0), 16, 0, crate::instruction::Reg(0))
+            .unwrap();
         state.registers.push_frame(16);
         state.stats.instructions = 1000;
 
@@ -2987,10 +3035,7 @@ mod tests {
         // Without an installed policy the router permits every check.
         assert!(!state.permission_router.has_policy());
         assert_eq!(
-            state.check_permission(
-                crate::interpreter::permission::PermissionScope::Syscall,
-                42,
-            ),
+            state.check_permission(crate::interpreter::permission::PermissionScope::Syscall, 42,),
             crate::interpreter::permission::PermissionDecision::Allow,
         );
     }
@@ -3094,7 +3139,10 @@ mod tests {
         let module = test_module();
         let mut state = InterpreterState::new(module);
 
-        state.call_stack.push_frame(FunctionId(5), 16, 0, crate::instruction::Reg(0)).unwrap();
+        state
+            .call_stack
+            .push_frame(FunctionId(5), 16, 0, crate::instruction::Reg(0))
+            .unwrap();
 
         let snapshot = state.debug_snapshot();
         assert_eq!(snapshot.function, Some(FunctionId(5)));
@@ -3106,7 +3154,10 @@ mod tests {
         let module = test_module();
         let mut state = InterpreterState::new(module);
 
-        state.call_stack.push_frame(FunctionId(0), 16, 0, crate::instruction::Reg(0)).unwrap();
+        state
+            .call_stack
+            .push_frame(FunctionId(0), 16, 0, crate::instruction::Reg(0))
+            .unwrap();
 
         assert_eq!(state.pc(), 0);
 
@@ -3488,9 +3539,9 @@ mod tests {
         let a = q.spawn(FunctionId(1));
         let b = q.spawn(FunctionId(2));
         let c = q.spawn(FunctionId(3));
-        q.fail(b);                       // middle task failed
-        assert_eq!(q.next_ready(), Some(c));   // back, still pending
-        assert_eq!(q.next_ready(), Some(a));   // skips b, yields a
+        q.fail(b); // middle task failed
+        assert_eq!(q.next_ready(), Some(c)); // back, still pending
+        assert_eq!(q.next_ready(), Some(a)); // skips b, yields a
         assert_eq!(q.next_ready(), None);
     }
 }

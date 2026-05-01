@@ -72,14 +72,14 @@
 //! ```
 
 use crate::mlir::error::{MlirError, Result};
-use crate::mlir::jit::engine::{JitConfig, JitEngine, JitCompiler};
-use crate::mlir::jit::incremental::{IncrementalCache, CacheConfig};
+use crate::mlir::jit::engine::{JitCompiler, JitConfig, JitEngine};
+use crate::mlir::jit::incremental::{CacheConfig, IncrementalCache};
 use dashmap::DashMap;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use verum_common::Text;
 
 // ============================================================================
@@ -171,9 +171,7 @@ impl ReplConfig {
 
     /// Create development configuration.
     pub fn development() -> Self {
-        Self::new()
-            .show_timing(true)
-            .verbose(true)
+        Self::new().show_timing(true).verbose(true)
     }
 
     /// Create minimal configuration.
@@ -272,12 +270,8 @@ impl EvalResult {
             let value_str = self.value.as_str();
             let total_chars = value_str.chars().count();
             let display_value: String = if total_chars > config.max_display_size {
-                let truncated: String =
-                    value_str.chars().take(config.max_display_size).collect();
-                format!(
-                    "{}…(truncated, {} total chars)",
-                    truncated, total_chars
-                )
+                let truncated: String = value_str.chars().take(config.max_display_size).collect();
+                format!("{}…(truncated, {} total chars)", truncated, total_chars)
             } else {
                 value_str.to_string()
             };
@@ -705,20 +699,15 @@ impl ReplSession {
         // Parse: fn <name>(...) { ... }
         // This is a simplified placeholder
         let name_start = input.find(char::is_alphabetic).unwrap_or(3);
-        let name_end = input[name_start..].find(|c: char| !c.is_alphanumeric() && c != '_')
+        let name_end = input[name_start..]
+            .find(|c: char| !c.is_alphanumeric() && c != '_')
             .map(|i| i + name_start)
             .unwrap_or(input.len());
 
         let name = Text::from(&input[name_start..name_end]);
 
         // Create function binding
-        let binding = Binding::new(
-            name.clone(),
-            "Fn",
-            vec![],
-            false,
-            eval_num,
-        );
+        let binding = Binding::new(name.clone(), "Fn", vec![], false, eval_num);
 
         self.bindings.insert(name.clone(), binding);
         self.stats.bindings_created.fetch_add(1, Ordering::Relaxed);
@@ -733,10 +722,10 @@ impl ReplSession {
         let exec_time = 50; // Simulated
 
         // For now, return a placeholder result
-        Ok(EvalResult::with_value(
-            format!("<result of: {}>", input),
-            "Unknown",
-        ).with_timing(compile_time, exec_time))
+        Ok(
+            EvalResult::with_value(format!("<result of: {}>", input), "Unknown")
+                .with_timing(compile_time, exec_time),
+        )
     }
 
     /// Get a binding by name.
@@ -807,9 +796,26 @@ impl ReplSession {
 
         // Complete from keywords (Verum keywords)
         let keywords = [
-            "let", "fn", "if", "else", "match", "for", "while", "loop",
-            "return", "break", "continue", "type", "implement", "using",
-            "context", "provide", "async", "await", "spawn", "join",
+            "let",
+            "fn",
+            "if",
+            "else",
+            "match",
+            "for",
+            "while",
+            "loop",
+            "return",
+            "break",
+            "continue",
+            "type",
+            "implement",
+            "using",
+            "context",
+            "provide",
+            "async",
+            "await",
+            "spawn",
+            "join",
         ];
 
         for kw in keywords {
@@ -1022,8 +1028,7 @@ mod tests {
 
     #[test]
     fn test_eval_result() {
-        let result = EvalResult::with_value("42", "i64")
-            .with_timing(100, 50);
+        let result = EvalResult::with_value("42", "i64").with_timing(100, 50);
 
         assert_eq!(result.value.as_str(), "42");
         assert_eq!(result.type_name.as_str(), "i64");
@@ -1137,10 +1142,7 @@ mod tests {
                     message,
                 );
             }
-            other => panic!(
-                "expected ReplError after timeout, got: {:?}",
-                other,
-            ),
+            other => panic!("expected ReplError after timeout, got: {:?}", other,),
         }
         Ok(())
     }

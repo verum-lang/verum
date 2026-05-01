@@ -70,11 +70,7 @@ fn circular_import_fires_on_two_node_cycle() {
 #[test]
 fn circular_import_silent_on_dag() {
     let dir = make_dir("circular_dag");
-    std::fs::write(
-        dir.join("src").join("leaf.vr"),
-        "public fn leaf() {}\n",
-    )
-    .expect("leaf.vr");
+    std::fs::write(dir.join("src").join("leaf.vr"), "public fn leaf() {}\n").expect("leaf.vr");
     std::fs::write(
         dir.join("src").join("middle.vr"),
         "mount leaf;\n\npublic fn middle() {}\n",
@@ -102,11 +98,7 @@ fn circular_import_silent_on_dag() {
 #[test]
 fn orphan_module_fires_on_isolated_file() {
     let dir = make_dir("orphan");
-    std::fs::write(
-        dir.join("src").join("main.vr"),
-        "fn main() {}\n",
-    )
-    .expect("main.vr");
+    std::fs::write(dir.join("src").join("main.vr"), "fn main() {}\n").expect("main.vr");
     std::fs::write(
         dir.join("src").join("dangling.vr"),
         "public fn dangling() {}\n",
@@ -129,11 +121,8 @@ fn orphan_module_silent_on_mounted_file() {
         "mount helper;\n\nfn main() {}\n",
     )
     .expect("main.vr");
-    std::fs::write(
-        dir.join("src").join("helper.vr"),
-        "public fn helper() {}\n",
-    )
-    .expect("helper.vr");
+    std::fs::write(dir.join("src").join("helper.vr"), "public fn helper() {}\n")
+        .expect("helper.vr");
 
     let out = run(&dir);
     assert_eq!(
@@ -170,11 +159,7 @@ fn orphan_module_skips_main_vr() {
 #[test]
 fn unused_public_silent_when_disabled() {
     let dir = make_dir("unused_public_disabled");
-    std::fs::write(
-        dir.join("src").join("main.vr"),
-        "fn main() {}\n",
-    )
-    .expect("main.vr");
+    std::fs::write(dir.join("src").join("main.vr"), "fn main() {}\n").expect("main.vr");
     std::fs::write(
         dir.join("src").join("unused.vr"),
         "public fn never_called() -> Int { 0 }\n",
@@ -198,11 +183,7 @@ fn unused_public_fires_when_enabled_in_config() {
         "[package]\nname = \"unused_public_enabled\"\nversion = \"0.1.0\"\n\n[lint.rules.unused-public]\nenabled = true\n",
     )
     .expect("manifest");
-    std::fs::write(
-        dir.join("src").join("main.vr"),
-        "fn main() {}\n",
-    )
-    .expect("main.vr");
+    std::fs::write(dir.join("src").join("main.vr"), "fn main() {}\n").expect("main.vr");
     std::fs::write(
         dir.join("src").join("unused.vr"),
         "public fn never_called_anywhere() -> Int { 0 }\n",
@@ -282,21 +263,13 @@ fn dead_module_fires_when_chain_does_not_reach_entry_point() {
     // unreachable from main.vr. orphan-module catches a (no one
     // mounts it); dead-module catches BOTH a and b (neither is
     // reachable from the entry point along the mount graph).
-    std::fs::write(
-        dir.join("src").join("main.vr"),
-        "fn main() {}\n",
-    )
-    .expect("main.vr");
+    std::fs::write(dir.join("src").join("main.vr"), "fn main() {}\n").expect("main.vr");
     std::fs::write(
         dir.join("src").join("a.vr"),
         "mount b;\n\npublic fn a_fn() {}\n",
     )
     .expect("a.vr");
-    std::fs::write(
-        dir.join("src").join("b.vr"),
-        "public fn b_fn() {}\n",
-    )
-    .expect("b.vr");
+    std::fs::write(dir.join("src").join("b.vr"), "public fn b_fn() {}\n").expect("b.vr");
     let out = run(&dir);
     assert!(
         count_rule(&out, "dead-module") >= 1,
@@ -318,11 +291,7 @@ fn dead_module_silent_when_chain_reaches_entry_point() {
         "mount b;\n\npublic fn a_fn() {}\n",
     )
     .expect("a.vr");
-    std::fs::write(
-        dir.join("src").join("b.vr"),
-        "public fn b_fn() {}\n",
-    )
-    .expect("b.vr");
+    std::fs::write(dir.join("src").join("b.vr"), "public fn b_fn() {}\n").expect("b.vr");
     let out = run(&dir);
     assert_eq!(
         count_rule(&out, "dead-module"),

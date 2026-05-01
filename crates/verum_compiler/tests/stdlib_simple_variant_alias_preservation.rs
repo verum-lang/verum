@@ -77,7 +77,8 @@ fn stdlib_loading_preserves_simple_none_alias() {
     // remapping). vtest_run_capture preserves both streams; using
     // `out.stderr` directly keeps this test scoped to the stderr
     // channel where the diagnostic is known to land.
-    let none_warnings: Vec<&str> = out.stderr
+    let none_warnings: Vec<&str> = out
+        .stderr
         .lines()
         .filter(|l| l.contains("[lenient]") && l.contains("undefined variable: None"))
         .collect();
@@ -109,7 +110,12 @@ fn stdlib_loading_preserves_simple_none_alias() {
          every imported module.\n\n\
          First few warnings:\n{}",
         none_warnings.len(),
-        none_warnings.iter().take(8).copied().collect::<Vec<_>>().join("\n"),
+        none_warnings
+            .iter()
+            .take(8)
+            .copied()
+            .collect::<Vec<_>>()
+            .join("\n"),
     );
 
     assert_eq!(

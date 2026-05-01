@@ -170,7 +170,10 @@ impl LspConfig {
     /// ill-typed keys are silently ignored — we're forgiving on input so a
     /// slightly out-of-sync extension never crashes the server.
     pub fn apply_json(&mut self, opts: &serde_json::Value) {
-        if let Some(v) = opts.get("enableRefinementValidation").and_then(|v| v.as_bool()) {
+        if let Some(v) = opts
+            .get("enableRefinementValidation")
+            .and_then(|v| v.as_bool())
+        {
             self.enable_refinement_validation = v;
         }
         if let Some(v) = opts.get("validationMode").and_then(|v| v.as_str()) {
@@ -181,10 +184,7 @@ impl LspConfig {
         if let Some(v) = opts.get("showCounterexamples").and_then(|v| v.as_bool()) {
             self.show_counterexamples = v;
         }
-        if let Some(v) = opts
-            .get("maxCounterexampleTraces")
-            .and_then(|v| v.as_u64())
-        {
+        if let Some(v) = opts.get("maxCounterexampleTraces").and_then(|v| v.as_u64()) {
             self.max_counterexample_traces = v.min(u32::MAX as u64) as u32;
         }
 

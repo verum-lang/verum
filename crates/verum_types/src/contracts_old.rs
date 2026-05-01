@@ -189,18 +189,14 @@ pub struct FrameAnalysis {
 
 impl FrameAnalysis {
     pub fn is_clean(&self) -> bool {
-        self.unconstrained_modifications.is_empty()
-            && self.redundant_old_refs.is_empty()
+        self.unconstrained_modifications.is_empty() && self.redundant_old_refs.is_empty()
     }
 }
 
 /// Given a postcondition and a declared frame, compute the
 /// snapshot obligations and report any unconstrained modifications
 /// or redundant `old(...)` references.
-pub fn compute_frame_obligations(
-    post: &Postcondition,
-    frame: &Frame,
-) -> FrameAnalysis {
+pub fn compute_frame_obligations(post: &Postcondition, frame: &Frame) -> FrameAnalysis {
     let old_locs = post.old_locations();
 
     // Locations that must be snapshot: every old-ref'd location.
@@ -235,10 +231,7 @@ pub fn compute_frame_obligations(
 
 /// Take a snapshot of the locations dictated by a frame analysis.
 /// Pre-values are read from an externally-supplied store callback.
-pub fn snapshot_frame<F>(
-    analysis: &FrameAnalysis,
-    mut read_store: F,
-) -> Snapshot
+pub fn snapshot_frame<F>(analysis: &FrameAnalysis, mut read_store: F) -> Snapshot
 where
     F: FnMut(&Text) -> Text,
 {

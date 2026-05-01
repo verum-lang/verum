@@ -39,10 +39,8 @@
 
 use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use verum_vbc::interpreter::permission::{
-    PermissionDecision, PermissionRouter, PermissionScope,
-};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use verum_vbc::interpreter::permission::{PermissionDecision, PermissionRouter, PermissionScope};
 
 fn warm_path_allow_all(c: &mut Criterion) {
     let mut group = c.benchmark_group("permission_router/warm_path");
@@ -54,10 +52,7 @@ fn warm_path_allow_all(c: &mut Criterion) {
         // hot loop, not the cold-prime cost.
         let _ = router.check(PermissionScope::Syscall, 42);
         b.iter(|| {
-            let decision = router.check(
-                black_box(PermissionScope::Syscall),
-                black_box(42),
-            );
+            let decision = router.check(black_box(PermissionScope::Syscall), black_box(42));
             black_box(decision);
         });
     });
@@ -71,10 +66,7 @@ fn warm_path_with_policy(c: &mut Criterion) {
         let mut router = PermissionRouter::with_policy(|_, _| PermissionDecision::Allow);
         let _ = router.check(PermissionScope::Network, 80);
         b.iter(|| {
-            let decision = router.check(
-                black_box(PermissionScope::Network),
-                black_box(80),
-            );
+            let decision = router.check(black_box(PermissionScope::Network), black_box(80));
             black_box(decision);
         });
     });
@@ -91,14 +83,8 @@ fn cold_then_warm_per_pair(c: &mut Criterion) {
         let _ = router.check(PermissionScope::Syscall, 1);
         let _ = router.check(PermissionScope::Syscall, 2);
         b.iter(|| {
-            let a = router.check(
-                black_box(PermissionScope::Syscall),
-                black_box(1),
-            );
-            let b_ = router.check(
-                black_box(PermissionScope::Syscall),
-                black_box(2),
-            );
+            let a = router.check(black_box(PermissionScope::Syscall), black_box(1));
+            let b_ = router.check(black_box(PermissionScope::Syscall), black_box(2));
             black_box((a, b_));
         });
     });
@@ -133,10 +119,7 @@ fn deny_path(c: &mut Criterion) {
         // Prime the deny decision into the warm-path cache.
         let _ = router.check(PermissionScope::Process, 0xDEAD);
         b.iter(|| {
-            let decision = router.check(
-                black_box(PermissionScope::Process),
-                black_box(0xDEAD),
-            );
+            let decision = router.check(black_box(PermissionScope::Process), black_box(0xDEAD));
             black_box(decision);
         });
     });

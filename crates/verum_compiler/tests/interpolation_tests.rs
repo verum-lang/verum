@@ -21,8 +21,8 @@
 use verum_ast::expr::Expr;
 use verum_ast::literal::Literal;
 use verum_ast::{FileId, Span};
-use verum_compiler::interpolation::sql::SqlInterpolationHandler;
 use verum_common::Text;
+use verum_compiler::interpolation::sql::SqlInterpolationHandler;
 
 fn test_span() -> Span {
     Span::new(0, 10, FileId::new(0))

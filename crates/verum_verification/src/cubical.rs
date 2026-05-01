@@ -174,9 +174,7 @@ impl CubicalPrimitive {
     pub fn category(self) -> CubicalCategory {
         match self {
             Self::Path | Self::PathOver | Self::Refl => CubicalCategory::Identity,
-            Self::Sym | Self::Trans | Self::Ap | Self::ApD => {
-                CubicalCategory::PathOps
-            }
+            Self::Sym | Self::Trans | Self::Ap | Self::ApD => CubicalCategory::PathOps,
             Self::JRule => CubicalCategory::Induction,
             Self::Transp | Self::Coe | Self::Subst => CubicalCategory::Transport,
             Self::Hcomp | Self::Comp => CubicalCategory::Composition,
@@ -315,7 +313,10 @@ impl DefaultCubicalCatalog {
 
 impl CubicalCatalog for DefaultCubicalCatalog {
     fn entries(&self) -> Vec<CubicalEntry> {
-        CubicalPrimitive::all().iter().map(|&p| entry_for(p)).collect()
+        CubicalPrimitive::all()
+            .iter()
+            .map(|&p| entry_for(p))
+            .collect()
     }
 
     fn lookup(&self, name: &str) -> Option<CubicalEntry> {
@@ -736,7 +737,11 @@ impl FaceFormula {
             Self::EndPoint { variable, end } => Text::from(format!(
                 "{} = {}",
                 variable.as_str(),
-                if matches!(end, FaceEnd::Zero) { "0" } else { "1" }
+                if matches!(end, FaceEnd::Zero) {
+                    "0"
+                } else {
+                    "1"
+                }
             )),
             Self::And(a, b) => Text::from(format!(
                 "({} ∧ {})",
@@ -1209,14 +1214,7 @@ mod tests {
 
     #[test]
     fn face_render_round_trip() {
-        let inputs = [
-            "0",
-            "1",
-            "i = 0",
-            "j = 1",
-            "i = 0 ∧ j = 1",
-            "i = 0 ∨ j = 1",
-        ];
+        let inputs = ["0", "1", "i = 0", "j = 1", "i = 0 ∧ j = 1", "i = 0 ∨ j = 1"];
         for s in inputs {
             let parsed = FaceFormula::parse(s).unwrap();
             let rendered = parsed.render();
@@ -1240,7 +1238,11 @@ mod tests {
     fn face_constants_have_no_variables() {
         for s in ["0", "1", "⊤", "⊥"] {
             let f = FaceFormula::parse(s).unwrap();
-            assert!(f.free_variables().is_empty(), "`{}` should be variable-free", s);
+            assert!(
+                f.free_variables().is_empty(),
+                "`{}` should be variable-free",
+                s
+            );
         }
     }
 

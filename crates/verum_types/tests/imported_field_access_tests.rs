@@ -527,7 +527,8 @@ fn test_field_access_in_record_pattern() {
             fields: vec![
                 FieldPattern::shorthand(Ident::new("name".to_string(), span)),
                 FieldPattern::shorthand(Ident::new("age".to_string(), span)),
-            ].into(),
+            ]
+            .into(),
             rest: false,
         },
         span,
@@ -571,7 +572,8 @@ fn test_field_access_record_pattern_with_rest() {
             fields: vec![
                 FieldPattern::shorthand(Ident::new("x".to_string(), span)),
                 FieldPattern::shorthand(Ident::new("y".to_string(), span)),
-            ].into(),
+            ]
+            .into(),
             rest: true, // Allow unmatched fields
         },
         span,
@@ -856,7 +858,8 @@ fn test_field_access_in_function_call() {
     );
 
     let call_expr = Expr::new(
-        ExprKind::Call { type_args: vec![].into(),
+        ExprKind::Call {
+            type_args: vec![].into(),
             func: Box::new(Expr::new(
                 ExprKind::Path(Path::single(Ident::new("abs".to_string(), span))),
                 span,

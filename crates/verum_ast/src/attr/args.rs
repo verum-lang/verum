@@ -72,8 +72,7 @@ use crate::span::Span;
 /// // @derive(Clone, Serialize) - variadic identifiers
 /// let variadic = ArgSpec::Variadic(ArgType::Ident);
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum ArgSpec {
     /// No arguments allowed: `@cold`, `@hot`, `@packed`
     #[default]
@@ -213,7 +212,6 @@ impl ArgSpec {
         }
     }
 }
-
 
 /// Type of a single attribute argument value.
 ///
@@ -739,10 +737,13 @@ mod tests {
 
     #[test]
     fn test_serialization() {
-        let spec = ArgSpec::Named(vec![
-            NamedArgSpec::required("min", ArgType::Int),
-            NamedArgSpec::optional("max", ArgType::Int),
-        ].into());
+        let spec = ArgSpec::Named(
+            vec![
+                NamedArgSpec::required("min", ArgType::Int),
+                NamedArgSpec::optional("max", ArgType::Int),
+            ]
+            .into(),
+        );
 
         let json = serde_json::to_string(&spec).unwrap();
         let restored: ArgSpec = serde_json::from_str(&json).unwrap();

@@ -58,8 +58,9 @@ use verum_ast::expr::Expr;
 // ==================== Backend Choice ====================
 
 /// Backend selection strategy
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[derive(Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, Default,
+)]
 pub enum BackendChoice {
     /// Use Z3 exclusively
     Z3,
@@ -75,7 +76,6 @@ pub enum BackendChoice {
     #[default]
     Capability,
 }
-
 
 impl std::str::FromStr for BackendChoice {
     type Err = String;
@@ -430,9 +430,7 @@ impl SmtBackendSwitcher {
         let saved = self.current;
 
         let result = match strategy {
-            VerifyStrategy::Runtime
-            | VerifyStrategy::Static
-            | VerifyStrategy::Proof => {
+            VerifyStrategy::Runtime | VerifyStrategy::Static | VerifyStrategy::Proof => {
                 // Runtime/Static are non-SMT; Proof is user-supplied
                 // tactic, rechecked by the kernel.
                 unreachable!("requires_smt() should have rejected these");
@@ -741,9 +739,7 @@ impl SmtBackendSwitcher {
 
     /// This is the recommended dispatch strategy for production use.
     fn solve_capability(&mut self, assertions: &List<Expr>) -> SolveResult {
-        use crate::capability_router::{
-            CapabilityRouter, SolverChoice,
-        };
+        use crate::capability_router::{CapabilityRouter, SolverChoice};
         use crate::routing_stats::TheoryClass;
         use std::time::Instant;
 
@@ -765,13 +761,20 @@ impl SmtBackendSwitcher {
             }
             SolverChoice::Cvc5Only { reason, .. } => {
                 if self.config.verbose {
-                    eprintln!("[CAPABILITY] theory={} → CVC5: {}", theory.mnemonic(), reason);
+                    eprintln!(
+                        "[CAPABILITY] theory={} → CVC5: {}",
+                        theory.mnemonic(),
+                        reason
+                    );
                 }
                 self.solve_with_cvc5(assertions)
             }
             SolverChoice::Portfolio { .. } => {
                 if self.config.verbose {
-                    eprintln!("[CAPABILITY] theory={} → portfolio (parallel)", theory.mnemonic());
+                    eprintln!(
+                        "[CAPABILITY] theory={} → portfolio (parallel)",
+                        theory.mnemonic()
+                    );
                 }
                 self.solve_portfolio(assertions)
             }
@@ -785,12 +788,8 @@ impl SmtBackendSwitcher {
 
         // Record the outcome in telemetry.
         let verdict = match &result {
-            SolveResult::Sat { .. } => {
-                crate::portfolio_executor::SolverVerdict::Sat
-            }
-            SolveResult::Unsat { .. } => {
-                crate::portfolio_executor::SolverVerdict::Unsat
-            }
+            SolveResult::Sat { .. } => crate::portfolio_executor::SolverVerdict::Sat,
+            SolveResult::Unsat { .. } => crate::portfolio_executor::SolverVerdict::Unsat,
             SolveResult::Unknown { reason, .. } => {
                 let r = match reason {
                     Maybe::Some(s) => s.as_str().to_string(),
@@ -798,13 +797,12 @@ impl SmtBackendSwitcher {
                 };
                 crate::portfolio_executor::SolverVerdict::Unknown { reason: r }
             }
-            SolveResult::Error { error, .. } => {
-                crate::portfolio_executor::SolverVerdict::Error {
-                    message: error.clone(),
-                }
-            }
+            SolveResult::Error { error, .. } => crate::portfolio_executor::SolverVerdict::Error {
+                message: error.clone(),
+            },
         };
-        self.routing_stats.record_outcome(theory, &verdict, t0.elapsed());
+        self.routing_stats
+            .record_outcome(theory, &verdict, t0.elapsed());
 
         result
     }
@@ -882,7 +880,9 @@ impl SmtBackendSwitcher {
             ExprKind::Literal(lit) => {
                 use verum_ast::LiteralKind;
                 chars.base.num_consts += 1.0;
-                if let LiteralKind::Text(_) = &lit.kind { chars.has_strings = true }
+                if let LiteralKind::Text(_) = &lit.kind {
+                    chars.has_strings = true
+                }
             }
 
             // --- Arithmetic operators: detect nonlinearity ---
@@ -930,7 +930,12 @@ impl SmtBackendSwitcher {
                     self.scan_expr(arg, chars);
                 }
             }
-            ExprKind::MethodCall { receiver, method, args, .. } => {
+            ExprKind::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } => {
                 Self::detect_theory_from_name(method.as_str(), chars);
                 self.scan_expr(receiver, chars);
                 for arg in args.iter() {
@@ -946,7 +951,9 @@ impl SmtBackendSwitcher {
             }
 
             // --- Pattern matching → inductive datatypes ---
-            ExprKind::Match { expr: scrutinee, .. } => {
+            ExprKind::Match {
+                expr: scrutinee, ..
+            } => {
                 chars.has_inductive_datatypes = true;
                 self.scan_expr(scrutinee, chars);
             }
@@ -959,7 +966,11 @@ impl SmtBackendSwitcher {
                     }
                 }
             }
-            ExprKind::If { then_branch, else_branch, .. } => {
+            ExprKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
                 // IfCondition is a complex nested structure; skip deep analysis
                 // here and just recurse into the branches.
                 for stmt in then_branch.stmts.iter() {
@@ -984,22 +995,17 @@ impl SmtBackendSwitcher {
     /// Check if an expression is "constant-like" (a literal or simple path).
     /// Used to detect nonlinearity: `x * y` is nonlinear, `x * 5` is linear.
     fn is_constant_like(expr: &Expr) -> bool {
-        matches!(
-            &expr.kind,
-            verum_ast::ExprKind::Literal(_)
-        )
+        matches!(&expr.kind, verum_ast::ExprKind::Literal(_))
     }
 
     /// Extract the callable name from a function reference expression.
     fn extract_call_name(func: &Expr) -> Option<String> {
         use verum_ast::ty::PathSegment;
         match &func.kind {
-            verum_ast::ExprKind::Path(path) => {
-                path.segments.last().and_then(|seg| match seg {
-                    PathSegment::Name(ident) => Some(ident.name.as_str().to_string()),
-                    _ => None,
-                })
-            }
+            verum_ast::ExprKind::Path(path) => path.segments.last().and_then(|seg| match seg {
+                PathSegment::Name(ident) => Some(ident.name.as_str().to_string()),
+                _ => None,
+            }),
             _ => None,
         }
     }
@@ -1017,9 +1023,21 @@ impl SmtBackendSwitcher {
         // String operations (Verum Text, SMT-LIB strings, Python-style)
         if matches!(
             name,
-            "len" | "length" | "concat" | "contains" | "starts_with" | "ends_with"
-                | "substr" | "substring" | "replace" | "indexof" | "to_upper" | "to_lower"
-                | "str_concat" | "str_contains" | "str_len"
+            "len"
+                | "length"
+                | "concat"
+                | "contains"
+                | "starts_with"
+                | "ends_with"
+                | "substr"
+                | "substring"
+                | "replace"
+                | "indexof"
+                | "to_upper"
+                | "to_lower"
+                | "str_concat"
+                | "str_contains"
+                | "str_len"
         ) {
             chars.has_strings = true;
         }
@@ -1119,16 +1137,15 @@ impl SmtBackendSwitcher {
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_secs())
                     .unwrap_or(0);
-                self.routing_stats.record_divergence(
-                    crate::routing_stats::DivergenceEvent {
+                self.routing_stats
+                    .record_divergence(crate::routing_stats::DivergenceEvent {
                         timestamp_secs,
                         theory,
                         z3_verdict,
                         cvc5_verdict,
                         z3_elapsed_ms: z3_elapsed.as_millis() as u64,
                         cvc5_elapsed_ms: cvc5_elapsed.as_millis() as u64,
-                    },
-                );
+                    });
                 // Honour `ValidationConfig.log_mismatches`: when
                 // disabled, suppress the stderr warning. Closes
                 // the inert-defense pattern — production CI
@@ -1168,7 +1185,10 @@ impl SmtBackendSwitcher {
             _ => {
                 // At least one was Unknown or Error.
                 self.routing_stats.record_cross_validate_incomplete();
-                if matches!(z3_result, SolveResult::Sat { .. } | SolveResult::Unsat { .. }) {
+                if matches!(
+                    z3_result,
+                    SolveResult::Sat { .. } | SolveResult::Unsat { .. }
+                ) {
                     z3_result
                 } else {
                     cvc5_result
@@ -1325,7 +1345,7 @@ impl SmtBackendSwitcher {
 
         #[cfg(feature = "cvc5")]
         {
-            use crate::cvc5_advanced::{synthesize, SyGuSProblem};
+            use crate::cvc5_advanced::{SyGuSProblem, synthesize};
             let problem = SyGuSProblem {
                 logic: "ALL".to_string(),
                 specification: spec,
@@ -1401,8 +1421,7 @@ impl SmtBackendSwitcher {
         // CVC5 spawn when the cap is 1 — Z3 stays primary
         // because the configured `default_backend` is Z3.
         let z3_available = self.z3.is_some();
-        let cvc5_available =
-            self.cvc5.is_some() && self.config.portfolio.max_threads >= 2;
+        let cvc5_available = self.cvc5.is_some() && self.config.portfolio.max_threads >= 2;
 
         // Spawn Z3 thread if available
         let z3_handle = if z3_available {
@@ -1978,9 +1997,7 @@ impl SwitcherConfig {
 
 /// Used for cross-validation divergence event logging, where we need to
 /// record exactly what each solver returned.
-fn solve_result_to_verdict(
-    result: &SolveResult,
-) -> crate::portfolio_executor::SolverVerdict {
+fn solve_result_to_verdict(result: &SolveResult) -> crate::portfolio_executor::SolverVerdict {
     use crate::portfolio_executor::SolverVerdict;
     match result {
         SolveResult::Sat { .. } => SolverVerdict::Sat,
@@ -2015,10 +2032,7 @@ mod synthesize_tests {
         let config = SwitcherConfig::default();
         let mut switcher = SmtBackendSwitcher::new(config);
         let assertions: List<Expr> = List::new();
-        let result = switcher.solve_with_strategy(
-            &assertions,
-            &VerifyStrategy::Synthesize,
-        );
+        let result = switcher.solve_with_strategy(&assertions, &VerifyStrategy::Synthesize);
         match result {
             Some(SolveResult::Error { backend, error }) => {
                 assert!(
@@ -2050,9 +2064,7 @@ mod synthesize_tests {
                      should be explicit Error with rationale"
                 );
             }
-            None => panic!(
-                "Synthesize strategy produced no result (requires_smt returned false?)"
-            ),
+            None => panic!("Synthesize strategy produced no result (requires_smt returned false?)"),
         }
     }
 
@@ -2064,8 +2076,7 @@ mod synthesize_tests {
     fn runtime_strategy_skips_solver_dispatch() {
         let mut switcher = SmtBackendSwitcher::with_defaults();
         let assertions: List<Expr> = List::new();
-        let result = switcher
-            .solve_with_strategy(&assertions, &VerifyStrategy::Runtime);
+        let result = switcher.solve_with_strategy(&assertions, &VerifyStrategy::Runtime);
         assert!(result.is_none());
     }
 }
@@ -2177,8 +2188,8 @@ mod inert_field_pin_tests {
         let cfg = SwitcherConfig {
             default_backend: BackendChoice::Z3,
             validation: ValidationConfig {
-                enabled: true,           // validation enabled …
-                cross_validate: false,   // … but cross_validate gate off
+                enabled: true,         // validation enabled …
+                cross_validate: false, // … but cross_validate gate off
                 ..ValidationConfig::default()
             },
             ..SwitcherConfig::default()

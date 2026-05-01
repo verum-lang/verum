@@ -110,9 +110,8 @@ pub use attr_validation::{
 };
 pub use error::{ParseError, ParseResult};
 pub use recovery::{
-    Delimiter, RecoveryContext, RecoveryStrategy, SyncPoint,
-    can_start_expression, can_start_item, can_start_statement, is_statement_terminator,
-    missing_token_message, unexpected_token_message,
+    Delimiter, RecoveryContext, RecoveryStrategy, SyncPoint, can_start_expression, can_start_item,
+    can_start_statement, is_statement_terminator, missing_token_message, unexpected_token_message,
 };
 
 // Export the hand-written parser infrastructure
@@ -169,7 +168,12 @@ impl FastParser {
     }
 
     /// Internal parsing implementation with optional source text for error analysis.
-    fn parse_module_internal(&self, lexer: Lexer, file_id: FileId, source: Option<&str>) -> ParseResult<Module> {
+    fn parse_module_internal(
+        &self,
+        lexer: Lexer,
+        file_id: FileId,
+        source: Option<&str>,
+    ) -> ParseResult<Module> {
         self.parse_module_internal_with_script_mode(lexer, file_id, source, false)
     }
 
@@ -521,7 +525,13 @@ impl FastParser {
         // Handle number literals (0x, 0b, 0o prefixed)
         if pos + 1 < len && bytes[pos] == b'0' {
             let prefix = bytes[pos + 1];
-            if prefix == b'x' || prefix == b'X' || prefix == b'b' || prefix == b'B' || prefix == b'o' || prefix == b'O' {
+            if prefix == b'x'
+                || prefix == b'X'
+                || prefix == b'b'
+                || prefix == b'B'
+                || prefix == b'o'
+                || prefix == b'O'
+            {
                 pos += 2;
                 // Scan alphanumeric (including invalid chars for the base)
                 while pos < len && (bytes[pos].is_ascii_alphanumeric() || bytes[pos] == b'_') {
@@ -534,7 +544,13 @@ impl FastParser {
         // General case: scan until delimiter or whitespace
         while pos < len {
             let b = bytes[pos];
-            if b.is_ascii_whitespace() || b == b';' || b == b',' || b == b')' || b == b']' || b == b'}' {
+            if b.is_ascii_whitespace()
+                || b == b';'
+                || b == b','
+                || b == b')'
+                || b == b']'
+                || b == b'}'
+            {
                 break;
             }
             pos += 1;
@@ -545,12 +561,19 @@ impl FastParser {
     /// Analyze source text at error position to determine specific lexer error type.
     fn analyze_lexer_error(source: &str, pos: usize, span: Span) -> ParseError {
         // Get the text at the error position
-        let remaining = if pos < source.len() { &source[pos..] } else { "" };
+        let remaining = if pos < source.len() {
+            &source[pos..]
+        } else {
+            ""
+        };
 
         // Analyze the pattern to determine error type
         if remaining.starts_with("0x") && remaining.len() <= 2 {
             // Invalid hex: 0x without digits
-            ParseError::invalid_number("incomplete hexadecimal literal: missing digits after 0x", span)
+            ParseError::invalid_number(
+                "incomplete hexadecimal literal: missing digits after 0x",
+                span,
+            )
         } else if remaining.starts_with("0x") {
             // Invalid hex with invalid characters
             ParseError::invalid_number("invalid hexadecimal literal", span)
@@ -607,8 +630,11 @@ impl FastParser {
             ParseError::unterminated_char(span)
         } else if msg.contains("invalid escape") {
             ParseError::invalid_escape(msg, span)
-        } else if msg.contains("invalid number") || msg.contains("invalid binary")
-                || msg.contains("invalid hex") || msg.contains("invalid octal") {
+        } else if msg.contains("invalid number")
+            || msg.contains("invalid binary")
+            || msg.contains("invalid hex")
+            || msg.contains("invalid octal")
+        {
             ParseError::invalid_number(msg, span)
         } else if msg.contains("empty char") || msg.contains("empty character") {
             ParseError::empty_char(span)

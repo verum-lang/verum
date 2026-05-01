@@ -33,8 +33,7 @@ use verum_codegen::llvm::{
 use verum_vbc::module::VbcModule;
 
 use crate::compilation_path::{
-    CompilationPath, TargetConfig as PathTargetConfig, analyze_function,
-    determine_compilation_path,
+    CompilationPath, TargetConfig as PathTargetConfig, analyze_function, determine_compilation_path,
 };
 
 use super::CompilationPipeline;
@@ -49,7 +48,10 @@ impl<'s> CompilationPipeline<'s> {
         &self,
         llvm_context: &'ctx verum_codegen::llvm::verum_llvm::context::Context,
         vbc_module: &std::sync::Arc<verum_vbc::module::VbcModule>,
-    ) -> Result<(verum_codegen::llvm::verum_llvm::module::Module<'ctx>, LlvmLoweringStats)> {
+    ) -> Result<(
+        verum_codegen::llvm::verum_llvm::module::Module<'ctx>,
+        LlvmLoweringStats,
+    )> {
         let input_path = &self.session.options().input;
         let module_name = input_path
             .file_stem()
@@ -72,7 +74,11 @@ impl<'s> CompilationPipeline<'s> {
             .with_coverage(self.session.options().coverage);
 
         // Set target triple for the host
-        let config = config.with_target(verum_codegen::llvm::verum_llvm::targets::TargetMachine::get_default_triple().as_str().to_string_lossy());
+        let config = config.with_target(
+            verum_codegen::llvm::verum_llvm::targets::TargetMachine::get_default_triple()
+                .as_str()
+                .to_string_lossy(),
+        );
 
         // Wire the AOT permission policy into lowering. `None` is the
         // trusted-application default — `PermissionAssert` is elided.
@@ -88,24 +94,29 @@ impl<'s> CompilationPipeline<'s> {
         let escape_result = {
             use verum_vbc::cbgr_analysis::VbcEscapeAnalyzer;
             let analyzer = VbcEscapeAnalyzer::new();
-            let functions: Vec<verum_vbc::VbcFunction> = vbc_module.functions.iter()
+            let functions: Vec<verum_vbc::VbcFunction> = vbc_module
+                .functions
+                .iter()
                 .filter_map(|f| {
-                    f.instructions.as_ref().map(|instrs| {
-                        verum_vbc::VbcFunction::new(f.clone(), instrs.clone())
-                    })
+                    f.instructions
+                        .as_ref()
+                        .map(|instrs| verum_vbc::VbcFunction::new(f.clone(), instrs.clone()))
                 })
                 .collect();
             let result = analyzer.analyze(&functions);
-            info!("  CBGR escape analysis: {} refs analyzed, {} promoted to tier1 ({:.1}%)",
+            info!(
+                "  CBGR escape analysis: {} refs analyzed, {} promoted to tier1 ({:.1}%)",
                 result.stats.total_refs,
                 result.stats.promoted_to_tier1,
-                result.stats.promotion_rate());
+                result.stats.promotion_rate()
+            );
             result
         };
 
         let mut lowering = VbcToLlvmLowering::new(llvm_context, config);
         lowering.set_escape_analysis(escape_result);
-        lowering.lower_module(vbc_module)
+        lowering
+            .lower_module(vbc_module)
             .map_err(|e| anyhow::anyhow!("VBC → LLVM lowering failed: {}", e))?;
 
         let stats = lowering.stats().clone();
@@ -113,7 +124,10 @@ impl<'s> CompilationPipeline<'s> {
 
         // Optionally dump IR for debugging
         if self.session.options().verbose > 1 {
-            debug!("Generated LLVM IR:\n{}", llvm_module.print_to_string().to_string_lossy());
+            debug!(
+                "Generated LLVM IR:\n{}",
+                llvm_module.print_to_string().to_string_lossy()
+            );
         }
 
         Ok((llvm_module, stats))
@@ -129,7 +143,9 @@ impl<'s> CompilationPipeline<'s> {
 
         // Create JIT execution engine
         let execution_engine = llvm_module
-            .create_jit_execution_engine(verum_codegen::llvm::verum_llvm::OptimizationLevel::Default)
+            .create_jit_execution_engine(
+                verum_codegen::llvm::verum_llvm::OptimizationLevel::Default,
+            )
             .map_err(|e| anyhow::anyhow!("Failed to create JIT engine: {}", e))?;
 
         // Look up main function
@@ -142,9 +158,9 @@ impl<'s> CompilationPipeline<'s> {
         // because main() is emitted with that exact signature in
         // `pipeline/native_codegen.rs::emit_program_main` (commit
         // 0d04ee0b documented main's i64 return contract).
-        if let Ok(main_fn) = unsafe {
-            execution_engine.get_function::<unsafe extern "C" fn() -> i64>("main")
-        } {
+        if let Ok(main_fn) =
+            unsafe { execution_engine.get_function::<unsafe extern "C" fn() -> i64>("main") }
+        {
             info!("  Executing main function via LLVM JIT");
             // SAFETY: We've compiled main with the expected signature
             let result = unsafe { main_fn.call() };
@@ -154,9 +170,9 @@ impl<'s> CompilationPipeline<'s> {
             // _start is emitted with `unsafe extern "C" fn()`
             // signature when present (no return value); transmute
             // is sound because the codegen-side signature matches.
-            if let Ok(start_fn) = unsafe {
-                execution_engine.get_function::<unsafe extern "C" fn()>("_start")
-            } {
+            if let Ok(start_fn) =
+                unsafe { execution_engine.get_function::<unsafe extern "C" fn()>("_start") }
+            {
                 info!("  Executing _start function via LLVM JIT");
                 // SAFETY: We've compiled _start with the expected signature
                 unsafe { start_fn.call() };
@@ -173,7 +189,7 @@ impl<'s> CompilationPipeline<'s> {
         llvm_module: &verum_codegen::llvm::verum_llvm::module::Module<'_>,
     ) -> Result<PathBuf> {
         use verum_codegen::llvm::verum_llvm::targets::{
-            InitializationConfig, Target, TargetMachine, RelocMode, CodeModel, FileType,
+            CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
         };
 
         // Initialize LLVM targets ONCE per process.
@@ -206,7 +222,14 @@ impl<'s> CompilationPipeline<'s> {
             .and_then(|s| s.to_str())
             .unwrap_or("main");
 
-        let output_path = if self.session.options().output.to_str().unwrap_or("").is_empty() {
+        let output_path = if self
+            .session
+            .options()
+            .output
+            .to_str()
+            .unwrap_or("")
+            .is_empty()
+        {
             profile_dir.join(if cfg!(windows) {
                 format!("{}.exe", module_name)
             } else {
@@ -300,11 +323,7 @@ impl<'s> CompilationPipeline<'s> {
             let analysis = match analyze_function(func_desc, vbc_module) {
                 Ok(a) => a,
                 Err(e) => {
-                    debug!(
-                        "  Function '{}': analysis skipped ({})",
-                        func_name,
-                        e
-                    );
+                    debug!("  Function '{}': analysis skipped ({})", func_name, e);
                     // Skip functions that can't be analyzed (e.g., no bytecode)
                     cpu_count += 1;
                     continue;

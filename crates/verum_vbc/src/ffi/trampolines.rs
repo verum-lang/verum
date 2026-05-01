@@ -64,8 +64,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use libffi::low::ffi_cif;
 use libffi::middle::{Cif, Type};
 
-use super::platform::FfiPlatformError;
 use super::CTypeRuntime;
+use super::platform::FfiPlatformError;
 use crate::value::Value;
 
 /// Unique identifier for a callback trampoline.
@@ -539,9 +539,7 @@ unsafe fn marshal_value_to_c(value: Value, ctype: CTypeRuntime, result_ptr: *mut
             | CTypeRuntime::CStr
             | CTypeRuntime::StructPtr(_)
             | CTypeRuntime::ArrayPtr
-            | CTypeRuntime::FnPtr => {
-                *(result_ptr as *mut *mut u8) = value.as_ptr::<u8>()
-            }
+            | CTypeRuntime::FnPtr => *(result_ptr as *mut *mut u8) = value.as_ptr::<u8>(),
             CTypeRuntime::StructValue(_) => {
                 // Struct-by-value in callbacks not yet supported
                 panic!("StructValue not supported in callbacks - use StructPtr instead")
@@ -620,7 +618,11 @@ mod tests {
         let mut registry = TrampolineRegistry::new();
 
         let id = registry
-            .create_callback(CTypeRuntime::I32, vec![CTypeRuntime::I32, CTypeRuntime::I32], 42)
+            .create_callback(
+                CTypeRuntime::I32,
+                vec![CTypeRuntime::I32, CTypeRuntime::I32],
+                42,
+            )
             .unwrap();
 
         assert!(!registry.is_empty());
@@ -702,8 +704,7 @@ mod tests {
         let code_ptr = registry.get_code_ptr(id).unwrap();
 
         // Call the trampoline as a C function
-        let fn_ptr: extern "C" fn(i32, i32) -> i32 =
-            unsafe { std::mem::transmute(code_ptr) };
+        let fn_ptr: extern "C" fn(i32, i32) -> i32 = unsafe { std::mem::transmute(code_ptr) };
 
         let result = fn_ptr(10, 32);
         assert_eq!(result, 42);
@@ -721,7 +722,11 @@ mod tests {
         let mut registry = TrampolineRegistry::new();
         let result = registry.create_callback(
             CTypeRuntime::I32,
-            vec![CTypeRuntime::I32, CTypeRuntime::StructValue(7), CTypeRuntime::I32],
+            vec![
+                CTypeRuntime::I32,
+                CTypeRuntime::StructValue(7),
+                CTypeRuntime::I32,
+            ],
             42,
         );
         match result {
@@ -740,11 +745,8 @@ mod tests {
     #[test]
     fn rejects_struct_value_in_callback_return_type() {
         let mut registry = TrampolineRegistry::new();
-        let result = registry.create_callback(
-            CTypeRuntime::StructValue(3),
-            vec![CTypeRuntime::I32],
-            42,
-        );
+        let result =
+            registry.create_callback(CTypeRuntime::StructValue(3), vec![CTypeRuntime::I32], 42);
         match result {
             Err(FfiPlatformError::StructValueInCallback { position }) => {
                 assert_eq!(

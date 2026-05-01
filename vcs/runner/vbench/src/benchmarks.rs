@@ -96,7 +96,9 @@ unsafe impl<T: Send + Sync> Send for ThinRef<T> {}
 unsafe impl<T: Send + Sync> Sync for ThinRef<T> {}
 
 impl<T> Clone for ThinRef<T> {
-    fn clone(&self) -> Self { *self }
+    fn clone(&self) -> Self {
+        *self
+    }
 }
 impl<T> Copy for ThinRef<T> {}
 
@@ -150,7 +152,9 @@ unsafe impl<T: Send + Sync> Send for FatRef<T> {}
 unsafe impl<T: Send + Sync> Sync for FatRef<T> {}
 
 impl<T> Clone for FatRef<T> {
-    fn clone(&self) -> Self { *self }
+    fn clone(&self) -> Self {
+        *self
+    }
 }
 impl<T> Copy for FatRef<T> {}
 
@@ -230,18 +234,18 @@ pub fn run_cbgr_benchmarks() -> Vec<BenchmarkResult> {
             .bench_with_threshold("generation_check", TARGET_CBGR_CHECK_NS, move || {
                 std::hint::black_box(thin_ref.validate(std::hint::black_box(generation)));
             })
-            .bench_with_threshold("thin_ref_access", TARGET_CBGR_CHECK_NS, move || {
-                unsafe {
-                    std::hint::black_box(thin_ref.get(std::hint::black_box(generation)));
-                }
+            .bench_with_threshold("thin_ref_access", TARGET_CBGR_CHECK_NS, move || unsafe {
+                std::hint::black_box(thin_ref.get(std::hint::black_box(generation)));
             })
-            .bench_with_threshold("fat_ref_access", TARGET_CBGR_CHECK_NS + 5.0, move || {
-                unsafe {
+            .bench_with_threshold(
+                "fat_ref_access",
+                TARGET_CBGR_CHECK_NS + 5.0,
+                move || unsafe {
                     std::hint::black_box(
                         fat_ref.get(std::hint::black_box(generation), std::hint::black_box(5)),
                     );
-                }
-            })
+                },
+            )
             .bench_with_threshold("bounds_check", TARGET_CBGR_CHECK_NS, || {
                 // `SENTINEL_SLICE` is 'static, so the check is the bounds
                 // compare + indexed load — no per-iter array construction.

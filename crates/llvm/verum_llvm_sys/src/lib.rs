@@ -58,8 +58,8 @@
 #![allow(improper_ctypes)]
 #![allow(clippy::all)]
 
-pub mod llvm;
 pub mod lld;
+pub mod llvm;
 
 // Re-export commonly used types at crate root
 pub use llvm::*;

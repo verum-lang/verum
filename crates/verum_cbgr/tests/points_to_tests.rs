@@ -45,8 +45,10 @@ fn create_test_cfg() -> ControlFlowGraph {
         definitions: vec![DefSite {
             block: entry,
             reference: RefId(1),
-            is_stack_allocated: true, span: None,
-        }].into(),
+            is_stack_allocated: true,
+            span: None,
+        }]
+        .into(),
         uses: vec![].into(),
         call_sites: vec![].into(),
         has_await_point: false,
@@ -68,8 +70,10 @@ fn create_test_cfg() -> ControlFlowGraph {
         uses: vec![UseeSite {
             block: exit,
             reference: RefId(1),
-            is_mutable: false, span: None,
-        }].into(),
+            is_mutable: false,
+            span: None,
+        }]
+        .into(),
         call_sites: vec![].into(),
         has_await_point: false,
         is_exception_handler: false,
@@ -576,7 +580,8 @@ fn test_cfg_heap_allocation() {
             reference: RefId(1),
             is_stack_allocated: false, // HEAP!
             span: None,
-        }].into(),
+        }]
+        .into(),
         uses: vec![].into(),
         call_sites: vec![].into(),
         has_await_point: false,
@@ -614,14 +619,15 @@ fn test_cfg_heap_allocation() {
     // Find the location and check it's marked as heap
     // Since we have one allocation, we should have one location
     if let Maybe::Some(var) = graph.get_var_for_ref(RefId(1))
-        && let Maybe::Some(pts) = graph.get_points_to_set(var) {
-            // Check that at least one location is heap
-            let has_heap = pts
-                .locations
-                .iter()
-                .any(|&loc| graph.get_location_type(loc).is_heap());
-            assert!(has_heap || pts.conservative);
-        }
+        && let Maybe::Some(pts) = graph.get_points_to_set(var)
+    {
+        // Check that at least one location is heap
+        let has_heap = pts
+            .locations
+            .iter()
+            .any(|&loc| graph.get_location_type(loc).is_heap());
+        assert!(has_heap || pts.conservative);
+    }
 }
 
 // ==================================================================================

@@ -109,7 +109,8 @@ fn test_1_direct_drop_error() {
             StmtKind::Let {
                 pattern: Pattern::wildcard(test_span(1, 1)),
                 ty: None,
-                value: Some(expr(ExprKind::Call { type_args: vec![].into(),
+                value: Some(expr(ExprKind::Call {
+                    type_args: vec![].into(),
                     func: Box::new(expr(ExprKind::Path(Path::single(ident("risky"))))),
                     args: List::new(),
                 })),
@@ -153,7 +154,8 @@ fn test_2_try_operator_ok() {
             StmtKind::Let {
                 pattern: Pattern::ident(ident("x"), false, test_span(1, 1)),
                 ty: None,
-                value: Some(expr(ExprKind::Try(Box::new(expr(ExprKind::Call { type_args: vec![].into(),
+                value: Some(expr(ExprKind::Try(Box::new(expr(ExprKind::Call {
+                    type_args: vec![].into(),
                     func: Box::new(expr(ExprKind::Path(Path::single(ident("risky"))))),
                     args: List::new(),
                 }))))),
@@ -185,8 +187,10 @@ fn test_3_unwrap_ok() {
     let mut checker = FlowSensitiveChecker::new(registry);
 
     // Create expression: risky().unwrap()
-    let body = expr(ExprKind::MethodCall { type_args: vec![].into(),
-        receiver: Box::new(expr(ExprKind::Call { type_args: vec![].into(),
+    let body = expr(ExprKind::MethodCall {
+        type_args: vec![].into(),
+        receiver: Box::new(expr(ExprKind::Call {
+            type_args: vec![].into(),
             func: Box::new(expr(ExprKind::Path(Path::single(ident("risky"))))),
             args: List::new(),
         })),
@@ -214,7 +218,8 @@ fn test_4_match_ok() {
 
     // Create expression: match risky() { Ok(x) => ..., Err(e) => ... }
     let body = expr(ExprKind::Match {
-        expr: Box::new(expr(ExprKind::Call { type_args: vec![].into(),
+        expr: Box::new(expr(ExprKind::Call {
+            type_args: vec![].into(),
             func: Box::new(expr(ExprKind::Path(Path::single(ident("risky"))))),
             args: List::new(),
         })),
@@ -285,7 +290,8 @@ fn test_5_is_err_check_ok() {
                 StmtKind::Let {
                     pattern: Pattern::ident(ident("result"), false, test_span(1, 1)),
                     ty: None,
-                    value: Some(expr(ExprKind::Call { type_args: vec![].into(),
+                    value: Some(expr(ExprKind::Call {
+                        type_args: vec![].into(),
                         func: Box::new(expr(ExprKind::Path(Path::single(ident("risky"))))),
                         args: List::new(),
                     })),
@@ -294,7 +300,8 @@ fn test_5_is_err_check_ok() {
             ),
             Stmt::expr(
                 expr(ExprKind::If {
-                    condition: if_cond(expr(ExprKind::MethodCall { type_args: vec![].into(),
+                    condition: if_cond(expr(ExprKind::MethodCall {
+                        type_args: vec![].into(),
                         receiver: Box::new(expr(ExprKind::Path(Path::single(ident("result"))))),
                         method: ident("is_err"),
                         args: List::new(),
@@ -341,7 +348,8 @@ fn test_6_conditional_branches_both_handle() {
                 StmtKind::Let {
                     pattern: Pattern::ident(ident("result"), false, test_span(1, 1)),
                     ty: None,
-                    value: Some(expr(ExprKind::Call { type_args: vec![].into(),
+                    value: Some(expr(ExprKind::Call {
+                        type_args: vec![].into(),
                         func: Box::new(expr(ExprKind::Path(Path::single(ident("risky"))))),
                         args: List::new(),
                     })),
@@ -353,14 +361,16 @@ fn test_6_conditional_branches_both_handle() {
                     condition: if_cond(expr(ExprKind::Path(Path::single(ident("condition"))))),
                     then_branch: Block::new(
                         vec![].into(),
-                        Some(Box::new(expr(ExprKind::MethodCall { type_args: vec![].into(),
+                        Some(Box::new(expr(ExprKind::MethodCall {
+                            type_args: vec![].into(),
                             receiver: Box::new(expr(ExprKind::Path(Path::single(ident("result"))))),
                             method: ident("unwrap"),
                             args: List::new(),
                         }))),
                         test_span(1, 1),
                     ),
-                    else_branch: Some(Box::new(expr(ExprKind::MethodCall { type_args: vec![].into(),
+                    else_branch: Some(Box::new(expr(ExprKind::MethodCall {
+                        type_args: vec![].into(),
                         receiver: Box::new(expr(ExprKind::Path(Path::single(ident("result"))))),
                         method: ident("unwrap"),
                         args: List::new(),
@@ -404,7 +414,8 @@ fn test_7_conditional_branches_partial_handle() {
                 StmtKind::Let {
                     pattern: Pattern::ident(ident("result"), false, test_span(1, 1)),
                     ty: None,
-                    value: Some(expr(ExprKind::Call { type_args: vec![].into(),
+                    value: Some(expr(ExprKind::Call {
+                        type_args: vec![].into(),
                         func: Box::new(expr(ExprKind::Path(Path::single(ident("risky"))))),
                         args: List::new(),
                     })),
@@ -416,7 +427,8 @@ fn test_7_conditional_branches_partial_handle() {
                     condition: if_cond(expr(ExprKind::Path(Path::single(ident("condition"))))),
                     then_branch: Block::new(
                         vec![].into(),
-                        Some(Box::new(expr(ExprKind::MethodCall { type_args: vec![].into(),
+                        Some(Box::new(expr(ExprKind::MethodCall {
+                            type_args: vec![].into(),
                             receiver: Box::new(expr(ExprKind::Path(Path::single(ident("result"))))),
                             method: ident("unwrap"),
                             args: List::new(),
@@ -463,10 +475,13 @@ fn test_8_loop_with_early_return() {
                     StmtKind::Let {
                         pattern: Pattern::ident(ident("result"), false, test_span(1, 1)),
                         ty: verum_common::Maybe::None,
-                        value: verum_common::Maybe::Some(expr(ExprKind::Try(Box::new(expr(ExprKind::Call { type_args: vec![].into(),
-                            func: Box::new(expr(ExprKind::Path(Path::single(ident("risky"))))),
-                            args: List::new(),
-                        }))))),
+                        value: verum_common::Maybe::Some(expr(ExprKind::Try(Box::new(expr(
+                            ExprKind::Call {
+                                type_args: vec![].into(),
+                                func: Box::new(expr(ExprKind::Path(Path::single(ident("risky"))))),
+                                args: List::new(),
+                            },
+                        ))))),
                     },
                     test_span(1, 1),
                 ),
@@ -475,9 +490,11 @@ fn test_8_loop_with_early_return() {
                         condition: if_cond(expr(ExprKind::Path(Path::single(ident("done"))))),
                         then_branch: Block::new(
                             vec![].into(),
-                            verum_common::Maybe::Some(Box::new(expr(ExprKind::Return(verum_common::Maybe::Some(Box::new(expr(
-                                ExprKind::Path(Path::single(ident("Ok"))),
-                            ))))))),
+                            verum_common::Maybe::Some(Box::new(expr(ExprKind::Return(
+                                verum_common::Maybe::Some(Box::new(expr(ExprKind::Path(
+                                    Path::single(ident("Ok")),
+                                )))),
+                            )))),
                             test_span(1, 1),
                         ),
                         else_branch: verum_common::Maybe::None,
@@ -523,7 +540,8 @@ fn test_9_nested_scopes() {
                         StmtKind::Let {
                             pattern: Pattern::ident(ident("result"), false, test_span(1, 1)),
                             ty: None,
-                            value: Some(expr(ExprKind::Call { type_args: vec![].into(),
+                            value: Some(expr(ExprKind::Call {
+                                type_args: vec![].into(),
                                 func: Box::new(expr(ExprKind::Path(Path::single(ident("risky"))))),
                                 args: List::new(),
                             })),
@@ -531,7 +549,8 @@ fn test_9_nested_scopes() {
                         test_span(1, 1),
                     ),
                     Stmt::expr(
-                        expr(ExprKind::MethodCall { type_args: vec![].into(),
+                        expr(ExprKind::MethodCall {
+                            type_args: vec![].into(),
                             receiver: Box::new(expr(ExprKind::Path(Path::single(ident("result"))))),
                             method: ident("unwrap"),
                             args: List::new(),
@@ -579,7 +598,8 @@ fn test_10_multiple_results() {
                 StmtKind::Let {
                     pattern: Pattern::ident(ident("r1"), false, test_span(1, 1)),
                     ty: None,
-                    value: Some(expr(ExprKind::Call { type_args: vec![].into(),
+                    value: Some(expr(ExprKind::Call {
+                        type_args: vec![].into(),
                         func: Box::new(expr(ExprKind::Path(Path::single(ident("risky"))))),
                         args: List::new(),
                     })),
@@ -590,7 +610,8 @@ fn test_10_multiple_results() {
                 StmtKind::Let {
                     pattern: Pattern::ident(ident("r2"), false, test_span(1, 1)),
                     ty: None,
-                    value: Some(expr(ExprKind::Call { type_args: vec![].into(),
+                    value: Some(expr(ExprKind::Call {
+                        type_args: vec![].into(),
                         func: Box::new(expr(ExprKind::Path(Path::single(ident("risky"))))),
                         args: List::new(),
                     })),
@@ -598,7 +619,8 @@ fn test_10_multiple_results() {
                 test_span(1, 1),
             ),
             Stmt::expr(
-                expr(ExprKind::MethodCall { type_args: vec![].into(),
+                expr(ExprKind::MethodCall {
+                    type_args: vec![].into(),
                     receiver: Box::new(expr(ExprKind::Path(Path::single(ident("r1"))))),
                     method: ident("unwrap"),
                     args: List::new(),
@@ -606,7 +628,8 @@ fn test_10_multiple_results() {
                 false,
             ),
             Stmt::expr(
-                expr(ExprKind::MethodCall { type_args: vec![].into(),
+                expr(ExprKind::MethodCall {
+                    type_args: vec![].into(),
                     receiver: Box::new(expr(ExprKind::Path(Path::single(ident("r2"))))),
                     method: ident("unwrap"),
                     args: List::new(),
@@ -648,7 +671,8 @@ fn test_11_multiple_results_one_unhandled() {
                 StmtKind::Let {
                     pattern: Pattern::ident(ident("r1"), false, test_span(1, 1)),
                     ty: None,
-                    value: Some(expr(ExprKind::Call { type_args: vec![].into(),
+                    value: Some(expr(ExprKind::Call {
+                        type_args: vec![].into(),
                         func: Box::new(expr(ExprKind::Path(Path::single(ident("risky"))))),
                         args: List::new(),
                     })),
@@ -659,7 +683,8 @@ fn test_11_multiple_results_one_unhandled() {
                 StmtKind::Let {
                     pattern: Pattern::ident(ident("r2"), false, test_span(1, 1)),
                     ty: None,
-                    value: Some(expr(ExprKind::Call { type_args: vec![].into(),
+                    value: Some(expr(ExprKind::Call {
+                        type_args: vec![].into(),
                         func: Box::new(expr(ExprKind::Path(Path::single(ident("risky"))))),
                         args: List::new(),
                     })),
@@ -667,7 +692,8 @@ fn test_11_multiple_results_one_unhandled() {
                 test_span(1, 1),
             ),
             Stmt::expr(
-                expr(ExprKind::MethodCall { type_args: vec![].into(),
+                expr(ExprKind::MethodCall {
+                    type_args: vec![].into(),
                     receiver: Box::new(expr(ExprKind::Path(Path::single(ident("r1"))))),
                     method: ident("unwrap"),
                     args: List::new(),
@@ -698,8 +724,10 @@ fn test_12_expect_ok() {
 
     let mut checker = FlowSensitiveChecker::new(registry);
 
-    let body = expr(ExprKind::MethodCall { type_args: vec![].into(),
-        receiver: Box::new(expr(ExprKind::Call { type_args: vec![].into(),
+    let body = expr(ExprKind::MethodCall {
+        type_args: vec![].into(),
+        receiver: Box::new(expr(ExprKind::Call {
+            type_args: vec![].into(),
             func: Box::new(expr(ExprKind::Path(Path::single(ident("risky"))))),
             args: List::new(),
         })),
@@ -735,7 +763,8 @@ fn test_13_non_must_handle_result_ignored_ok() {
             StmtKind::Let {
                 pattern: Pattern::wildcard(test_span(1, 1)),
                 ty: None,
-                value: Some(expr(ExprKind::Call { type_args: vec![].into(),
+                value: Some(expr(ExprKind::Call {
+                    type_args: vec![].into(),
                     func: Box::new(expr(ExprKind::Path(Path::single(ident("regular"))))),
                     args: List::new(),
                 })),
@@ -841,7 +870,8 @@ fn test_16_if_let_ok_pattern() {
                     },
                     test_span(1, 1),
                 ),
-                value: expr(ExprKind::Call { type_args: vec![].into(),
+                value: expr(ExprKind::Call {
+                    type_args: vec![].into(),
                     func: Box::new(expr(ExprKind::Path(Path::single(ident("risky"))))),
                     args: List::new(),
                 }),
@@ -850,7 +880,8 @@ fn test_16_if_let_ok_pattern() {
         }),
         then_branch: Block::new(
             vec![].into(),
-            Some(Box::new(expr(ExprKind::Call { type_args: vec![].into(),
+            Some(Box::new(expr(ExprKind::Call {
+                type_args: vec![].into(),
                 func: Box::new(expr(ExprKind::Path(Path::single(ident("use"))))),
                 args: vec![expr(ExprKind::Path(Path::single(ident("x"))))].into(),
             }))),

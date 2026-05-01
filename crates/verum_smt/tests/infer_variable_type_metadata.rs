@@ -50,11 +50,7 @@ fn infers_type_from_registered_constructor_in_goal() {
     let mut engine = ProofSearchEngine::new();
     engine.register_variant_type(
         Text::from("Color"),
-        vec![
-            Text::from("Red"),
-            Text::from("Green"),
-            Text::from("Blue"),
-        ],
+        vec![Text::from("Red"), Text::from("Green"), Text::from("Blue")],
     );
 
     // Goal: c == Red
@@ -92,11 +88,7 @@ fn finds_constructor_in_hypothesis_when_goal_lacks_one_inner() {
 fn rejects_unregistered_variable_with_real_error() {
     let engine = ProofSearchEngine::new();
     // No variant types registered. Goal contains no constructor for x.
-    let goal_expr = binary(
-        BinOp::Eq,
-        ident_expr("x"),
-        ident_expr("y"),
-    );
+    let goal_expr = binary(BinOp::Eq, ident_expr("x"), ident_expr("y"));
     let goal = ProofGoal::with_hypotheses(goal_expr, List::new());
 
     let result = engine.infer_variable_type_for_test(&Text::from("x"), &goal);

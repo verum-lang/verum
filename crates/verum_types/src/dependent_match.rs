@@ -696,16 +696,9 @@ impl ConstructorRefinement {
             // least one side carries arguments. Bare-name Generic vs
             // bare-name Generic is conservatively not disjoint (could be
             // type variables).
-            (
-                Type::Generic {
-                    name: n1,
-                    args: a1,
-                },
-                Type::Generic {
-                    name: n2,
-                    args: a2,
-                },
-            ) => n1 != n2 && (!a1.is_empty() || !a2.is_empty()),
+            (Type::Generic { name: n1, args: a1 }, Type::Generic { name: n2, args: a2 }) => {
+                n1 != n2 && (!a1.is_empty() || !a2.is_empty())
+            }
 
             // All other combinations (primitives, variables, ...) are
             // conservatively *not proven disjoint*.
@@ -718,10 +711,7 @@ impl ConstructorRefinement {
     /// considered the enclosing type; only the head determines identity
     /// at the constructor level. This matches the behaviour expected by
     /// the `test_absurd_*` tests in `dependent_types_tests.rs`.
-    fn paths_are_disjoint_constructors(
-        p1: &verum_ast::ty::Path,
-        p2: &verum_ast::ty::Path,
-    ) -> bool {
+    fn paths_are_disjoint_constructors(p1: &verum_ast::ty::Path, p2: &verum_ast::ty::Path) -> bool {
         use verum_ast::ty::PathSegment;
         match (p1.segments.last(), p2.segments.last()) {
             (Some(PathSegment::Name(a)), Some(PathSegment::Name(b))) => a.name != b.name,
@@ -1322,8 +1312,12 @@ impl<'a> DependentPatternChecker<'a> {
         // Delegate to the unified dependent exhaustiveness checker
         use crate::exhaustiveness::check_exhaustiveness_unified;
 
-        let result =
-            check_exhaustiveness_unified(patterns, scrutinee_ty, self.env, self.inductive_constructors)?;
+        let result = check_exhaustiveness_unified(
+            patterns,
+            scrutinee_ty,
+            self.env,
+            self.inductive_constructors,
+        )?;
 
         if result.base.is_exhaustive {
             Ok(true)
@@ -1732,8 +1726,13 @@ impl<'a> DependentPatternChecker<'a> {
         // Use the unified dependent match checker for exhaustiveness
         use crate::exhaustiveness::check_dependent_match_unified;
 
-        let exhaustiveness_result =
-            check_dependent_match_unified(scrutinee_ty, result_ty, arms, self.env, self.inductive_constructors)?;
+        let exhaustiveness_result = check_dependent_match_unified(
+            scrutinee_ty,
+            result_ty,
+            arms,
+            self.env,
+            self.inductive_constructors,
+        )?;
 
         // Infer the motive (how result type depends on scrutinee)
         let motive = self.infer_motive(scrutinee_ty, result_ty)?;

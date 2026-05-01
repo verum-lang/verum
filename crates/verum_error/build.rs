@@ -8,7 +8,10 @@
 use std::process::Command;
 
 fn main() {
-    emit("VERUM_BUILD_PROFILE", std::env::var("PROFILE").unwrap_or_else(|_| "unknown".into()));
+    emit(
+        "VERUM_BUILD_PROFILE",
+        std::env::var("PROFILE").unwrap_or_else(|_| "unknown".into()),
+    );
     emit(
         "VERUM_BUILD_TARGET",
         std::env::var("TARGET").unwrap_or_else(|_| "unknown".into()),

@@ -1,18 +1,20 @@
 //! Control flow and logic operation handlers for VBC interpreter dispatch.
 
-use crate::value::Value;
 use super::super::super::error::InterpreterResult;
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::super::do_return;
 use super::bytecode_io::*;
 use super::string_helpers::deep_value_eq;
+use crate::value::Value;
 
 // ============================================================================
 // Handler Implementations - Logic Operations
 // ============================================================================
 
-pub(in super::super) fn handle_land(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_land(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -21,7 +23,9 @@ pub(in super::super) fn handle_land(state: &mut InterpreterState) -> Interpreter
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_lor(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_lor(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -30,7 +34,9 @@ pub(in super::super) fn handle_lor(state: &mut InterpreterState) -> InterpreterR
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_lnot(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_lnot(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let val = state.get_reg(src);
@@ -57,7 +63,9 @@ pub(in super::super) fn handle_lnot(state: &mut InterpreterState) -> Interpreter
 }
 
 /// Logical XOR: dst = a ^^ b
-pub(in super::super) fn handle_lxor(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_lxor(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -70,14 +78,18 @@ pub(in super::super) fn handle_lxor(state: &mut InterpreterState) -> Interpreter
 // Handler Implementations - Jump/Branch Instructions
 // ============================================================================
 
-pub(in super::super) fn handle_jump(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_jump(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let offset = read_signed_varint(state)? as i32;
     let new_pc = (state.pc() as i64 + offset as i64) as u32;
     state.set_pc(new_pc);
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_jump_if(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_jump_if(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let cond = read_reg(state)?;
     let offset = read_signed_varint(state)? as i32;
     if state.get_reg(cond).is_truthy() {
@@ -87,7 +99,9 @@ pub(in super::super) fn handle_jump_if(state: &mut InterpreterState) -> Interpre
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_jump_if_not(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_jump_if_not(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let cond = read_reg(state)?;
     let offset = read_signed_varint(state)? as i32;
     let cond_val = state.get_reg(cond);
@@ -99,7 +113,9 @@ pub(in super::super) fn handle_jump_if_not(state: &mut InterpreterState) -> Inte
 }
 
 /// Fused compare-and-jump: if a == b then jump
-pub(in super::super) fn handle_jump_eq(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_jump_eq(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let a = read_reg(state)?;
     let b = read_reg(state)?;
     let offset = read_signed_varint(state)? as i32;
@@ -114,7 +130,9 @@ pub(in super::super) fn handle_jump_eq(state: &mut InterpreterState) -> Interpre
 }
 
 /// Fused compare-and-jump: if a != b then jump
-pub(in super::super) fn handle_jump_ne(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_jump_ne(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let a = read_reg(state)?;
     let b = read_reg(state)?;
     let offset = read_signed_varint(state)? as i32;
@@ -129,7 +147,9 @@ pub(in super::super) fn handle_jump_ne(state: &mut InterpreterState) -> Interpre
 }
 
 /// Fused compare-and-jump: if a < b then jump
-pub(in super::super) fn handle_jump_lt(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_jump_lt(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let a = read_reg(state)?;
     let b = read_reg(state)?;
     let offset = read_signed_varint(state)? as i32;
@@ -143,7 +163,9 @@ pub(in super::super) fn handle_jump_lt(state: &mut InterpreterState) -> Interpre
 }
 
 /// Fused compare-and-jump: if a <= b then jump
-pub(in super::super) fn handle_jump_le(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_jump_le(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let a = read_reg(state)?;
     let b = read_reg(state)?;
     let offset = read_signed_varint(state)? as i32;
@@ -157,7 +179,9 @@ pub(in super::super) fn handle_jump_le(state: &mut InterpreterState) -> Interpre
 }
 
 /// Fused compare-and-jump: if a > b then jump
-pub(in super::super) fn handle_jump_gt(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_jump_gt(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let a = read_reg(state)?;
     let b = read_reg(state)?;
     let offset = read_signed_varint(state)? as i32;
@@ -171,7 +195,9 @@ pub(in super::super) fn handle_jump_gt(state: &mut InterpreterState) -> Interpre
 }
 
 /// Fused compare-and-jump: if a >= b then jump
-pub(in super::super) fn handle_jump_ge(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_jump_ge(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let a = read_reg(state)?;
     let b = read_reg(state)?;
     let offset = read_signed_varint(state)? as i32;
@@ -188,12 +214,16 @@ pub(in super::super) fn handle_jump_ge(state: &mut InterpreterState) -> Interpre
 // Handler Implementations - Return
 // ============================================================================
 
-pub(in super::super) fn handle_return(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_return(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let src = read_reg(state)?;
     let value = state.get_reg(src);
     do_return(state, value)
 }
 
-pub(in super::super) fn handle_return_unit(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_return_unit(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     do_return(state, Value::unit())
 }

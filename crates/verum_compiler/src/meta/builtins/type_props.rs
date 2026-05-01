@@ -58,11 +58,7 @@ use super::{ConstValue, MetaContext, MetaError};
 pub fn register_builtins(map: &mut BuiltinRegistry) {
     map.insert(
         Text::from("size_of"),
-        BuiltinInfo::meta_types(
-            meta_size_of,
-            "Get type size in bytes",
-            "(Type) -> Int",
-        ),
+        BuiltinInfo::meta_types(meta_size_of, "Get type size in bytes", "(Type) -> Int"),
     );
     map.insert(
         Text::from("align_of"),
@@ -82,11 +78,7 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
     );
     map.insert(
         Text::from("type_bits"),
-        BuiltinInfo::meta_types(
-            meta_type_bits,
-            "Get type size in bits",
-            "(Type) -> Int",
-        ),
+        BuiltinInfo::meta_types(meta_type_bits, "Get type size in bits", "(Type) -> Int"),
     );
     map.insert(
         Text::from("type_min"),
@@ -261,10 +253,10 @@ pub fn compute_type_size(ty: &TypeKind) -> Result<u64, MetaError> {
         // Primitives
         TypeKind::Unit | TypeKind::Never => Ok(0),
         TypeKind::Bool => Ok(1),
-        TypeKind::Char => Ok(4), // UTF-32 code point
-        TypeKind::Int => Ok(8),  // Default 64-bit
-        TypeKind::Float => Ok(8), // Default 64-bit
-        TypeKind::Text => Ok(24), // ptr + len + capacity
+        TypeKind::Char => Ok(4),    // UTF-32 code point
+        TypeKind::Int => Ok(8),     // Default 64-bit
+        TypeKind::Float => Ok(8),   // Default 64-bit
+        TypeKind::Text => Ok(24),   // ptr + len + capacity
         TypeKind::Unknown => Ok(0), // Unknown has no concrete size
 
         // References (CBGR: ThinRef = 16 bytes)
@@ -454,8 +446,7 @@ pub fn compute_type_alignment(ty: &TypeKind) -> Result<u64, MetaError> {
                 // Four-byte types align to 4
                 "U32" | "UInt32" | "I32" | "Int32" | "F32" | "Float32" => Ok(4),
                 // Eight-byte types align to 8
-                "U64" | "UInt64" | "I64" | "Int64" | "F64" | "Float64" |
-                "USize" | "ISize" => Ok(8),
+                "U64" | "UInt64" | "I64" | "Int64" | "F64" | "Float64" | "USize" | "ISize" => Ok(8),
                 // 16-byte types align to 16
                 "U128" | "UInt128" | "I128" | "Int128" => Ok(16),
 
@@ -465,7 +456,7 @@ pub fn compute_type_alignment(ty: &TypeKind) -> Result<u64, MetaError> {
                     name
                 )))),
             }
-        },
+        }
 
         // Refinement types (canonical)
         TypeKind::Refined { base, .. } => compute_type_alignment(&base.kind),
@@ -670,9 +661,7 @@ pub fn compute_type_name(ty: &TypeKind) -> Text {
             }
         }
 
-        TypeKind::Slice(inner) => {
-            Text::from(format!("[{}]", compute_type_name(&inner.kind)))
-        }
+        TypeKind::Slice(inner) => Text::from(format!("[{}]", compute_type_name(&inner.kind))),
 
         TypeKind::Reference { mutable, inner } => {
             if *mutable {
@@ -714,7 +703,11 @@ pub fn compute_type_name(ty: &TypeKind) -> Text {
             }
         }
 
-        TypeKind::Function { params, return_type, .. } => {
+        TypeKind::Function {
+            params,
+            return_type,
+            ..
+        } => {
             let param_names: Vec<String> = params
                 .iter()
                 .map(|p| compute_type_name(&p.kind).to_string())
@@ -805,10 +798,7 @@ mod tests {
     fn lit_int(n: i128) -> Expr {
         use verum_ast::span::Span;
         let span = Span::dummy();
-        Expr::new(
-            ExprKind::Literal(verum_ast::Literal::int(n, span)),
-            span,
-        )
+        Expr::new(ExprKind::Literal(verum_ast::Literal::int(n, span)), span)
     }
 
     fn array_kind_with_size(elem: TypeKind, size: Option<Expr>) -> TypeKind {
@@ -872,10 +862,7 @@ mod tests {
         // what hand-written sizes typically look like in the
         // AST before const-folding runs.
         use verum_ast::span::Span;
-        let paren = Expr::new(
-            ExprKind::Paren(Box::new(lit_int(4))),
-            Span::dummy(),
-        );
+        let paren = Expr::new(ExprKind::Paren(Box::new(lit_int(4))), Span::dummy());
         let ty = array_kind_with_size(TypeKind::Int, Some(paren));
         assert_eq!(compute_type_size(&ty).unwrap(), 32);
     }
@@ -889,10 +876,7 @@ mod tests {
         use verum_ast::span::Span;
         use verum_ast::ty::Path;
         let path_expr = Expr::new(
-            ExprKind::Path(Path::single(verum_ast::ty::Ident::new(
-                "N",
-                Span::dummy(),
-            ))),
+            ExprKind::Path(Path::single(verum_ast::ty::Ident::new("N", Span::dummy()))),
             Span::dummy(),
         );
         let ty = array_kind_with_size(TypeKind::Int, Some(path_expr));
@@ -912,10 +896,7 @@ mod tests {
         use verum_ast::span::Span;
         use verum_ast::ty::Path;
         let path_expr = Expr::new(
-            ExprKind::Path(Path::single(verum_ast::ty::Ident::new(
-                "N",
-                Span::dummy(),
-            ))),
+            ExprKind::Path(Path::single(verum_ast::ty::Ident::new("N", Span::dummy()))),
             Span::dummy(),
         );
         let ty = array_kind_with_size(TypeKind::Int, Some(path_expr));

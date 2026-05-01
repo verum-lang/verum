@@ -11,13 +11,15 @@ pub mod index;
 pub mod search;
 pub mod tutorials;
 
-pub use completions::{CompletionContext, CompletionItem, CompletionKind, CompletionProvider, InlineHelp, get_inline_help};
+pub use completions::{
+    CompletionContext, CompletionItem, CompletionKind, CompletionProvider, InlineHelp,
+    get_inline_help,
+};
 pub use docs::{DocEntry, DocKind};
 pub use examples::{Example, ExampleCategory};
 pub use index::{DiscoveryIndex, ModuleInfo, ModuleTree};
 pub use search::{SearchQuery, SearchResult};
 pub use tutorials::{
-    Tutorial, TutorialStep, Challenge, TestCase,
-    PlaybookTemplate, TemplateCell,
-    builtin_tutorials, builtin_challenges, builtin_templates,
+    Challenge, PlaybookTemplate, TemplateCell, TestCase, Tutorial, TutorialStep,
+    builtin_challenges, builtin_templates, builtin_tutorials,
 };

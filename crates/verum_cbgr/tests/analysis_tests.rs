@@ -956,7 +956,7 @@ fn test_path_sensitive_nested_conditionals() {
                 block: block_id,
                 reference: ref_id,
                 is_mutable: false,
-            span: None,
+                span: None,
             });
         }
     }
@@ -1446,10 +1446,13 @@ fn test_field_sensitive_enum_variant() {
     let analyzer = EscapeAnalyzer::new(cfg);
 
     // Create enum variant path
-    let variant_path = FieldPath::from_components(vec![FieldComponent::EnumVariant {
-        variant: "Some".into(),
-        field: 0,
-    }].into());
+    let variant_path = FieldPath::from_components(
+        vec![FieldComponent::EnumVariant {
+            variant: "Some".into(),
+            field: 0,
+        }]
+        .into(),
+    );
 
     assert_eq!(variant_path.len(), 1);
 
@@ -1875,7 +1878,7 @@ fn test_flows_to_heap_conservative() {
                 block: BlockId(1),
                 reference: ref_id,
                 is_mutable: i % 2 == 0,
-            span: None,
+                span: None,
             });
         }
     }
@@ -2708,7 +2711,7 @@ fn test_closure_escapes_via_heap() {
                 block: BlockId(1),
                 reference: ref_id,
                 is_mutable: i % 2 == 0,
-            span: None,
+                span: None,
             });
         }
     }

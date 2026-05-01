@@ -1,9 +1,9 @@
 //! Cell types for the playbook
 
-use std::time::Duration;
 use serde::{Deserialize, Serialize};
-use verum_common::Text;
+use std::time::Duration;
 use verum_ast::Span;
+use verum_common::Text;
 use verum_vbc::value::Value;
 
 /// Unique identifier for a cell

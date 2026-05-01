@@ -51,7 +51,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use verum_smt::{
-    Cvc5Backend, Cvc5Config, Cvc5Error, QuantifierMode, Cvc5SmtLogic,
+    Cvc5Backend, Cvc5Config, Cvc5Error, Cvc5SmtLogic, QuantifierMode,
     solver::{SmtBackend, SmtContext, SmtError, SmtResult, VerificationCondition},
     z3_backend::{AdvancedResult, Z3Config, Z3ContextManager, Z3Solver},
 };

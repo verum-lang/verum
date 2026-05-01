@@ -42,8 +42,8 @@ impl UniverseTier {
     pub fn as_str(&self) -> &'static str {
         match self {
             UniverseTier::Truncated => "truncated",
-            UniverseTier::Kappa1    => "κ_1",
-            UniverseTier::Kappa2    => "κ_2",
+            UniverseTier::Kappa1 => "κ_1",
+            UniverseTier::Kappa2 => "κ_2",
         }
     }
 
@@ -52,7 +52,7 @@ impl UniverseTier {
         match (self, other) {
             (UniverseTier::Truncated, UniverseTier::Kappa1)
             | (UniverseTier::Truncated, UniverseTier::Kappa2)
-            | (UniverseTier::Kappa1,    UniverseTier::Kappa2) => true,
+            | (UniverseTier::Kappa1, UniverseTier::Kappa2) => true,
             _ => false,
         }
     }
@@ -62,8 +62,8 @@ impl UniverseTier {
     pub fn succ(&self) -> Self {
         match self {
             UniverseTier::Truncated => UniverseTier::Kappa1,
-            UniverseTier::Kappa1    => UniverseTier::Kappa2,
-            UniverseTier::Kappa2    => UniverseTier::Kappa2,
+            UniverseTier::Kappa1 => UniverseTier::Kappa2,
+            UniverseTier::Kappa2 => UniverseTier::Kappa2,
         }
     }
 }
@@ -302,10 +302,11 @@ pub fn check_universe_ascent_v2(
     // decidable cases: only the {1, 2} domain has a structural
     // algorithm (Lemma 131.L1 + Lemma 131.L3 + Theorem 134.T tight
     // bound). Everything else needs the Drake-extended admit.
-    let is_v0_pair = matches!((s, t),
+    let is_v0_pair = matches!(
+        (s, t),
         (1, 2) |  // canonical ascent (Lemma 131.L1)
         (2, 2) |  // Drake reflection terminus (Lemma 131.L3)
-        (1, 1)    // κ_1 → κ_1 reflexive
+        (1, 1) // κ_1 → κ_1 reflexive
     );
     if is_v0_pair {
         return Ok(());
@@ -353,39 +354,54 @@ mod v2_tests {
 
     #[test]
     fn from_universe_tier_preserves_semantics() {
-        assert_eq!(KappaTier::from(UniverseTier::Truncated), KappaTier::Truncated);
-        assert_eq!(KappaTier::from(UniverseTier::Kappa1),    KappaTier::KappaN(1));
-        assert_eq!(KappaTier::from(UniverseTier::Kappa2),    KappaTier::KappaN(2));
+        assert_eq!(
+            KappaTier::from(UniverseTier::Truncated),
+            KappaTier::Truncated
+        );
+        assert_eq!(KappaTier::from(UniverseTier::Kappa1), KappaTier::KappaN(1));
+        assert_eq!(KappaTier::from(UniverseTier::Kappa2), KappaTier::KappaN(2));
     }
 
     #[test]
     fn v2_admits_v0_pairs_with_empty_audit() {
         let mut a = BridgeAudit::new();
         check_universe_ascent_v2(
-            KappaTier::KappaN(1), KappaTier::KappaN(2),
-            &mut a, "κ_1→κ_2"
-        ).unwrap();
+            KappaTier::KappaN(1),
+            KappaTier::KappaN(2),
+            &mut a,
+            "κ_1→κ_2",
+        )
+        .unwrap();
         assert!(a.is_decidable());
 
         let mut a = BridgeAudit::new();
         check_universe_ascent_v2(
-            KappaTier::KappaN(2), KappaTier::KappaN(2),
-            &mut a, "κ_2 Drake"
-        ).unwrap();
+            KappaTier::KappaN(2),
+            KappaTier::KappaN(2),
+            &mut a,
+            "κ_2 Drake",
+        )
+        .unwrap();
         assert!(a.is_decidable());
 
         let mut a = BridgeAudit::new();
         check_universe_ascent_v2(
-            KappaTier::KappaN(1), KappaTier::KappaN(1),
-            &mut a, "κ_1 reflexive"
-        ).unwrap();
+            KappaTier::KappaN(1),
+            KappaTier::KappaN(1),
+            &mut a,
+            "κ_1 reflexive",
+        )
+        .unwrap();
         assert!(a.is_decidable());
 
         let mut a = BridgeAudit::new();
         check_universe_ascent_v2(
-            KappaTier::Truncated, KappaTier::Truncated,
-            &mut a, "Truncated reflexive"
-        ).unwrap();
+            KappaTier::Truncated,
+            KappaTier::Truncated,
+            &mut a,
+            "Truncated reflexive",
+        )
+        .unwrap();
         assert!(a.is_decidable());
     }
 
@@ -394,12 +410,17 @@ mod v2_tests {
         // κ_3 → κ_3 — beyond Theorem 134.T's tight bound.
         let mut a = BridgeAudit::new();
         check_universe_ascent_v2(
-            KappaTier::KappaN(3), KappaTier::KappaN(3),
-            &mut a, "κ_3 reflexive"
-        ).unwrap();
+            KappaTier::KappaN(3),
+            KappaTier::KappaN(3),
+            &mut a,
+            "κ_3 reflexive",
+        )
+        .unwrap();
         assert_eq!(a.admits().len(), 1, "κ_3 → κ_3 must invoke Drake-extended");
-        assert_eq!(a.admits()[0].bridge,
-            crate::diakrisis_bridge::BridgeId::DrakeReflectionExtended);
+        assert_eq!(
+            a.admits()[0].bridge,
+            crate::diakrisis_bridge::BridgeId::DrakeReflectionExtended
+        );
     }
 
     #[test]
@@ -407,9 +428,12 @@ mod v2_tests {
         // κ_1 → κ_3 — multi-step (skips κ_2). admits via 131.L4.
         let mut a = BridgeAudit::new();
         check_universe_ascent_v2(
-            KappaTier::KappaN(1), KappaTier::KappaN(3),
-            &mut a, "κ_1→κ_3 multi-step"
-        ).unwrap();
+            KappaTier::KappaN(1),
+            KappaTier::KappaN(3),
+            &mut a,
+            "κ_1→κ_3 multi-step",
+        )
+        .unwrap();
         assert_eq!(a.admits().len(), 1);
     }
 
@@ -418,9 +442,12 @@ mod v2_tests {
         // κ_2 → κ_1 — must reject.
         let mut a = BridgeAudit::new();
         let err = check_universe_ascent_v2(
-            KappaTier::KappaN(2), KappaTier::KappaN(1),
-            &mut a, "κ_2 → κ_1 inversion"
-        ).unwrap_err();
+            KappaTier::KappaN(2),
+            KappaTier::KappaN(1),
+            &mut a,
+            "κ_2 → κ_1 inversion",
+        )
+        .unwrap_err();
         assert!(matches!(err, KernelError::UniverseAscentInvalid { .. }));
     }
 
@@ -429,9 +456,12 @@ mod v2_tests {
         // κ_5 → κ_3 — inversion at extended levels too.
         let mut a = BridgeAudit::new();
         let err = check_universe_ascent_v2(
-            KappaTier::KappaN(5), KappaTier::KappaN(3),
-            &mut a, "κ_5 → κ_3 inversion"
-        ).unwrap_err();
+            KappaTier::KappaN(5),
+            KappaTier::KappaN(3),
+            &mut a,
+            "κ_5 → κ_3 inversion",
+        )
+        .unwrap_err();
         assert!(matches!(err, KernelError::UniverseAscentInvalid { .. }));
     }
 
@@ -440,9 +470,12 @@ mod v2_tests {
         // Truncated → κ_1 is REJECTED (the user must lift first).
         let mut a = BridgeAudit::new();
         let err = check_universe_ascent_v2(
-            KappaTier::Truncated, KappaTier::KappaN(1),
-            &mut a, "Trunc → κ_1"
-        ).unwrap_err();
+            KappaTier::Truncated,
+            KappaTier::KappaN(1),
+            &mut a,
+            "Trunc → κ_1",
+        )
+        .unwrap_err();
         assert!(matches!(err, KernelError::UniverseAscentInvalid { .. }));
     }
 
@@ -450,9 +483,12 @@ mod v2_tests {
     fn v2_rejects_kappa_to_truncated() {
         let mut a = BridgeAudit::new();
         let err = check_universe_ascent_v2(
-            KappaTier::KappaN(1), KappaTier::Truncated,
-            &mut a, "κ_1 → Trunc"
-        ).unwrap_err();
+            KappaTier::KappaN(1),
+            KappaTier::Truncated,
+            &mut a,
+            "κ_1 → Trunc",
+        )
+        .unwrap_err();
         assert!(matches!(err, KernelError::UniverseAscentInvalid { .. }));
     }
 
@@ -516,7 +552,8 @@ mod v2_tests {
                 a.lt(b),
                 a.to_ordinal().lt(&b.to_ordinal()),
                 "KappaTier::lt and Ordinal::lt disagree on ({:?}, {:?})",
-                a, b
+                a,
+                b
             );
         }
     }

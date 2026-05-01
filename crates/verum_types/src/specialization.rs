@@ -629,8 +629,10 @@ impl OverlapDetector {
     /// This prevents false-positive overlap errors when a valid specialization exists.
     fn has_specialization_relationship(&self, impl1: &ProtocolImpl, impl2: &ProtocolImpl) -> bool {
         // Check if either impl explicitly declares specialization
-        let impl1_specializes = matches!(&impl1.specialization, Maybe::Some(spec) if spec.is_specialized);
-        let impl2_specializes = matches!(&impl2.specialization, Maybe::Some(spec) if spec.is_specialized);
+        let impl1_specializes =
+            matches!(&impl1.specialization, Maybe::Some(spec) if spec.is_specialized);
+        let impl2_specializes =
+            matches!(&impl2.specialization, Maybe::Some(spec) if spec.is_specialized);
 
         if impl1_specializes || impl2_specializes {
             // At least one declares specialization - verify the relationship is valid
@@ -655,22 +657,49 @@ impl OverlapDetector {
     fn type_specificity_score(&self, ty: &Type) -> usize {
         match ty {
             // Concrete types are maximally specific
-            Type::Unit | Type::Bool | Type::Int | Type::Float | Type::Char | Type::Text
+            Type::Unit
+            | Type::Bool
+            | Type::Int
+            | Type::Float
+            | Type::Char
+            | Type::Text
             | Type::Never => 10,
 
             // Named types: specific + score of args
-            Type::Named { args, .. } => 5 + args.iter().map(|a| self.type_specificity_score(a)).sum::<usize>(),
+            Type::Named { args, .. } => {
+                5 + args
+                    .iter()
+                    .map(|a| self.type_specificity_score(a))
+                    .sum::<usize>()
+            }
 
             // Generic types: somewhat specific
-            Type::Generic { args, .. } => 3 + args.iter().map(|a| self.type_specificity_score(a)).sum::<usize>(),
+            Type::Generic { args, .. } => {
+                3 + args
+                    .iter()
+                    .map(|a| self.type_specificity_score(a))
+                    .sum::<usize>()
+            }
 
             // Type variables are least specific
             Type::Var(_) => 0,
 
             // Compound types: sum of components
-            Type::Tuple(elems) => 2 + elems.iter().map(|e| self.type_specificity_score(e)).sum::<usize>(),
-            Type::Function { params, return_type, .. } => {
-                2 + params.iter().map(|p| self.type_specificity_score(p)).sum::<usize>()
+            Type::Tuple(elems) => {
+                2 + elems
+                    .iter()
+                    .map(|e| self.type_specificity_score(e))
+                    .sum::<usize>()
+            }
+            Type::Function {
+                params,
+                return_type,
+                ..
+            } => {
+                2 + params
+                    .iter()
+                    .map(|p| self.type_specificity_score(p))
+                    .sum::<usize>()
                     + self.type_specificity_score(return_type)
             }
             Type::Array { element, .. } => 2 + self.type_specificity_score(element),
@@ -897,19 +926,16 @@ impl SpecializationValidator {
                     name: n2,
                     args: args2,
                 },
-            ) if n1 == n2 => {
-                args1
-                    .iter()
-                    .zip(args2.iter())
-                    .any(|(a1, a2)| self.is_more_specific(a1, a2))
-            }
+            ) if n1 == n2 => args1
+                .iter()
+                .zip(args2.iter())
+                .any(|(a1, a2)| self.is_more_specific(a1, a2)),
 
             // Tuple types
-            (Type::Tuple(t1), Type::Tuple(t2)) if t1.len() == t2.len() => {
-                t1.iter()
-                    .zip(t2.iter())
-                    .any(|(a, b)| self.is_more_specific(a, b))
-            }
+            (Type::Tuple(t1), Type::Tuple(t2)) if t1.len() == t2.len() => t1
+                .iter()
+                .zip(t2.iter())
+                .any(|(a, b)| self.is_more_specific(a, b)),
 
             // Equal types are not more specific
             _ => false,
@@ -1013,8 +1039,7 @@ impl SpecializationValidator {
                     args: args2,
                 },
             ) => {
-                Type::canonical_primitive(n1.as_str())
-                    == Type::canonical_primitive(n2.as_str())
+                Type::canonical_primitive(n1.as_str()) == Type::canonical_primitive(n2.as_str())
                     && args1.len() == args2.len()
                     && args1
                         .iter()

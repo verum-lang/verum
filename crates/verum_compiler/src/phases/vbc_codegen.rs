@@ -44,8 +44,7 @@
 use std::time::{Duration, Instant};
 
 use super::{
-    CompilationPhase, PhaseData, PhaseInput, PhaseMetrics, PhaseOutput, VbcModuleData,
-    VbcTierStats,
+    CompilationPhase, PhaseData, PhaseInput, PhaseMetrics, PhaseOutput, VbcModuleData, VbcTierStats,
 };
 use verum_ast::Module;
 use verum_cbgr::tier_analysis::TierAnalysisConfig;
@@ -208,10 +207,8 @@ impl VbcCodegenPhase {
 
         for (_func_id, func_cfg) in sorted_funcs {
             // Create analyzer for this function's CFG
-            let analyzer = TierAnalyzer::with_config(
-                func_cfg.cfg.clone(),
-                self.tier_config.clone(),
-            );
+            let analyzer =
+                TierAnalyzer::with_config(func_cfg.cfg.clone(), self.tier_config.clone());
 
             // Run 9-phase analysis (escape, dominance, ownership, concurrency,
             // lifetime, NLL, tier determination, cross-function, final)
@@ -268,10 +265,10 @@ impl CompilationPhase for VbcCodegenPhase {
                     .message("VBC codegen phase requires AST modules as input")
                     .build();
                 return Err({
-                let mut list = List::new();
-                list.push(diagnostic);
-                list
-            });
+                    let mut list = List::new();
+                    list.push(diagnostic);
+                    list
+                });
             }
         };
 

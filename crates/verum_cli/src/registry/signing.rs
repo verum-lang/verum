@@ -74,10 +74,7 @@ impl CogSigner {
     }
 
     /// Verify package signature
-    pub fn verify_signature(
-        cog_path: &Path,
-        signature_data: &CogSignature,
-    ) -> Result<bool> {
+    pub fn verify_signature(cog_path: &Path, signature_data: &CogSignature) -> Result<bool> {
         // Read package file
         let package_bytes = std::fs::read(cog_path)?;
 

@@ -69,7 +69,11 @@ public fn main() -> Int { 0 }
         ],
         &dir,
     );
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(out_path.exists(), "main certificate must be written");
     let sidecar = dir.join("out.lean.provenance.json");
     assert!(
@@ -102,16 +106,44 @@ public fn main() -> Int { 0 }
         ],
         &dir,
     );
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let sidecar_path = dir.join("out.lean.provenance.json");
     assert!(sidecar_path.exists(), "sidecar must exist");
     let body = fs::read_to_string(&sidecar_path).expect("read sidecar");
-    assert!(body.contains("\"schema_version\": 1"), "schema_version: {}", body);
-    assert!(body.contains("\"target_format\": \"lean\""), "target_format: {}", body);
-    assert!(body.contains("\"discharge_strategy\": \"statement_only\""), "discharge: {}", body);
-    assert!(body.contains("\"obligation_hash\": null"), "obligation_hash V2.1 slot must be null: {}", body);
-    assert!(body.contains("\"proof_term\": null"), "proof_term V2.1 slot must be null: {}", body);
-    assert!(body.contains("\"name\": \"yoneda\""), "yoneda missing: {}", body);
+    assert!(
+        body.contains("\"schema_version\": 1"),
+        "schema_version: {}",
+        body
+    );
+    assert!(
+        body.contains("\"target_format\": \"lean\""),
+        "target_format: {}",
+        body
+    );
+    assert!(
+        body.contains("\"discharge_strategy\": \"statement_only\""),
+        "discharge: {}",
+        body
+    );
+    assert!(
+        body.contains("\"obligation_hash\": null"),
+        "obligation_hash V2.1 slot must be null: {}",
+        body
+    );
+    assert!(
+        body.contains("\"proof_term\": null"),
+        "proof_term V2.1 slot must be null: {}",
+        body
+    );
+    assert!(
+        body.contains("\"name\": \"yoneda\""),
+        "yoneda missing: {}",
+        body
+    );
     assert!(
         body.contains("\"framework_name\": \"lurie_htt\""),
         "framework attr missing: {}",
@@ -144,7 +176,11 @@ public fn main() -> Int { 0 }
         ],
         &dir,
     );
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let sidecar = fs::read_to_string(dir.join("out.coq.provenance.json")).expect("read");
     assert!(
         sidecar.contains("\"framework_name\": null"),
@@ -174,7 +210,11 @@ public fn main() -> Int { 0 }
         ],
         &dir,
     );
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let sidecar = dir.join("out.dk.provenance.json");
     assert!(sidecar.exists(), "alias must emit sidecar");
     let body = fs::read_to_string(&sidecar).unwrap();

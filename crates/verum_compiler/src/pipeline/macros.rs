@@ -29,9 +29,9 @@
 use anyhow::Result;
 use tracing::debug;
 
-use verum_ast::visitor::{Visitor, walk_expr};
 use verum_ast::Item;
 use verum_ast::Span;
+use verum_ast::visitor::{Visitor, walk_expr};
 use verum_common::{List, Maybe, Text};
 
 use crate::meta::MetaRegistry;
@@ -82,10 +82,12 @@ impl<'a> MacroExpander<'a> {
         let module_path_std = Text::from(self.module_path.as_str());
         let macro_name_text = Text::from(invocation.macro_name.as_str());
 
-
         // Try to resolve as a user-defined meta function first (@meta_name())
         // This handles functions declared with `meta fn name() -> TokenStream { ... }`
-        if let Some(meta_fn) = self.registry.resolve_meta_call(&module_path_std, &macro_name_text) {
+        if let Some(meta_fn) = self
+            .registry
+            .resolve_meta_call(&module_path_std, &macro_name_text)
+        {
             debug!(
                 "Expanding user-defined meta function '@{}'",
                 invocation.macro_name.as_str()
@@ -96,7 +98,8 @@ impl<'a> MacroExpander<'a> {
                 InvocationArgs::MetaArgs(exprs) => {
                     // Meta function calls have parsed expressions as arguments
                     // For now, we convert them to ConstValue::Expr for the meta function to use
-                    exprs.iter()
+                    exprs
+                        .iter()
                         .map(|e| ConstValue::Expr(e.clone()))
                         .collect::<Vec<_>>()
                 }
@@ -110,9 +113,7 @@ impl<'a> MacroExpander<'a> {
             let result = self
                 .context
                 .execute_user_meta_fn(&meta_fn, args)
-                .map_err(|e| {
-                    anyhow::anyhow!("Meta function execution failed: {}", e)
-                })?;
+                .map_err(|e| anyhow::anyhow!("Meta function execution failed: {}", e))?;
 
             // For expression-level meta functions, just return empty items
             // The expansion should happen inline where the expression was

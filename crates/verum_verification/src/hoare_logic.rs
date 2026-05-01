@@ -2649,13 +2649,18 @@ impl HoareLogic {
             PatternKind::Rest => {
                 // Rest pattern: represents remaining elements
                 Ok(Variable::new(format!("rest_{}", self.fresh_id())))
-            }            PatternKind::View { .. } => {
+            }
+            PatternKind::View { .. } => {
                 // View pattern: use the inner pattern
                 Ok(Variable::new(format!("view_{}", self.fresh_id())))
             }
             PatternKind::Active { name, .. } => {
                 // Active pattern: use the pattern name
-                Ok(Variable::new(format!("active_{}_{}", name.name, self.fresh_id())))
+                Ok(Variable::new(format!(
+                    "active_{}_{}",
+                    name.name,
+                    self.fresh_id()
+                )))
             }
             PatternKind::And(patterns) => {
                 // And pattern: use first pattern's variable
@@ -2670,7 +2675,10 @@ impl HoareLogic {
                 // Returns a variable for the binding name (with narrowed type)
                 Ok(Variable::new(binding.name.to_string()))
             }
-            PatternKind::Stream { head_patterns, rest } => {
+            PatternKind::Stream {
+                head_patterns,
+                rest,
+            } => {
                 // Stream pattern: stream[first, second, ...rest]
                 // Return variable from first head pattern or rest binding
                 if let Some(first) = head_patterns.first() {
@@ -2687,9 +2695,7 @@ impl HoareLogic {
                 // Return the variable from the inner pattern
                 self.pattern_to_variable(pattern)
             }
-            PatternKind::Cons { head, .. } => {
-                self.pattern_to_variable(head)
-            }
+            PatternKind::Cons { head, .. } => self.pattern_to_variable(head),
         }
     }
 
@@ -2989,16 +2995,15 @@ impl HoareLogic {
                 let type_name = format!("{:?}", test_type.kind);
                 Ok(Formula::Predicate(
                     Text::from("has_type"),
-                    vec![
-                        scrutinee.clone(),
-                        SmtExpr::var(type_name),
-                    ]
-                    .into(),
+                    vec![scrutinee.clone(), SmtExpr::var(type_name)].into(),
                 ))
             }
 
             // Stream pattern - check length and head element patterns
-            PatternKind::Stream { head_patterns, rest } => {
+            PatternKind::Stream {
+                head_patterns,
+                rest,
+            } => {
                 // Stream patterns consume elements from an iterator
                 // For verification, we check:
                 // 1. Stream has at least len(head_patterns) elements

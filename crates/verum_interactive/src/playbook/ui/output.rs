@@ -10,9 +10,9 @@
 //! - Stream output (stdout/stderr)
 //! - Timing information
 
+use crate::playbook::session::CellOutput;
 use ratatui::prelude::*;
 use ratatui::widgets::{Paragraph, Widget};
-use crate::playbook::session::CellOutput;
 
 /// Widget for displaying cell output
 pub struct OutputWidget<'a> {
@@ -38,7 +38,9 @@ impl<'a> OutputWidget<'a> {
     /// Format a single output to lines
     fn format_output(output: &CellOutput) -> Vec<Line<'static>> {
         match output {
-            CellOutput::Value { repr, type_info, .. } => {
+            CellOutput::Value {
+                repr, type_info, ..
+            } => {
                 vec![Line::from(vec![
                     Span::styled("→ ", Style::default().fg(Color::Green)),
                     Span::styled(repr.to_string(), Style::default().fg(Color::White)),
@@ -46,14 +48,23 @@ impl<'a> OutputWidget<'a> {
                     Span::styled(type_info.to_string(), Style::default().fg(Color::Cyan)),
                 ])]
             }
-            CellOutput::Tensor { shape, dtype, preview, stats } => {
+            CellOutput::Tensor {
+                shape,
+                dtype,
+                preview,
+                stats,
+            } => {
                 let mut lines = vec![];
 
                 // Shape and type header
-                let shape_str = format!("[{}]", shape.iter()
-                    .map(|d| d.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", "));
+                let shape_str = format!(
+                    "[{}]",
+                    shape
+                        .iter()
+                        .map(|d| d.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
                 lines.push(Line::from(vec![
                     Span::styled("→ Tensor<", Style::default().fg(Color::Cyan)),
                     Span::styled(dtype.to_string(), Style::default().fg(Color::Yellow)),
@@ -121,10 +132,18 @@ impl<'a> OutputWidget<'a> {
                     ]));
                 }
 
-                lines.push(Line::from(Span::styled("}", Style::default().fg(Color::DarkGray))));
+                lines.push(Line::from(Span::styled(
+                    "}",
+                    Style::default().fg(Color::DarkGray),
+                )));
                 lines
             }
-            CellOutput::Collection { len, element_type, preview, truncated } => {
+            CellOutput::Collection {
+                len,
+                element_type,
+                preview,
+                truncated,
+            } => {
                 let mut lines = vec![];
 
                 // Header with length and type
@@ -157,7 +176,11 @@ impl<'a> OutputWidget<'a> {
 
                 lines
             }
-            CellOutput::Error { message, suggestions, .. } => {
+            CellOutput::Error {
+                message,
+                suggestions,
+                ..
+            } => {
                 let mut lines = vec![Line::from(vec![
                     Span::styled("✗ ", Style::default().fg(Color::Red).bold()),
                     Span::styled(message.to_string(), Style::default().fg(Color::Red)),
@@ -181,10 +204,7 @@ impl<'a> OutputWidget<'a> {
                     for line in stdout.as_str().lines() {
                         lines.push(Line::from(vec![
                             Span::styled("│ ", Style::default().fg(Color::DarkGray)),
-                            Span::styled(
-                                line.to_string(),
-                                Style::default().fg(Color::Green),
-                            ),
+                            Span::styled(line.to_string(), Style::default().fg(Color::Green)),
                         ]));
                     }
                 }
@@ -194,17 +214,17 @@ impl<'a> OutputWidget<'a> {
                     for line in stderr.as_str().lines() {
                         lines.push(Line::from(vec![
                             Span::styled("│ ", Style::default().fg(Color::DarkGray)),
-                            Span::styled(
-                                line.to_string(),
-                                Style::default().fg(Color::Red),
-                            ),
+                            Span::styled(line.to_string(), Style::default().fg(Color::Red)),
                         ]));
                     }
                 }
 
                 lines
             }
-            CellOutput::Timing { compile_time_ms, execution_time_ms } => {
+            CellOutput::Timing {
+                compile_time_ms,
+                execution_time_ms,
+            } => {
                 let time_str = if *execution_time_ms == 0 {
                     "< 1ms".to_string()
                 } else if *execution_time_ms > 1000 {
@@ -214,7 +234,9 @@ impl<'a> OutputWidget<'a> {
                 };
                 vec![Line::from(Span::styled(
                     format!("⏱ {}", time_str),
-                    Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+                    Style::default()
+                        .fg(Color::DarkGray)
+                        .add_modifier(Modifier::ITALIC),
                 ))]
             }
             CellOutput::Multi { outputs } => {
@@ -234,16 +256,22 @@ fn format_value_brief(output: &CellOutput) -> String {
     match output {
         CellOutput::Value { repr, .. } => repr.to_string(),
         CellOutput::Tensor { shape, dtype, .. } => {
-            let shape_str = format!("[{}]", shape.iter()
-                .map(|d| d.to_string())
-                .collect::<Vec<_>>()
-                .join(", "));
+            let shape_str = format!(
+                "[{}]",
+                shape
+                    .iter()
+                    .map(|d| d.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
             format!("Tensor<{}, {}>", dtype, shape_str)
         }
         CellOutput::Structured { type_name, fields } => {
             format!("{} {{ {} fields }}", type_name, fields.len())
         }
-        CellOutput::Collection { len, element_type, .. } => {
+        CellOutput::Collection {
+            len, element_type, ..
+        } => {
             format!("[{} × {}]", len, element_type)
         }
         CellOutput::Error { message, .. } => format!("Error: {}", message),
@@ -259,7 +287,9 @@ fn format_value_brief(output: &CellOutput) -> String {
                 preview.to_string()
             }
         }
-        CellOutput::Timing { execution_time_ms, .. } => format!("({}ms)", execution_time_ms),
+        CellOutput::Timing {
+            execution_time_ms, ..
+        } => format!("({}ms)", execution_time_ms),
         CellOutput::Multi { outputs } => format!("[{} outputs]", outputs.len()),
         CellOutput::Empty => "()".to_string(),
     }
@@ -275,7 +305,10 @@ impl<'a> Widget for OutputWidget<'a> {
 
         // Truncate if too many lines
         let display_lines: Vec<Line> = if lines.len() > self.max_lines {
-            let mut truncated = lines.into_iter().take(self.max_lines - 1).collect::<Vec<_>>();
+            let mut truncated = lines
+                .into_iter()
+                .take(self.max_lines - 1)
+                .collect::<Vec<_>>();
             truncated.push(Line::from(Span::styled(
                 "... (output truncated)",
                 Style::default().fg(Color::DarkGray),
@@ -320,9 +353,9 @@ pub fn output_height(output: &CellOutput) -> usize {
             height
         }
         CellOutput::Structured { fields, .. } => 2 + fields.len(), // header + fields + closing
-        CellOutput::Collection { preview, truncated, .. } => {
-            1 + preview.len() + if *truncated { 1 } else { 0 }
-        }
+        CellOutput::Collection {
+            preview, truncated, ..
+        } => 1 + preview.len() + if *truncated { 1 } else { 0 },
         CellOutput::Error { suggestions, .. } => 1 + suggestions.len(),
         CellOutput::Stream { stdout, stderr } => {
             stdout.as_str().lines().count() + stderr.as_str().lines().count()

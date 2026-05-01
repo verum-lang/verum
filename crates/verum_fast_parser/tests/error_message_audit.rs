@@ -16,8 +16,8 @@
 // Tests various error scenarios to ensure helpful diagnostics
 
 use verum_ast::FileId;
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 #[derive(Debug)]
 struct ErrorTest {
@@ -280,7 +280,11 @@ fn parse_and_get_error(source: &str) -> String {
     let result = parser.parse_module(lexer, file_id);
     match result {
         Err(errors) => {
-            assert!(!errors.is_empty(), "Expected at least one error for: {}", source);
+            assert!(
+                !errors.is_empty(),
+                "Expected at least one error for: {}",
+                source
+            );
             let error = &errors[0];
             let mut msg = format!("{}", error);
             if let Some(help) = &error.help {
@@ -297,11 +301,13 @@ fn test_rust_struct_suggests_type_is() {
     let msg = parse_and_get_error("struct Point { x: Int, y: Int }");
     assert!(
         msg.contains("not a Verum keyword"),
-        "Should mention 'not a Verum keyword', got: {}", msg
+        "Should mention 'not a Verum keyword', got: {}",
+        msg
     );
     assert!(
         msg.contains("type Name is"),
-        "Should suggest 'type Name is {{ ... }}', got: {}", msg
+        "Should suggest 'type Name is {{ ... }}', got: {}",
+        msg
     );
 }
 
@@ -310,11 +316,13 @@ fn test_rust_enum_suggests_type_is() {
     let msg = parse_and_get_error("enum Color { Red, Green, Blue }");
     assert!(
         msg.contains("not a Verum keyword"),
-        "Should mention 'not a Verum keyword', got: {}", msg
+        "Should mention 'not a Verum keyword', got: {}",
+        msg
     );
     assert!(
         msg.contains("type Name is A | B"),
-        "Should suggest variant syntax, got: {}", msg
+        "Should suggest variant syntax, got: {}",
+        msg
     );
 }
 
@@ -323,11 +331,13 @@ fn test_rust_trait_suggests_protocol() {
     let msg = parse_and_get_error("trait Display { fn fmt(&self) -> Text; }");
     assert!(
         msg.contains("not a Verum keyword"),
-        "Should mention 'not a Verum keyword', got: {}", msg
+        "Should mention 'not a Verum keyword', got: {}",
+        msg
     );
     assert!(
         msg.contains("protocol"),
-        "Should suggest 'type Name is protocol {{ ... }}', got: {}", msg
+        "Should suggest 'type Name is protocol {{ ... }}', got: {}",
+        msg
     );
 }
 
@@ -336,11 +346,13 @@ fn test_rust_impl_suggests_implement() {
     let msg = parse_and_get_error("impl Display for Point { }");
     assert!(
         msg.contains("not a Verum keyword"),
-        "Should mention 'not a Verum keyword', got: {}", msg
+        "Should mention 'not a Verum keyword', got: {}",
+        msg
     );
     assert!(
         msg.contains("implement"),
-        "Should suggest 'implement', got: {}", msg
+        "Should suggest 'implement', got: {}",
+        msg
     );
 }
 
@@ -349,11 +361,13 @@ fn test_rust_use_suggests_mount() {
     let msg = parse_and_get_error("use std::collections::HashMap;");
     assert!(
         msg.contains("not a Verum keyword"),
-        "Should mention 'not a Verum keyword', got: {}", msg
+        "Should mention 'not a Verum keyword', got: {}",
+        msg
     );
     assert!(
         msg.contains("mount"),
-        "Should suggest 'mount', got: {}", msg
+        "Should suggest 'mount', got: {}",
+        msg
     );
 }
 
@@ -362,11 +376,13 @@ fn test_rust_mod_suggests_module() {
     let msg = parse_and_get_error("mod tests { }");
     assert!(
         msg.contains("not a Verum keyword"),
-        "Should mention 'not a Verum keyword', got: {}", msg
+        "Should mention 'not a Verum keyword', got: {}",
+        msg
     );
     assert!(
         msg.contains("module"),
-        "Should suggest 'module', got: {}", msg
+        "Should suggest 'module', got: {}",
+        msg
     );
 }
 
@@ -375,7 +391,8 @@ fn test_rust_println_macro_suggests_print() {
     let msg = parse_and_get_error("fn main() { println!(\"hello\"); }");
     assert!(
         msg.contains("Rust macro syntax") || msg.contains("print("),
-        "Should detect println! as Rust macro, got: {}", msg
+        "Should detect println! as Rust macro, got: {}",
+        msg
     );
 }
 
@@ -384,7 +401,8 @@ fn test_rust_vec_macro_suggests_list() {
     let msg = parse_and_get_error("fn main() { let x = vec![1, 2, 3]; }");
     assert!(
         msg.contains("Rust macro syntax") || msg.contains("List"),
-        "Should detect vec! as Rust macro and suggest List, got: {}", msg
+        "Should detect vec! as Rust macro and suggest List, got: {}",
+        msg
     );
 }
 
@@ -393,7 +411,8 @@ fn test_rust_assert_macro_suggests_assert() {
     let msg = parse_and_get_error("fn main() { assert!(true); }");
     assert!(
         msg.contains("Rust macro syntax") || msg.contains("assert("),
-        "Should detect assert! as Rust macro, got: {}", msg
+        "Should detect assert! as Rust macro, got: {}",
+        msg
     );
 }
 
@@ -410,7 +429,8 @@ fn test_error_code_e0e0_for_rust_keywords() {
             assert_eq!(
                 error.code.as_deref(),
                 Some("E0E0"),
-                "Rust keyword error should have code E0E0, got: {:?}", error.code
+                "Rust keyword error should have code E0E0, got: {:?}",
+                error.code
             );
         }
         Ok(_) => panic!("Expected parse error"),
@@ -430,7 +450,8 @@ fn test_error_code_e0e2_for_rust_macros() {
             assert_eq!(
                 error.code.as_deref(),
                 Some("E0E2"),
-                "Rust macro error should have code E0E2, got: {:?}", error.code
+                "Rust macro error should have code E0E2, got: {:?}",
+                error.code
             );
         }
         Ok(_) => panic!("Expected parse error"),
@@ -461,12 +482,16 @@ fn test_error_messages_have_help_text() {
                 let error = &errors[0];
                 assert!(
                     error.help.is_some(),
-                    "Error for '{}' should have help text, got: {:?}", source, error
+                    "Error for '{}' should have help text, got: {:?}",
+                    source,
+                    error
                 );
                 let help = error.help.as_ref().unwrap();
                 assert!(
                     help.contains("did you mean"),
-                    "Help for '{}' should contain 'did you mean', got: {}", source, help
+                    "Help for '{}' should contain 'did you mean', got: {}",
+                    source,
+                    help
                 );
             }
             Ok(_) => panic!("Expected parse error for: {}", source),
@@ -538,7 +563,8 @@ fn test_println_macro_mapping() {
     assert!(suggestion.is_some(), "println! should have a suggestion");
     assert!(
         suggestion.unwrap().contains("print"),
-        "println! should suggest print(...), got: {}", suggestion.unwrap()
+        "println! should suggest print(...), got: {}",
+        suggestion.unwrap()
     );
 }
 
@@ -548,7 +574,8 @@ fn test_format_macro_mapping() {
     assert!(suggestion.is_some(), "format! should have a suggestion");
     assert!(
         suggestion.unwrap().contains("f\""),
-        "format! should suggest f\"...\" format strings, got: {}", suggestion.unwrap()
+        "format! should suggest f\"...\" format strings, got: {}",
+        suggestion.unwrap()
     );
 }
 
@@ -558,7 +585,8 @@ fn test_panic_macro_mapping() {
     assert!(suggestion.is_some(), "panic! should have a suggestion");
     assert!(
         suggestion.unwrap().contains("panic("),
-        "panic! should suggest panic(...), got: {}", suggestion.unwrap()
+        "panic! should suggest panic(...), got: {}",
+        suggestion.unwrap()
     );
 }
 
@@ -568,7 +596,8 @@ fn test_assert_macro_mapping() {
     assert!(suggestion.is_some(), "assert! should have a suggestion");
     assert!(
         suggestion.unwrap().contains("assert("),
-        "assert! should suggest assert(...), got: {}", suggestion.unwrap()
+        "assert! should suggest assert(...), got: {}",
+        suggestion.unwrap()
     );
 }
 
@@ -578,7 +607,8 @@ fn test_vec_macro_mapping() {
     assert!(suggestion.is_some(), "vec! should have a suggestion");
     assert!(
         suggestion.unwrap().contains("List"),
-        "vec! should suggest List, got: {}", suggestion.unwrap()
+        "vec! should suggest List, got: {}",
+        suggestion.unwrap()
     );
 }
 
@@ -588,7 +618,8 @@ fn test_todo_macro_mapping() {
     assert!(suggestion.is_some(), "todo! should have a suggestion");
     assert!(
         suggestion.unwrap().contains("todo("),
-        "todo! should suggest todo(), got: {}", suggestion.unwrap()
+        "todo! should suggest todo(), got: {}",
+        suggestion.unwrap()
     );
 }
 
@@ -599,6 +630,7 @@ fn test_println_in_function_body_detected() {
     // The parser should detect the `!` after an identifier and flag it as Rust macro syntax
     assert!(
         msg.contains("Rust macro") || msg.contains("print(") || msg.contains("E0E2"),
-        "println!(\"hello\") should be flagged as Rust macro syntax, got: {}", msg
+        "println!(\"hello\") should be flagged as Rust macro syntax, got: {}",
+        msg
     );
 }

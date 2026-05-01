@@ -145,7 +145,6 @@ impl AttributeError {
     #[must_use]
     pub fn to_diagnostic(&self) -> Diagnostic {
         // Create the base diagnostic with converted span
-        
 
         // Note: Additional information like secondary spans and suggestions
         // would require using DiagnosticBuilder, but for now we return the base diagnostic.

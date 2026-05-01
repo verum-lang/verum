@@ -212,7 +212,7 @@ pub fn make_z3_adapter(
     Z3Adapter::new(move || {
         use crate::solver::{SmtBackend, SmtContext, SmtResult, Z3Backend};
         use crate::z3_backend::Z3Config;
-        use verum_common::{List, Maybe, Map};
+        use verum_common::{List, Map, Maybe};
 
         // Each portfolio worker owns its own Z3 session so that parallel
         // solvers don't contend on a shared context.
@@ -276,7 +276,8 @@ pub fn make_cvc5_adapter(
         // Real CVC5 integration path would go here, mirroring the Z3 adapter.
         Cvc5CheckResult {
             verdict: SolverVerdict::Unknown {
-                reason: "CVC5 adapter stub; full integration requires cvc5_backend migration".into(),
+                reason: "CVC5 adapter stub; full integration requires cvc5_backend migration"
+                    .into(),
             },
         }
     })
@@ -320,14 +321,20 @@ mod tests {
         let result = adapter.check_sat(&interrupt);
         // Either Error or Cancelled depending on build configuration.
         assert!(
-            matches!(result, SolverVerdict::Error { .. } | SolverVerdict::Unknown { .. }),
-            "expected Error or Unknown in stub mode, got {:?}", result
+            matches!(
+                result,
+                SolverVerdict::Error { .. } | SolverVerdict::Unknown { .. }
+            ),
+            "expected Error or Unknown in stub mode, got {:?}",
+            result
         );
     }
 
     #[test]
     fn adapter_ids_are_correct() {
-        let z3 = Z3Adapter::new(|| Z3CheckResult { verdict: SolverVerdict::Sat });
+        let z3 = Z3Adapter::new(|| Z3CheckResult {
+            verdict: SolverVerdict::Sat,
+        });
         assert_eq!(z3.solver_id(), SolverId::Z3);
 
         let cvc5 = Cvc5Adapter::<fn() -> Cvc5CheckResult>::unavailable();

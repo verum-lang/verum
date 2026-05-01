@@ -49,8 +49,8 @@ use std::time::Instant;
 use verum_ast::expr::ExprKind;
 use verum_ast::literal::StringLit;
 use verum_ast::{ItemKind, LiteralKind, Module, decl::FunctionDecl};
-use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
 use verum_common::{List, Text};
+use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
 
 use crate::literal_registry::{LiteralRegistry, TaggedLiteralHandler};
 use crate::meta::{MacroKind, MetaRegistry};
@@ -515,8 +515,7 @@ impl MetaRegistryPhase {
     /// Extract string content from StringLit
     fn extract_string_content(&self, s: &StringLit) -> String {
         match s {
-            StringLit::Regular(text)
-            | StringLit::MultiLine(text) => text.to_string(),
+            StringLit::Regular(text) | StringLit::MultiLine(text) => text.to_string(),
         }
     }
 

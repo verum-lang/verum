@@ -1,8 +1,8 @@
 #[allow(deprecated)]
 use verum_llvm_sys::core::LLVMGetElementAsConstant;
 use verum_llvm_sys::core::{
-    LLVMConstExtractElement, LLVMConstInsertElement, LLVMConstShuffleVector, LLVMIsAConstantDataVector,
-    LLVMIsAConstantVector,
+    LLVMConstExtractElement, LLVMConstInsertElement, LLVMConstShuffleVector,
+    LLVMIsAConstantDataVector, LLVMIsAConstantVector,
 };
 use verum_llvm_sys::prelude::LLVMValueRef;
 
@@ -98,11 +98,20 @@ impl<'ctx> VectorValue<'ctx> {
     }
 
     pub fn const_extract_element(self, index: IntValue<'ctx>) -> BasicValueEnum<'ctx> {
-        unsafe { BasicValueEnum::new(LLVMConstExtractElement(self.as_value_ref(), index.as_value_ref())) }
+        unsafe {
+            BasicValueEnum::new(LLVMConstExtractElement(
+                self.as_value_ref(),
+                index.as_value_ref(),
+            ))
+        }
     }
 
     // SubTypes: value should really be T in self: VectorValue<T> I think
-    pub fn const_insert_element<BV: BasicValue<'ctx>>(self, index: IntValue<'ctx>, value: BV) -> BasicValueEnum<'ctx> {
+    pub fn const_insert_element<BV: BasicValue<'ctx>>(
+        self,
+        index: IntValue<'ctx>,
+        value: BV,
+    ) -> BasicValueEnum<'ctx> {
         unsafe {
             BasicValueEnum::new(LLVMConstInsertElement(
                 self.as_value_ref(),
@@ -127,7 +136,11 @@ impl<'ctx> VectorValue<'ctx> {
     // Use Builder::build_select instead.
 
     // SubTypes: <V: VectorValue<T, Const>> self: V, right: V, mask: V -> V
-    pub fn const_shuffle_vector(self, right: VectorValue<'ctx>, mask: VectorValue<'ctx>) -> VectorValue<'ctx> {
+    pub fn const_shuffle_vector(
+        self,
+        right: VectorValue<'ctx>,
+        mask: VectorValue<'ctx>,
+    ) -> VectorValue<'ctx> {
         unsafe {
             VectorValue::new(LLVMConstShuffleVector(
                 self.as_value_ref(),

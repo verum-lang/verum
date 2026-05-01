@@ -52,10 +52,10 @@ use std::time::{Duration, Instant};
 
 use verum_ast::span::Span;
 use verum_ast::ty::{Path, Type};
+use verum_common::ToText;
 use verum_common::{List, Map, Maybe, Set, Text};
 use verum_protocol_types::protocol_base::{Protocol, ProtocolImpl};
 use verum_protocol_types::specialization::SpecializationLattice;
-use verum_common::ToText;
 
 use z3::ast::{Bool, Int};
 use z3::{Context, Sort};
@@ -798,9 +798,13 @@ impl SpecializationVerifier {
             // Meta types - check inner type for genericity
             TypeKind::Meta { inner } => self.is_generic_with_context(inner.as_ref(), impl_idx),
             // Type lambdas - check body for genericity
-            TypeKind::TypeLambda { body, .. } => self.is_generic_with_context(body.as_ref(), impl_idx),
+            TypeKind::TypeLambda { body, .. } => {
+                self.is_generic_with_context(body.as_ref(), impl_idx)
+            }
             // Path equality type: check carrier for genericity
-            TypeKind::PathType { carrier, .. } | TypeKind::DependentApp { carrier, .. } => self.is_generic_with_context(carrier.as_ref(), impl_idx),
+            TypeKind::PathType { carrier, .. } | TypeKind::DependentApp { carrier, .. } => {
+                self.is_generic_with_context(carrier.as_ref(), impl_idx)
+            }
         }
     }
 
@@ -1571,11 +1575,7 @@ impl SpecializationVerifier {
                 continue;
             };
             for bound in proto.super_protocols.iter() {
-                let parent_name = bound
-                    .protocol
-                    .as_ident()
-                    .map(|i| i.as_str())
-                    .unwrap_or("");
+                let parent_name = bound.protocol.as_ident().map(|i| i.as_str()).unwrap_or("");
                 if parent_name.is_empty() {
                     continue;
                 }
@@ -1830,8 +1830,6 @@ pub fn detect_overlaps(implementations: &[ProtocolImpl]) -> List<(usize, usize)>
 #[cfg(test)]
 mod tests {
     use super::*;
-    
-    
 
     #[test]
     fn test_verifier_creation() {

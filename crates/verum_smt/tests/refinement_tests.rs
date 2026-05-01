@@ -55,9 +55,9 @@ fn test_is_refinement_type() {
 
 // ==================== Proof Extraction Integration Tests ====================
 
+use verum_common::{List, Set, Text};
 use verum_smt::proof_extraction::{ProofExtractor, ProofTerm, ProofValidation};
 use verum_smt::z3_backend::ProofWitness;
-use verum_common::{List, Set, Text};
 
 #[test]
 fn test_validate_proof_witness_empty() {

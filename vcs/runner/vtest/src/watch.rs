@@ -114,7 +114,9 @@ impl FileWatcher {
                 }
             }
         })
-        .map_err(|e| RunnerError::ConfigError(format!("Failed to create file watcher: {}", e).into()))?;
+        .map_err(|e| {
+            RunnerError::ConfigError(format!("Failed to create file watcher: {}", e).into())
+        })?;
 
         // Watch all configured paths
         for path in &self.config.watch_paths {
@@ -123,11 +125,9 @@ impl FileWatcher {
                     .watcher()
                     .watch(path, RecursiveMode::Recursive)
                     .map_err(|e| {
-                        RunnerError::ConfigError(format!(
-                            "Failed to watch {}: {}",
-                            path.display(),
-                            e
-                        ).into())
+                        RunnerError::ConfigError(
+                            format!("Failed to watch {}: {}", path.display(), e).into(),
+                        )
                     })?;
             }
         }

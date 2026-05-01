@@ -22,23 +22,22 @@
 //!  4. Function codegen (signatures, closures, generics)
 //!  5. CBGR reference codegen (ThinRef/FatRef)
 
+use verum_ast::decl::{FunctionBody, FunctionDecl, FunctionParam, FunctionParamKind, Visibility};
+use verum_ast::expr::{BinOp, Expr, ExprKind};
+use verum_ast::literal::{FloatLit, IntLit, Literal, LiteralKind};
+use verum_ast::pattern::{Pattern, PatternKind};
+use verum_ast::span::{FileId, Span};
+use verum_ast::ty::{Ident, Type, TypeKind};
+use verum_ast::{Attribute, Item, ItemKind, Module as AstModule};
 use verum_codegen::llvm::{
-    VbcToLlvmLowering, LoweringConfig, LoweringStats,
-    TypeLowering, RefTier,
-    CbgrLowering, CbgrStats,
+    CbgrLowering, CbgrStats, LoweringConfig, LoweringStats, RefTier, TypeLowering,
+    VbcToLlvmLowering,
 };
+use verum_common::Heap;
+use verum_common::{List, Maybe, Text};
 use verum_llvm::context::Context;
 use verum_vbc::codegen::VbcCodegen;
 use verum_vbc::types::{TypeId, TypeRef};
-use verum_ast::{Module as AstModule, Item, ItemKind, Attribute};
-use verum_ast::decl::{FunctionDecl, FunctionParam, FunctionParamKind, FunctionBody, Visibility};
-use verum_ast::pattern::{Pattern, PatternKind};
-use verum_ast::ty::{Type, TypeKind, Ident};
-use verum_ast::expr::{Expr, ExprKind, BinOp};
-use verum_common::Heap;
-use verum_ast::literal::{Literal, LiteralKind, IntLit, FloatLit};
-use verum_ast::span::{Span, FileId};
-use verum_common::{List, Text, Maybe};
 
 // =============================================================================
 // HELPERS
@@ -51,7 +50,10 @@ fn dummy_span() -> Span {
 fn int_lit_expr(value: i128) -> Expr {
     Expr {
         kind: ExprKind::Literal(Literal {
-            kind: LiteralKind::Int(IntLit { value, suffix: None }),
+            kind: LiteralKind::Int(IntLit {
+                value,
+                suffix: None,
+            }),
             span: dummy_span(),
         }),
         span: dummy_span(),
@@ -117,7 +119,10 @@ fn bin_op_expr(op: BinOp, lhs: Expr, rhs: Expr) -> Expr {
 }
 
 fn mk_type(kind: TypeKind) -> Type {
-    Type { kind, span: dummy_span() }
+    Type {
+        kind,
+        span: dummy_span(),
+    }
 }
 
 fn simple_function(name: &str, return_value: i128) -> Item {
@@ -134,7 +139,10 @@ fn simple_function(name: &str, return_value: i128) -> Item {
             is_transparent: false,
             extern_abi: Maybe::None,
             is_variadic: false,
-            name: Ident { name: Text::from(name), span: dummy_span() },
+            name: Ident {
+                name: Text::from(name),
+                span: dummy_span(),
+            },
             generics: List::new(),
             params: List::new(),
             return_type: Maybe::Some(mk_type(TypeKind::Int)),
@@ -154,7 +162,12 @@ fn simple_function(name: &str, return_value: i128) -> Item {
     }
 }
 
-fn function_with_params(name: &str, params: &[(&str, TypeKind)], body: Expr, ret_type: TypeKind) -> Item {
+fn function_with_params(
+    name: &str,
+    params: &[(&str, TypeKind)],
+    body: Expr,
+    ret_type: TypeKind,
+) -> Item {
     let param_list: List<FunctionParam> = params
         .iter()
         .map(|(pname, ty)| FunctionParam {
@@ -163,7 +176,10 @@ fn function_with_params(name: &str, params: &[(&str, TypeKind)], body: Expr, ret
                     kind: PatternKind::Ident {
                         by_ref: false,
                         mutable: false,
-                        name: Ident { name: Text::from(*pname), span: dummy_span() },
+                        name: Ident {
+                            name: Text::from(*pname),
+                            span: dummy_span(),
+                        },
                         subpattern: Maybe::None,
                     },
                     span: dummy_span(),
@@ -189,7 +205,10 @@ fn function_with_params(name: &str, params: &[(&str, TypeKind)], body: Expr, ret
             is_transparent: false,
             extern_abi: Maybe::None,
             is_variadic: false,
-            name: Ident { name: Text::from(name), span: dummy_span() },
+            name: Ident {
+                name: Text::from(name),
+                span: dummy_span(),
+            },
             generics: List::new(),
             params: param_list,
             return_type: Maybe::Some(mk_type(ret_type)),
@@ -261,7 +280,9 @@ fn test_llvm_ir_contains_module_metadata() {
     let ir_str = ir.as_str();
     // Should have a target triple or source_filename
     assert!(
-        ir_str.contains("source_filename") || ir_str.contains("target triple") || ir_str.contains("target datalayout"),
+        ir_str.contains("source_filename")
+            || ir_str.contains("target triple")
+            || ir_str.contains("target datalayout"),
         "LLVM IR should contain module metadata"
     );
 }
@@ -278,14 +299,20 @@ fn test_llvm_ir_multiple_functions() {
     assert!(ir_str.contains("foo"), "IR should contain foo");
     assert!(ir_str.contains("bar"), "IR should contain bar");
     assert!(ir_str.contains("main"), "IR should contain main");
-    assert!(stats.functions_lowered >= 3, "Should lower at least 3 functions, got {}", stats.functions_lowered);
+    assert!(
+        stats.functions_lowered >= 3,
+        "Should lower at least 3 functions, got {}",
+        stats.functions_lowered
+    );
 }
 
 #[test]
 fn test_llvm_ir_empty_module() {
     let ast = test_module(vec![]);
     let mut vbc_codegen = VbcCodegen::new();
-    let vbc_module = vbc_codegen.compile_module(&ast).expect("VBC compilation failed");
+    let vbc_module = vbc_codegen
+        .compile_module(&ast)
+        .expect("VBC compilation failed");
 
     let context = Context::create();
     let config = LoweringConfig::debug("empty_module");
@@ -318,7 +345,10 @@ fn test_type_lowering_float() {
     let result = types.lower_type_id(TypeId::FLOAT);
     assert!(result.is_ok(), "Float type should lower successfully");
     let llvm_type = result.unwrap();
-    assert!(llvm_type.is_float_type(), "Float should lower to float type");
+    assert!(
+        llvm_type.is_float_type(),
+        "Float should lower to float type"
+    );
 }
 
 #[test]
@@ -329,7 +359,10 @@ fn test_type_lowering_bool() {
     let result = types.lower_type_id(TypeId::BOOL);
     assert!(result.is_ok(), "Bool type should lower successfully");
     let llvm_type = result.unwrap();
-    assert!(llvm_type.is_int_type(), "Bool should lower to i1 integer type");
+    assert!(
+        llvm_type.is_int_type(),
+        "Bool should lower to i1 integer type"
+    );
 }
 
 #[test]
@@ -341,7 +374,10 @@ fn test_type_lowering_text() {
     assert!(result.is_ok(), "Text type should lower successfully");
     let llvm_type = result.unwrap();
     // Text is a pointer to string data
-    assert!(llvm_type.is_pointer_type(), "Text should lower to pointer type");
+    assert!(
+        llvm_type.is_pointer_type(),
+        "Text should lower to pointer type"
+    );
 }
 
 #[test]
@@ -353,7 +389,10 @@ fn test_type_lowering_unit() {
     assert!(result.is_ok(), "Unit type should lower successfully");
     let llvm_type = result.unwrap();
     // Unit is an empty struct
-    assert!(llvm_type.is_struct_type(), "Unit should lower to empty struct type");
+    assert!(
+        llvm_type.is_struct_type(),
+        "Unit should lower to empty struct type"
+    );
 }
 
 #[test]
@@ -361,10 +400,26 @@ fn test_type_lowering_integer_sizes() {
     let context = Context::create();
     let types = TypeLowering::new(&context);
 
-    for type_id in &[TypeId::I8, TypeId::I16, TypeId::I32, TypeId::U8, TypeId::U16, TypeId::U32, TypeId::U64] {
+    for type_id in &[
+        TypeId::I8,
+        TypeId::I16,
+        TypeId::I32,
+        TypeId::U8,
+        TypeId::U16,
+        TypeId::U32,
+        TypeId::U64,
+    ] {
         let result = types.lower_type_id(*type_id);
-        assert!(result.is_ok(), "TypeId {:?} should lower successfully", type_id);
-        assert!(result.unwrap().is_int_type(), "TypeId {:?} should lower to int type", type_id);
+        assert!(
+            result.is_ok(),
+            "TypeId {:?} should lower successfully",
+            type_id
+        );
+        assert!(
+            result.unwrap().is_int_type(),
+            "TypeId {:?} should lower to int type",
+            type_id
+        );
     }
 }
 
@@ -375,7 +430,10 @@ fn test_type_lowering_f32() {
 
     let result = types.lower_type_id(TypeId::F32);
     assert!(result.is_ok(), "F32 should lower successfully");
-    assert!(result.unwrap().is_float_type(), "F32 should lower to float type");
+    assert!(
+        result.unwrap().is_float_type(),
+        "F32 should lower to float type"
+    );
 }
 
 #[test]
@@ -385,7 +443,10 @@ fn test_type_lowering_ptr() {
 
     let result = types.lower_type_id(TypeId::PTR);
     assert!(result.is_ok(), "PTR type should lower successfully");
-    assert!(result.unwrap().is_pointer_type(), "PTR should lower to pointer type");
+    assert!(
+        result.unwrap().is_pointer_type(),
+        "PTR should lower to pointer type"
+    );
 }
 
 #[test]
@@ -400,7 +461,10 @@ fn test_type_lowering_tuple() {
     ];
     let result = types.lower_tuple(&tuple_ref);
     assert!(result.is_ok(), "Tuple type should lower successfully");
-    assert!(result.unwrap().is_struct_type(), "Tuple should lower to struct type");
+    assert!(
+        result.unwrap().is_struct_type(),
+        "Tuple should lower to struct type"
+    );
 }
 
 #[test]
@@ -410,7 +474,10 @@ fn test_type_lowering_empty_tuple() {
 
     let result = types.lower_tuple(&[]);
     assert!(result.is_ok(), "Empty tuple should lower successfully");
-    assert!(result.unwrap().is_struct_type(), "Empty tuple should lower to struct type");
+    assert!(
+        result.unwrap().is_struct_type(),
+        "Empty tuple should lower to struct type"
+    );
 }
 
 #[test]
@@ -426,7 +493,10 @@ fn test_type_lowering_function_type() {
     let result = types.lower_type_ref(&fn_ref);
     assert!(result.is_ok(), "Function type should lower successfully");
     // Function types are opaque pointers
-    assert!(result.unwrap().is_pointer_type(), "Function type should lower to pointer");
+    assert!(
+        result.unwrap().is_pointer_type(),
+        "Function type should lower to pointer"
+    );
 }
 
 #[test]
@@ -441,7 +511,10 @@ fn test_type_lowering_reference_type() {
     };
     let result = types.lower_type_ref(&ref_type);
     assert!(result.is_ok(), "Reference type should lower successfully");
-    assert!(result.unwrap().is_pointer_type(), "Reference should lower to pointer");
+    assert!(
+        result.unwrap().is_pointer_type(),
+        "Reference should lower to pointer"
+    );
 }
 
 #[test]
@@ -455,7 +528,10 @@ fn test_type_lowering_array_type() {
     };
     let result = types.lower_type_ref(&arr_type);
     assert!(result.is_ok(), "Array type should lower successfully");
-    assert!(result.unwrap().is_array_type(), "Array should lower to array type");
+    assert!(
+        result.unwrap().is_array_type(),
+        "Array should lower to array type"
+    );
 }
 
 #[test]
@@ -467,7 +543,10 @@ fn test_type_lowering_slice_type() {
     let result = types.lower_type_ref(&slice_type);
     assert!(result.is_ok(), "Slice type should lower successfully");
     // Slice is a fat pointer: { ptr, len }
-    assert!(result.unwrap().is_struct_type(), "Slice should lower to struct (fat pointer)");
+    assert!(
+        result.unwrap().is_struct_type(),
+        "Slice should lower to struct (fat pointer)"
+    );
 }
 
 #[test]
@@ -477,7 +556,10 @@ fn test_type_lowering_generic_rejects_unresolved() {
 
     let generic_ref = TypeRef::Generic(verum_vbc::types::TypeParamId(0));
     let result = types.lower_type_ref(&generic_ref);
-    assert!(result.is_err(), "Generic type should fail to lower (must be monomorphized first)");
+    assert!(
+        result.is_err(),
+        "Generic type should fail to lower (must be monomorphized first)"
+    );
 }
 
 // =============================================================================
@@ -509,7 +591,10 @@ fn test_function_with_float_return() {
     )]);
     let (ir, _) = compile_to_llvm_ir(&ast);
     let ir_str = ir.as_str();
-    assert!(ir_str.contains("pi_val"), "IR should contain pi_val function");
+    assert!(
+        ir_str.contains("pi_val"),
+        "IR should contain pi_val function"
+    );
 }
 
 #[test]
@@ -522,7 +607,10 @@ fn test_function_with_bool_return() {
     )]);
     let (ir, _) = compile_to_llvm_ir(&ast);
     let ir_str = ir.as_str();
-    assert!(ir_str.contains("always_true"), "IR should contain always_true function");
+    assert!(
+        ir_str.contains("always_true"),
+        "IR should contain always_true function"
+    );
 }
 
 #[test]
@@ -540,7 +628,10 @@ fn test_function_many_params() {
         TypeKind::Int,
     )]);
     let (ir, _) = compile_to_llvm_ir(&ast);
-    assert!(ir.as_str().contains("many_args"), "IR should contain many_args function");
+    assert!(
+        ir.as_str().contains("many_args"),
+        "IR should contain many_args function"
+    );
 }
 
 // =============================================================================
@@ -607,7 +698,10 @@ fn test_cbgr_thin_ref_type_layout() {
     // ThinRef: { ptr, generation: u32, epoch_caps: u32 }
     // Count should be 3 fields
     let field_count = thin_ref.count_fields();
-    assert_eq!(field_count, 3, "ThinRef should have 3 fields (ptr, generation, epoch_caps)");
+    assert_eq!(
+        field_count, 3,
+        "ThinRef should have 3 fields (ptr, generation, epoch_caps)"
+    );
 }
 
 #[test]
@@ -618,7 +712,10 @@ fn test_cbgr_fat_ref_type_layout() {
     let fat_ref = cbgr.fat_ref_type();
     // FatRef: { ptr, generation: u32, epoch_caps: u32, len: u64 }
     let field_count = fat_ref.count_fields();
-    assert_eq!(field_count, 4, "FatRef should have 4 fields (ptr, generation, epoch_caps, len)");
+    assert_eq!(
+        field_count, 4,
+        "FatRef should have 4 fields (ptr, generation, epoch_caps, len)"
+    );
 }
 
 #[test]
@@ -638,7 +735,11 @@ fn test_cbgr_stats_initial() {
 #[test]
 fn test_cbgr_stats_elimination_rate_empty() {
     let stats = CbgrStats::default();
-    assert_eq!(stats.elimination_rate(), 0.0, "Empty stats should have 0% elimination rate");
+    assert_eq!(
+        stats.elimination_rate(),
+        0.0,
+        "Empty stats should have 0% elimination rate"
+    );
 }
 
 #[test]
@@ -652,7 +753,11 @@ fn test_cbgr_stats_elimination_rate() {
         checks_eliminated: 7,
     };
     let rate = stats.elimination_rate();
-    assert!((rate - 0.7).abs() < 0.001, "Elimination rate should be 0.7, got {}", rate);
+    assert!(
+        (rate - 0.7).abs() < 0.001,
+        "Elimination rate should be 0.7, got {}",
+        rate
+    );
 }
 
 #[test]
@@ -690,7 +795,10 @@ fn test_lowering_stats_accumulate() {
     ]);
     let (_, stats) = compile_to_llvm_ir(&ast);
     assert!(stats.functions_lowered >= 3, "Should track function count");
-    assert!(stats.instructions_lowered > 0, "Should track instruction count");
+    assert!(
+        stats.instructions_lowered > 0,
+        "Should track instruction count"
+    );
 }
 
 // =============================================================================
@@ -718,16 +826,25 @@ fn test_release_config_lowering() {
     let ast = test_module(vec![simple_function("optimized_fn", 99)]);
 
     let mut vbc_codegen = VbcCodegen::new();
-    let vbc_module = vbc_codegen.compile_module(&ast).expect("VBC compile failed");
+    let vbc_module = vbc_codegen
+        .compile_module(&ast)
+        .expect("VBC compile failed");
 
     let context = Context::create();
     let config = LoweringConfig::release("opt_module");
     let mut lowering = VbcToLlvmLowering::new(&context, config);
     let result = lowering.lower_module(&vbc_module);
-    assert!(result.is_ok(), "Release lowering should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Release lowering should succeed: {:?}",
+        result.err()
+    );
 
     let ir = lowering.get_ir();
-    assert!(ir.as_str().contains("optimized_fn"), "IR should contain function");
+    assert!(
+        ir.as_str().contains("optimized_fn"),
+        "IR should contain function"
+    );
 }
 
 #[test]
@@ -735,13 +852,19 @@ fn test_coverage_config_lowering() {
     let ast = test_module(vec![simple_function("covered_fn", 0)]);
 
     let mut vbc_codegen = VbcCodegen::new();
-    let vbc_module = vbc_codegen.compile_module(&ast).expect("VBC compile failed");
+    let vbc_module = vbc_codegen
+        .compile_module(&ast)
+        .expect("VBC compile failed");
 
     let context = Context::create();
     let config = LoweringConfig::new("coverage_test").with_coverage(true);
     let mut lowering = VbcToLlvmLowering::new(&context, config);
     let result = lowering.lower_module(&vbc_module);
-    assert!(result.is_ok(), "Coverage lowering should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Coverage lowering should succeed: {:?}",
+        result.err()
+    );
 
     let ir = lowering.get_ir();
     // Coverage should emit the coverage counter global
@@ -760,19 +883,27 @@ fn test_debug_info_emission() {
     let ast = test_module(vec![simple_function("debug_fn", 42)]);
 
     let mut vbc_codegen = VbcCodegen::new();
-    let vbc_module = vbc_codegen.compile_module(&ast).expect("VBC compile failed");
+    let vbc_module = vbc_codegen
+        .compile_module(&ast)
+        .expect("VBC compile failed");
 
     let context = Context::create();
     let config = LoweringConfig::debug("debug_module");
     let mut lowering = VbcToLlvmLowering::new(&context, config);
     let result = lowering.lower_module(&vbc_module);
-    assert!(result.is_ok(), "Debug lowering should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Debug lowering should succeed: {:?}",
+        result.err()
+    );
 
     let ir = lowering.get_ir();
     let ir_str = ir.as_str();
     // Debug builds should contain DWARF metadata
     assert!(
-        ir_str.contains("!dbg") || ir_str.contains("!DICompileUnit") || ir_str.contains("Debug Info Version"),
+        ir_str.contains("!dbg")
+            || ir_str.contains("!DICompileUnit")
+            || ir_str.contains("Debug Info Version"),
         "Debug IR should contain debug metadata"
     );
 }
@@ -784,8 +915,7 @@ fn test_debug_info_emission() {
 #[test]
 fn test_custom_target_triple() {
     let context = Context::create();
-    let config = LoweringConfig::new("triple_test")
-        .with_target("x86_64-unknown-linux-gnu");
+    let config = LoweringConfig::new("triple_test").with_target("x86_64-unknown-linux-gnu");
     let lowering = VbcToLlvmLowering::new(&context, config);
     let ir = lowering.get_ir();
     assert!(

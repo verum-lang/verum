@@ -65,8 +65,11 @@ fn write_module(out: &mut String, module: &VbcModule) -> std::fmt::Result {
             let pty = format_type_ref(module, &p.type_ref);
             write!(out, "{}: {}", pname, pty)?;
         }
-        writeln!(out, ") -> {}  [id={}, regs={}, locals={}]",
-            ret, i, func.register_count, func.locals_count)?;
+        writeln!(
+            out,
+            ") -> {}  [id={}, regs={}, locals={}]",
+            ret, i, func.register_count, func.locals_count
+        )?;
 
         if let Some(instructions) = &func.instructions {
             for (j, instr) in instructions.iter().enumerate() {
@@ -120,15 +123,39 @@ fn format_type_ref(module: &VbcModule, tr: &TypeRef) -> String {
             let args_str: Vec<String> = args.iter().map(|a| format_type_ref(module, a)).collect();
             format!("{}<{}>", base_name, args_str.join(", "))
         }
-        TypeRef::Function { params, return_type, .. } => {
-            let params_str: Vec<String> = params.iter().map(|p| format_type_ref(module, p)).collect();
-            format!("fn({}) -> {}", params_str.join(", "), format_type_ref(module, return_type))
+        TypeRef::Function {
+            params,
+            return_type,
+            ..
+        } => {
+            let params_str: Vec<String> =
+                params.iter().map(|p| format_type_ref(module, p)).collect();
+            format!(
+                "fn({}) -> {}",
+                params_str.join(", "),
+                format_type_ref(module, return_type)
+            )
         }
-        TypeRef::Rank2Function { type_param_count, params, return_type, .. } => {
-            let params_str: Vec<String> = params.iter().map(|p| format_type_ref(module, p)).collect();
-            format!("fn<{}>({}) -> {}", type_param_count, params_str.join(", "), format_type_ref(module, return_type))
+        TypeRef::Rank2Function {
+            type_param_count,
+            params,
+            return_type,
+            ..
+        } => {
+            let params_str: Vec<String> =
+                params.iter().map(|p| format_type_ref(module, p)).collect();
+            format!(
+                "fn<{}>({}) -> {}",
+                type_param_count,
+                params_str.join(", "),
+                format_type_ref(module, return_type)
+            )
         }
-        TypeRef::Reference { inner, mutability, tier } => {
+        TypeRef::Reference {
+            inner,
+            mutability,
+            tier,
+        } => {
             let m = match mutability {
                 Mutability::Immutable => "&",
                 Mutability::Mutable => "&mut ",
@@ -223,12 +250,20 @@ fn reg_range(args: &crate::instruction::RegRange) -> String {
     } else if args.count == 1 {
         format!("[r{}]", args.start.0)
     } else {
-        format!("[r{}..r{}]", args.start.0, args.start.0 + args.count as u16 - 1)
+        format!(
+            "[r{}..r{}]",
+            args.start.0,
+            args.start.0 + args.count as u16 - 1
+        )
     }
 }
 
 #[allow(clippy::too_many_lines)]
-fn write_instruction(out: &mut String, module: &VbcModule, instr: &Instruction) -> std::fmt::Result {
+fn write_instruction(
+    out: &mut String,
+    module: &VbcModule,
+    instr: &Instruction,
+) -> std::fmt::Result {
     use Instruction::*;
     match instr {
         // ── Data Movement ──
@@ -249,7 +284,12 @@ fn write_instruction(out: &mut String, module: &VbcModule, instr: &Instruction) 
         LoadTrue { dst } => write!(out, "LOAD_TRUE {}", r(dst)),
         LoadFalse { dst } => write!(out, "LOAD_FALSE {}", r(dst)),
         LoadUnit { dst } => write!(out, "LOAD_UNIT {}", r(dst)),
-        LoadT { dst, type_ref } => write!(out, "LOAD_T    {}, {}", r(dst), format_type_ref(module, type_ref)),
+        LoadT { dst, type_ref } => write!(
+            out,
+            "LOAD_T    {}, {}",
+            r(dst),
+            format_type_ref(module, type_ref)
+        ),
         LoadSmallI { dst, value } => write!(out, "LOAD_SI   {}, {}", r(dst), value),
         LoadNil { dst } => write!(out, "LOAD_NIL  {}", r(dst)),
 
@@ -263,84 +303,233 @@ fn write_instruction(out: &mut String, module: &VbcModule, instr: &Instruction) 
         CvtToF { dst, src } => write!(out, "CVT_TO_F  {}, {}", r(dst), r(src)),
 
         // ── Arithmetic ──
-        BinaryI { op, dst, a, b } => write!(out, "{:<10}{}, {}, {}", format!("{:?}", op), r(dst), r(a), r(b)),
-        BinaryF { op, dst, a, b } => write!(out, "{:<10}{}, {}, {}", format!("{:?}F", op), r(dst), r(a), r(b)),
-        BinaryG { op, dst, a, b, protocol_id } =>
-            write!(out, "{:<10}{}, {}, {} (proto={})", format!("{:?}G", op), r(dst), r(a), r(b), protocol_id),
+        BinaryI { op, dst, a, b } => write!(
+            out,
+            "{:<10}{}, {}, {}",
+            format!("{:?}", op),
+            r(dst),
+            r(a),
+            r(b)
+        ),
+        BinaryF { op, dst, a, b } => write!(
+            out,
+            "{:<10}{}, {}, {}",
+            format!("{:?}F", op),
+            r(dst),
+            r(a),
+            r(b)
+        ),
+        BinaryG {
+            op,
+            dst,
+            a,
+            b,
+            protocol_id,
+        } => write!(
+            out,
+            "{:<10}{}, {}, {} (proto={})",
+            format!("{:?}G", op),
+            r(dst),
+            r(a),
+            r(b),
+            protocol_id
+        ),
         UnaryI { op, dst, src } => write!(out, "{:<10}{}, {}", format!("{:?}", op), r(dst), r(src)),
-        UnaryF { op, dst, src } => write!(out, "{:<10}{}, {}", format!("{:?}F", op), r(dst), r(src)),
+        UnaryF { op, dst, src } => {
+            write!(out, "{:<10}{}, {}", format!("{:?}F", op), r(dst), r(src))
+        }
         Not { dst, src } => write!(out, "NOT       {}, {}", r(dst), r(src)),
-        Bitwise { op, dst, a, b } => write!(out, "{:<10}{}, {}, {}", format!("{:?}", op), r(dst), r(a), r(b)),
+        Bitwise { op, dst, a, b } => write!(
+            out,
+            "{:<10}{}, {}, {}",
+            format!("{:?}", op),
+            r(dst),
+            r(a),
+            r(b)
+        ),
 
         // ── Comparison ──
-        CmpI { op, dst, a, b } => write!(out, "CMP_I     {}, {}, {} ({:?})", r(dst), r(a), r(b), op),
-        CmpF { op, dst, a, b } => write!(out, "CMP_F     {}, {}, {} ({:?})", r(dst), r(a), r(b), op),
-        CmpG { eq, dst, a, b, protocol_id } =>
-            write!(out, "CMP_G     {}, {}, {} (eq={}, proto={})", r(dst), r(a), r(b), eq, protocol_id),
-        CmpU { sub_op, dst, a, b } =>
-            write!(out, "CMP_U     {}, {}, {} ({:?})", r(dst), r(a), r(b), sub_op),
+        CmpI { op, dst, a, b } => {
+            write!(out, "CMP_I     {}, {}, {} ({:?})", r(dst), r(a), r(b), op)
+        }
+        CmpF { op, dst, a, b } => {
+            write!(out, "CMP_F     {}, {}, {} ({:?})", r(dst), r(a), r(b), op)
+        }
+        CmpG {
+            eq,
+            dst,
+            a,
+            b,
+            protocol_id,
+        } => write!(
+            out,
+            "CMP_G     {}, {}, {} (eq={}, proto={})",
+            r(dst),
+            r(a),
+            r(b),
+            eq,
+            protocol_id
+        ),
+        CmpU { sub_op, dst, a, b } => write!(
+            out,
+            "CMP_U     {}, {}, {} ({:?})",
+            r(dst),
+            r(a),
+            r(b),
+            sub_op
+        ),
 
         // ── Control Flow ──
         Nop => write!(out, "NOP"),
         Jmp { offset } => write!(out, "JMP       {:+}", offset),
         JmpIf { cond, offset } => write!(out, "JMP_IF    {}, {:+}", r(cond), offset),
         JmpNot { cond, offset } => write!(out, "JMP_NOT   {}, {:+}", r(cond), offset),
-        JmpCmp { op, a, b, offset } =>
-            write!(out, "JMP_CMP   {}, {}, {:+} ({:?})", r(a), r(b), offset, op),
+        JmpCmp { op, a, b, offset } => {
+            write!(out, "JMP_CMP   {}, {}, {:+} ({:?})", r(a), r(b), offset, op)
+        }
         Ret { value } => write!(out, "RET       {}", r(value)),
         RetV => write!(out, "RET_V"),
-        Call { dst, func_id, args } =>
-            write!(out, "CALL      {}, {} {}", r(dst), func_name(module, *func_id), reg_range(args)),
-        TailCall { func_id, args } =>
-            write!(out, "TAIL_CALL {} {}", func_name(module, *func_id), reg_range(args)),
-        CallM { dst, receiver, method_id, args } =>
-            write!(out, "CALL_M    {}, {}.{} {}", r(dst), r(receiver), func_name(module, *method_id), reg_range(args)),
-        CallClosure { dst, closure, args } =>
-            write!(out, "CALL_CLS  {}, {} {}", r(dst), r(closure), reg_range(args)),
-        CallR { dst, func, argc } =>
-            write!(out, "CALL_R    {}, {} (argc={})", r(dst), r(func), argc),
-        NewClosure { dst, func_id, captures } => {
+        Call { dst, func_id, args } => write!(
+            out,
+            "CALL      {}, {} {}",
+            r(dst),
+            func_name(module, *func_id),
+            reg_range(args)
+        ),
+        TailCall { func_id, args } => write!(
+            out,
+            "TAIL_CALL {} {}",
+            func_name(module, *func_id),
+            reg_range(args)
+        ),
+        CallM {
+            dst,
+            receiver,
+            method_id,
+            args,
+        } => write!(
+            out,
+            "CALL_M    {}, {}.{} {}",
+            r(dst),
+            r(receiver),
+            func_name(module, *method_id),
+            reg_range(args)
+        ),
+        CallClosure { dst, closure, args } => write!(
+            out,
+            "CALL_CLS  {}, {} {}",
+            r(dst),
+            r(closure),
+            reg_range(args)
+        ),
+        CallR { dst, func, argc } => {
+            write!(out, "CALL_R    {}, {} (argc={})", r(dst), r(func), argc)
+        }
+        NewClosure {
+            dst,
+            func_id,
+            captures,
+        } => {
             let caps: Vec<String> = captures.iter().map(r).collect();
-            write!(out, "NEW_CLS   {}, {} [{}]", r(dst), func_name(module, *func_id), caps.join(", "))
+            write!(
+                out,
+                "NEW_CLS   {}, {} [{}]",
+                r(dst),
+                func_name(module, *func_id),
+                caps.join(", ")
+            )
         }
 
         // ── Memory / Collections ──
-        New { dst, type_id, field_count } => {
+        New {
+            dst,
+            type_id,
+            field_count,
+        } => {
             let tname = format_type_id(module, TypeId(*type_id));
-            write!(out, "NEW       {}, {} (fields={})", r(dst), tname, field_count)
+            write!(
+                out,
+                "NEW       {}, {} (fields={})",
+                r(dst),
+                tname,
+                field_count
+            )
         }
-        NewG { dst, type_id, type_args } => {
+        NewG {
+            dst,
+            type_id,
+            type_args,
+        } => {
             let tname = format_type_id(module, TypeId(*type_id));
             let targs: Vec<String> = type_args.iter().map(r).collect();
-            write!(out, "NEW_G     {}, {}<{}> ", r(dst), tname, targs.join(", "))
+            write!(
+                out,
+                "NEW_G     {}, {}<{}> ",
+                r(dst),
+                tname,
+                targs.join(", ")
+            )
         }
-        GetF { dst, obj, field_idx } => write!(out, "GET_F     {}, {}.{}", r(dst), r(obj), field_idx),
-        SetF { obj, field_idx, value } => write!(out, "SET_F     {}.{}, {}", r(obj), field_idx, r(value)),
+        GetF {
+            dst,
+            obj,
+            field_idx,
+        } => write!(out, "GET_F     {}, {}.{}", r(dst), r(obj), field_idx),
+        SetF {
+            obj,
+            field_idx,
+            value,
+        } => write!(out, "SET_F     {}.{}, {}", r(obj), field_idx, r(value)),
         GetE { dst, arr, idx } => write!(out, "GET_E     {}, {}[{}]", r(dst), r(arr), r(idx)),
         SetE { arr, idx, value } => write!(out, "SET_E     {}[{}], {}", r(arr), r(idx), r(value)),
-        Len { dst, arr, type_hint: _ } => write!(out, "LEN       {}, {}", r(dst), r(arr)),
+        Len {
+            dst,
+            arr,
+            type_hint: _,
+        } => write!(out, "LEN       {}, {}", r(dst), r(arr)),
         NewList { dst } => write!(out, "NEW_LIST  {}", r(dst)),
         ListPush { list, val } => write!(out, "LIST_PUSH {}, {}", r(list), r(val)),
         ListPop { dst, list } => write!(out, "LIST_POP  {}, {}", r(dst), r(list)),
         NewMap { dst } => write!(out, "NEW_MAP   {}", r(dst)),
         MapGet { dst, map, key } => write!(out, "MAP_GET   {}, {}[{}]", r(dst), r(map), r(key)),
         MapSet { map, key, val } => write!(out, "MAP_SET   {}[{}], {}", r(map), r(key), r(val)),
-        MapContains { dst, map, key } => write!(out, "MAP_HAS   {}, {}[{}]", r(dst), r(map), r(key)),
+        MapContains { dst, map, key } => {
+            write!(out, "MAP_HAS   {}, {}[{}]", r(dst), r(map), r(key))
+        }
         Clone { dst, src } => write!(out, "CLONE     {}, {}", r(dst), r(src)),
         MakeList { dst, len } => write!(out, "MAKE_LIST {}, len={}", r(dst), len),
         MakeMap { dst, capacity } => write!(out, "MAKE_MAP  {}, cap={}", r(dst), capacity),
         MakeSet { dst, capacity } => write!(out, "MAKE_SET  {}, cap={}", r(dst), capacity),
-        MapInsert { map, key, value } => write!(out, "MAP_INS   {}[{}], {}", r(map), r(key), r(value)),
+        MapInsert { map, key, value } => {
+            write!(out, "MAP_INS   {}[{}], {}", r(map), r(key), r(value))
+        }
         NewSet { dst } => write!(out, "NEW_SET   {}", r(dst)),
         SetInsert { set, elem } => write!(out, "SET_INS   {}, {}", r(set), r(elem)),
-        SetContains { dst, set, elem } => write!(out, "SET_HAS   {}, {}, {}", r(dst), r(set), r(elem)),
+        SetContains { dst, set, elem } => {
+            write!(out, "SET_HAS   {}, {}, {}", r(dst), r(set), r(elem))
+        }
         SetRemove { set, elem } => write!(out, "SET_REM   {}, {}", r(set), r(elem)),
-        NewRange { dst, start, end, inclusive } =>
-            write!(out, "NEW_RANGE {}, {}..{}{}", r(dst), r(start), if *inclusive { "=" } else { "" }, r(end)),
+        NewRange {
+            dst,
+            start,
+            end,
+            inclusive,
+        } => write!(
+            out,
+            "NEW_RANGE {}, {}..{}{}",
+            r(dst),
+            r(start),
+            if *inclusive { "=" } else { "" },
+            r(end)
+        ),
 
         // ── Iterators ──
         IterNew { dst, iterable } => write!(out, "ITER_NEW  {}, {}", r(dst), r(iterable)),
-        IterNext { dst, has_next, iter } => write!(out, "ITER_NEXT {}, {}, {}", r(dst), r(has_next), r(iter)),
+        IterNext {
+            dst,
+            has_next,
+            iter,
+        } => write!(out, "ITER_NEXT {}, {}, {}", r(dst), r(has_next), r(iter)),
         Iter { dst, iterable } => write!(out, "ITER      {}, {}", r(dst), r(iterable)),
 
         // ── CBGR ──
@@ -356,12 +545,42 @@ fn write_instruction(out: &mut String, module: &VbcModule, instr: &Instruction) 
         // ── Pattern Matching + Variants ──
         IsVar { dst, value, tag } => write!(out, "IS_VAR    {}, {}, tag={}", r(dst), r(value), tag),
         AsVar { dst, value, tag } => write!(out, "AS_VAR    {}, {}, tag={}", r(dst), r(value), tag),
-        Unpack { dst_start, tuple, count } =>
-            write!(out, "UNPACK    r{}..r{}, {} (count={})", dst_start.0, dst_start.0 + *count as u16 - 1, r(tuple), count),
-        Pack { dst, src_start, count } =>
-            write!(out, "PACK      {}, r{}..r{} (count={})", r(dst), src_start.0, src_start.0 + *count as u16 - 1, count),
-        Switch { value, default_offset, cases } => {
-            write!(out, "SWITCH    {}, default={:+}, {} cases", r(value), default_offset, cases.len())?;
+        Unpack {
+            dst_start,
+            tuple,
+            count,
+        } => write!(
+            out,
+            "UNPACK    r{}..r{}, {} (count={})",
+            dst_start.0,
+            dst_start.0 + *count as u16 - 1,
+            r(tuple),
+            count
+        ),
+        Pack {
+            dst,
+            src_start,
+            count,
+        } => write!(
+            out,
+            "PACK      {}, r{}..r{} (count={})",
+            r(dst),
+            src_start.0,
+            src_start.0 + *count as u16 - 1,
+            count
+        ),
+        Switch {
+            value,
+            default_offset,
+            cases,
+        } => {
+            write!(
+                out,
+                "SWITCH    {}, default={:+}, {} cases",
+                r(value),
+                default_offset,
+                cases.len()
+            )?;
             for (cv, off) in cases.iter().take(5) {
                 write!(out, " [{}→{:+}]", cv, off)?;
             }
@@ -371,14 +590,32 @@ fn write_instruction(out: &mut String, module: &VbcModule, instr: &Instruction) 
             Ok(())
         }
         GetTag { dst, variant } => write!(out, "GET_TAG   {}, {}", r(dst), r(variant)),
-        MakeVariant { dst, tag, field_count } =>
-            write!(out, "MK_VAR    {}, tag={}, fields={}", r(dst), tag, field_count),
-        SetVariantData { variant, field, value } =>
-            write!(out, "SET_VDATA {}.{}, {}", r(variant), field, r(value)),
-        GetVariantData { dst, variant, field } =>
-            write!(out, "GET_VDATA {}, {}.{}", r(dst), r(variant), field),
-        GetVariantDataRef { dst, variant, field } =>
-            write!(out, "GET_VDREF {}, {}.{}", r(dst), r(variant), field),
+        MakeVariant {
+            dst,
+            tag,
+            field_count,
+        } => write!(
+            out,
+            "MK_VAR    {}, tag={}, fields={}",
+            r(dst),
+            tag,
+            field_count
+        ),
+        SetVariantData {
+            variant,
+            field,
+            value,
+        } => write!(out, "SET_VDATA {}.{}, {}", r(variant), field, r(value)),
+        GetVariantData {
+            dst,
+            variant,
+            field,
+        } => write!(out, "GET_VDATA {}, {}.{}", r(dst), r(variant), field),
+        GetVariantDataRef {
+            dst,
+            variant,
+            field,
+        } => write!(out, "GET_VDREF {}, {}.{}", r(dst), r(variant), field),
 
         // ── String ──
         ToString { dst, src } => write!(out, "TO_STR    {}, {}", r(dst), r(src)),
@@ -386,19 +623,39 @@ fn write_instruction(out: &mut String, module: &VbcModule, instr: &Instruction) 
         CharToStr { dst, src } => write!(out, "CHR2STR   {}, {}", r(dst), r(src)),
 
         // ── Generator ──
-        GenCreate { dst, func_id, args } =>
-            write!(out, "GEN_NEW   {}, {} {}", r(dst), func_name(module, *func_id), reg_range(args)),
+        GenCreate { dst, func_id, args } => write!(
+            out,
+            "GEN_NEW   {}, {} {}",
+            r(dst),
+            func_name(module, *func_id),
+            reg_range(args)
+        ),
         GenNext { dst, generator } => write!(out, "GEN_NEXT  {}, {}", r(dst), r(generator)),
         GenHasNext { dst, generator } => write!(out, "GEN_HAS   {}, {}", r(dst), r(generator)),
 
         // ── Async ──
-        Spawn { dst, func_id, args } =>
-            write!(out, "SPAWN     {}, {} {}", r(dst), func_name(module, *func_id), reg_range(args)),
+        Spawn { dst, func_id, args } => write!(
+            out,
+            "SPAWN     {}, {} {}",
+            r(dst),
+            func_name(module, *func_id),
+            reg_range(args)
+        ),
         Await { dst, task } => write!(out, "AWAIT     {}, {}", r(dst), r(task)),
         Yield { value } => write!(out, "YIELD     {}", r(value)),
-        Select { dst, futures, handlers } => {
+        Select {
+            dst,
+            futures,
+            handlers,
+        } => {
             let futs: Vec<String> = futures.iter().map(r).collect();
-            write!(out, "SELECT    {}, [{}], {} handlers", r(dst), futs.join(", "), handlers.len())
+            write!(
+                out,
+                "SELECT    {}, [{}], {} handlers",
+                r(dst),
+                futs.join(", "),
+                handlers.len()
+            )
         }
         FutureReady { dst, future } => write!(out, "FUT_READY {}, {}", r(dst), r(future)),
         FutureGet { dst, future } => write!(out, "FUT_GET   {}, {}", r(dst), r(future)),
@@ -406,35 +663,71 @@ fn write_instruction(out: &mut String, module: &VbcModule, instr: &Instruction) 
 
         // ── Nursery ──
         NurseryInit { dst } => write!(out, "NURS_INIT {}", r(dst)),
-        NurserySpawn { dst, nursery, task } =>
-            write!(out, "NURS_SPAWN {}, {}, {}", r(dst), r(nursery), r(task)),
-        NurseryAwaitAll { nursery, success } =>
-            write!(out, "NURS_WAIT {}, {}", r(nursery), r(success)),
+        NurserySpawn { dst, nursery, task } => {
+            write!(out, "NURS_SPAWN {}, {}, {}", r(dst), r(nursery), r(task))
+        }
+        NurseryAwaitAll { nursery, success } => {
+            write!(out, "NURS_WAIT {}, {}", r(nursery), r(success))
+        }
         NurseryCancel { nursery } => write!(out, "NURS_CNCL {}", r(nursery)),
 
         // ── Context ──
         CtxGet { dst, ctx_type } => write!(out, "CTX_GET   {}, ctx={}", r(dst), ctx_type),
-        CtxProvide { ctx_type, value, body_offset } =>
-            write!(out, "CTX_PROV  ctx={}, {}, body={:+}", ctx_type, r(value), body_offset),
+        CtxProvide {
+            ctx_type,
+            value,
+            body_offset,
+        } => write!(
+            out,
+            "CTX_PROV  ctx={}, {}, body={:+}",
+            ctx_type,
+            r(value),
+            body_offset
+        ),
         CtxEnd => write!(out, "CTX_END"),
-        CtxCheckNegative { ctx_type, func_name } =>
-            write!(out, "CTX_CHK_NEG ctx={}, func={}", ctx_type, func_name),
+        CtxCheckNegative {
+            ctx_type,
+            func_name,
+        } => write!(out, "CTX_CHK_NEG ctx={}, func={}", ctx_type, func_name),
         PushContext { name, handler } => write!(out, "PUSH_CTX  name={}, {}", name, r(handler)),
         PopContext { name } => write!(out, "POP_CTX   name={}", name),
-        Attenuate { dst, context, capabilities } =>
-            write!(out, "ATTENUATE {}, {}, caps={}", r(dst), r(context), capabilities),
+        Attenuate {
+            dst,
+            context,
+            capabilities,
+        } => write!(
+            out,
+            "ATTENUATE {}, {}, caps={}",
+            r(dst),
+            r(context),
+            capabilities
+        ),
 
         // ── Debug / Verify ──
         Spec { reg, expected_type } => {
             let tname = format_type_id(module, TypeId(*expected_type));
             write!(out, "SPEC      {}, {}", r(reg), tname)
         }
-        Guard { reg, expected_type, deopt_offset } => {
+        Guard {
+            reg,
+            expected_type,
+            deopt_offset,
+        } => {
             let tname = format_type_id(module, TypeId(*expected_type));
-            write!(out, "GUARD     {}, {}, deopt={:+}", r(reg), tname, deopt_offset)
+            write!(
+                out,
+                "GUARD     {}, {}, deopt={:+}",
+                r(reg),
+                tname,
+                deopt_offset
+            )
         }
-        Assert { cond, message_id } =>
-            write!(out, "ASSERT    {}, {}", r(cond), str_name(module, *message_id)),
+        Assert { cond, message_id } => write!(
+            out,
+            "ASSERT    {}, {}",
+            r(cond),
+            str_name(module, *message_id)
+        ),
         Panic { message_id } => write!(out, "PANIC     {}", str_name(module, *message_id)),
         Unreachable => write!(out, "UNREACHABLE"),
         DebugPrint { value } => write!(out, "DBG_PRINT {}", r(value)),
@@ -449,23 +742,76 @@ fn write_instruction(out: &mut String, module: &VbcModule, instr: &Instruction) 
         Pop { dst } => write!(out, "POP       {}", r(dst)),
 
         // ── Generic Calls ──
-        CallG { dst, func_id, type_args, args } => {
+        CallG {
+            dst,
+            func_id,
+            type_args,
+            args,
+        } => {
             let targs: Vec<String> = type_args.iter().map(r).collect();
-            write!(out, "CALL_G    {}, {}<{}> {}", r(dst), func_name(module, *func_id), targs.join(", "), reg_range(args))
+            write!(
+                out,
+                "CALL_G    {}, {}<{}> {}",
+                r(dst),
+                func_name(module, *func_id),
+                targs.join(", "),
+                reg_range(args)
+            )
         }
-        CallV { dst, receiver, vtable_slot, args } =>
-            write!(out, "CALL_V    {}, {}.vt[{}] {}", r(dst), r(receiver), vtable_slot, reg_range(args)),
-        CallC { dst, cache_id, args } =>
-            write!(out, "CALL_C    {}, cache={} {}", r(dst), cache_id, reg_range(args)),
+        CallV {
+            dst,
+            receiver,
+            vtable_slot,
+            args,
+        } => write!(
+            out,
+            "CALL_V    {}, {}.vt[{}] {}",
+            r(dst),
+            r(receiver),
+            vtable_slot,
+            reg_range(args)
+        ),
+        CallC {
+            dst,
+            cache_id,
+            args,
+        } => write!(
+            out,
+            "CALL_C    {}, cache={} {}",
+            r(dst),
+            cache_id,
+            reg_range(args)
+        ),
         // ── Autodiff ──
-        GradBegin { scope_id, mode, wrt } => {
+        GradBegin {
+            scope_id,
+            mode,
+            wrt,
+        } => {
             let wregs: Vec<String> = wrt.iter().map(r).collect();
-            write!(out, "GRAD_BEGIN scope={}, {:?}, wrt=[{}]", scope_id, mode, wregs.join(", "))
+            write!(
+                out,
+                "GRAD_BEGIN scope={}, {:?}, wrt=[{}]",
+                scope_id,
+                mode,
+                wregs.join(", ")
+            )
         }
-        GradEnd { scope_id, output, grad_out, grad_regs } => {
+        GradEnd {
+            scope_id,
+            output,
+            grad_out,
+            grad_regs,
+        } => {
             let gregs: Vec<String> = grad_regs.iter().map(r).collect();
-            write!(out, "GRAD_END  scope={}, out={}, grad_out={}, grads=[{}]",
-                scope_id, r(output), r(grad_out), gregs.join(", "))
+            write!(
+                out,
+                "GRAD_END  scope={}, out={}, grad_out={}, grads=[{}]",
+                scope_id,
+                r(output),
+                r(grad_out),
+                gregs.join(", ")
+            )
         }
         GradCheckpoint { id, tensors } => {
             let tregs: Vec<String> = tensors.iter().map(r).collect();
@@ -475,8 +821,10 @@ fn write_instruction(out: &mut String, module: &VbcModule, instr: &Instruction) 
         GradStop { dst, src } => write!(out, "GRAD_STOP {}, {}", r(dst), r(src)),
 
         // ── Meta ──
-        MetaQuote { dst, bytes_const_id } =>
-            write!(out, "META_QUOTE {}, const={}", r(dst), bytes_const_id),
+        MetaQuote {
+            dst,
+            bytes_const_id,
+        } => write!(out, "META_QUOTE {}, const={}", r(dst), bytes_const_id),
         MetaSplice { src } => write!(out, "META_SPLICE {}", r(src)),
         MetaEval { dst, expr } => write!(out, "META_EVAL {}, {}", r(dst), r(expr)),
         MetaReflect { dst, type_id } => {
@@ -487,35 +835,80 @@ fn write_instruction(out: &mut String, module: &VbcModule, instr: &Instruction) 
         // ── Tensor (common) ──
         TensorNew { dst, dtype, dims } => {
             let dregs: Vec<String> = dims.iter().map(r).collect();
-            write!(out, "T_NEW     {}, {:?}, dims=[{}]", r(dst), dtype, dregs.join(", "))
+            write!(
+                out,
+                "T_NEW     {}, {:?}, dims=[{}]",
+                r(dst),
+                dtype,
+                dregs.join(", ")
+            )
         }
-        TensorBinop { op, dst, a, b } =>
-            write!(out, "T_BINOP   {}, {}, {} ({:?})", r(dst), r(a), r(b), op),
-        TensorUnop { op, dst, src } =>
-            write!(out, "T_UNOP    {}, {} ({:?})", r(dst), r(src), op),
-        TensorMatmul { dst, a, b } =>
-            write!(out, "T_MATMUL  {}, {}, {}", r(dst), r(a), r(b)),
-        TensorReduce { op, dst, src, axes, keepdim } =>
-            write!(out, "T_REDUCE  {}, {} ({:?}, axes={:?}, keep={})", r(dst), r(src), op, axes, keepdim),
+        TensorBinop { op, dst, a, b } => {
+            write!(out, "T_BINOP   {}, {}, {} ({:?})", r(dst), r(a), r(b), op)
+        }
+        TensorUnop { op, dst, src } => write!(out, "T_UNOP    {}, {} ({:?})", r(dst), r(src), op),
+        TensorMatmul { dst, a, b } => write!(out, "T_MATMUL  {}, {}, {}", r(dst), r(a), r(b)),
+        TensorReduce {
+            op,
+            dst,
+            src,
+            axes,
+            keepdim,
+        } => write!(
+            out,
+            "T_REDUCE  {}, {} ({:?}, axes={:?}, keep={})",
+            r(dst),
+            r(src),
+            op,
+            axes,
+            keepdim
+        ),
         TensorReshape { dst, src, shape } => {
             let sregs: Vec<String> = shape.iter().map(r).collect();
-            write!(out, "T_RESHAPE {}, {}, [{}]", r(dst), r(src), sregs.join(", "))
+            write!(
+                out,
+                "T_RESHAPE {}, {}, [{}]",
+                r(dst),
+                r(src),
+                sregs.join(", ")
+            )
         }
-        TensorTranspose { dst, src, perm } =>
-            write!(out, "T_TRANSP  {}, {}, perm={:?}", r(dst), r(src), perm),
-        TensorSlice { dst, src, starts, ends } => {
+        TensorTranspose { dst, src, perm } => {
+            write!(out, "T_TRANSP  {}, {}, perm={:?}", r(dst), r(src), perm)
+        }
+        TensorSlice {
+            dst,
+            src,
+            starts,
+            ends,
+        } => {
             let s: Vec<String> = starts.iter().map(r).collect();
             let e: Vec<String> = ends.iter().map(r).collect();
-            write!(out, "T_SLICE   {}, {}, [{}]..[{}]", r(dst), r(src), s.join(","), e.join(","))
+            write!(
+                out,
+                "T_SLICE   {}, {}, [{}]..[{}]",
+                r(dst),
+                r(src),
+                s.join(","),
+                e.join(",")
+            )
         }
         TensorClone { dst, src } => write!(out, "T_CLONE   {}, {}", r(dst), r(src)),
 
         // ── GPU (common) ──
         GpuSync { stream } => write!(out, "GPU_SYNC  {}", r(stream)),
-        GpuMemcpy { dst, src, direction } =>
-            write!(out, "GPU_CPY   {}, {}, dir={}", r(dst), r(src), direction),
-        GpuAlloc { dst, size, device } =>
-            write!(out, "GPU_ALLOC {}, size={}, dev={}", r(dst), r(size), r(device)),
+        GpuMemcpy {
+            dst,
+            src,
+            direction,
+        } => write!(out, "GPU_CPY   {}, {}, dir={}", r(dst), r(src), direction),
+        GpuAlloc { dst, size, device } => write!(
+            out,
+            "GPU_ALLOC {}, size={}, dev={}",
+            r(dst),
+            r(size),
+            r(device)
+        ),
         GpuDeviceSync => write!(out, "GPU_DEV_SYNC"),
 
         // ── Fallback for all remaining exotic instructions ──

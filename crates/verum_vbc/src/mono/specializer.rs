@@ -85,8 +85,15 @@ impl std::fmt::Display for SpecializationError {
             SpecializationError::UnresolvedTypeParam(id) => {
                 write!(f, "Unresolved type parameter: {:?}", id)
             }
-            SpecializationError::SpecializationNotFound { function_id, type_args } => {
-                write!(f, "Specialization not found for {:?} with {:?}", function_id, type_args)
+            SpecializationError::SpecializationNotFound {
+                function_id,
+                type_args,
+            } => {
+                write!(
+                    f,
+                    "Specialization not found for {:?} with {:?}",
+                    function_id, type_args
+                )
             }
         }
     }
@@ -111,22 +118,70 @@ impl TypeLayout {
     /// Layout for built-in types.
     pub fn for_builtin(type_id: TypeId) -> Self {
         match type_id.0 {
-            0 => Self { size: 0, alignment: 1 },    // UNIT
-            1 => Self { size: 1, alignment: 1 },    // BOOL
-            2 => Self { size: 8, alignment: 8 },    // INT
-            3 => Self { size: 8, alignment: 8 },    // FLOAT
-            4 => Self { size: 24, alignment: 8 },   // TEXT (ptr + len + cap)
-            5 => Self { size: 0, alignment: 1 },    // NEVER
-            6 => Self { size: 1, alignment: 1 },    // U8
-            7 => Self { size: 2, alignment: 2 },    // U16
-            8 => Self { size: 4, alignment: 4 },    // U32
-            9 => Self { size: 8, alignment: 8 },    // U64
-            10 => Self { size: 1, alignment: 1 },   // I8
-            11 => Self { size: 2, alignment: 2 },   // I16
-            12 => Self { size: 4, alignment: 4 },   // I32
-            13 => Self { size: 4, alignment: 4 },   // F32
-            14 => Self { size: 8, alignment: 8 },   // PTR
-            _ => Self { size: 8, alignment: 8 },    // Default for user types
+            0 => Self {
+                size: 0,
+                alignment: 1,
+            }, // UNIT
+            1 => Self {
+                size: 1,
+                alignment: 1,
+            }, // BOOL
+            2 => Self {
+                size: 8,
+                alignment: 8,
+            }, // INT
+            3 => Self {
+                size: 8,
+                alignment: 8,
+            }, // FLOAT
+            4 => Self {
+                size: 24,
+                alignment: 8,
+            }, // TEXT (ptr + len + cap)
+            5 => Self {
+                size: 0,
+                alignment: 1,
+            }, // NEVER
+            6 => Self {
+                size: 1,
+                alignment: 1,
+            }, // U8
+            7 => Self {
+                size: 2,
+                alignment: 2,
+            }, // U16
+            8 => Self {
+                size: 4,
+                alignment: 4,
+            }, // U32
+            9 => Self {
+                size: 8,
+                alignment: 8,
+            }, // U64
+            10 => Self {
+                size: 1,
+                alignment: 1,
+            }, // I8
+            11 => Self {
+                size: 2,
+                alignment: 2,
+            }, // I16
+            12 => Self {
+                size: 4,
+                alignment: 4,
+            }, // I32
+            13 => Self {
+                size: 4,
+                alignment: 4,
+            }, // F32
+            14 => Self {
+                size: 8,
+                alignment: 8,
+            }, // PTR
+            _ => Self {
+                size: 8,
+                alignment: 8,
+            }, // Default for user types
         }
     }
 }
@@ -205,10 +260,13 @@ impl<'a> BytecodeSpecializer<'a> {
         let mut type_layouts = HashMap::new();
         let mut max_type_id = 0u32;
         for type_desc in &module.types {
-            type_layouts.insert(type_desc.id, TypeLayout {
-                size: type_desc.size,
-                alignment: type_desc.alignment,
-            });
+            type_layouts.insert(
+                type_desc.id,
+                TypeLayout {
+                    size: type_desc.size,
+                    alignment: type_desc.alignment,
+                },
+            );
             max_type_id = max_type_id.max(type_desc.id.0);
         }
 
@@ -248,7 +306,9 @@ impl<'a> BytecodeSpecializer<'a> {
                 offset: start,
                 message: format!(
                     "Bytecode range {}..{} exceeds module size {}",
-                    start, end, self.module.bytecode.len()
+                    start,
+                    end,
+                    self.module.bytecode.len()
                 ),
             });
         }
@@ -348,12 +408,14 @@ impl<'a> BytecodeSpecializer<'a> {
         let func_id = FunctionId(self.read_varint(bytecode, pc)? as u32);
 
         // Read type arguments
-        let type_arg_count = bytecode.get(*pc).copied().ok_or_else(|| {
-            SpecializationError::InvalidBytecode {
-                offset: *pc,
-                message: "Unexpected end of bytecode reading type_arg_count".to_string(),
-            }
-        })?;
+        let type_arg_count =
+            bytecode
+                .get(*pc)
+                .copied()
+                .ok_or_else(|| SpecializationError::InvalidBytecode {
+                    offset: *pc,
+                    message: "Unexpected end of bytecode reading type_arg_count".to_string(),
+                })?;
         *pc += 1;
 
         let mut call_type_args = Vec::with_capacity(type_arg_count as usize);
@@ -364,12 +426,14 @@ impl<'a> BytecodeSpecializer<'a> {
         }
 
         // Read arguments
-        let arg_count = bytecode.get(*pc).copied().ok_or_else(|| {
-            SpecializationError::InvalidBytecode {
-                offset: *pc,
-                message: "Unexpected end of bytecode reading arg_count".to_string(),
-            }
-        })?;
+        let arg_count =
+            bytecode
+                .get(*pc)
+                .copied()
+                .ok_or_else(|| SpecializationError::InvalidBytecode {
+                    offset: *pc,
+                    message: "Unexpected end of bytecode reading arg_count".to_string(),
+                })?;
         *pc += 1;
 
         let mut args = Vec::with_capacity(arg_count as usize);
@@ -379,7 +443,9 @@ impl<'a> BytecodeSpecializer<'a> {
 
         // Look up specialized function
         let key = InstantiationKey::new(func_id, call_type_args.clone());
-        let specialized_fn = self.graph.get_specialization_by_key(&key)
+        let specialized_fn = self
+            .graph
+            .get_specialization_by_key(&key)
             .unwrap_or(func_id); // Fall back to original if not found
 
         // Emit CALL instruction
@@ -421,21 +487,25 @@ impl<'a> BytecodeSpecializer<'a> {
         let protocol_id = ProtocolId(self.read_varint(bytecode, pc)? as u32);
 
         // Read method index in the protocol
-        let method_idx = bytecode.get(*pc).copied().ok_or_else(|| {
-            SpecializationError::InvalidBytecode {
-                offset: *pc,
-                message: "Unexpected end reading method_idx for CALL_V".to_string(),
-            }
-        })?;
+        let method_idx =
+            bytecode
+                .get(*pc)
+                .copied()
+                .ok_or_else(|| SpecializationError::InvalidBytecode {
+                    offset: *pc,
+                    message: "Unexpected end reading method_idx for CALL_V".to_string(),
+                })?;
         *pc += 1;
 
         // Read arguments
-        let arg_count = bytecode.get(*pc).copied().ok_or_else(|| {
-            SpecializationError::InvalidBytecode {
-                offset: *pc,
-                message: "Unexpected end reading arg_count for CALL_V".to_string(),
-            }
-        })?;
+        let arg_count =
+            bytecode
+                .get(*pc)
+                .copied()
+                .ok_or_else(|| SpecializationError::InvalidBytecode {
+                    offset: *pc,
+                    message: "Unexpected end reading arg_count for CALL_V".to_string(),
+                })?;
         *pc += 1;
 
         let mut args = Vec::with_capacity(arg_count as usize);
@@ -446,35 +516,39 @@ impl<'a> BytecodeSpecializer<'a> {
         // Attempt devirtualization
         // Check if we know the concrete type of the receiver
         if let Some(receiver_type) = self.register_types.get(&receiver).cloned()
-            && let Some(direct_fn) = self.lookup_protocol_impl(&receiver_type, protocol_id, method_idx) {
-                // Devirtualize: emit CALL instead of CALL_V
-                output.push(Opcode::Call.to_byte());
-                self.write_reg(output, dst);
-                self.write_varint(output, direct_fn.0 as u64);
-                output.push(arg_count + 1); // +1 for receiver as first arg
-                self.write_reg(output, receiver); // receiver becomes first argument
-                for arg in args {
-                    self.write_reg(output, arg);
-                }
-                self.stats.call_v_devirtualized += 1;
-                return Ok(());
+            && let Some(direct_fn) =
+                self.lookup_protocol_impl(&receiver_type, protocol_id, method_idx)
+        {
+            // Devirtualize: emit CALL instead of CALL_V
+            output.push(Opcode::Call.to_byte());
+            self.write_reg(output, dst);
+            self.write_varint(output, direct_fn.0 as u64);
+            output.push(arg_count + 1); // +1 for receiver as first arg
+            self.write_reg(output, receiver); // receiver becomes first argument
+            for arg in args {
+                self.write_reg(output, arg);
             }
+            self.stats.call_v_devirtualized += 1;
+            return Ok(());
+        }
 
         // Fallback: check if substitution provides a primary type that could help
         if let Some(primary_type) = self.substitution.get(TypeParamId(0))
-            && let Some(direct_fn) = self.lookup_protocol_impl(primary_type, protocol_id, method_idx) {
-                // Devirtualize using substituted type
-                output.push(Opcode::Call.to_byte());
-                self.write_reg(output, dst);
-                self.write_varint(output, direct_fn.0 as u64);
-                output.push(arg_count + 1);
-                self.write_reg(output, receiver);
-                for arg in args {
-                    self.write_reg(output, arg);
-                }
-                self.stats.call_v_devirtualized += 1;
-                return Ok(());
+            && let Some(direct_fn) =
+                self.lookup_protocol_impl(primary_type, protocol_id, method_idx)
+        {
+            // Devirtualize using substituted type
+            output.push(Opcode::Call.to_byte());
+            self.write_reg(output, dst);
+            self.write_varint(output, direct_fn.0 as u64);
+            output.push(arg_count + 1);
+            self.write_reg(output, receiver);
+            for arg in args {
+                self.write_reg(output, arg);
             }
+            self.stats.call_v_devirtualized += 1;
+            return Ok(());
+        }
 
         // Cannot devirtualize: emit CALL_V as-is
         output.push(Opcode::CallV.to_byte());
@@ -511,7 +585,10 @@ impl<'a> BytecodeSpecializer<'a> {
         let type_desc = self.module.types.iter().find(|td| td.id == type_id)?;
 
         // Find protocol implementation
-        let proto_impl = type_desc.protocols.iter().find(|pi| pi.protocol == protocol_id)?;
+        let proto_impl = type_desc
+            .protocols
+            .iter()
+            .find(|pi| pi.protocol == protocol_id)?;
 
         // Get method function ID by index
         let method_fn_id = proto_impl.methods.get(method_idx as usize)?;
@@ -539,12 +616,15 @@ impl<'a> BytecodeSpecializer<'a> {
         let base_type_id = TypeId(self.read_varint(bytecode, pc)? as u32);
 
         // Read type arguments
-        let type_arg_count = bytecode.get(*pc).copied().ok_or_else(|| {
-            SpecializationError::InvalidBytecode {
-                offset: *pc,
-                message: "Unexpected end of bytecode reading type_arg_count for NEW_G".to_string(),
-            }
-        })?;
+        let type_arg_count =
+            bytecode
+                .get(*pc)
+                .copied()
+                .ok_or_else(|| SpecializationError::InvalidBytecode {
+                    offset: *pc,
+                    message: "Unexpected end of bytecode reading type_arg_count for NEW_G"
+                        .to_string(),
+                })?;
         *pc += 1;
 
         let mut type_args = Vec::with_capacity(type_arg_count as usize);
@@ -792,20 +872,14 @@ impl<'a> BytecodeSpecializer<'a> {
                     self.type_layouts.get(id).map_or(8, |l| l.size)
                 }
             }
-            TypeRef::Instantiated { base, .. } => {
-                self.type_layouts.get(base).map_or(8, |l| l.size)
-            }
+            TypeRef::Instantiated { base, .. } => self.type_layouts.get(base).map_or(8, |l| l.size),
             TypeRef::Reference { .. } => 16, // ThinRef size
-            TypeRef::Tuple(elements) => {
-                elements.iter().map(|e| self.get_type_size(e)).sum()
-            }
-            TypeRef::Array { element, length } => {
-                self.get_type_size(element) * (*length as u32)
-            }
-            TypeRef::Slice(_) => 16, // ptr + len
-            TypeRef::Function { .. } => 8, // function pointer
+            TypeRef::Tuple(elements) => elements.iter().map(|e| self.get_type_size(e)).sum(),
+            TypeRef::Array { element, length } => self.get_type_size(element) * (*length as u32),
+            TypeRef::Slice(_) => 16,            // ptr + len
+            TypeRef::Function { .. } => 8,      // function pointer
             TypeRef::Rank2Function { .. } => 8, // function pointer (rank-2 polymorphic)
-            TypeRef::Generic(_) => 8, // Should be substituted by now
+            TypeRef::Generic(_) => 8,           // Should be substituted by now
         }
     }
 
@@ -823,9 +897,11 @@ impl<'a> BytecodeSpecializer<'a> {
                 self.type_layouts.get(base).map_or(8, |l| l.alignment)
             }
             TypeRef::Reference { .. } => 8,
-            TypeRef::Tuple(elements) => {
-                elements.iter().map(|e| self.get_type_alignment(e)).max().unwrap_or(1)
-            }
+            TypeRef::Tuple(elements) => elements
+                .iter()
+                .map(|e| self.get_type_alignment(e))
+                .max()
+                .unwrap_or(1),
             TypeRef::Array { element, .. } => self.get_type_alignment(element),
             TypeRef::Slice(_) => 8,
             TypeRef::Function { .. } => 8,
@@ -853,9 +929,9 @@ impl<'a> BytecodeSpecializer<'a> {
         }
 
         // Check if all args are concrete - if any are generic, we can't fully instantiate
-        let all_concrete = args.iter().all(|arg| {
-            matches!(arg, TypeRef::Concrete(_) | TypeRef::Instantiated { .. })
-        });
+        let all_concrete = args
+            .iter()
+            .all(|arg| matches!(arg, TypeRef::Concrete(_) | TypeRef::Instantiated { .. }));
 
         if !all_concrete {
             // Can't fully instantiate - return base type
@@ -891,7 +967,8 @@ impl<'a> BytecodeSpecializer<'a> {
         };
 
         // Update layout cache
-        self.type_layouts.insert(new_id, TypeLayout { size, alignment });
+        self.type_layouts
+            .insert(new_id, TypeLayout { size, alignment });
 
         // Store new type descriptor
         self.new_type_descriptors.push(new_type_desc);
@@ -905,17 +982,19 @@ impl<'a> BytecodeSpecializer<'a> {
     /// Computes size and alignment for an instantiated generic type.
     fn compute_instantiated_layout(&self, base: TypeId, args: &[TypeRef]) -> (u32, u32) {
         // Get base type layout
-        let base_layout = self.type_layouts.get(&base)
-            .copied()
-            .unwrap_or(TypeLayout { size: 8, alignment: 8 });
+        let base_layout = self.type_layouts.get(&base).copied().unwrap_or(TypeLayout {
+            size: 8,
+            alignment: 8,
+        });
 
         // For simple cases, inherit from base
         // For complex cases (structs with generic fields), need to compute based on args
         if let Some(base_desc) = self.module.types.iter().find(|td| td.id == base) {
             // Check if any field uses a type parameter
-            let has_generic_fields = base_desc.fields.iter().any(|f| {
-                matches!(f.type_ref, TypeRef::Generic(_))
-            });
+            let has_generic_fields = base_desc
+                .fields
+                .iter()
+                .any(|f| matches!(f.type_ref, TypeRef::Generic(_)));
 
             if has_generic_fields && !args.is_empty() {
                 // Compute actual layout based on substituted field types
@@ -957,18 +1036,20 @@ impl<'a> BytecodeSpecializer<'a> {
             if let Some(type_ref) = self.substitution.get(TypeParamId(param_id)) {
                 // Only return if it's a concrete numeric type
                 if let TypeRef::Concrete(id) = type_ref
-                    && id.is_numeric() {
-                        return Some(type_ref.clone());
-                    }
+                    && id.is_numeric()
+                {
+                    return Some(type_ref.clone());
+                }
             }
         }
 
         // Fallback: return the first available concrete type
         for param_id in 0..16 {
             if let Some(type_ref) = self.substitution.get(TypeParamId(param_id))
-                && matches!(type_ref, TypeRef::Concrete(_)) {
-                    return Some(type_ref.clone());
-                }
+                && matches!(type_ref, TypeRef::Concrete(_))
+            {
+                return Some(type_ref.clone());
+            }
         }
 
         None
@@ -1048,7 +1129,11 @@ impl<'a> BytecodeSpecializer<'a> {
     }
 
     /// Reads a TypeRef from bytecode.
-    fn read_type_ref(&self, bytecode: &[u8], pc: &mut usize) -> Result<TypeRef, SpecializationError> {
+    fn read_type_ref(
+        &self,
+        bytecode: &[u8],
+        pc: &mut usize,
+    ) -> Result<TypeRef, SpecializationError> {
         if *pc >= bytecode.len() {
             return Err(SpecializationError::InvalidBytecode {
                 offset: *pc,
@@ -1139,7 +1224,11 @@ impl<'a> BytecodeSpecializer<'a> {
                     _ => crate::types::CbgrTier::Tier2,
                 };
                 *pc += 1;
-                Ok(TypeRef::Reference { inner, mutability, tier })
+                Ok(TypeRef::Reference {
+                    inner,
+                    mutability,
+                    tier,
+                })
             }
             5 => {
                 // Tuple
@@ -1229,7 +1318,11 @@ impl<'a> BytecodeSpecializer<'a> {
                     self.write_type_ref(output, arg);
                 }
             }
-            TypeRef::Function { params, return_type, .. } => {
+            TypeRef::Function {
+                params,
+                return_type,
+                ..
+            } => {
                 output.push(3); // tag
                 output.push(params.len() as u8);
                 for param in params {
@@ -1237,7 +1330,11 @@ impl<'a> BytecodeSpecializer<'a> {
                 }
                 self.write_type_ref(output, return_type);
             }
-            TypeRef::Reference { inner, mutability, tier } => {
+            TypeRef::Reference {
+                inner,
+                mutability,
+                tier,
+            } => {
                 output.push(4); // tag
                 self.write_type_ref(output, inner);
                 output.push(*mutability as u8);
@@ -1259,7 +1356,12 @@ impl<'a> BytecodeSpecializer<'a> {
                 output.push(7); // tag
                 self.write_type_ref(output, element);
             }
-            TypeRef::Rank2Function { type_param_count, params, return_type, .. } => {
+            TypeRef::Rank2Function {
+                type_param_count,
+                params,
+                return_type,
+                ..
+            } => {
                 output.push(8); // tag for Rank2Function
                 self.write_varint(output, *type_param_count as u64);
                 output.push(params.len() as u8);
@@ -1290,20 +1392,53 @@ impl<'a> BytecodeSpecializer<'a> {
             }
 
             // Two registers (unary ops)
-            Opcode::Mov | Opcode::Not | Opcode::NegI | Opcode::NegF | Opcode::Bnot
-            | Opcode::Clone | Opcode::Ref | Opcode::RefMut | Opcode::Deref | Opcode::DerefMut => {
+            Opcode::Mov
+            | Opcode::Not
+            | Opcode::NegI
+            | Opcode::NegF
+            | Opcode::Bnot
+            | Opcode::Clone
+            | Opcode::Ref
+            | Opcode::RefMut
+            | Opcode::Deref
+            | Opcode::DerefMut => {
                 let first = self.count_reg_bytes(bytecode, pc)?;
                 let second = self.count_reg_bytes(bytecode, pc + first)?;
                 Ok(first + second)
             }
 
             // Three registers (binary ops)
-            Opcode::AddI | Opcode::SubI | Opcode::MulI | Opcode::DivI | Opcode::ModI
-            | Opcode::AddF | Opcode::SubF | Opcode::MulF | Opcode::DivF
-            | Opcode::Band | Opcode::Bor | Opcode::Bxor | Opcode::Shl | Opcode::Shr | Opcode::Ushr
-            | Opcode::EqI | Opcode::NeI | Opcode::LtI | Opcode::LeI | Opcode::GtI | Opcode::GeI
-            | Opcode::EqF | Opcode::NeF | Opcode::LtF | Opcode::LeF | Opcode::GtF | Opcode::GeF
-            | Opcode::And | Opcode::Or | Opcode::Xor | Opcode::EqRef => {
+            Opcode::AddI
+            | Opcode::SubI
+            | Opcode::MulI
+            | Opcode::DivI
+            | Opcode::ModI
+            | Opcode::AddF
+            | Opcode::SubF
+            | Opcode::MulF
+            | Opcode::DivF
+            | Opcode::Band
+            | Opcode::Bor
+            | Opcode::Bxor
+            | Opcode::Shl
+            | Opcode::Shr
+            | Opcode::Ushr
+            | Opcode::EqI
+            | Opcode::NeI
+            | Opcode::LtI
+            | Opcode::LeI
+            | Opcode::GtI
+            | Opcode::GeI
+            | Opcode::EqF
+            | Opcode::NeF
+            | Opcode::LtF
+            | Opcode::LeF
+            | Opcode::GtF
+            | Opcode::GeF
+            | Opcode::And
+            | Opcode::Or
+            | Opcode::Xor
+            | Opcode::EqRef => {
                 let mut total = 0;
                 for _ in 0..3 {
                     total += self.count_reg_bytes(bytecode, pc + total)?;
@@ -1322,8 +1457,12 @@ impl<'a> BytecodeSpecializer<'a> {
             }
 
             // Fused compare-and-jump: two registers + 4-byte offset
-            Opcode::JmpEq | Opcode::JmpNe | Opcode::JmpLt | Opcode::JmpLe
-            | Opcode::JmpGt | Opcode::JmpGe => {
+            Opcode::JmpEq
+            | Opcode::JmpNe
+            | Opcode::JmpLt
+            | Opcode::JmpLe
+            | Opcode::JmpGt
+            | Opcode::JmpGe => {
                 let mut total = 0;
                 for _ in 0..2 {
                     total += self.count_reg_bytes(bytecode, pc + total)?;
@@ -1404,22 +1543,26 @@ impl<'a> BytecodeSpecializer<'a> {
     }
 
     /// Counts bytes for a register at the given offset.
-    fn count_reg_bytes(&self, bytecode: &[u8], offset: usize) -> Result<usize, SpecializationError> {
+    fn count_reg_bytes(
+        &self,
+        bytecode: &[u8],
+        offset: usize,
+    ) -> Result<usize, SpecializationError> {
         if offset >= bytecode.len() {
             return Err(SpecializationError::InvalidBytecode {
                 offset,
                 message: "Unexpected end counting register bytes".to_string(),
             });
         }
-        if bytecode[offset] < 128 {
-            Ok(1)
-        } else {
-            Ok(2)
-        }
+        if bytecode[offset] < 128 { Ok(1) } else { Ok(2) }
     }
 
     /// Counts bytes for a varint at the given offset.
-    fn count_varint_bytes(&self, bytecode: &[u8], offset: usize) -> Result<usize, SpecializationError> {
+    fn count_varint_bytes(
+        &self,
+        bytecode: &[u8],
+        offset: usize,
+    ) -> Result<usize, SpecializationError> {
         let mut count = 0;
         let mut pos = offset;
         loop {

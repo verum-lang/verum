@@ -1,21 +1,52 @@
 pub mod analyze;
-pub mod cache;
-pub mod dap;
-pub mod bench;
-pub mod build;
-pub mod check;
 pub mod audit_gate;
+pub mod bench;
+/// `verum benchmark` subcommand — head-to-head comparison surface
+/// (#83). Runs the configured suite against one or more systems
+/// (Verum / Coq / Lean4 / Isabelle / Agda) and emits a typed
+/// comparison matrix.
+pub mod benchmark;
+pub mod build;
+pub mod cache;
+/// `verum cache-closure` subcommand — surfaces
+/// `verum_verification::closure_cache::FilesystemCacheStore` so
+/// users / IDE / CI can inspect / list / clear / probe the
+/// per-theorem closure-hash incremental verification cache.
+pub mod cache_closure;
+/// `verum cert-replay` subcommand — multi-backend SMT certificate
+/// cross-validation. Kernel-only structural check + per-backend
+/// replay + multi-backend consensus gate.
+pub mod cert_replay;
+pub mod check;
 pub mod check_proof;
 pub mod clean;
-pub mod elaborate_proof;
+/// `verum cog-registry` subcommand — interact with the cog
+/// distribution registry: publish / lookup / search / verify /
+/// multi-mirror consensus check.
+pub mod cog_registry;
 pub mod config;
+/// `verum cubical` subcommand — typed cubical/HoTT primitive
+/// catalogue + computation-rule registry + face-formula validator.
+pub mod cubical;
+pub mod dap;
 pub mod deps;
 pub mod diagnose;
 pub mod doc;
+/// `verum doc-render` subcommand — auto-paper generator. Walks
+/// every `.vr` file, projects @theorem / @lemma / @corollary /
+/// @axiom to typed `DocItem`s, and renders Markdown / LaTeX / HTML
+/// via `verum_verification::doc_render::DefaultDocRenderer`.
+pub mod doc_render;
 pub mod doctor;
+pub mod elaborate_proof;
 pub mod explain;
 pub mod file;
 pub mod fmt;
+/// `verum foreign-import` subcommand — read Coq / Lean4 / Mizar /
+/// Isabelle source files and emit a Verum `.vr` skeleton with one
+/// `@axiom`-bodied declaration per imported theorem, attributed
+/// back to the source via `@framework(<system>, "<source>:<line>")`.
+pub mod foreign_import;
 pub mod hooks;
 pub mod init;
 pub mod lex_mask;
@@ -24,6 +55,10 @@ pub mod lint_baseline;
 pub mod lint_cache;
 pub mod lint_engine;
 pub mod lint_human;
+/// `verum llm-tactic` subcommand — LCF-style fail-closed LLM proof
+/// proposer. The LLM may propose tactic sequences but the kernel
+/// re-checks every step before committing.
+pub mod llm_tactic;
 pub mod lsp;
 pub mod new;
 pub mod playbook;
@@ -37,6 +72,12 @@ pub mod proof_draft;
 /// REPL consumers can request structured repair suggestions for a
 /// typed `ProofFailureKind` without depending on the Rust API.
 pub mod proof_repair;
+/// `verum proof-repl` subcommand — non-interactive batch driver
+/// for the proof REPL state machine. Apply tactics, undo / redo,
+/// hint, visualise the proof tree.
+pub mod proof_repl;
+pub mod repl;
+pub mod run;
 /// `verum tactic` subcommand — surfaces
 /// `verum_verification::tactic_combinator::DefaultTacticCatalog` so
 /// IDE / REPL / docs-generator consumers can ask the canonical
@@ -44,55 +85,14 @@ pub mod proof_repair;
 /// algebraic laws look like, and what a single combinator's full
 /// doc record is.
 pub mod tactic;
-/// `verum cache-closure` subcommand — surfaces
-/// `verum_verification::closure_cache::FilesystemCacheStore` so
-/// users / IDE / CI can inspect / list / clear / probe the
-/// per-theorem closure-hash incremental verification cache.
-pub mod cache_closure;
-/// `verum doc-render` subcommand — auto-paper generator. Walks
-/// every `.vr` file, projects @theorem / @lemma / @corollary /
-/// @axiom to typed `DocItem`s, and renders Markdown / LaTeX / HTML
-/// via `verum_verification::doc_render::DefaultDocRenderer`.
-pub mod doc_render;
-/// `verum foreign-import` subcommand — read Coq / Lean4 / Mizar /
-/// Isabelle source files and emit a Verum `.vr` skeleton with one
-/// `@axiom`-bodied declaration per imported theorem, attributed
-/// back to the source via `@framework(<system>, "<source>:<line>")`.
-pub mod foreign_import;
-/// `verum llm-tactic` subcommand — LCF-style fail-closed LLM proof
-/// proposer. The LLM may propose tactic sequences but the kernel
-/// re-checks every step before committing.
-pub mod llm_tactic;
-/// `verum proof-repl` subcommand — non-interactive batch driver
-/// for the proof REPL state machine. Apply tactics, undo / redo,
-/// hint, visualise the proof tree.
-pub mod proof_repl;
-/// `verum benchmark` subcommand — head-to-head comparison surface
-/// (#83). Runs the configured suite against one or more systems
-/// (Verum / Coq / Lean4 / Isabelle / Agda) and emits a typed
-/// comparison matrix.
-pub mod benchmark;
-/// `verum cert-replay` subcommand — multi-backend SMT certificate
-/// cross-validation. Kernel-only structural check + per-backend
-/// replay + multi-backend consensus gate.
-pub mod cert_replay;
-/// `verum cog-registry` subcommand — interact with the cog
-/// distribution registry: publish / lookup / search / verify /
-/// multi-mirror consensus check.
-pub mod cog_registry;
-/// `verum cubical` subcommand — typed cubical/HoTT primitive
-/// catalogue + computation-rule registry + face-formula validator.
-pub mod cubical;
-pub mod repl;
-pub mod run;
 // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system.
 // The stdlib.rs file is kept for reference but not exposed in the CLI.
 // pub mod stdlib;
+pub mod fuzz;
+pub mod property;
 #[cfg(feature = "verification")]
 pub mod smt_info;
 pub mod smt_stats;
-pub mod fuzz;
-pub mod property;
 pub mod test;
 pub mod vbc_version;
 pub mod verify;

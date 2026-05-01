@@ -10,8 +10,8 @@
 
 use verum_common::{List, Text};
 use verum_kernel::{
-    AxiomRegistry, ConstructorSig, Context, CoreTerm, InductiveRegistry,
-    RegisteredInductive, UniverseLevel, infer, infer_with_inductives,
+    AxiomRegistry, ConstructorSig, Context, CoreTerm, InductiveRegistry, RegisteredInductive,
+    UniverseLevel, infer, infer_with_inductives,
 };
 
 fn empty_axioms() -> AxiomRegistry {
@@ -26,12 +26,10 @@ fn nat_decl() -> RegisteredInductive {
     RegisteredInductive::new(
         Text::from("Nat"),
         List::new(),
-        List::from_iter(vec![
-            ConstructorSig {
-                name: Text::from("Zero"),
-                arg_types: List::new(),
-            },
-        ]),
+        List::from_iter(vec![ConstructorSig {
+            name: Text::from("Zero"),
+            arg_types: List::new(),
+        }]),
     )
 }
 
@@ -56,8 +54,8 @@ fn infer_with_empty_registry_falls_back_to_concrete_zero() {
         args: List::new(),
     };
     let inductives = InductiveRegistry::new();
-    let ty = infer_with_inductives(&empty_ctx(), &term, &empty_axioms(), &inductives)
-        .expect("infer ok");
+    let ty =
+        infer_with_inductives(&empty_ctx(), &term, &empty_axioms(), &inductives).expect("infer ok");
     assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(0)));
 }
 
@@ -73,8 +71,8 @@ fn infer_with_registered_concrete_zero_returns_concrete_zero() {
         path: Text::from("Nat"),
         args: List::new(),
     };
-    let ty = infer_with_inductives(&empty_ctx(), &term, &empty_axioms(), &inductives)
-        .expect("infer ok");
+    let ty =
+        infer_with_inductives(&empty_ctx(), &term, &empty_axioms(), &inductives).expect("infer ok");
     assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(0)));
 }
 
@@ -91,8 +89,8 @@ fn infer_with_registered_concrete_two_returns_concrete_two() {
         path: Text::from("Nat"),
         args: List::new(),
     };
-    let ty = infer_with_inductives(&empty_ctx(), &term, &empty_axioms(), &inductives)
-        .expect("infer ok");
+    let ty =
+        infer_with_inductives(&empty_ctx(), &term, &empty_axioms(), &inductives).expect("infer ok");
     assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(2)));
 }
 
@@ -109,8 +107,8 @@ fn infer_with_registered_prop_universe_returns_prop() {
         path: Text::from("Nat"),
         args: List::new(),
     };
-    let ty = infer_with_inductives(&empty_ctx(), &term, &empty_axioms(), &inductives)
-        .expect("infer ok");
+    let ty =
+        infer_with_inductives(&empty_ctx(), &term, &empty_axioms(), &inductives).expect("infer ok");
     assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Prop));
 }
 
@@ -125,8 +123,8 @@ fn unregistered_inductive_falls_back_to_concrete_zero_in_either_path() {
         args: List::new(),
     };
     let inductives = InductiveRegistry::new();
-    let ty = infer_with_inductives(&empty_ctx(), &term, &empty_axioms(), &inductives)
-        .expect("infer ok");
+    let ty =
+        infer_with_inductives(&empty_ctx(), &term, &empty_axioms(), &inductives).expect("infer ok");
     assert_eq!(ty, CoreTerm::Universe(UniverseLevel::Concrete(0)));
 }
 
@@ -150,16 +148,13 @@ fn registered_inductive_with_universe_serde_roundtrip() {
     // field still deserialise — they default to Concrete(0).
     use serde_json;
     let json = r#"{"name":"OldNat","params":[],"constructors":[]}"#;
-    let decl: RegisteredInductive =
-        serde_json::from_str(json).expect("legacy json deserialises");
+    let decl: RegisteredInductive = serde_json::from_str(json).expect("legacy json deserialises");
     assert_eq!(decl.universe, UniverseLevel::Concrete(0));
 
     // New JSON with explicit universe field round-trips cleanly.
-    let new_decl =
-        nat_decl().with_universe(UniverseLevel::Concrete(2));
+    let new_decl = nat_decl().with_universe(UniverseLevel::Concrete(2));
     let serialized = serde_json::to_string(&new_decl).expect("serialise");
-    let restored: RegisteredInductive =
-        serde_json::from_str(&serialized).expect("deserialise");
+    let restored: RegisteredInductive = serde_json::from_str(&serialized).expect("deserialise");
     assert_eq!(restored.universe, UniverseLevel::Concrete(2));
 }
 
@@ -185,8 +180,8 @@ fn nested_inductive_in_pi_uses_registered_universe() {
         domain: Heap::new(nat.clone()),
         codomain: Heap::new(nat),
     };
-    let ty = infer_with_inductives(&empty_ctx(), &pi, &empty_axioms(), &inductives)
-        .expect("infer ok");
+    let ty =
+        infer_with_inductives(&empty_ctx(), &pi, &empty_axioms(), &inductives).expect("infer ok");
     // Pi-formation: result lives in max(level(dom), level(codom)).
     // Both are Concrete(2), so the Pi inhabits
     // Universe(Max(Concrete(2), Concrete(2))).

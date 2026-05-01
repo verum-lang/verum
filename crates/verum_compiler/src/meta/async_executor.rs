@@ -49,9 +49,9 @@ use std::sync::Arc;
 use verum_ast::expr::Expr;
 use verum_common::{List, Text};
 
-use super::{ConstValue, MetaContext, MetaError};
 use super::registry::MetaFunction;
 use super::sandbox::MetaSandbox;
+use super::{ConstValue, MetaContext, MetaError};
 
 /// Task identifier for dependency tracking
 pub type TaskId = usize;

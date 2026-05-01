@@ -21,9 +21,9 @@
 
 //! Tests parsing of `using C` syntax in generic parameters for context polymorphism.
 
+use verum_ast::ItemKind;
 use verum_ast::span::FileId;
 use verum_ast::ty::GenericParamKind;
-use verum_ast::ItemKind;
 use verum_common::List;
 use verum_lexer::Lexer;
 use verum_parser::{ParseError, VerumParser};
@@ -55,7 +55,11 @@ fn identity<T, using C>(value: T) -> T using C {
 "#;
 
     let result = parse_module(input);
-    assert!(result.is_ok(), "Should parse function with context param: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Should parse function with context param: {:?}",
+        result.err()
+    );
 
     let module = result.unwrap();
     match &module.items[0].kind {
@@ -77,7 +81,10 @@ fn identity<T, using C>(value: T) -> T using C {
                 GenericParamKind::Context { name } => {
                     assert_eq!(name.name.as_str(), "C");
                 }
-                _ => panic!("Expected Context param at index 1, got {:?}", generics[1].kind),
+                _ => panic!(
+                    "Expected Context param at index 1, got {:?}",
+                    generics[1].kind
+                ),
             }
         }
         _ => panic!("Expected Function declaration"),
@@ -94,7 +101,11 @@ fn logged_action<using C>() using C {
 "#;
 
     let result = parse_module(input);
-    assert!(result.is_ok(), "Should parse function with only context param: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Should parse function with only context param: {:?}",
+        result.err()
+    );
 
     let module = result.unwrap();
     match &module.items[0].kind {
@@ -123,7 +134,11 @@ fn transform<A, B, R, using Ctx>(a: A, b: B) -> R using Ctx {
 "#;
 
     let result = parse_module(input);
-    assert!(result.is_ok(), "Should parse with multiple type params and context: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Should parse with multiple type params and context: {:?}",
+        result.err()
+    );
 
     let module = result.unwrap();
     match &module.items[0].kind {
@@ -132,13 +147,14 @@ fn transform<A, B, R, using Ctx>(a: A, b: B) -> R using Ctx {
             assert_eq!(generics.len(), 4, "Should have 4 generic params");
 
             // Check names
-            let names: Vec<&str> = generics.iter().map(|p| {
-                match &p.kind {
+            let names: Vec<&str> = generics
+                .iter()
+                .map(|p| match &p.kind {
                     GenericParamKind::Type { name, .. } => name.name.as_str(),
                     GenericParamKind::Context { name } => name.name.as_str(),
                     _ => "",
-                }
-            }).collect();
+                })
+                .collect();
 
             assert_eq!(names, vec!["A", "B", "R", "Ctx"]);
 
@@ -157,28 +173,42 @@ fn transform<A, B, R, using Ctx>(a: A, b: B) -> R using Ctx {
 #[test]
 fn test_parse_context_param_various_names() {
     // Test various valid context param names
-    let names = vec!["C", "Ctx", "Context", "MyContext", "CtxA", "C1", "DatabaseCtx"];
+    let names = vec![
+        "C",
+        "Ctx",
+        "Context",
+        "MyContext",
+        "CtxA",
+        "C1",
+        "DatabaseCtx",
+    ];
 
     for ctx_name in names {
-        let input = format!(r#"
+        let input = format!(
+            r#"
 fn foo<T, using {}>(x: T) -> T using {} {{
     x
 }}
-"#, ctx_name, ctx_name);
+"#,
+            ctx_name, ctx_name
+        );
 
         let result = parse_module(&input);
-        assert!(result.is_ok(), "Should parse context param name '{}': {:?}", ctx_name, result.err());
+        assert!(
+            result.is_ok(),
+            "Should parse context param name '{}': {:?}",
+            ctx_name,
+            result.err()
+        );
 
         let module = result.unwrap();
         match &module.items[0].kind {
-            ItemKind::Function(func) => {
-                match &func.generics[1].kind {
-                    GenericParamKind::Context { name } => {
-                        assert_eq!(name.name.as_str(), ctx_name);
-                    }
-                    _ => panic!("Expected Context param for name: {}", ctx_name),
+            ItemKind::Function(func) => match &func.generics[1].kind {
+                GenericParamKind::Context { name } => {
+                    assert_eq!(name.name.as_str(), ctx_name);
                 }
-            }
+                _ => panic!("Expected Context param for name: {}", ctx_name),
+            },
             _ => panic!("Expected Function declaration"),
         }
     }
@@ -198,7 +228,11 @@ fn map<T, U, using C>(value: T, f: fn(T) -> U using C) -> U using C {
 "#;
 
     let result = parse_module(input);
-    assert!(result.is_ok(), "Should parse higher-order context-polymorphic function: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Should parse higher-order context-polymorphic function: {:?}",
+        result.err()
+    );
 
     let module = result.unwrap();
     match &module.items[0].kind {
@@ -228,7 +262,11 @@ fn outer<T, using OuterCtx>(value: T, f: fn(T) -> T using OuterCtx) -> T using O
 "#;
 
     let result = parse_module(input);
-    assert!(result.is_ok(), "Should parse nested context polymorphism: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Should parse nested context polymorphism: {:?}",
+        result.err()
+    );
 }
 
 // ============================================================================
@@ -245,7 +283,11 @@ fn traverse<F<_>, T, U, using C>(container: F<T>, f: fn(T) -> U using C) -> F<U>
 "#;
 
     let result = parse_module(input);
-    assert!(result.is_ok(), "Should parse context with HKT: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Should parse context with HKT: {:?}",
+        result.err()
+    );
 
     let module = result.unwrap();
     match &module.items[0].kind {
@@ -253,11 +295,16 @@ fn traverse<F<_>, T, U, using C>(container: F<T>, f: fn(T) -> U using C) -> F<U>
             let generics = &func.generics;
 
             // Find context param
-            let context_params: Vec<_> = generics.iter()
+            let context_params: Vec<_> = generics
+                .iter()
                 .filter(|p| matches!(&p.kind, GenericParamKind::Context { .. }))
                 .collect();
 
-            assert_eq!(context_params.len(), 1, "Should have exactly 1 context param");
+            assert_eq!(
+                context_params.len(),
+                1,
+                "Should have exactly 1 context param"
+            );
         }
         _ => panic!("Expected Function declaration"),
     }
@@ -273,7 +320,11 @@ fn sized_op<T, N: meta Int, using C>(arr: Array<T, N>) -> T using C {
 "#;
 
     let result = parse_module(input);
-    assert!(result.is_ok(), "Should parse context with meta param: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Should parse context with meta param: {:?}",
+        result.err()
+    );
 
     let module = result.unwrap();
     match &module.items[0].kind {
@@ -303,7 +354,11 @@ fn clone_with_ctx<T: Clone, using C>(value: T) -> T using C {
 "#;
 
     let result = parse_module(input);
-    assert!(result.is_ok(), "Should parse context with bounded type: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Should parse context with bounded type: {:?}",
+        result.err()
+    );
 }
 
 // ============================================================================
@@ -320,7 +375,11 @@ fn unusual<using C, T>(x: T) -> T using C {
 "#;
 
     let result = parse_module(input);
-    assert!(result.is_ok(), "Should parse context param in first position: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Should parse context param in first position: {:?}",
+        result.err()
+    );
 
     let module = result.unwrap();
     match &module.items[0].kind {
@@ -347,7 +406,11 @@ fn middle<T, using C, U>(x: T, y: U) -> T using C {
 "#;
 
     let result = parse_module(input);
-    assert!(result.is_ok(), "Should parse context param in middle: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Should parse context param in middle: {:?}",
+        result.err()
+    );
 
     let module = result.unwrap();
     match &module.items[0].kind {
@@ -378,18 +441,25 @@ fn multi_ctx<T, using C1, using C2>(x: T) -> T using [C1, C2] {
 "#;
 
     let result = parse_module(input);
-    assert!(result.is_ok(), "Should parse multiple context params: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Should parse multiple context params: {:?}",
+        result.err()
+    );
 
     let module = result.unwrap();
     match &module.items[0].kind {
         ItemKind::Function(func) => {
-            let context_params: Vec<_> = func.generics.iter()
+            let context_params: Vec<_> = func
+                .generics
+                .iter()
                 .filter(|p| matches!(&p.kind, GenericParamKind::Context { .. }))
                 .collect();
 
             assert_eq!(context_params.len(), 2, "Should have 2 context params");
 
-            let names: Vec<&str> = context_params.iter()
+            let names: Vec<&str> = context_params
+                .iter()
                 .filter_map(|p| match &p.kind {
                     GenericParamKind::Context { name } => Some(name.name.as_str()),
                     _ => None,
@@ -416,7 +486,10 @@ fn bad<T, using>(x: T) -> T {
 "#;
 
     let result = parse_module(input);
-    assert!(result.is_err(), "Should fail parsing 'using' without identifier");
+    assert!(
+        result.is_err(),
+        "Should fail parsing 'using' without identifier"
+    );
 }
 
 #[test]
@@ -452,7 +525,11 @@ implement<T> Container<T> {
 "#;
 
     let result = parse_module(input);
-    assert!(result.is_ok(), "Should parse method with context param: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Should parse method with context param: {:?}",
+        result.err()
+    );
 }
 
 // ============================================================================
@@ -502,7 +579,11 @@ fn iter_map<T, U, using C>(
 "#;
 
     let result = parse_module(input);
-    assert!(result.is_ok(), "Should parse iterator map pattern: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Should parse iterator map pattern: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -518,7 +599,11 @@ fn and_then<T, U, E, using C>(
 "#;
 
     let result = parse_module(input);
-    assert!(result.is_ok(), "Should parse Result.and_then pattern: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Should parse Result.and_then pattern: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -534,7 +619,11 @@ fn maybe_map<T, U, using C>(
 "#;
 
     let result = parse_module(input);
-    assert!(result.is_ok(), "Should parse Maybe.map pattern: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Should parse Maybe.map pattern: {:?}",
+        result.err()
+    );
 }
 
 // ============================================================================
@@ -554,14 +643,18 @@ fn test_context_param_has_correct_span() {
             let context_param = &func.generics[1];
 
             // Span should be non-zero and reasonable
-            assert!(context_param.span.start < context_param.span.end,
-                    "Context param span should have positive length");
+            assert!(
+                context_param.span.start < context_param.span.end,
+                "Context param span should have positive length"
+            );
 
             match &context_param.kind {
                 GenericParamKind::Context { name } => {
                     // Name span should also be valid
-                    assert!(name.span.start < name.span.end,
-                            "Context param name span should have positive length");
+                    assert!(
+                        name.span.start < name.span.end,
+                        "Context param name span should have positive length"
+                    );
                 }
                 _ => panic!("Expected Context param"),
             }
@@ -587,7 +680,11 @@ type Mappable is protocol {
 "#;
 
     let result = parse_module(input);
-    assert!(result.is_ok(), "Should parse protocol method with context param: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Should parse protocol method with context param: {:?}",
+        result.err()
+    );
 }
 
 // ============================================================================
@@ -604,7 +701,11 @@ fn borrowed<'a, T, using C>(value: &'a T) -> &'a T using C {
 "#;
 
     let result = parse_module(input);
-    assert!(result.is_ok(), "Should parse context with lifetime param: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Should parse context with lifetime param: {:?}",
+        result.err()
+    );
 }
 
 // ============================================================================
@@ -620,12 +721,18 @@ fn three_context<T, using A, using B, using C>(x: T) -> T using [A, B, C] {
 "#;
 
     let result = parse_module(input);
-    assert!(result.is_ok(), "Should parse three context params: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Should parse three context params: {:?}",
+        result.err()
+    );
 
     let module = result.unwrap();
     match &module.items[0].kind {
         ItemKind::Function(func) => {
-            let context_count = func.generics.iter()
+            let context_count = func
+                .generics
+                .iter()
                 .filter(|p| matches!(&p.kind, GenericParamKind::Context { .. }))
                 .count();
 
@@ -648,7 +755,11 @@ fn ordered<using First, T, using Second, U, using Third>(x: T, y: U) -> T using 
 "#;
 
     let result = parse_module(input);
-    assert!(result.is_ok(), "Should parse context params in various positions: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Should parse context params in various positions: {:?}",
+        result.err()
+    );
 
     let module = result.unwrap();
     match &module.items[0].kind {
@@ -656,11 +767,21 @@ fn ordered<using First, T, using Second, U, using Third>(x: T, y: U) -> T using 
             let params = &func.generics;
 
             // Check order: First, T, Second, U, Third
-            assert!(matches!(&params[0].kind, GenericParamKind::Context { name } if name.name.as_str() == "First"));
-            assert!(matches!(&params[1].kind, GenericParamKind::Type { name, .. } if name.name.as_str() == "T"));
-            assert!(matches!(&params[2].kind, GenericParamKind::Context { name } if name.name.as_str() == "Second"));
-            assert!(matches!(&params[3].kind, GenericParamKind::Type { name, .. } if name.name.as_str() == "U"));
-            assert!(matches!(&params[4].kind, GenericParamKind::Context { name } if name.name.as_str() == "Third"));
+            assert!(
+                matches!(&params[0].kind, GenericParamKind::Context { name } if name.name.as_str() == "First")
+            );
+            assert!(
+                matches!(&params[1].kind, GenericParamKind::Type { name, .. } if name.name.as_str() == "T")
+            );
+            assert!(
+                matches!(&params[2].kind, GenericParamKind::Context { name } if name.name.as_str() == "Second")
+            );
+            assert!(
+                matches!(&params[3].kind, GenericParamKind::Type { name, .. } if name.name.as_str() == "U")
+            );
+            assert!(
+                matches!(&params[4].kind, GenericParamKind::Context { name } if name.name.as_str() == "Third")
+            );
         }
         _ => panic!("Expected Function declaration"),
     }

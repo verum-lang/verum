@@ -13,8 +13,8 @@
     unused_assignments
 )]
 use verum_ast::span::FileId;
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 #[test]
 fn test_parser_creation() {

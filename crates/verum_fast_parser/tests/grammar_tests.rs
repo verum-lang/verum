@@ -42,8 +42,8 @@ use verum_ast::{
     Expr, ExprKind, FileId, Item, ItemKind, Module, Pattern, PatternKind, Span, Stmt, StmtKind,
     Type, TypeKind,
 };
-use verum_lexer::Lexer;
 use verum_fast_parser::{ParseResult, VerumParser};
+use verum_lexer::Lexer;
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -3376,7 +3376,9 @@ mod l1_core_spec_tests {
 
     #[test]
     fn test_function_type_advanced_context_inference_parses() {
-        let content = include_str!("../../../vcs/specs/L1-core/types/inference/function_type_advanced_context_inference.vr");
+        let content = include_str!(
+            "../../../vcs/specs/L1-core/types/inference/function_type_advanced_context_inference.vr"
+        );
         parse_module(content).unwrap_or_else(|e| {
             panic!(
                 "Failed to parse function_type_advanced_context_inference.vr: {:?}",

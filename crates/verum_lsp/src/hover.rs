@@ -659,7 +659,8 @@ fn format_targets_hover(targets: AttributeTarget) -> String {
 pub fn get_proof_keyword_hover(word: &str) -> Option<String> {
     match word {
         // Declaration keywords
-        "theorem" => Some("# `theorem`\n\n\
+        "theorem" => Some(
+            "# `theorem`\n\n\
             Declares a theorem - a proven mathematical statement.\n\n\
             ### Syntax\n\
             ```verum\n\
@@ -674,8 +675,11 @@ pub fn get_proof_keyword_hover(word: &str) -> Option<String> {
                 requires x >= 0.0\n\
                 ensures result >= 0.0\n\
             proof by smt\n\
-            ```".to_string()),
-        "lemma" => Some("# `lemma`\n\n\
+            ```"
+            .to_string(),
+        ),
+        "lemma" => Some(
+            "# `lemma`\n\n\
             Declares a lemma - a helper theorem used in proofs.\n\n\
             Lemmas are typically used to break down complex proofs into smaller, \
             reusable parts.\n\n\
@@ -685,8 +689,11 @@ pub fn get_proof_keyword_hover(word: &str) -> Option<String> {
                 requires conditions\n\
                 ensures result\n\
             proof by tactic\n\
-            ```".to_string()),
-        "axiom" => Some("# `axiom`\n\n\
+            ```"
+            .to_string(),
+        ),
+        "axiom" => Some(
+            "# `axiom`\n\n\
             Declares an axiom - an assumed truth without proof.\n\n\
             ⚠️ **Warning**: Axioms are assumed true without verification. \
             Use sparingly and only for fundamental assumptions.\n\n\
@@ -697,14 +704,20 @@ pub fn get_proof_keyword_hover(word: &str) -> Option<String> {
             ### Example\n\
             ```verum\n\
             axiom excluded_middle: forall P. P || !P\n\
-            ```".to_string()),
-        "corollary" => Some("# `corollary`\n\n\
+            ```"
+            .to_string(),
+        ),
+        "corollary" => Some(
+            "# `corollary`\n\n\
             Declares a corollary - a result that follows directly from a theorem.\n\n\
             Corollaries are typically straightforward consequences of previously \
-            proven theorems.".to_string()),
+            proven theorems."
+                .to_string(),
+        ),
 
         // Proof structure
-        "proof" => Some("# `proof`\n\n\
+        "proof" => Some(
+            "# `proof`\n\n\
             Begins a proof block for a theorem or lemma.\n\n\
             ### Syntax\n\
             ```verum\n\
@@ -713,46 +726,67 @@ pub fn get_proof_keyword_hover(word: &str) -> Option<String> {
             proof {\n\
                 // proof steps\n\
             }\n\
-            ```".to_string()),
-        "qed" => Some("# `qed`\n\n\
+            ```"
+            .to_string(),
+        ),
+        "qed" => Some(
+            "# `qed`\n\n\
             Marks the end of a proof (\"quod erat demonstrandum\").\n\n\
-            Indicates that the proof is complete.".to_string()),
-        "by" => Some("# `by`\n\n\
+            Indicates that the proof is complete."
+                .to_string(),
+        ),
+        "by" => Some(
+            "# `by`\n\n\
             Specifies the tactic used to prove a goal.\n\n\
             ### Syntax\n\
             ```verum\n\
             proof by <tactic>\n\
             have P by <tactic>\n\
-            ```".to_string()),
+            ```"
+            .to_string(),
+        ),
 
         // Proof helpers
-        "have" => Some("# `have`\n\n\
+        "have" => Some(
+            "# `have`\n\n\
             Introduces a local fact in a proof.\n\n\
             ### Syntax\n\
             ```verum\n\
             have fact: P by tactic\n\
             ```\n\n\
-            The fact becomes available for subsequent proof steps.".to_string()),
-        "show" => Some("# `show`\n\n\
+            The fact becomes available for subsequent proof steps."
+                .to_string(),
+        ),
+        "show" => Some(
+            "# `show`\n\n\
             Declares what the proof is trying to show.\n\n\
             ### Syntax\n\
             ```verum\n\
             show P by tactic\n\
-            ```".to_string()),
-        "suffices" => Some("# `suffices`\n\n\
+            ```"
+            .to_string(),
+        ),
+        "suffices" => Some(
+            "# `suffices`\n\n\
             Reduces the current goal to a sufficient condition.\n\n\
             ### Syntax\n\
             ```verum\n\
             suffices P by tactic\n\
             ```\n\n\
-            If `P` can be proven and `P => Goal`, then the goal is proven.".to_string()),
-        "obtain" => Some("# `obtain`\n\n\
+            If `P` can be proven and `P => Goal`, then the goal is proven."
+                .to_string(),
+        ),
+        "obtain" => Some(
+            "# `obtain`\n\n\
             Destructs an existential statement to get a witness.\n\n\
             ### Syntax\n\
             ```verum\n\
             obtain x such that P from hypothesis\n\
-            ```".to_string()),
-        "calc" => Some("# `calc`\n\n\
+            ```"
+            .to_string(),
+        ),
+        "calc" => Some(
+            "# `calc`\n\n\
             Begins a calculational proof chain.\n\n\
             ### Syntax\n\
             ```verum\n\
@@ -762,65 +796,118 @@ pub fn get_proof_keyword_hover(word: &str) -> Option<String> {
                   < d by tactic3\n\
             }\n\
             ```\n\n\
-            Each step justifies the relation with the previous term.".to_string()),
+            Each step justifies the relation with the previous term."
+                .to_string(),
+        ),
 
         // Quantifiers
-        "forall" => Some("# `forall`\n\n\
+        "forall" => Some(
+            "# `forall`\n\n\
             Universal quantifier - \"for all\".\n\n\
             ### Syntax\n\
             ```verum\n\
             forall x: T. P(x)\n\
             ```\n\n\
-            Asserts that property P holds for all values x of type T.".to_string()),
-        "exists" => Some("# `exists`\n\n\
+            Asserts that property P holds for all values x of type T."
+                .to_string(),
+        ),
+        "exists" => Some(
+            "# `exists`\n\n\
             Existential quantifier - \"there exists\".\n\n\
             ### Syntax\n\
             ```verum\n\
             exists x: T. P(x)\n\
             ```\n\n\
-            Asserts that there is some value x of type T for which P holds.".to_string()),
+            Asserts that there is some value x of type T for which P holds."
+                .to_string(),
+        ),
 
         // Tactics
-        "auto" => Some(hover_for_tactic("auto", "Automatic proof search",
+        "auto" => Some(hover_for_tactic(
+            "auto",
+            "Automatic proof search",
             "Attempts to discharge the goal using available hypotheses and lemmas. \
-            Combines simplification, assumption matching, and basic reasoning.")),
-        "simp" => Some(hover_for_tactic("simp", "Simplification",
+            Combines simplification, assumption matching, and basic reasoning.",
+        )),
+        "simp" => Some(hover_for_tactic(
+            "simp",
+            "Simplification",
             "Applies simplification lemmas repeatedly to rewrite the goal into a simpler form. \
-            Can be configured with `simp [lemma1, lemma2]` to use specific lemmas.")),
-        "ring" => Some(hover_for_tactic("ring", "Ring equation solver",
+            Can be configured with `simp [lemma1, lemma2]` to use specific lemmas.",
+        )),
+        "ring" => Some(hover_for_tactic(
+            "ring",
+            "Ring equation solver",
             "Proves algebraic equations in ring structures using ring axioms. \
-            Works on expressions involving `+`, `-`, `*` over integers, rationals, etc.")),
-        "field" => Some(hover_for_tactic("field", "Field theory solver",
-            "Proves equations in field structures. Handles division and extends ring tactics.")),
-        "omega" => Some(hover_for_tactic("omega", "Linear arithmetic solver",
+            Works on expressions involving `+`, `-`, `*` over integers, rationals, etc.",
+        )),
+        "field" => Some(hover_for_tactic(
+            "field",
+            "Field theory solver",
+            "Proves equations in field structures. Handles division and extends ring tactics.",
+        )),
+        "omega" => Some(hover_for_tactic(
+            "omega",
+            "Linear arithmetic solver",
             "Solves linear arithmetic constraints over integers. \
-            Handles equations and inequalities with `+`, `-`, `*` (by constants), and comparisons.")),
-        "blast" => Some(hover_for_tactic("blast", "DPLL-based proof search",
+            Handles equations and inequalities with `+`, `-`, `*` (by constants), and comparisons.",
+        )),
+        "blast" => Some(hover_for_tactic(
+            "blast",
+            "DPLL-based proof search",
             "Aggressive automated proving using DPLL algorithm. \
-            Good for propositional goals and first-order logic problems.")),
-        "smt" => Some(hover_for_tactic("smt", "SMT solver invocation",
+            Good for propositional goals and first-order logic problems.",
+        )),
+        "smt" => Some(hover_for_tactic(
+            "smt",
+            "SMT solver invocation",
             "Sends the goal to an external SMT solver (Z3 or CVC5). \
-            Very powerful for complex arithmetic, arrays, and quantified formulas.")),
-        "induction" => Some(hover_for_tactic("induction", "Proof by induction",
+            Very powerful for complex arithmetic, arrays, and quantified formulas.",
+        )),
+        "induction" => Some(hover_for_tactic(
+            "induction",
+            "Proof by induction",
             "Applies structural induction on a term. \
-            Use `induction on x` to specify the induction variable.")),
-        "cases" => Some(hover_for_tactic("cases", "Case analysis",
+            Use `induction on x` to specify the induction variable.",
+        )),
+        "cases" => Some(hover_for_tactic(
+            "cases",
+            "Case analysis",
             "Splits the goal into cases based on constructors or conditions. \
-            Use `cases h` to case-split on a hypothesis or value.")),
-        "trivial" => Some(hover_for_tactic("trivial", "Trivial proof",
-            "Solves reflexivity and simple equalities like `x == x` or `true`.")),
-        "assumption" => Some(hover_for_tactic("assumption", "Proof by assumption",
-            "Searches hypotheses for an exact match with the goal.")),
-        "contradiction" => Some(hover_for_tactic("contradiction", "Proof by contradiction",
-            "Derives `False` from contradictory hypotheses.")),
-        "rewrite" => Some(hover_for_tactic("rewrite", "Rewrite using equality",
+            Use `cases h` to case-split on a hypothesis or value.",
+        )),
+        "trivial" => Some(hover_for_tactic(
+            "trivial",
+            "Trivial proof",
+            "Solves reflexivity and simple equalities like `x == x` or `true`.",
+        )),
+        "assumption" => Some(hover_for_tactic(
+            "assumption",
+            "Proof by assumption",
+            "Searches hypotheses for an exact match with the goal.",
+        )),
+        "contradiction" => Some(hover_for_tactic(
+            "contradiction",
+            "Proof by contradiction",
+            "Derives `False` from contradictory hypotheses.",
+        )),
+        "rewrite" => Some(hover_for_tactic(
+            "rewrite",
+            "Rewrite using equality",
             "Replaces terms in the goal using an equality lemma. \
-            Use `rewrite h` where `h: a = b` to replace `a` with `b`.")),
-        "apply" => Some(hover_for_tactic("apply", "Apply lemma/theorem",
+            Use `rewrite h` where `h: a = b` to replace `a` with `b`.",
+        )),
+        "apply" => Some(hover_for_tactic(
+            "apply",
+            "Apply lemma/theorem",
             "Matches the goal with the conclusion of a lemma and generates subgoals for premises. \
-            Use `apply lemma_name` to apply a specific lemma.")),
-        "exact" => Some(hover_for_tactic("exact", "Exact proof term",
-            "Provides an explicit proof term that exactly matches the goal.")),
+            Use `apply lemma_name` to apply a specific lemma.",
+        )),
+        "exact" => Some(hover_for_tactic(
+            "exact",
+            "Exact proof term",
+            "Provides an explicit proof term that exactly matches the goal.",
+        )),
 
         _ => None,
     }
@@ -865,7 +952,7 @@ pub fn format_reference_type_hover(tier: RefTier, is_mut: bool, inner_type: &str
             Memory layout: ThinRef (16 bytes) or FatRef (24 bytes).",
             "> **Note**: CBGR-managed references provide runtime memory safety \
             with automatic generation tracking. The ~15ns overhead ensures \
-            no use-after-free errors."
+            no use-after-free errors.",
         ),
         RefTier::Checked => (
             if is_mut { "&checked mut" } else { "&checked" },
@@ -874,7 +961,7 @@ pub fn format_reference_type_hover(tier: RefTier, is_mut: bool, inner_type: &str
             The compiler has proven this reference is safe through escape analysis. \
             No runtime overhead.",
             "> **Note**: Statically verified references have zero runtime overhead \
-            because the compiler proves safety at compile time."
+            because the compiler proves safety at compile time.",
         ),
         RefTier::Unsafe => (
             if is_mut { "&unsafe mut" } else { "&unsafe" },
@@ -882,7 +969,7 @@ pub fn format_reference_type_hover(tier: RefTier, is_mut: bool, inner_type: &str
             "**Unsafe reference** (Tier 2)\n\n\
             ⚠️ All safety checks are bypassed. You must manually guarantee memory safety.",
             "> **Warning**: Unsafe references bypass all safety checks. \
-            Use only when you can manually guarantee memory safety."
+            Use only when you can manually guarantee memory safety.",
         ),
     };
 
@@ -898,7 +985,8 @@ pub fn format_reference_type_hover(tier: RefTier, is_mut: bool, inner_type: &str
 /// Get hover for reference-related keywords
 pub fn get_reference_keyword_hover(word: &str) -> Option<String> {
     match word {
-        "checked" => Some("# `checked`\n\n\
+        "checked" => Some(
+            "# `checked`\n\n\
             Reference tier modifier for statically verified references.\n\n\
             ### Syntax\n\
             ```verum\n\
@@ -909,8 +997,11 @@ pub fn get_reference_keyword_hover(word: &str) -> Option<String> {
             - **Overhead**: 0ns (compile-time verified)\n\
             - **Safety**: Compiler proves memory safety via escape analysis\n\
             - **Use case**: Hot paths where CBGR overhead is unacceptable\n\n\
-            The compiler will reject `&checked` if it cannot prove safety.".to_string()),
-        "unsafe" => Some("# `unsafe`\n\n\
+            The compiler will reject `&checked` if it cannot prove safety."
+                .to_string(),
+        ),
+        "unsafe" => Some(
+            "# `unsafe`\n\n\
             Reference tier modifier for unchecked references, or code block marker.\n\n\
             ### As Reference Modifier\n\
             ```verum\n\
@@ -924,7 +1015,9 @@ pub fn get_reference_keyword_hover(word: &str) -> Option<String> {
             unsafe {\n\
                 // code with manual safety obligations\n\
             }\n\
-            ```".to_string()),
+            ```"
+            .to_string(),
+        ),
         _ => None,
     }
 }

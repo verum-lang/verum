@@ -271,7 +271,10 @@ impl DeriveDeserialize {
 
             // Pattern: "field_name"
             let pattern = Pattern::new(
-                PatternKind::Literal(verum_ast::Literal::string(field_name.to_string().into(), span)),
+                PatternKind::Literal(verum_ast::Literal::string(
+                    field_name.to_string().into(),
+                    span,
+                )),
                 span,
             );
 
@@ -325,7 +328,8 @@ impl DeriveDeserialize {
                         value: Maybe::Some(ignore_try),
                     },
                     span,
-                )].into(),
+                )]
+                .into(),
                 expr: None,
                 span,
             }),
@@ -395,7 +399,8 @@ impl DeriveDeserialize {
                             has_semi: true,
                         },
                         span,
-                    )].into(),
+                    )]
+                    .into(),
                     expr: None,
                     span,
                 },
@@ -420,7 +425,8 @@ impl DeriveDeserialize {
                             has_semi: true,
                         },
                         span,
-                    )].into(),
+                    )]
+                    .into(),
                     expr: None,
                     span,
                 },

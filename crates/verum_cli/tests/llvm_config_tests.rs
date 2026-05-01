@@ -449,9 +449,10 @@ fn test_lto_config_validation() {
             return Err("Incremental LTO only supported for Thin LTO");
         }
         if let Some(threads) = config.max_threads
-            && threads == 0 {
-                return Err("max_threads must be > 0");
-            }
+            && threads == 0
+        {
+            return Err("max_threads must be > 0");
+        }
         Ok(())
     }
 
@@ -652,13 +653,15 @@ fn test_cross_compile_config() {
         // Sysroot and linker are optional — host defaults are used when
         // either is None — but if explicitly set they must be non-empty.
         if let Some(sr) = &config.sysroot
-            && sr.as_os_str().is_empty() {
-                return Err("Cross-compilation sysroot is empty");
-            }
+            && sr.as_os_str().is_empty()
+        {
+            return Err("Cross-compilation sysroot is empty");
+        }
         if let Some(ln) = &config.linker
-            && ln.as_os_str().is_empty() {
-                return Err("Cross-compilation linker is empty");
-            }
+            && ln.as_os_str().is_empty()
+        {
+            return Err("Cross-compilation linker is empty");
+        }
         Ok(())
     }
 

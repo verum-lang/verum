@@ -21,8 +21,8 @@
 
 use std::time::Duration;
 use verum_ast::{Expr, Type, TypeKind};
-use verum_common::{List, Maybe, Set, Text};
 use verum_common::ToText;
+use verum_common::{List, Maybe, Set, Text};
 use z3::ast::{Bool, Dynamic, Int, Real};
 
 use crate::context::Context;

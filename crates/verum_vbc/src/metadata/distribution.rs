@@ -81,10 +81,7 @@ impl MeshTopology {
 
     /// Returns the size of a dimension.
     pub fn dim_size(&self, name: &str) -> Option<usize> {
-        self.dims
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, s)| *s)
+        self.dims.iter().find(|(n, _)| n == name).map(|(_, s)| *s)
     }
 
     /// Returns dimension names.

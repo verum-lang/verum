@@ -1054,10 +1054,7 @@ impl CallGraphBuilder {
                     self.visit_expr(v);
                 }
             }
-            ExprKind::TryRecover {
-                try_block,
-                recover,
-            } => {
+            ExprKind::TryRecover { try_block, recover } => {
                 self.visit_expr(try_block);
                 self.visit_recover_body(recover);
             }
@@ -1174,7 +1171,9 @@ impl CallGraphBuilder {
                         verum_ast::expr::AsmOperandKind::InOut { place, .. } => {
                             self.visit_expr(place);
                         }
-                        verum_ast::expr::AsmOperandKind::InLateOut { in_expr, out_place, .. } => {
+                        verum_ast::expr::AsmOperandKind::InLateOut {
+                            in_expr, out_place, ..
+                        } => {
                             self.visit_expr(in_expr);
                             self.visit_expr(out_place);
                         }

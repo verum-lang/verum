@@ -14,8 +14,8 @@
 //! richer form look the name up in the module's type registry.
 
 use serde::{Deserialize, Serialize};
-use verum_common::{Heap, List, Text};
 use verum_common::span::Span;
+use verum_common::{Heap, List, Text};
 
 use crate::expr::IrExpr;
 
@@ -127,17 +127,13 @@ mod tests {
 
     #[test]
     fn refinement_underlying_sort_strips_predicate() {
-        use verum_common::Heap;
         use crate::expr::{IrExpr, IrExprKind};
+        use verum_common::Heap;
 
         let refined = IrType::Refined {
             base: Heap::new(IrType::Int),
             binder: Text::from("self"),
-            predicate: Heap::new(IrExpr::new(
-                IrExprKind::BoolLit(true),
-                None,
-                Span::dummy(),
-            )),
+            predicate: Heap::new(IrExpr::new(IrExprKind::BoolLit(true), None, Span::dummy())),
         };
         match refined.underlying_sort() {
             IrType::Int => {}

@@ -56,10 +56,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::expr_translate::{
-    AgdaExprRenderer, AgdaTypeRenderer, CoqExprRenderer, CoqTypeRenderer,
-    DeduktiExprRenderer, DeduktiTypeRenderer, ExprRenderer, IsabelleExprRenderer,
-    IsabelleTypeRenderer, LeanExprRenderer, LeanTypeRenderer, TranslatedExpr,
-    TranslatedType, TypeRenderer,
+    AgdaExprRenderer, AgdaTypeRenderer, CoqExprRenderer, CoqTypeRenderer, DeduktiExprRenderer,
+    DeduktiTypeRenderer, ExprRenderer, IsabelleExprRenderer, IsabelleTypeRenderer,
+    LeanExprRenderer, LeanTypeRenderer, TranslatedExpr, TranslatedType, TypeRenderer,
 };
 
 /// One theorem parameter — name + per-backend type text (#141).
@@ -228,10 +227,7 @@ impl TheoremSpec {
     /// `params` is a slice of `(parameter_name, parameter_type)` pairs
     /// extracted from the theorem's AST by the audit walker. Names
     /// should already be sanitised to valid foreign-tool identifiers.
-    pub fn with_translated_params(
-        mut self,
-        params: &[(String, &verum_ast::ty::Type)],
-    ) -> Self {
+    pub fn with_translated_params(mut self, params: &[(String, &verum_ast::ty::Type)]) -> Self {
         for (name, ty) in params {
             let mut per_backend_type_text: std::collections::BTreeMap<String, String> =
                 std::collections::BTreeMap::new();
@@ -476,10 +472,7 @@ impl CorpusBackend for CoqCorpusBackend {
 /// **Output format**: `<kernel_version>:<32-byte-hex-blake3>` — the
 /// kernel version is included so future Verum versions can refuse
 /// to verify signatures from incompatible kernel revisions.
-pub fn compute_provenance_signature(
-    spec: &TheoremSpec,
-    backend_id: &str,
-) -> String {
+pub fn compute_provenance_signature(spec: &TheoremSpec, backend_id: &str) -> String {
     let mut hasher = blake3::Hasher::new();
     hasher.update(KERNEL_VERSION.as_bytes());
     hasher.update(b"\x00");
@@ -1083,7 +1076,11 @@ mod tests {
         assert_eq!(rendered.filename, "my_thm.v");
         assert!(rendered.content.contains("Theorem my_thm : Prop."));
         assert!(rendered.content.contains("Admitted."));
-        assert!(rendered.content.contains("(* Proposition (Verum source): x = x *)"));
+        assert!(
+            rendered
+                .content
+                .contains("(* Proposition (Verum source): x = x *)")
+        );
     }
 
     #[test]
@@ -1101,7 +1098,11 @@ mod tests {
         let backend = LeanCorpusBackend::new();
         let rendered = backend.render_theorem(&spec_proven("my_thm", "x = x"));
         assert_eq!(rendered.filename, "my_thm.lean");
-        assert!(rendered.content.contains("theorem my_thm : Prop := by sorry"));
+        assert!(
+            rendered
+                .content
+                .contains("theorem my_thm : Prop := by sorry")
+        );
     }
 
     #[test]
@@ -1126,7 +1127,9 @@ mod tests {
             .insert("coq".to_string(), "apply other_thm.".to_string());
         let rendered = backend.render_theorem(&spec);
         assert!(
-            rendered.content.contains("Proof.\n  apply other_thm.\nQed."),
+            rendered
+                .content
+                .contains("Proof.\n  apply other_thm.\nQed."),
             "tactic must replace `admit. Admitted.`; got:\n{}",
             rendered.content,
         );
@@ -1254,7 +1257,11 @@ mod tests {
         // and corrupt the file. Sanitiser must escape it.
         let backend = CoqCorpusBackend::new();
         let rendered = backend.render_theorem(&spec_axiom("evil", "*)"));
-        assert!(!rendered.content.contains("(* Proposition (Verum source): *) *)"));
+        assert!(
+            !rendered
+                .content
+                .contains("(* Proposition (Verum source): *) *)")
+        );
         assert!(rendered.content.contains("* )"));
     }
 
@@ -1469,9 +1476,15 @@ mod tests {
         let mut spec = spec_proven("with_module", "true");
         spec.module_path = "theorems.msfs.05_afnt_alpha.theorem_5_1".to_string();
         let r = CoqCorpusBackend::new().render_theorem(&spec);
-        assert!(r.content.contains("theorems.msfs.05_afnt_alpha.theorem_5_1"));
+        assert!(
+            r.content
+                .contains("theorems.msfs.05_afnt_alpha.theorem_5_1")
+        );
         let r = LeanCorpusBackend::new().render_theorem(&spec);
-        assert!(r.content.contains("theorems.msfs.05_afnt_alpha.theorem_5_1"));
+        assert!(
+            r.content
+                .contains("theorems.msfs.05_afnt_alpha.theorem_5_1")
+        );
     }
 
     #[test]
@@ -1483,8 +1496,10 @@ mod tests {
         // binding; post-fix it validates the proposition's TYPE
         // structure too.
         let mut spec = spec_proven("eq_thm", "n == 7");
-        spec.per_backend_proposition.insert("coq".into(), "(n = 7)".into());
-        spec.per_backend_proposition.insert("lean".into(), "(n = 7)".into());
+        spec.per_backend_proposition
+            .insert("coq".into(), "(n = 7)".into());
+        spec.per_backend_proposition
+            .insert("lean".into(), "(n = 7)".into());
         let coq = CoqCorpusBackend::new().render_theorem(&spec);
         assert!(
             coq.content.contains("Theorem eq_thm : (n = 7)."),
@@ -1493,7 +1508,8 @@ mod tests {
         );
         let lean = LeanCorpusBackend::new().render_theorem(&spec);
         assert!(
-            lean.content.contains("theorem eq_thm : (n = 7) := by sorry"),
+            lean.content
+                .contains("theorem eq_thm : (n = 7) := by sorry"),
             "Lean output must use translated type; got:\n{}",
             lean.content,
         );
@@ -1509,7 +1525,10 @@ mod tests {
         assert!(coq.content.contains("Theorem untranslated_thm : Prop."));
         assert!(coq.content.contains("complex match shape"));
         let lean = LeanCorpusBackend::new().render_theorem(&spec);
-        assert!(lean.content.contains("theorem untranslated_thm : Prop := by sorry"));
+        assert!(
+            lean.content
+                .contains("theorem untranslated_thm : Prop := by sorry")
+        );
         assert!(lean.content.contains("complex match shape"));
     }
 
@@ -1518,8 +1537,10 @@ mod tests {
         // The translation lift applies to proofless decls (axiom
         // form) the same way it applies to proof-bearing decls.
         let mut spec = spec_axiom("nat_zero_pos", "0 == 0");
-        spec.per_backend_proposition.insert("coq".into(), "(0 = 0)".into());
-        spec.per_backend_proposition.insert("lean".into(), "(0 = 0)".into());
+        spec.per_backend_proposition
+            .insert("coq".into(), "(0 = 0)".into());
+        spec.per_backend_proposition
+            .insert("lean".into(), "(0 = 0)".into());
         let coq = CoqCorpusBackend::new().render_theorem(&spec);
         assert!(coq.content.contains("Axiom nat_zero_pos : (0 = 0)."));
         let lean = LeanCorpusBackend::new().render_theorem(&spec);
@@ -1531,7 +1552,8 @@ mod tests {
         // Theorem `foo(n: Int) ensures n == 7` → Coq emission must
         // declare `n : Z` before the colon-separator.
         let mut spec = spec_proven("eq_thm", "n == 7");
-        spec.per_backend_proposition.insert("coq".into(), "(n = 7)".into());
+        spec.per_backend_proposition
+            .insert("coq".into(), "(n = 7)".into());
         spec.params.push(TheoremParam {
             name: "n".to_string(),
             per_backend_type_text: {
@@ -1551,7 +1573,8 @@ mod tests {
     #[test]
     fn theorem_param_emission_with_int_parameter_in_lean() {
         let mut spec = spec_proven("eq_thm", "n == 7");
-        spec.per_backend_proposition.insert("lean".into(), "(n = 7)".into());
+        spec.per_backend_proposition
+            .insert("lean".into(), "(n = 7)".into());
         spec.params.push(TheoremParam {
             name: "n".to_string(),
             per_backend_type_text: {
@@ -1562,7 +1585,8 @@ mod tests {
         });
         let lean = LeanCorpusBackend::new().render_theorem(&spec);
         assert!(
-            lean.content.contains("theorem eq_thm (n : Int) : (n = 7) := by sorry"),
+            lean.content
+                .contains("theorem eq_thm (n : Int) : (n = 7) := by sorry"),
             "Lean output must declare param before colon; got:\n{}",
             lean.content,
         );
@@ -1579,21 +1603,25 @@ mod tests {
         // test isolates param-fallback behavior from proposition
         // fallback.
         let mut spec = spec_proven("opaque_thm", "P x");
-        spec.per_backend_proposition.insert("coq".into(), "(P x)".into());
-        spec.per_backend_proposition.insert("lean".into(), "(P x)".into());
+        spec.per_backend_proposition
+            .insert("coq".into(), "(P x)".into());
+        spec.per_backend_proposition
+            .insert("lean".into(), "(P x)".into());
         spec.params.push(TheoremParam {
             name: "x".to_string(),
             per_backend_type_text: std::collections::BTreeMap::new(),
         });
         let coq = CoqCorpusBackend::new().render_theorem(&spec);
         assert!(
-            coq.content.contains("Theorem opaque_thm (x : Type) : (P x)."),
+            coq.content
+                .contains("Theorem opaque_thm (x : Type) : (P x)."),
             "Coq emission with untranslated param type must use `Type` placeholder; got:\n{}",
             coq.content,
         );
         let lean = LeanCorpusBackend::new().render_theorem(&spec);
         assert!(
-            lean.content.contains("theorem opaque_thm (x : Type) : (P x) := by sorry"),
+            lean.content
+                .contains("theorem opaque_thm (x : Type) : (P x) := by sorry"),
             "Lean emission with untranslated param type must use `Type` placeholder; got:\n{}",
             lean.content,
         );
@@ -1602,7 +1630,8 @@ mod tests {
     #[test]
     fn multiple_params_emit_in_declaration_order() {
         let mut spec = spec_proven("multi_param_thm", "a == b");
-        spec.per_backend_proposition.insert("coq".into(), "(a = b)".into());
+        spec.per_backend_proposition
+            .insert("coq".into(), "(a = b)".into());
         for (name, ty) in [("a", "Z"), ("b", "Z")] {
             spec.params.push(TheoremParam {
                 name: name.to_string(),
@@ -1614,7 +1643,10 @@ mod tests {
             });
         }
         let coq = CoqCorpusBackend::new().render_theorem(&spec);
-        assert!(coq.content.contains("Theorem multi_param_thm (a : Z) (b : Z) : (a = b)."));
+        assert!(
+            coq.content
+                .contains("Theorem multi_param_thm (a : Z) (b : Z) : (a = b).")
+        );
     }
 
     #[test]
@@ -1623,9 +1655,9 @@ mod tests {
         // populates `params`, with_translated_proposition populates
         // `per_backend_proposition`. Both end up in the emitted
         // theorem header.
+        use verum_ast::Span;
         use verum_ast::expr::ExprKind;
         use verum_ast::ty::{Ident as TyIdent, Path as TyPath, Type, TypeKind};
-        use verum_ast::Span;
         use verum_common::Heap;
 
         let lit_zero = verum_ast::Expr::new(
@@ -1656,7 +1688,8 @@ mod tests {
         );
         let lean = LeanCorpusBackend::new().render_theorem(&spec);
         assert!(
-            lean.content.contains("theorem zero_thm (n : Int) : (n = 0) := by sorry"),
+            lean.content
+                .contains("theorem zero_thm (n : Int) : (n = 0) := by sorry"),
             "Lean emission must combine param + translated proposition; got:\n{}",
             lean.content,
         );
@@ -1667,9 +1700,9 @@ mod tests {
         // Round-trip: TheoremSpec::with_translated_proposition takes
         // an Expr and populates per_backend_proposition for every
         // standard backend (Coq + Lean).
+        use verum_ast::Span;
         use verum_ast::expr::ExprKind;
         use verum_ast::ty::{Ident, Path};
-        use verum_ast::Span;
         use verum_common::Heap;
 
         let lit_zero = verum_ast::Expr::new(
@@ -1688,8 +1721,7 @@ mod tests {
             },
             Span::dummy(),
         );
-        let spec = spec_proven("zero_thm", "n == 0")
-            .with_translated_proposition(&prop);
+        let spec = spec_proven("zero_thm", "n == 0").with_translated_proposition(&prop);
         assert_eq!(
             spec.per_backend_proposition.get("coq").map(|s| s.as_str()),
             Some("(n = 0)"),
@@ -1707,11 +1739,12 @@ mod tests {
     #[test]
     fn coq_emits_generic_implicit_arg() {
         // `<S>` (no bound) → ` {S : Type}` precedes value params.
-        let spec = spec_proven("generic_thm", "true")
-            .with_generics(&[("S".to_string(), String::new())]);
+        let spec =
+            spec_proven("generic_thm", "true").with_generics(&[("S".to_string(), String::new())]);
         let coq = CoqCorpusBackend::new().render_theorem(&spec);
         assert!(
-            coq.content.contains("Theorem generic_thm {S : Type} : Prop."),
+            coq.content
+                .contains("Theorem generic_thm {S : Type} : Prop."),
             "Coq emission must declare generic before colon; got:\n{}",
             coq.content,
         );
@@ -1719,11 +1752,12 @@ mod tests {
 
     #[test]
     fn lean_emits_generic_implicit_arg() {
-        let spec = spec_proven("generic_thm", "true")
-            .with_generics(&[("S".to_string(), String::new())]);
+        let spec =
+            spec_proven("generic_thm", "true").with_generics(&[("S".to_string(), String::new())]);
         let lean = LeanCorpusBackend::new().render_theorem(&spec);
         assert!(
-            lean.content.contains("theorem generic_thm {S : Type} : Prop := by sorry"),
+            lean.content
+                .contains("theorem generic_thm {S : Type} : Prop := by sorry"),
             "Lean emission must declare generic before colon; got:\n{}",
             lean.content,
         );
@@ -1751,7 +1785,8 @@ mod tests {
         // → `Theorem foo (* bound: S : RichS *) {S : Type} (s : Type) (c : LAbsCandidate) : ...`.
         let mut spec = spec_proven("five_axis_thm", "false")
             .with_generics(&[("S".to_string(), "S : RichS".to_string())]);
-        spec.per_backend_proposition.insert("coq".into(), "False".into());
+        spec.per_backend_proposition
+            .insert("coq".into(), "False".into());
         spec.params.push(TheoremParam {
             name: "s".to_string(),
             per_backend_type_text: std::collections::BTreeMap::new(),
@@ -1785,6 +1820,9 @@ mod tests {
             "Coq emission for no-generic theorem must not add braces; got:\n{}",
             coq.content,
         );
-        assert!(!coq.content.contains("{"), "no braces expected when generics empty");
+        assert!(
+            !coq.content.contains("{"),
+            "no braces expected when generics empty"
+        );
     }
 }

@@ -20,8 +20,8 @@
 // Verifies that all crates work together correctly and data flows
 // properly between modules.
 
-use verum_diagnostics::DiagnosticBuilder;
 use verum_common::{List, Map, Set, Text};
+use verum_diagnostics::DiagnosticBuilder;
 
 // ============================================================================
 // Standard Library Integration

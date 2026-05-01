@@ -173,11 +173,7 @@ impl ScriptLockfile {
                 fs::create_dir_all(parent)?;
             }
         }
-        let tmp = path.with_extension(format!(
-            "lock.tmp.{}.{}",
-            std::process::id(),
-            now_secs()
-        ));
+        let tmp = path.with_extension(format!("lock.tmp.{}.{}", std::process::id(), now_secs()));
         {
             use std::io::Write;
             let mut f = fs::File::create(&tmp)?;
@@ -234,7 +230,10 @@ pub enum VerifyOutcome {
     /// Toolchain version differs — regenerate.
     CompilerChanged { lockfile: String, current: String },
     /// Schema-version skew — regenerate.
-    SchemaSkew { lockfile_version: u32, expected: u32 },
+    SchemaSkew {
+        lockfile_version: u32,
+        expected: u32,
+    },
 }
 
 impl VerifyOutcome {
@@ -384,10 +383,7 @@ mod tests {
             let entry = entry.unwrap();
             let name = entry.file_name();
             let s = name.to_string_lossy();
-            assert!(
-                !s.contains(".lock.tmp."),
-                "leftover tempfile: {s}"
-            );
+            assert!(!s.contains(".lock.tmp."), "leftover tempfile: {s}");
         }
     }
 
@@ -470,21 +466,10 @@ mod tests {
     #[test]
     fn canonical_dep_order_yields_byte_identical_serialisation() {
         let make = |deps| {
-            ScriptLockfile::new(
-                "/tmp/x.vr",
-                ScriptLockfile::hash_source(b""),
-                "0.1.0",
-                deps,
-            )
+            ScriptLockfile::new("/tmp/x.vr", ScriptLockfile::hash_source(b""), "0.1.0", deps)
         };
-        let a = make(vec![
-            dep("apple", "1.0.0"),
-            dep("zebra", "1.0.0"),
-        ]);
-        let b = make(vec![
-            dep("zebra", "1.0.0"),
-            dep("apple", "1.0.0"),
-        ]);
+        let a = make(vec![dep("apple", "1.0.0"), dep("zebra", "1.0.0")]);
+        let b = make(vec![dep("zebra", "1.0.0"), dep("apple", "1.0.0")]);
         assert_eq!(a.deps, b.deps, "dep order must canonicalise");
     }
 }

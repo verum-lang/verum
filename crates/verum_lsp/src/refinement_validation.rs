@@ -515,9 +515,7 @@ impl RefinementValidator {
         let cache_enabled = self.config.read().cache_enabled;
 
         // Check cache first
-        if cache_enabled
-            && let Maybe::Some(cached_result) = self.cache.get(&cache_key)
-        {
+        if cache_enabled && let Maybe::Some(cached_result) = self.cache.get(&cache_key) {
             return Ok(self.result_to_response(cached_result, start.elapsed()));
         }
 
@@ -896,7 +894,9 @@ impl RefinementValidator {
 
                     // Add parameter refinements as constraints
                     for param in &func.params {
-                        if let verum_ast::FunctionParamKind::Regular { ty, pattern, .. } = &param.kind {
+                        if let verum_ast::FunctionParamKind::Regular { ty, pattern, .. } =
+                            &param.kind
+                        {
                             if let TypeKind::Refined { predicate, .. } = &ty.kind {
                                 let var_name = extract_pattern_name(pattern);
                                 constraints.push(ScopeConstraint {
@@ -935,11 +935,7 @@ impl RefinementValidator {
             // Only collect constraints from statements before the current position
             if stmt.span.end <= offset {
                 match &stmt.kind {
-                    verum_ast::StmtKind::Let {
-                        pattern,
-                        ty,
-                        ..
-                    } => {
+                    verum_ast::StmtKind::Let { pattern, ty, .. } => {
                         // If the let has a refined type, add it as a constraint
                         if let Maybe::Some(type_ann) = ty {
                             if let TypeKind::Refined { predicate, .. } = &type_ann.kind {
@@ -1349,19 +1345,16 @@ impl RefinementValidator {
         // the validator owned `should_emit_cost_warning` but no
         // path consumed it, so the documented LSP knob had no
         // effect on response shape.
-        let cost_warning: Option<RefinementDiagnostic> =
-            if self.should_emit_cost_warning(elapsed) {
-                Some(self.build_cost_warning_diagnostic(elapsed))
-            } else {
-                None
-            };
+        let cost_warning: Option<RefinementDiagnostic> = if self.should_emit_cost_warning(elapsed) {
+            Some(self.build_cost_warning_diagnostic(elapsed))
+        } else {
+            None
+        };
 
         let mut diagnostics = match &result {
             ValidationResult::Valid => List::new(),
             ValidationResult::Invalid { counterexample } => {
-                List::from(vec![
-                    self.build_diagnostic(counterexample.clone(), elapsed)
-                ])
+                List::from(vec![self.build_diagnostic(counterexample.clone(), elapsed)])
             }
             ValidationResult::Unknown => List::new(),
         };
@@ -1387,15 +1380,18 @@ impl RefinementValidator {
     /// surfaces a slow-verification event to the LSP client.
     /// The message names the configured threshold so users can
     /// identify which knob to tune.
-    fn build_cost_warning_diagnostic(
-        &self,
-        elapsed: Duration,
-    ) -> RefinementDiagnostic {
+    fn build_cost_warning_diagnostic(&self, elapsed: Duration) -> RefinementDiagnostic {
         let threshold = self.slow_threshold();
         RefinementDiagnostic {
             range: Range {
-                start: Position { line: 0, character: 0 },
-                end: Position { line: 0, character: 0 },
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 0,
+                },
             },
             severity: DiagnosticSeverity::WARNING,
             code: Some("W0701".to_string()),
@@ -1637,7 +1633,9 @@ impl RefinementValidator {
                 if func.span.start <= start_offset && end_offset <= func.span.end {
                     // Check parameters for reference types
                     for param in &func.params {
-                        if let verum_ast::FunctionParamKind::Regular { ty, pattern, .. } = &param.kind {
+                        if let verum_ast::FunctionParamKind::Regular { ty, pattern, .. } =
+                            &param.kind
+                        {
                             if ty.span.start >= start_offset && ty.span.end <= end_offset {
                                 if is_reference_type(ty) {
                                     return Some(ReferenceContext {
@@ -3008,9 +3006,7 @@ fn extract_pattern_name(pattern: &verum_ast::pattern::Pattern) -> Text {
 fn extract_base_type(ty: &Type) -> Text {
     match &ty.kind {
         TypeKind::Refined { base, .. } => extract_base_type(base),
-        _ if ty.kind.primitive_name().is_some() => {
-            Text::from(ty.kind.primitive_name().unwrap())
-        }
+        _ if ty.kind.primitive_name().is_some() => Text::from(ty.kind.primitive_name().unwrap()),
         TypeKind::Path(path) => {
             if let Some(seg) = path.segments.last() {
                 match seg {
@@ -3037,9 +3033,7 @@ fn format_type_text(ty: &Type) -> Text {
                 constraint_str.as_str()
             ))
         }
-        _ if ty.kind.primitive_name().is_some() => {
-            Text::from(ty.kind.primitive_name().unwrap())
-        }
+        _ if ty.kind.primitive_name().is_some() => Text::from(ty.kind.primitive_name().unwrap()),
         TypeKind::Path(path) => {
             if let Some(seg) = path.segments.last() {
                 match seg {
@@ -3426,7 +3420,10 @@ mod tests {
 
         cfg.validation_mode = crate::lsp_config::ValidationMode::Thorough;
         validator.apply_config(&cfg);
-        assert_eq!(validator.config.read().default_mode, ValidationMode::Thorough);
+        assert_eq!(
+            validator.config.read().default_mode,
+            ValidationMode::Thorough
+        );
     }
 
     #[test]

@@ -73,8 +73,7 @@ impl Backend {
     fn index_document_in_workspace(&self, uri: &Url) {
         self.documents.with_document(uri, |doc| {
             if let Some(module) = &doc.module {
-                self.workspace_index
-                    .index_document(uri, module, &doc.text);
+                self.workspace_index.index_document(uri, module, &doc.text);
             }
         });
     }
@@ -95,33 +94,29 @@ impl Backend {
 
         // Begin
         self.client
-            .send_notification::<tower_lsp::lsp_types::notification::Progress>(
-                ProgressParams {
-                    token: token.clone(),
-                    value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
-                        WorkDoneProgressBegin {
-                            title: title.to_string(),
-                            cancellable: Some(false),
-                            message: None,
-                            percentage: None,
-                        },
-                    )),
-                },
-            )
+            .send_notification::<tower_lsp::lsp_types::notification::Progress>(ProgressParams {
+                token: token.clone(),
+                value: ProgressParamsValue::WorkDone(WorkDoneProgress::Begin(
+                    WorkDoneProgressBegin {
+                        title: title.to_string(),
+                        cancellable: Some(false),
+                        message: None,
+                        percentage: None,
+                    },
+                )),
+            })
             .await;
 
         let result = work().await;
 
         // End
         self.client
-            .send_notification::<tower_lsp::lsp_types::notification::Progress>(
-                ProgressParams {
-                    token,
-                    value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(
-                        WorkDoneProgressEnd { message: None },
-                    )),
-                },
-            )
+            .send_notification::<tower_lsp::lsp_types::notification::Progress>(ProgressParams {
+                token,
+                value: ProgressParamsValue::WorkDone(WorkDoneProgress::End(WorkDoneProgressEnd {
+                    message: None,
+                })),
+            })
             .await;
 
         result
@@ -185,7 +180,6 @@ impl Backend {
             binary: cfg.fmt_binary.clone(),
         }
     }
-
 }
 
 #[tower_lsp::async_trait]
@@ -214,14 +208,16 @@ impl LanguageServer for Backend {
 
         // Apply immediately-propagated knobs to stateful components.
         // Master switch — CBGR inlay hints visible in the editor.
-        self.cbgr_hints.set_enabled(cfg.cbgr_show_optimization_hints);
+        self.cbgr_hints
+            .set_enabled(cfg.cbgr_show_optimization_hints);
         // Verbosity gate — when on, hint tooltips include the
         // per-tier reason text (escape kind, dominator status,
         // etc.) instead of just the timing summary. Wires the
         // previously-inert `cbgr_enable_profiling` LspConfig flag
         // so users that opt into profiling see why the analyzer
         // chose each tier, not just the cost.
-        self.cbgr_hints.set_detailed_hints(cfg.cbgr_enable_profiling);
+        self.cbgr_hints
+            .set_detailed_hints(cfg.cbgr_enable_profiling);
         self.refinement_validator.apply_config(&cfg);
 
         tracing::info!(
@@ -338,7 +334,9 @@ impl LanguageServer for Backend {
                 // Selection ranges
                 selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
                 // Linked editing
-                linked_editing_range_provider: Some(LinkedEditingRangeServerCapabilities::Simple(true)),
+                linked_editing_range_provider: Some(LinkedEditingRangeServerCapabilities::Simple(
+                    true,
+                )),
                 // Document links for mount statements
                 document_link_provider: Some(DocumentLinkOptions {
                     resolve_provider: Some(false),
@@ -590,12 +588,11 @@ impl LanguageServer for Backend {
                     self.documents.with_document(&uri, |doc| {
                         if let Some(symbol) = doc.get_symbol(name) {
                             if let Some(docs) = &symbol.docs {
-                                item.documentation = Some(Documentation::MarkupContent(
-                                    MarkupContent {
+                                item.documentation =
+                                    Some(Documentation::MarkupContent(MarkupContent {
                                         kind: MarkupKind::Markdown,
                                         value: docs.clone(),
-                                    },
-                                ));
+                                    }));
                             }
                             if let Some(ty) = &symbol.ty {
                                 item.detail = Some(format!("{:?}", ty));
@@ -621,9 +618,7 @@ impl LanguageServer for Backend {
                 if let Ok(uri) = Url::parse(uri_str) {
                     let ref_count = self
                         .documents
-                        .with_document(&uri, |doc| {
-                            count_references_excluding_def(doc, name, &uri)
-                        })
+                        .with_document(&uri, |doc| count_references_excluding_def(doc, name, &uri))
                         .unwrap_or(0);
 
                     lens.command = Some(Command {
@@ -667,9 +662,7 @@ impl LanguageServer for Backend {
             .with_document(&uri, |doc| {
                 let result = self.semantic_provider.compute(&doc.text, doc.file_id);
                 match result {
-                    SemanticTokensResult::Tokens(tokens) if !tokens.data.is_empty() => {
-                        Some(tokens)
-                    }
+                    SemanticTokensResult::Tokens(tokens) if !tokens.data.is_empty() => Some(tokens),
                     _ => None,
                 }
             })
@@ -687,10 +680,13 @@ impl LanguageServer for Backend {
                 let edits = compute_semantic_token_edits(&cached_tokens.data, &new_tokens.data);
 
                 // Store new result in cache
-                let result_id = format!("{}", std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_millis());
+                let result_id = format!(
+                    "{}",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_millis()
+                );
 
                 let delta = SemanticTokensDelta {
                     result_id: Some(result_id.clone()),
@@ -705,10 +701,13 @@ impl LanguageServer for Backend {
         }
 
         // No cached result or ID mismatch — return full tokens
-        let result_id = format!("{}", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis());
+        let result_id = format!(
+            "{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        );
 
         let full_tokens = SemanticTokens {
             result_id: Some(result_id.clone()),
@@ -732,9 +731,7 @@ impl LanguageServer for Backend {
         // between formatters. On any subprocess failure the in-LSP
         // formatter takes over as a fallback so the save flow never
         // breaks.
-        let original = self
-            .documents
-            .with_document(&uri, |doc| doc.text.clone());
+        let original = self.documents.with_document(&uri, |doc| doc.text.clone());
         if let Some(text) = original {
             let settings = self.fmt_settings();
             let filename = uri.to_file_path().ok().map(|p| p.display().to_string());
@@ -1016,8 +1013,9 @@ impl LanguageServer for Backend {
                     {
                         let mut param_strs = Vec::new();
                         for (i, param) in func.params.iter().enumerate() {
-                            if let verum_ast::decl::FunctionParamKind::Regular { pattern, ty, .. } =
-                                &param.kind
+                            if let verum_ast::decl::FunctionParamKind::Regular {
+                                pattern, ty, ..
+                            } = &param.kind
                             {
                                 let param_name = match &pattern.kind {
                                     verum_ast::PatternKind::Ident { name, .. } => {
@@ -1094,12 +1092,19 @@ impl LanguageServer for Backend {
     ) -> Result<Option<SemanticTokensRangeResult>> {
         let uri = params.text_document.uri;
         let range = params.range;
-        tracing::debug!("Semantic tokens range: {} ({}..{})", uri, range.start.line, range.end.line);
+        tracing::debug!(
+            "Semantic tokens range: {} ({}..{})",
+            uri,
+            range.start.line,
+            range.end.line
+        );
 
         let tokens = self
             .documents
             .with_document(&uri, |doc| {
-                let result = self.semantic_provider.compute_range(&doc.text, doc.file_id, range);
+                let result = self
+                    .semantic_provider
+                    .compute_range(&doc.text, doc.file_id, range);
                 match result {
                     SemanticTokensResult::Tokens(tokens) if !tokens.data.is_empty() => Some(tokens),
                     _ => None,
@@ -1350,9 +1355,16 @@ impl LanguageServer for Backend {
                 let ty = symbol.ty.as_ref()?;
                 let type_name = extract_type_name(ty)?;
                 let type_symbol = doc.symbols.get(&type_name)?;
-                if matches!(type_symbol.kind, VerumSymbolKind::Type | VerumSymbolKind::Protocol) {
-                    let range = crate::position_utils::ast_span_to_range(&type_symbol.def_span, &doc.text);
-                    Some(GotoDefinitionResponse::Scalar(Location { uri: uri.clone(), range }))
+                if matches!(
+                    type_symbol.kind,
+                    VerumSymbolKind::Type | VerumSymbolKind::Protocol
+                ) {
+                    let range =
+                        crate::position_utils::ast_span_to_range(&type_symbol.def_span, &doc.text);
+                    Some(GotoDefinitionResponse::Scalar(Location {
+                        uri: uri.clone(),
+                        range,
+                    }))
                 } else {
                     None
                 }
@@ -1378,8 +1390,12 @@ impl LanguageServer for Backend {
                 for item in module.items.iter() {
                     if let verum_ast::ItemKind::Impl(impl_block) = &item.kind {
                         if impl_matches_type(&impl_block.kind, &word) {
-                            let range = crate::position_utils::ast_span_to_range(&item.span, &doc.text);
-                            locations.push(Location { uri: uri.clone(), range });
+                            let range =
+                                crate::position_utils::ast_span_to_range(&item.span, &doc.text);
+                            locations.push(Location {
+                                uri: uri.clone(),
+                                range,
+                            });
                         }
                     }
                 }
@@ -1416,18 +1432,26 @@ impl LanguageServer for Backend {
                 let word = doc.word_at_position(position)?;
                 let module = doc.module.as_ref()?;
                 let refs = references::find_ast_references(module, &word, &uri, &doc.text);
-                if refs.is_empty() { return None; }
-                let result: Vec<DocumentHighlight> = refs
-                    .into_iter()
-                    .map(|r| DocumentHighlight {
-                        range: r.location.range,
-                        kind: Some(match r.kind {
-                            references::ReferenceKind::Definition | references::ReferenceKind::Write => DocumentHighlightKind::WRITE,
-                            references::ReferenceKind::Read | references::ReferenceKind::Call => DocumentHighlightKind::READ,
-                        }),
-                    })
-                    .collect();
-                if result.is_empty() { None } else { Some(result) }
+                if refs.is_empty() {
+                    return None;
+                }
+                let result: Vec<DocumentHighlight> =
+                    refs.into_iter()
+                        .map(|r| DocumentHighlight {
+                            range: r.location.range,
+                            kind: Some(match r.kind {
+                                references::ReferenceKind::Definition
+                                | references::ReferenceKind::Write => DocumentHighlightKind::WRITE,
+                                references::ReferenceKind::Read
+                                | references::ReferenceKind::Call => DocumentHighlightKind::READ,
+                            }),
+                        })
+                        .collect();
+                if result.is_empty() {
+                    None
+                } else {
+                    Some(result)
+                }
             })
             .flatten();
 
@@ -1572,14 +1596,22 @@ impl LanguageServer for Backend {
             .with_document(&uri, |doc| {
                 let word = doc.word_at_position(position)?;
                 let symbol = doc.symbols.get(&word)?;
-                if !matches!(symbol.kind, VerumSymbolKind::Type | VerumSymbolKind::Variant) {
+                if !matches!(
+                    symbol.kind,
+                    VerumSymbolKind::Type | VerumSymbolKind::Variant
+                ) {
                     return None;
                 }
                 let module = doc.module.as_ref()?;
                 let refs = references::find_ast_references(module, &word, &uri, &doc.text);
                 let ranges: Vec<Range> = refs.into_iter().map(|r| r.location.range).collect();
-                if ranges.len() <= 1 { None } else {
-                    Some(LinkedEditingRanges { ranges, word_pattern: Some(r"[a-zA-Z_]\w*".to_string()) })
+                if ranges.len() <= 1 {
+                    None
+                } else {
+                    Some(LinkedEditingRanges {
+                        ranges,
+                        word_pattern: Some(r"[a-zA-Z_]\w*".to_string()),
+                    })
                 }
             })
             .flatten())
@@ -1610,7 +1642,11 @@ impl LanguageServer for Backend {
                         });
                     }
                 }
-                if result.is_empty() { None } else { Some(result) }
+                if result.is_empty() {
+                    None
+                } else {
+                    Some(result)
+                }
             })
             .flatten();
 
@@ -1628,7 +1664,11 @@ impl LanguageServer for Backend {
         // and the initial load agree.
         let mut flat = serde_json::Map::new();
 
-        fn collect(prefix: &str, value: &serde_json::Value, out: &mut serde_json::Map<String, serde_json::Value>) {
+        fn collect(
+            prefix: &str,
+            value: &serde_json::Value,
+            out: &mut serde_json::Map<String, serde_json::Value>,
+        ) {
             if let Some(obj) = value.as_object() {
                 for (k, v) in obj {
                     if v.is_object() {
@@ -1651,7 +1691,10 @@ impl LanguageServer for Backend {
         // Map VS Code's "verum.lsp.enableRefinementValidation" etc. to the
         // short keys our LspConfig::apply_json expects.
         for (from, to) in [
-            ("lsp.enableRefinementValidation", "enableRefinementValidation"),
+            (
+                "lsp.enableRefinementValidation",
+                "enableRefinementValidation",
+            ),
             ("lsp.validationMode", "validationMode"),
             ("lsp.smtSolver", "smtSolver"),
             ("lsp.smtTimeout", "smtTimeout"),
@@ -1662,8 +1705,14 @@ impl LanguageServer for Backend {
             ("lsp.cacheMaxEntries", "cacheMaxEntries"),
             ("cbgr.enableProfiling", "cbgrEnableProfiling"),
             ("cbgr.showOptimizationHints", "cbgrShowOptimizationHints"),
-            ("verification.showCostWarnings", "verificationShowCostWarnings"),
-            ("verification.slowThresholdMs", "verificationSlowThresholdMs"),
+            (
+                "verification.showCostWarnings",
+                "verificationShowCostWarnings",
+            ),
+            (
+                "verification.slowThresholdMs",
+                "verificationSlowThresholdMs",
+            ),
         ] {
             if let Some(v) = flat.get(from).cloned() {
                 flat.entry(to.to_string()).or_insert(v);
@@ -1673,7 +1722,8 @@ impl LanguageServer for Backend {
         let merged = serde_json::Value::Object(flat);
         self.config.apply_json(&merged);
         let cfg = self.config.snapshot();
-        self.cbgr_hints.set_enabled(cfg.cbgr_show_optimization_hints);
+        self.cbgr_hints
+            .set_enabled(cfg.cbgr_show_optimization_hints);
         self.refinement_validator.apply_config(&cfg);
 
         // Revalidate all open documents with potentially new settings
@@ -1725,7 +1775,11 @@ impl LanguageServer for Backend {
             .documents
             .with_document(uri, |doc| {
                 let result = crate::type_hierarchy::supertypes(doc, &params.item, uri);
-                if result.is_empty() { None } else { Some(result) }
+                if result.is_empty() {
+                    None
+                } else {
+                    Some(result)
+                }
             })
             .flatten())
     }
@@ -1741,7 +1795,11 @@ impl LanguageServer for Backend {
             .documents
             .with_document(uri, |doc| {
                 let result = crate::type_hierarchy::subtypes(doc, &params.item, uri);
-                if result.is_empty() { None } else { Some(result) }
+                if result.is_empty() {
+                    None
+                } else {
+                    Some(result)
+                }
             })
             .flatten())
     }
@@ -1990,7 +2048,9 @@ fn impl_matches_type(kind: &verum_ast::decl::ImplKind, type_name: &str) -> bool 
         verum_ast::decl::ImplKind::Inherent(ty) => {
             extract_ast_type_name(&ty.kind).as_deref() == Some(type_name)
         }
-        verum_ast::decl::ImplKind::Protocol { for_type, protocol, .. } => {
+        verum_ast::decl::ImplKind::Protocol {
+            for_type, protocol, ..
+        } => {
             extract_ast_type_name(&for_type.kind).as_deref() == Some(type_name)
                 || extract_path_name(protocol).as_deref() == Some(type_name)
         }
@@ -2051,18 +2111,35 @@ fn word_range_at_offset(text: &str, offset: usize) -> Option<Range> {
     let mut end_pos = None;
     for (i, ch) in text.char_indices() {
         if i == start {
-            start_pos = Some(Position { line, character: col });
+            start_pos = Some(Position {
+                line,
+                character: col,
+            });
         }
         if i == end {
-            end_pos = Some(Position { line, character: col });
+            end_pos = Some(Position {
+                line,
+                character: col,
+            });
             break;
         }
-        if ch == '\n' { line += 1; col = 0; } else { col += 1; }
+        if ch == '\n' {
+            line += 1;
+            col = 0;
+        } else {
+            col += 1;
+        }
     }
     if end == text.len() && end_pos.is_none() {
-        end_pos = Some(Position { line, character: col });
+        end_pos = Some(Position {
+            line,
+            character: col,
+        });
     }
-    Some(Range { start: start_pos?, end: end_pos? })
+    Some(Range {
+        start: start_pos?,
+        end: end_pos?,
+    })
 }
 
 /// Check if a position falls within a range.

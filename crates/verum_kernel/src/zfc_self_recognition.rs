@@ -452,8 +452,10 @@ mod tests {
         let req = required_meta_theory(KernelRuleId::Refine);
         assert!(req.zfc_axioms.contains(&ZfcAxiom::Separation));
         assert!(req.zfc_axioms.contains(&ZfcAxiom::Replacement));
-        assert!(req.inaccessibles.is_empty(),
-            "K-Refine should not require Grothendieck universes directly");
+        assert!(
+            req.inaccessibles.is_empty(),
+            "K-Refine should not require Grothendieck universes directly"
+        );
     }
 
     #[test]
@@ -467,8 +469,10 @@ mod tests {
     #[test]
     fn k_pos_uses_foundation() {
         let req = required_meta_theory(KernelRuleId::Pos);
-        assert!(req.zfc_axioms.contains(&ZfcAxiom::Foundation),
-            "K-Pos blocking of Berardi paradox uses ∈-induction");
+        assert!(
+            req.zfc_axioms.contains(&ZfcAxiom::Foundation),
+            "K-Pos blocking of Berardi paradox uses ∈-induction"
+        );
     }
 
     #[test]
@@ -488,8 +492,10 @@ mod tests {
     fn k_adj_unit_and_counit_share_requirements() {
         let unit = required_meta_theory(KernelRuleId::AdjUnit);
         let counit = required_meta_theory(KernelRuleId::AdjCounit);
-        assert_eq!(unit.zfc_axioms, counit.zfc_axioms,
-            "Unit and counit identities use the same ZFC fragment");
+        assert_eq!(
+            unit.zfc_axioms, counit.zfc_axioms,
+            "Unit and counit identities use the same ZFC fragment"
+        );
         assert_eq!(unit.inaccessibles, counit.inaccessibles);
     }
 
@@ -498,8 +504,11 @@ mod tests {
     #[test]
     fn every_kernel_rule_is_provable_in_zfc_plus_2_inacc() {
         for rule in KernelRuleId::full_list() {
-            assert!(is_zfc_plus_2_inacc_provable(rule),
-                "{} must be provable in ZFC + 2 inaccessibles", rule.name());
+            assert!(
+                is_zfc_plus_2_inacc_provable(rule),
+                "{} must be provable in ZFC + 2 inaccessibles",
+                rule.name()
+            );
         }
     }
 
@@ -519,17 +528,17 @@ mod tests {
         audit.cite(KernelRuleId::Refine);
         audit.cite(KernelRuleId::Univ);
         let req = audit.required_zfc_axioms();
-        assert!(req.contains(&ZfcAxiom::Separation));    // from Refine
-        assert!(req.contains(&ZfcAxiom::Replacement));   // from both
-        assert!(req.contains(&ZfcAxiom::Foundation));    // from Refine
-        assert!(req.contains(&ZfcAxiom::Pairing));       // from Univ
+        assert!(req.contains(&ZfcAxiom::Separation)); // from Refine
+        assert!(req.contains(&ZfcAxiom::Replacement)); // from both
+        assert!(req.contains(&ZfcAxiom::Foundation)); // from Refine
+        assert!(req.contains(&ZfcAxiom::Pairing)); // from Univ
     }
 
     #[test]
     fn audit_required_inaccessibles_unions_correctly() {
         let mut audit = SelfRecognitionAudit::new();
-        audit.cite(KernelRuleId::Norm);     // κ_1
-        audit.cite(KernelRuleId::Univ);     // κ_1, κ_2
+        audit.cite(KernelRuleId::Norm); // κ_1
+        audit.cite(KernelRuleId::Univ); // κ_1, κ_2
         let inacc = audit.required_inaccessibles();
         assert_eq!(inacc.len(), 2);
         assert_eq!(inacc[0], InaccessibleLevel::Kappa1);
@@ -549,7 +558,11 @@ mod tests {
         // implicit in some constructions but not currently required
         // by any of the seven rules).
         let req = audit.required_zfc_axioms();
-        assert!(req.len() >= 6, "expected at least 6 ZFC axioms required, got {}", req.len());
+        assert!(
+            req.len() >= 6,
+            "expected at least 6 ZFC axioms required, got {}",
+            req.len()
+        );
     }
 
     #[test]

@@ -1,10 +1,10 @@
 //! This module contains some supplemental functions for dealing with errors.
 
 use libc::c_void;
+use verum_llvm_sys::LLVMDiagnosticSeverity;
 use verum_llvm_sys::core::{LLVMGetDiagInfoDescription, LLVMGetDiagInfoSeverity};
 use verum_llvm_sys::error_handling::{LLVMInstallFatalErrorHandler, LLVMResetFatalErrorHandler};
 use verum_llvm_sys::prelude::LLVMDiagnosticInfoRef;
-use verum_llvm_sys::LLVMDiagnosticSeverity;
 
 /// Installs a fatal error handler that LLVM calls before `exit()`.
 ///

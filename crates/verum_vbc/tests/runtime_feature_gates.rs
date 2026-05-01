@@ -21,8 +21,8 @@ use std::sync::Arc;
 
 use verum_vbc::bytecode;
 use verum_vbc::instruction::{Instruction, Reg, RegRange};
-use verum_vbc::interpreter::InterpreterError;
 use verum_vbc::interpreter::Interpreter;
+use verum_vbc::interpreter::InterpreterError;
 use verum_vbc::module::{FunctionDescriptor, FunctionId, VbcModule};
 use verum_vbc::types::StringId;
 
@@ -52,7 +52,10 @@ fn spawn_rejected_when_futures_disabled() {
         Instruction::Spawn {
             dst: Reg(0),
             func_id: 0,
-            args: RegRange { start: Reg(1), count: 0 },
+            args: RegRange {
+                start: Reg(1),
+                count: 0,
+            },
         },
         Instruction::Ret { value: Reg(0) },
     ];
@@ -105,7 +108,10 @@ fn spawn_passes_when_futures_enabled() {
         Instruction::Spawn {
             dst: Reg(0),
             func_id: 0,
-            args: RegRange { start: Reg(1), count: 0 },
+            args: RegRange {
+                start: Reg(1),
+                count: 0,
+            },
         },
         Instruction::Ret { value: Reg(0) },
     ];

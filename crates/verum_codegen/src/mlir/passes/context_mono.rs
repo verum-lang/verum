@@ -38,23 +38,23 @@
 //! - Eliminates virtual dispatch for known context types
 //! - Enables further optimizations (inlining, constant folding)
 
+use super::{PassResult, PassStats, VerumPass};
 use crate::mlir::dialect::{attr_names, op_names};
 use crate::mlir::error::{MlirError, Result};
-use super::{PassResult, PassStats, VerumPass};
 
 use indexmap::{IndexMap, IndexSet};
+use parking_lot::RwLock;
+use smallvec::SmallVec;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use verum_common::Text;
 use verum_mlir::ir::attribute::{IntegerAttribute, StringAttribute};
 use verum_mlir::ir::operation::OperationLike;
 use verum_mlir::ir::{
     Attribute, Block, BlockLike, Identifier, Location, Module, Operation, OperationRef, Region,
     RegionLike, Type, Value, ValueLike,
 };
-use parking_lot::RwLock;
-use smallvec::SmallVec;
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use verum_common::Text;
 
 // ============================================================================
 // Context Analysis Data Structures
@@ -648,7 +648,11 @@ impl ContextAnalysisEngine {
     }
 
     /// Process a call site.
-    fn process_call_site(&mut self, op: &OperationRef<'_, '_>, caller_id: FunctionId) -> Result<()> {
+    fn process_call_site(
+        &mut self,
+        op: &OperationRef<'_, '_>,
+        caller_id: FunctionId,
+    ) -> Result<()> {
         // Get callee name from attribute
         let callee_name = op
             .attribute("callee")
@@ -737,7 +741,10 @@ impl ContextAnalysisEngine {
                 let mut all_known = true;
                 for &get_id in &callee_info.context_gets {
                     if let Some(get_info) = self.context_gets.get(&get_id) {
-                        if !call_site.known_contexts.contains_key(&get_info.context_name) {
+                        if !call_site
+                            .known_contexts
+                            .contains_key(&get_info.context_name)
+                        {
                             all_known = false;
                             break;
                         }
@@ -1037,7 +1044,9 @@ mod tests {
         assert_eq!(ContextResolution::Direct.overhead_ns(), 0);
         assert_eq!(ContextResolution::Cached.overhead_ns(), 2);
         assert!(ContextResolution::StackWalk.overhead_ns() > 0);
-        assert!(ContextResolution::Dynamic.overhead_ns() > ContextResolution::StackWalk.overhead_ns());
+        assert!(
+            ContextResolution::Dynamic.overhead_ns() > ContextResolution::StackWalk.overhead_ns()
+        );
     }
 
     #[test]

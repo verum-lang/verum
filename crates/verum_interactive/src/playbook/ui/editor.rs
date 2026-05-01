@@ -9,7 +9,9 @@
 //! - LSP integration for error highlighting
 
 use ratatui::prelude::*;
-use ratatui::widgets::{Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Widget};
+use ratatui::widgets::{
+    Block, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Widget,
+};
 
 /// Selection range in the editor
 #[derive(Debug, Clone, Copy, Default)]
@@ -29,7 +31,8 @@ impl Selection {
     /// Normalize selection so start <= end
     pub fn normalize(&self) -> Selection {
         let (start, end) = if self.start.0 < self.end.0
-            || (self.start.0 == self.end.0 && self.start.1 <= self.end.1) {
+            || (self.start.0 == self.end.0 && self.start.1 <= self.end.1)
+        {
             (self.start, self.end)
         } else {
             (self.end, self.start)
@@ -111,7 +114,10 @@ impl EditorState {
 
     /// Get current line
     pub fn current_line(&self) -> &str {
-        self.lines.get(self.cursor.0).map(|s| s.as_str()).unwrap_or("")
+        self.lines
+            .get(self.cursor.0)
+            .map(|s| s.as_str())
+            .unwrap_or("")
     }
 
     /// Convert char index to byte offset in a string.
@@ -354,7 +360,10 @@ impl EditorState {
 
         if self.cursor.0 > 0 {
             self.cursor.0 -= 1;
-            self.cursor.1 = self.cursor.1.min(Self::char_len(&self.lines[self.cursor.0]));
+            self.cursor.1 = self
+                .cursor
+                .1
+                .min(Self::char_len(&self.lines[self.cursor.0]));
         }
 
         self.end_selection(with_selection);
@@ -366,7 +375,10 @@ impl EditorState {
 
         if self.cursor.0 < self.lines.len() - 1 {
             self.cursor.0 += 1;
-            self.cursor.1 = self.cursor.1.min(Self::char_len(&self.lines[self.cursor.0]));
+            self.cursor.1 = self
+                .cursor
+                .1
+                .min(Self::char_len(&self.lines[self.cursor.0]));
         }
 
         self.end_selection(with_selection);
@@ -420,10 +432,9 @@ impl EditorState {
     /// End a selection after cursor movement.
     /// Updates the selection end to the current cursor position.
     fn end_selection(&mut self, with_selection: bool) {
-        if with_selection
-            && let Some(ref mut sel) = self.selection {
-                sel.end = self.cursor;
-            }
+        if with_selection && let Some(ref mut sel) = self.selection {
+            sel.end = self.cursor;
+        }
     }
 
     /// Start selection at current position
@@ -540,8 +551,12 @@ impl EditorState {
         let line = self.current_line().to_string();
         let chars: Vec<char> = line.chars().collect();
         let mut i = char_col;
-        while i > 0 && chars[i - 1].is_whitespace() { i -= 1; }
-        while i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_') { i -= 1; }
+        while i > 0 && chars[i - 1].is_whitespace() {
+            i -= 1;
+        }
+        while i > 0 && (chars[i - 1].is_alphanumeric() || chars[i - 1] == '_') {
+            i -= 1;
+        }
         self.cursor.1 = i;
         self.end_selection(select);
     }
@@ -554,13 +569,20 @@ impl EditorState {
         let chars: Vec<char> = line.chars().collect();
         let len = chars.len();
         if char_col >= len {
-            if row < self.lines.len() - 1 { self.cursor.0 += 1; self.cursor.1 = 0; }
+            if row < self.lines.len() - 1 {
+                self.cursor.0 += 1;
+                self.cursor.1 = 0;
+            }
             self.end_selection(select);
             return;
         }
         let mut i = char_col;
-        while i < len && (chars[i].is_alphanumeric() || chars[i] == '_') { i += 1; }
-        while i < len && chars[i].is_whitespace() { i += 1; }
+        while i < len && (chars[i].is_alphanumeric() || chars[i] == '_') {
+            i += 1;
+        }
+        while i < len && chars[i].is_whitespace() {
+            i += 1;
+        }
         self.cursor.1 = i;
         self.end_selection(select);
     }
@@ -569,7 +591,9 @@ impl EditorState {
     pub fn insert_tab(&mut self) {
         let col = self.cursor.1;
         let spaces = 4 - (col % 4);
-        for _ in 0..spaces { self.insert_char(' '); }
+        for _ in 0..spaces {
+            self.insert_char(' ');
+        }
     }
 
     /// Scroll up
@@ -609,10 +633,18 @@ pub enum DiagnosticSeverity {
 impl DiagnosticSeverity {
     pub fn style(&self) -> Style {
         match self {
-            DiagnosticSeverity::Error => Style::default().fg(Color::Red).add_modifier(Modifier::UNDERLINED),
-            DiagnosticSeverity::Warning => Style::default().fg(Color::Yellow).add_modifier(Modifier::UNDERLINED),
-            DiagnosticSeverity::Info => Style::default().fg(Color::Cyan).add_modifier(Modifier::UNDERLINED),
-            DiagnosticSeverity::Hint => Style::default().fg(Color::Gray).add_modifier(Modifier::UNDERLINED),
+            DiagnosticSeverity::Error => Style::default()
+                .fg(Color::Red)
+                .add_modifier(Modifier::UNDERLINED),
+            DiagnosticSeverity::Warning => Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::UNDERLINED),
+            DiagnosticSeverity::Info => Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::UNDERLINED),
+            DiagnosticSeverity::Hint => Style::default()
+                .fg(Color::Gray)
+                .add_modifier(Modifier::UNDERLINED),
         }
     }
 }
@@ -655,22 +687,86 @@ impl<'a> EditorWidget<'a> {
         let mut spans = Vec::new();
         // Keywords per grammar/verum.ebnf (all categories)
         let keywords = [
-            "fn", "let", "is", "type", "where", "using",
-            "if", "else", "match", "return", "for", "while", "loop", "break", "continue",
-            "async", "await", "spawn", "defer", "errdefer", "try", "yield", "throws", "select", "nursery",
-            "pub", "mut", "const", "unsafe", "pure", "ffi",
-            "module", "mount", "implement", "context", "protocol", "extends",
-            "self", "super", "cog", "static", "meta", "provide", "finally", "recover",
-            "invariant", "decreases", "stream", "tensor", "affine", "linear",
-            "public", "internal", "protected", "ensures", "requires", "result", "some",
-            "theorem", "lemma", "axiom", "corollary", "proof", "calc",
-            "have", "show", "suffices", "obtain", "by", "qed",
-            "induction", "cases", "contradiction", "forall", "exists",
+            "fn",
+            "let",
+            "is",
+            "type",
+            "where",
+            "using",
+            "if",
+            "else",
+            "match",
+            "return",
+            "for",
+            "while",
+            "loop",
+            "break",
+            "continue",
+            "async",
+            "await",
+            "spawn",
+            "defer",
+            "errdefer",
+            "try",
+            "yield",
+            "throws",
+            "select",
+            "nursery",
+            "pub",
+            "mut",
+            "const",
+            "unsafe",
+            "pure",
+            "ffi",
+            "module",
+            "mount",
+            "implement",
+            "context",
+            "protocol",
+            "extends",
+            "self",
+            "super",
+            "cog",
+            "static",
+            "meta",
+            "provide",
+            "finally",
+            "recover",
+            "invariant",
+            "decreases",
+            "stream",
+            "tensor",
+            "affine",
+            "linear",
+            "public",
+            "internal",
+            "protected",
+            "ensures",
+            "requires",
+            "result",
+            "some",
+            "theorem",
+            "lemma",
+            "axiom",
+            "corollary",
+            "proof",
+            "calc",
+            "have",
+            "show",
+            "suffices",
+            "obtain",
+            "by",
+            "qed",
+            "induction",
+            "cases",
+            "contradiction",
+            "forall",
+            "exists",
         ];
         let types = [
-            "Int", "Float", "Bool", "Char", "Text",
-            "List", "Map", "Set", "Maybe", "Heap", "Shared",
-            "Deque", "Channel", "Mutex", "Task", "Result", "Tensor", "Future", "Duration",
+            "Int", "Float", "Bool", "Char", "Text", "List", "Map", "Set", "Maybe", "Heap",
+            "Shared", "Deque", "Channel", "Mutex", "Task", "Result", "Tensor", "Future",
+            "Duration",
         ];
 
         let mut chars = source.char_indices().peekable();
@@ -698,10 +794,17 @@ impl<'a> EditorWidget<'a> {
 
                 let word = &source[start..end];
                 let style = if keywords.contains(&word) {
-                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD)
                 } else if types.contains(&word) {
                     Style::default().fg(Color::Cyan)
-                } else if word.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+                } else if word
+                    .chars()
+                    .next()
+                    .map(|c| c.is_uppercase())
+                    .unwrap_or(false)
+                {
                     Style::default().fg(Color::Green)
                 } else {
                     Style::default().fg(Color::White)
@@ -733,7 +836,10 @@ impl<'a> EditorWidget<'a> {
                     spans.push(Span::raw(&source[current_start..start]));
                 }
 
-                spans.push(Span::styled(&source[start..end], Style::default().fg(Color::Yellow)));
+                spans.push(Span::styled(
+                    &source[start..end],
+                    Style::default().fg(Color::Yellow),
+                ));
                 current_start = end;
             }
             // Check for comments
@@ -753,7 +859,10 @@ impl<'a> EditorWidget<'a> {
                         spans.push(Span::raw(&source[current_start..start]));
                     }
 
-                    spans.push(Span::styled(&source[start..end], Style::default().fg(Color::DarkGray)));
+                    spans.push(Span::styled(
+                        &source[start..end],
+                        Style::default().fg(Color::DarkGray),
+                    ));
                     current_start = end;
                 }
             }
@@ -775,7 +884,10 @@ impl<'a> EditorWidget<'a> {
                     spans.push(Span::raw(&source[current_start..start]));
                 }
 
-                spans.push(Span::styled(&source[start..end], Style::default().fg(Color::LightBlue)));
+                spans.push(Span::styled(
+                    &source[start..end],
+                    Style::default().fg(Color::LightBlue),
+                ));
                 current_start = end;
             }
         }
@@ -796,7 +908,9 @@ impl<'a> EditorWidget<'a> {
 impl<'a> Widget for EditorWidget<'a> {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let border_style = if self.state.fullscreen {
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::Green)
         };
@@ -831,25 +945,26 @@ impl<'a> Widget for EditorWidget<'a> {
         let visible_lines = inner.height as usize;
 
         // Render visible lines
-        for (i, line_idx) in (self.state.scroll_offset..(self.state.scroll_offset + visible_lines)).enumerate() {
+        for (i, line_idx) in
+            (self.state.scroll_offset..(self.state.scroll_offset + visible_lines)).enumerate()
+        {
             let y = inner.y + i as u16;
 
             if line_idx >= self.state.lines.len() {
                 // Render ~ for lines past end of file
                 if self.show_line_numbers {
-                    buf.set_string(
-                        inner.x,
-                        y,
-                        "~",
-                        Style::default().fg(Color::DarkGray),
-                    );
+                    buf.set_string(inner.x, y, "~", Style::default().fg(Color::DarkGray));
                 }
                 continue;
             }
 
             // Render line number
             if self.show_line_numbers {
-                let num_str = format!("{:>width$} ", line_idx + 1, width = line_num_width as usize - 1);
+                let num_str = format!(
+                    "{:>width$} ",
+                    line_idx + 1,
+                    width = line_num_width as usize - 1
+                );
                 let num_style = if line_idx == self.state.cursor.0 {
                     Style::default().fg(Color::Yellow)
                 } else {
@@ -890,7 +1005,10 @@ impl<'a> Widget for EditorWidget<'a> {
                     // Check for diagnostics (col_start/col_end are byte-based in diagnostics,
                     // but we compare with char_idx for display purposes)
                     for diag in self.diagnostics {
-                        if diag.line == line_idx && char_idx >= diag.col_start && char_idx < diag.col_end {
+                        if diag.line == line_idx
+                            && char_idx >= diag.col_start
+                            && char_idx < diag.col_end
+                        {
                             style = style.patch(diag.severity.style());
                         }
                     }
@@ -916,8 +1034,8 @@ impl<'a> Widget for EditorWidget<'a> {
         // Render scrollbar if needed
         if self.state.lines.len() > visible_lines {
             let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight);
-            let mut scrollbar_state = ScrollbarState::new(self.state.lines.len())
-                .position(self.state.scroll_offset);
+            let mut scrollbar_state =
+                ScrollbarState::new(self.state.lines.len()).position(self.state.scroll_offset);
 
             scrollbar.render(
                 Rect {
@@ -960,12 +1078,12 @@ fn system_clipboard_write(text: &str) {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
-        {
-            if let Some(ref mut stdin) = child.stdin {
-                let _ = stdin.write_all(text.as_bytes());
-            }
-            let _ = child.wait();
+    {
+        if let Some(ref mut stdin) = child.stdin {
+            let _ = stdin.write_all(text.as_bytes());
         }
+        let _ = child.wait();
+    }
 }
 
 /// Read text from the OS clipboard.

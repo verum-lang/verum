@@ -255,23 +255,14 @@ mod tests {
     #[test]
     fn join_of_chain_is_higher() {
         let l = LabelLattice::chain();
-        assert_eq!(
-            l.join(&Label::public(), &Label::secret()),
-            Label::secret()
-        );
-        assert_eq!(
-            l.join(&Label::secret(), &Label::public()),
-            Label::secret()
-        );
+        assert_eq!(l.join(&Label::public(), &Label::secret()), Label::secret());
+        assert_eq!(l.join(&Label::secret(), &Label::public()), Label::secret());
     }
 
     #[test]
     fn join_with_self_is_self() {
         let l = LabelLattice::chain();
-        assert_eq!(
-            l.join(&Label::secret(), &Label::secret()),
-            Label::secret()
-        );
+        assert_eq!(l.join(&Label::secret(), &Label::secret()), Label::secret());
     }
 
     #[test]

@@ -19,8 +19,8 @@
 // Tests for module-level context annotations: @using([Ctx1, Ctx2])
 
 use verum_ast::{FileId, ItemKind, Module};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 /// Helper to parse a module from source.
 fn parse_module(source: &str) -> Result<Module, String> {

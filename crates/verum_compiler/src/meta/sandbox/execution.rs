@@ -84,36 +84,39 @@ impl SandboxedExecutor {
             ConstValue::Unit => 0,
             ConstValue::Bool(_) => 1,
             ConstValue::Char(_) => 4,
-            ConstValue::Int(_) => 16, // i128
-            ConstValue::UInt(_) => 16, // u128
-            ConstValue::Float(_) => 8, // f64
-            ConstValue::Text(s) => s.len() + 24, // String overhead + content
+            ConstValue::Int(_) => 16,             // i128
+            ConstValue::UInt(_) => 16,            // u128
+            ConstValue::Float(_) => 8,            // f64
+            ConstValue::Text(s) => s.len() + 24,  // String overhead + content
             ConstValue::Bytes(b) => b.len() + 24, // Vec overhead + content
             ConstValue::Array(arr) => {
-                arr.iter().map(|v| self.estimate_value_memory(v)).sum::<usize>() + 24
+                arr.iter()
+                    .map(|v| self.estimate_value_memory(v))
+                    .sum::<usize>()
+                    + 24
             }
             ConstValue::Tuple(items) => {
-                items.iter().map(|v| self.estimate_value_memory(v)).sum::<usize>() + 24
+                items
+                    .iter()
+                    .map(|v| self.estimate_value_memory(v))
+                    .sum::<usize>()
+                    + 24
             }
-            ConstValue::Maybe(maybe) => {
-                match maybe.as_ref() {
-                    verum_common::Maybe::Some(v) => self.estimate_value_memory(v) + 8,
-                    verum_common::Maybe::None => 8,
-                }
-            }
+            ConstValue::Maybe(maybe) => match maybe.as_ref() {
+                verum_common::Maybe::Some(v) => self.estimate_value_memory(v) + 8,
+                verum_common::Maybe::None => 8,
+            },
             ConstValue::Map(map) => {
                 map.iter()
                     .map(|(k, v)| k.len() + 24 + self.estimate_value_memory(v))
                     .sum::<usize>()
                     + 24
             }
-            ConstValue::Set(set) => {
-                set.iter().map(|s| s.len() + 24).sum::<usize>() + 24
-            }
-            ConstValue::Expr(_) => 64, // AST node approximation
-            ConstValue::Type(_) => 32, // Type approximation
+            ConstValue::Set(set) => set.iter().map(|s| s.len() + 24).sum::<usize>() + 24,
+            ConstValue::Expr(_) => 64,    // AST node approximation
+            ConstValue::Type(_) => 32,    // Type approximation
             ConstValue::Pattern(_) => 64, // Pattern approximation
-            ConstValue::Item(_) => 128, // Item approximation
+            ConstValue::Item(_) => 128,   // Item approximation
             ConstValue::Items(items) => items.len() * 128 + 24, // Items approximation
         }
     }
@@ -129,11 +132,7 @@ impl SandboxedExecutor {
 
     /// This is the main entry point for executing meta functions at compile-time.
     /// It recursively evaluates the expression AST while enforcing I/O restrictions.
-    pub fn execute(
-        &self,
-        ctx: &MetaContext,
-        expr: &Expr,
-    ) -> Result<ConstValue, SandboxError> {
+    pub fn execute(&self, ctx: &MetaContext, expr: &Expr) -> Result<ConstValue, SandboxError> {
         // Reset state before execution
         self.limiter.reset_execution_state();
 
@@ -314,11 +313,7 @@ impl SandboxedExecutor {
     }
 
     /// Execute a unary operation
-    fn execute_unary_op(
-        &self,
-        op: &UnOp,
-        operand: ConstValue,
-    ) -> Result<ConstValue, SandboxError> {
+    fn execute_unary_op(&self, op: &UnOp, operand: ConstValue) -> Result<ConstValue, SandboxError> {
         match op {
             UnOp::Neg => operand.neg(),
             UnOp::Not => operand.not(),
@@ -612,31 +607,29 @@ impl SandboxedExecutor {
                     }
                 };
                 match func_name {
-                    "include_str" | "include_file" => {
-                        ctx.build_assets
-                            .read_text_uncached(path.as_str())
-                            .map(ConstValue::Text)
-                            .map_err(|e| SandboxError::UnsafeOperation {
-                                operation: Text::from(func_name),
-                                reason: Text::from(format!("{:?}", e)),
-                            })
-                    }
-                    "include_bytes" | "load_build_asset" => {
-                        ctx.build_assets
-                            .read_bytes_uncached(path.as_str())
-                            .map(|bytes| {
-                                ConstValue::Array(
-                                    bytes
-                                        .into_iter()
-                                        .map(|b| ConstValue::Int(b as i128))
-                                        .collect(),
-                                )
-                            })
-                            .map_err(|e| SandboxError::UnsafeOperation {
-                                operation: Text::from(func_name),
-                                reason: Text::from(format!("{:?}", e)),
-                            })
-                    }
+                    "include_str" | "include_file" => ctx
+                        .build_assets
+                        .read_text_uncached(path.as_str())
+                        .map(ConstValue::Text)
+                        .map_err(|e| SandboxError::UnsafeOperation {
+                            operation: Text::from(func_name),
+                            reason: Text::from(format!("{:?}", e)),
+                        }),
+                    "include_bytes" | "load_build_asset" => ctx
+                        .build_assets
+                        .read_bytes_uncached(path.as_str())
+                        .map(|bytes| {
+                            ConstValue::Array(
+                                bytes
+                                    .into_iter()
+                                    .map(|b| ConstValue::Int(b as i128))
+                                    .collect(),
+                            )
+                        })
+                        .map_err(|e| SandboxError::UnsafeOperation {
+                            operation: Text::from(func_name),
+                            reason: Text::from(format!("{:?}", e)),
+                        }),
                     // Unreachable — outer match guard already filtered to
                     // these four names. The catch-all is defensive in
                     // case the outer pattern is later widened.
@@ -645,14 +638,12 @@ impl SandboxedExecutor {
             }
 
             // ========== Unknown function ==========
-            _ => {
-                Err(SandboxError::ForbiddenFunction {
-                    function: Text::from(func_name),
-                    reason: Text::from(
-                        "Unknown function in meta context. Only built-in meta functions are allowed.",
-                    ),
-                })
-            }
+            _ => Err(SandboxError::ForbiddenFunction {
+                function: Text::from(func_name),
+                reason: Text::from(
+                    "Unknown function in meta context. Only built-in meta functions are allowed.",
+                ),
+            }),
         }
     }
 }
@@ -712,11 +703,7 @@ mod tests {
         let exec = SandboxedExecutor::new();
         let ctx = MetaContext::new();
         let result = exec
-            .execute_builtin_function(
-                "Err",
-                vec![ConstValue::Text(Text::from("oops"))],
-                &ctx,
-            )
+            .execute_builtin_function("Err", vec![ConstValue::Text(Text::from("oops"))], &ctx)
             .expect("Err must succeed when sandbox supports Result");
         match result {
             ConstValue::Tuple(parts) => {

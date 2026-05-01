@@ -61,9 +61,14 @@ fn main() {
 /// resolvable for the safe wrappers in `core/sys/<plat>/libsystem.vr`
 /// to compile.
 const ARITY_SENSITIVE_NAMES: &[&str] = &[
-    "write", "pread", "pwrite",
-    "send", "recv", "sendto",
-    "getsockopt", "safe_getsockopt",
+    "write",
+    "pread",
+    "pwrite",
+    "send",
+    "recv",
+    "sendto",
+    "getsockopt",
+    "safe_getsockopt",
 ];
 
 #[test]
@@ -77,12 +82,15 @@ fn stdlib_loading_preserves_alternative_arities() {
 
     let out = vtest_run_capture(&fixture);
 
-    let arity_warnings: Vec<&str> = out.stderr
+    let arity_warnings: Vec<&str> = out
+        .stderr
         .lines()
         .filter(|l| l.contains("[lenient]") && l.contains("wrong number of arguments"))
-        .filter(|l| ARITY_SENSITIVE_NAMES.iter().any(|n| {
-            l.contains(&format!("for {}:", n))
-        }))
+        .filter(|l| {
+            ARITY_SENSITIVE_NAMES
+                .iter()
+                .any(|n| l.contains(&format!("for {}:", n)))
+        })
         .collect();
 
     assert!(
@@ -100,7 +108,12 @@ fn stdlib_loading_preserves_alternative_arities() {
          for the arity-suffix branch outside the prefer-existing gate.\n\n\
          First few warnings:\n{}",
         arity_warnings.len(),
-        arity_warnings.iter().take(8).copied().collect::<Vec<_>>().join("\n"),
+        arity_warnings
+            .iter()
+            .take(8)
+            .copied()
+            .collect::<Vec<_>>()
+            .join("\n"),
     );
 
     assert_eq!(

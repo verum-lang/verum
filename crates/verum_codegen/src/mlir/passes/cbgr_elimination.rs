@@ -36,11 +36,19 @@
 //! - Typical elimination rate: 40-70%
 //! - Net improvement: ~6-10ns average per reference access
 
-use crate::mlir::dialect::{attr_names, op_names, RefTier, EscapeCategory as DialectEscapeCategory};
-use crate::mlir::error::{MlirError, Result};
 use super::{PassResult, PassStats, VerumPass};
+use crate::mlir::dialect::{
+    EscapeCategory as DialectEscapeCategory, RefTier, attr_names, op_names,
+};
+use crate::mlir::error::{MlirError, Result};
 
 use indexmap::{IndexMap, IndexSet};
+use parking_lot::RwLock;
+use smallvec::SmallVec;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use verum_common::Text;
 use verum_mlir::ir::attribute::IntegerAttribute;
 use verum_mlir::ir::operation::{OperationLike, OperationRefMut};
 use verum_mlir::ir::r#type::IntegerType;
@@ -48,12 +56,6 @@ use verum_mlir::ir::{
     Attribute, Block, BlockLike, Identifier, Location, Module, Operation, OperationRef, Region,
     RegionLike, Value, ValueLike,
 };
-use parking_lot::RwLock;
-use smallvec::SmallVec;
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use verum_common::Text;
 
 // ============================================================================
 // Escape Analysis Data Structures
@@ -625,7 +627,11 @@ impl EscapeAnalysisEngine {
     }
 
     /// Analyze escape behavior of a specific use.
-    fn analyze_use_escape(&self, value_info: &ValueInfo, op_info: &OperationInfo) -> EscapeCategory {
+    fn analyze_use_escape(
+        &self,
+        value_info: &ValueInfo,
+        op_info: &OperationInfo,
+    ) -> EscapeCategory {
         let op_name = op_info.name.as_str();
 
         // Special handling for different operation types
@@ -743,7 +749,9 @@ impl EscapeAnalysisEngine {
     pub fn get_removable_checks(&self) -> Vec<OperationId> {
         self.operations
             .iter()
-            .filter(|(_, info)| info.is_cbgr_check && info.action == Some(OptimizationAction::Remove))
+            .filter(|(_, info)| {
+                info.is_cbgr_check && info.action == Some(OptimizationAction::Remove)
+            })
             .map(|(id, _)| *id)
             .collect()
     }
@@ -949,7 +957,9 @@ impl CbgrEliminationPass {
                             if let Some(value_info) = engine.values.get(&value_id) {
                                 match value_info.escape_category {
                                     EscapeCategory::NoEscape => stats.eliminated_no_escape += 1,
-                                    EscapeCategory::LocalEscape => stats.eliminated_local_escape += 1,
+                                    EscapeCategory::LocalEscape => {
+                                        stats.eliminated_local_escape += 1
+                                    }
                                     _ => {}
                                 }
                             }
@@ -1195,13 +1205,7 @@ mod tests {
 
     #[test]
     fn test_optimization_action() {
-        assert_eq!(
-            OptimizationAction::Remove,
-            OptimizationAction::Remove
-        );
-        assert_ne!(
-            OptimizationAction::Remove,
-            OptimizationAction::Keep
-        );
+        assert_eq!(OptimizationAction::Remove, OptimizationAction::Remove);
+        assert_ne!(OptimizationAction::Remove, OptimizationAction::Keep);
     }
 }

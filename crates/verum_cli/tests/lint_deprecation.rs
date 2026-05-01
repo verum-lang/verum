@@ -8,9 +8,7 @@
 //! the formatter handles the empty case) so the first real
 //! deprecation can land with confidence.
 
-use verum_cli::commands::lint::{
-    deprecation_notice, is_deprecated, rule_status, LintRuleStatus,
-};
+use verum_cli::commands::lint::{LintRuleStatus, deprecation_notice, is_deprecated, rule_status};
 
 #[test]
 fn every_existing_rule_is_active_by_default() {

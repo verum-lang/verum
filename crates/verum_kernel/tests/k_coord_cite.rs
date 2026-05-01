@@ -34,10 +34,8 @@ fn same_coord_cite_admitted() {
 #[test]
 fn lower_axiom_cite_admitted() {
     // theorem at ν=2 cites axiom at ν=1 → admitted (axiom.ν ≤ theorem.ν).
-    let theorem_coord =
-        KernelCoord::canonical(Text::from("hott"), OrdinalDepth::finite(2));
-    let axiom_coord =
-        KernelCoord::canonical(Text::from("set_level"), OrdinalDepth::finite(1));
+    let theorem_coord = KernelCoord::canonical(Text::from("hott"), OrdinalDepth::finite(2));
+    let axiom_coord = KernelCoord::canonical(Text::from("set_level"), OrdinalDepth::finite(1));
     let res = check_coord_cite(
         &theorem_coord,
         &axiom_coord,
@@ -50,10 +48,8 @@ fn lower_axiom_cite_admitted() {
 #[test]
 fn higher_axiom_cite_rejected_without_tier_jump() {
     // theorem at ν=1 tries to cite axiom at ν=2 → rejected.
-    let theorem_coord =
-        KernelCoord::canonical(Text::from("set_level"), OrdinalDepth::finite(1));
-    let axiom_coord =
-        KernelCoord::canonical(Text::from("hott"), OrdinalDepth::finite(2));
+    let theorem_coord = KernelCoord::canonical(Text::from("set_level"), OrdinalDepth::finite(1));
+    let axiom_coord = KernelCoord::canonical(Text::from("hott"), OrdinalDepth::finite(2));
     let res = check_coord_cite(
         &theorem_coord,
         &axiom_coord,
@@ -82,10 +78,8 @@ fn higher_axiom_cite_rejected_without_tier_jump() {
 fn higher_axiom_cite_admitted_under_tier_jump() {
     // theorem at ν=1 cites axiom at ν=2 with allow_tier_jump=true
     // (Categorical coherence K-Universe-Ascent) → admitted.
-    let theorem_coord =
-        KernelCoord::canonical(Text::from("set_level"), OrdinalDepth::finite(1));
-    let axiom_coord =
-        KernelCoord::canonical(Text::from("hott"), OrdinalDepth::finite(2));
+    let theorem_coord = KernelCoord::canonical(Text::from("set_level"), OrdinalDepth::finite(1));
+    let axiom_coord = KernelCoord::canonical(Text::from("hott"), OrdinalDepth::finite(2));
     let res = check_coord_cite(
         &theorem_coord,
         &axiom_coord,
@@ -103,8 +97,7 @@ fn higher_axiom_cite_admitted_under_tier_jump() {
 fn omega_axiom_cite_from_set_theorem_rejected() {
     // theorem at ν=3 tries to cite axiom at ν=ω → rejected
     // (finite < ω lex).
-    let theorem_coord =
-        KernelCoord::canonical(Text::from("set_level"), OrdinalDepth::finite(3));
+    let theorem_coord = KernelCoord::canonical(Text::from("set_level"), OrdinalDepth::finite(3));
     let axiom_coord = KernelCoord::canonical(Text::from("lurie_htt"), OrdinalDepth::omega());
     let res = check_coord_cite(
         &theorem_coord,
@@ -119,8 +112,7 @@ fn omega_axiom_cite_from_set_theorem_rejected() {
 fn omega_theorem_cites_finite_axiom_admitted() {
     // theorem at ν=ω cites axiom at ν=5 → admitted.
     let theorem_coord = KernelCoord::canonical(Text::from("lurie_htt"), OrdinalDepth::omega());
-    let axiom_coord =
-        KernelCoord::canonical(Text::from("set_level"), OrdinalDepth::finite(5));
+    let axiom_coord = KernelCoord::canonical(Text::from("set_level"), OrdinalDepth::finite(5));
     let res = check_coord_cite(
         &theorem_coord,
         &axiom_coord,
@@ -135,7 +127,10 @@ fn omega_plus_one_theorem_cites_omega_axiom_admitted() {
     // theorem at ν=ω+1 cites axiom at ν=ω → admitted.
     let theorem_coord = KernelCoord::canonical(
         Text::from("baez_dolan"),
-        OrdinalDepth { omega_coeff: 1, finite_offset: 1 },
+        OrdinalDepth {
+            omega_coeff: 1,
+            finite_offset: 1,
+        },
     );
     let axiom_coord = KernelCoord::canonical(Text::from("lurie_htt"), OrdinalDepth::omega());
     let res = check_coord_cite(
@@ -159,13 +154,8 @@ fn register_with_coord_attaches_coord_to_entry() {
         path: Text::from("Unit"),
         args: verum_common::List::new(),
     };
-    reg.register_with_coord(
-        Text::from("a1"),
-        ty,
-        fw("test_fw"),
-        coord.clone(),
-    )
-    .expect("admit");
+    reg.register_with_coord(Text::from("a1"), ty, fw("test_fw"), coord.clone())
+        .expect("admit");
     use verum_common::Maybe;
     match reg.get("a1") {
         Maybe::Some(entry) => {
@@ -219,12 +209,7 @@ fn register_with_coord_rejects_uip_shape() {
         codomain: Heap::new(pi_a),
     };
     let coord = KernelCoord::canonical(Text::from("test_fw"), OrdinalDepth::finite(0));
-    let res = reg.register_with_coord(
-        Text::from("uip_attempt"),
-        uip,
-        fw("test_fw"),
-        coord,
-    );
+    let res = reg.register_with_coord(Text::from("uip_attempt"), uip, fw("test_fw"), coord);
     assert!(matches!(res, Err(KernelError::UipForbidden(_))));
     use verum_common::Maybe;
     assert!(matches!(reg.get("uip_attempt"), Maybe::None));
@@ -237,7 +222,8 @@ fn legacy_register_leaves_coord_none() {
         path: Text::from("Unit"),
         args: verum_common::List::new(),
     };
-    reg.register(Text::from("legacy"), ty, fw("test")).expect("admit");
+    reg.register(Text::from("legacy"), ty, fw("test"))
+        .expect("admit");
     use verum_common::Maybe;
     match reg.get("legacy") {
         Maybe::Some(entry) => {
@@ -268,7 +254,10 @@ fn coord_serde_roundtrip() {
     use serde_json;
     let c = KernelCoord::canonical(
         Text::from("lurie_htt"),
-        OrdinalDepth { omega_coeff: 1, finite_offset: 2 },
+        OrdinalDepth {
+            omega_coeff: 1,
+            finite_offset: 2,
+        },
     );
     let s = serde_json::to_string(&c).expect("serialise");
     let restored: KernelCoord = serde_json::from_str(&s).expect("deserialise");
@@ -298,9 +287,7 @@ fn pre_v8_axiom_serde_lacks_coord_field() {
 mod v2_typing_judgment_integration {
     use super::*;
     use verum_common::{Heap, List};
-    use verum_kernel::{
-        Context, CoreTerm, InductiveRegistry, infer, infer_with_full_context,
-    };
+    use verum_kernel::{Context, CoreTerm, InductiveRegistry, infer, infer_with_full_context};
 
     fn unit_ty() -> CoreTerm {
         CoreTerm::Inductive {
@@ -347,8 +334,7 @@ mod v2_typing_judgment_integration {
             unit_ty(),
             KernelCoord::canonical(Text::from("petz"), OrdinalDepth::finite(2)),
         );
-        let theorem_coord =
-            KernelCoord::canonical(Text::from("lurie_htt"), OrdinalDepth::omega());
+        let theorem_coord = KernelCoord::canonical(Text::from("lurie_htt"), OrdinalDepth::omega());
         let inductives = InductiveRegistry::new();
         let res = infer_with_full_context(
             &Context::new(),
@@ -358,11 +344,7 @@ mod v2_typing_judgment_integration {
             &theorem_coord,
             false,
         );
-        assert!(
-            res.is_ok(),
-            "lower-cite must admit: {:?}",
-            res,
-        );
+        assert!(res.is_ok(), "lower-cite must admit: {:?}", res,);
     }
 
     #[test]
@@ -376,8 +358,7 @@ mod v2_typing_judgment_integration {
             unit_ty(),
             KernelCoord::canonical(Text::from("lurie_htt"), OrdinalDepth::omega()),
         );
-        let theorem_coord =
-            KernelCoord::canonical(Text::from("petz"), OrdinalDepth::finite(2));
+        let theorem_coord = KernelCoord::canonical(Text::from("petz"), OrdinalDepth::finite(2));
         let inductives = InductiveRegistry::new();
         let res = infer_with_full_context(
             &Context::new(),
@@ -401,8 +382,7 @@ mod v2_typing_judgment_integration {
             unit_ty(),
             KernelCoord::canonical(Text::from("lurie_htt"), OrdinalDepth::omega()),
         );
-        let theorem_coord =
-            KernelCoord::canonical(Text::from("petz"), OrdinalDepth::finite(2));
+        let theorem_coord = KernelCoord::canonical(Text::from("petz"), OrdinalDepth::finite(2));
         let inductives = InductiveRegistry::new();
         let res = infer_with_full_context(
             &Context::new(),
@@ -439,8 +419,7 @@ mod v2_typing_judgment_integration {
                 citation: Text::from("test"),
             },
         };
-        let theorem_coord =
-            KernelCoord::canonical(Text::from("petz"), OrdinalDepth::finite(2));
+        let theorem_coord = KernelCoord::canonical(Text::from("petz"), OrdinalDepth::finite(2));
         let inductives = InductiveRegistry::new();
         let res = infer_with_full_context(
             &Context::new(),

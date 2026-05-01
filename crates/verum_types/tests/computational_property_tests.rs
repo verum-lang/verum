@@ -65,7 +65,11 @@ fn test_all_properties_distinct() {
     for (i, a) in properties.iter().enumerate() {
         for (j, b) in properties.iter().enumerate() {
             if i != j {
-                assert_ne!(a, b, "Properties at index {} and {} should be different", i, j);
+                assert_ne!(
+                    a, b,
+                    "Properties at index {} and {} should be different",
+                    i, j
+                );
             }
         }
     }
@@ -109,10 +113,8 @@ fn test_property_set_empty_defaults_to_pure() {
 #[test]
 fn test_property_set_pure_removed_with_others() {
     // When Pure is combined with IO, Pure should be removed
-    let ps = PropertySet::from_properties(vec![
-        ComputationalProperty::Pure,
-        ComputationalProperty::IO,
-    ]);
+    let ps =
+        PropertySet::from_properties(vec![ComputationalProperty::Pure, ComputationalProperty::IO]);
     assert!(!ps.contains(&ComputationalProperty::Pure));
     assert!(ps.contains(&ComputationalProperty::IO));
 }

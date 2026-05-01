@@ -106,7 +106,10 @@ pub struct Tree<T: Clone> {
 
 impl<T: Clone> Tree<T> {
     pub fn singleton(value: T) -> Self {
-        Tree { value, shrinks: Vec::new() }
+        Tree {
+            value,
+            shrinks: Vec::new(),
+        }
     }
     pub fn new(value: T, shrinks: Vec<Box<dyn Fn() -> Tree<T> + Send + Sync>>) -> Self {
         Tree { value, shrinks }
@@ -125,13 +128,18 @@ pub enum Generator {
     /// Full Int range.
     Int,
     /// Bounded Int from refinement type `Int{ lo <= it <= hi }`.
-    IntRange { lo: i64, hi: i64 },
+    IntRange {
+        lo: i64,
+        hi: i64,
+    },
     /// Non-negative integers.
     Nat,
     /// IEEE 754 f64 with edge-cases bias.
     Float,
     /// Text with length bound.
-    Text { max_len: u32 },
+    Text {
+        max_len: u32,
+    },
 }
 
 impl Generator {
@@ -159,8 +167,12 @@ impl Generator {
                 verum_ast::PathSegment::Name(id) => Some(id.name.as_str()),
                 _ => None,
             }) {
-                Some("Nat") | Some("U8") | Some("U16") | Some("U32") | Some("U64") => Some(Generator::Nat),
-                Some("I8") | Some("I16") | Some("I32") | Some("I64") | Some("Int") => Some(Generator::Int),
+                Some("Nat") | Some("U8") | Some("U16") | Some("U32") | Some("U64") => {
+                    Some(Generator::Nat)
+                }
+                Some("I8") | Some("I16") | Some("I32") | Some("I64") | Some("Int") => {
+                    Some(Generator::Int)
+                }
                 Some("Bool") => Some(Generator::Bool),
                 Some("Byte") => Some(Generator::IntRange { lo: 0, hi: 255 }),
                 Some("Float") | Some("F32") | Some("F64") => Some(Generator::Float),
@@ -220,7 +232,11 @@ impl TreeValue {
             TreeValue::Int { value, lo, hi } => shrink_int(*value)
                 .into_iter()
                 .filter(|v| v >= lo && v <= hi)
-                .map(|v| TreeValue::Int { value: v, lo: *lo, hi: *hi })
+                .map(|v| TreeValue::Int {
+                    value: v,
+                    lo: *lo,
+                    hi: *hi,
+                })
                 .collect(),
             TreeValue::Float(f) if *f == 0.0 => vec![],
             TreeValue::Float(f) => shrink_float(*f).into_iter().map(TreeValue::Float).collect(),
@@ -228,7 +244,10 @@ impl TreeValue {
             TreeValue::Text { value, max_len } => shrink_text(value)
                 .into_iter()
                 .filter(|s| s.chars().count() as u32 <= *max_len)
-                .map(|s| TreeValue::Text { value: s, max_len: *max_len })
+                .map(|s| TreeValue::Text {
+                    value: s,
+                    max_len: *max_len,
+                })
                 .collect(),
         }
     }
@@ -255,15 +274,27 @@ fn gen_int(seed: &mut Seed) -> TreeValue {
     if rand_range_u32(seed, 0, 99) < 15 {
         let edges = [0i64, 1, -1, i64::MIN, i64::MAX, 2, -2, 100, -100];
         let i = rand_range_u32(seed, 0, (edges.len() - 1) as u32) as usize;
-        return TreeValue::Int { value: edges[i], lo: i64::MIN, hi: i64::MAX };
+        return TreeValue::Int {
+            value: edges[i],
+            lo: i64::MIN,
+            hi: i64::MAX,
+        };
     }
     // Biased toward small magnitudes: pick a magnitude exponentially,
     // then a sign. Produces a mix of near-zero and large values.
     let bits = rand_range_u32(seed, 0, 63);
-    let mag = if bits == 0 { 0 } else { next_u64(seed) & ((1u64 << bits) - 1) };
+    let mag = if bits == 0 {
+        0
+    } else {
+        next_u64(seed) & ((1u64 << bits) - 1)
+    };
     let sign = (next_u64(seed) & 1) == 1;
     let v = if sign { -(mag as i64) } else { mag as i64 };
-    TreeValue::Int { value: v, lo: i64::MIN, hi: i64::MAX }
+    TreeValue::Int {
+        value: v,
+        lo: i64::MIN,
+        hi: i64::MAX,
+    }
 }
 
 fn gen_int_range(seed: &mut Seed, lo: i64, hi: i64) -> TreeValue {
@@ -274,8 +305,17 @@ fn gen_int_range(seed: &mut Seed, lo: i64, hi: i64) -> TreeValue {
 fn gen_float(seed: &mut Seed) -> TreeValue {
     if rand_range_u32(seed, 0, 99) < 15 {
         let edges = [
-            0.0_f64, -0.0, 1.0, -1.0, f64::INFINITY, f64::NEG_INFINITY, f64::NAN,
-            f64::MIN_POSITIVE, f64::EPSILON, f64::MAX, f64::MIN,
+            0.0_f64,
+            -0.0,
+            1.0,
+            -1.0,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+            f64::MIN_POSITIVE,
+            f64::EPSILON,
+            f64::MAX,
+            f64::MIN,
         ];
         let i = rand_range_u32(seed, 0, (edges.len() - 1) as u32) as usize;
         return TreeValue::Float(edges[i]);
@@ -394,14 +434,16 @@ fn extract_bounds(kind: &TypeKind) -> Option<(i64, i64)> {
         TypeKind::Refined { predicate, .. } => &predicate.expr,
         _ => return None,
     };
-    use verum_ast::{Expr, ExprKind, BinOp};
+    use verum_ast::{BinOp, Expr, ExprKind};
     let mut lo: i64 = i64::MIN;
     let mut hi: i64 = i64::MAX;
     fn walk(e: &Expr, lo: &mut i64, hi: &mut i64) -> bool {
         match &e.kind {
-            ExprKind::Binary { op: BinOp::And, left, right } => {
-                walk(left, lo, hi) && walk(right, lo, hi)
-            }
+            ExprKind::Binary {
+                op: BinOp::And,
+                left,
+                right,
+            } => walk(left, lo, hi) && walk(right, lo, hi),
             ExprKind::Binary { op, left, right } => {
                 let (it_left, value) = match (is_it_ref(left), lit_i64(right)) {
                     (true, Some(v)) => (true, v),
@@ -411,15 +453,34 @@ fn extract_bounds(kind: &TypeKind) -> Option<(i64, i64)> {
                     },
                 };
                 match (op, it_left) {
-                    (BinOp::Lt, true) => { *hi = (*hi).min(value.saturating_sub(1)); }
-                    (BinOp::Le, true) => { *hi = (*hi).min(value); }
-                    (BinOp::Gt, true) => { *lo = (*lo).max(value.saturating_add(1)); }
-                    (BinOp::Ge, true) => { *lo = (*lo).max(value); }
-                    (BinOp::Eq, _) => { *lo = value; *hi = value; }
-                    (BinOp::Lt, false) => { *lo = (*lo).max(value.saturating_add(1)); }
-                    (BinOp::Le, false) => { *lo = (*lo).max(value); }
-                    (BinOp::Gt, false) => { *hi = (*hi).min(value.saturating_sub(1)); }
-                    (BinOp::Ge, false) => { *hi = (*hi).min(value); }
+                    (BinOp::Lt, true) => {
+                        *hi = (*hi).min(value.saturating_sub(1));
+                    }
+                    (BinOp::Le, true) => {
+                        *hi = (*hi).min(value);
+                    }
+                    (BinOp::Gt, true) => {
+                        *lo = (*lo).max(value.saturating_add(1));
+                    }
+                    (BinOp::Ge, true) => {
+                        *lo = (*lo).max(value);
+                    }
+                    (BinOp::Eq, _) => {
+                        *lo = value;
+                        *hi = value;
+                    }
+                    (BinOp::Lt, false) => {
+                        *lo = (*lo).max(value.saturating_add(1));
+                    }
+                    (BinOp::Le, false) => {
+                        *lo = (*lo).max(value);
+                    }
+                    (BinOp::Gt, false) => {
+                        *hi = (*hi).min(value.saturating_sub(1));
+                    }
+                    (BinOp::Ge, false) => {
+                        *hi = (*hi).min(value);
+                    }
                     _ => {}
                 }
                 true
@@ -448,7 +509,10 @@ fn extract_bounds(kind: &TypeKind) -> Option<(i64, i64)> {
                     None
                 }
             }
-            ExprKind::Unary { op: verum_ast::UnOp::Neg, expr: inner } => {
+            ExprKind::Unary {
+                op: verum_ast::UnOp::Neg,
+                expr: inner,
+            } => {
                 if let ExprKind::Literal(lit) = &inner.kind {
                     if let verum_ast::LiteralKind::Int(intlit) = &lit.kind {
                         return Some(-(intlit.value as i64));
@@ -573,12 +637,18 @@ pub fn run_property(
 
     for i in 0..total_runs {
         // Fresh generator streams per iteration, independent of other iters.
-        let seed = if cfg.pinned_seed { cfg.seed } else { {
-            // Mix seed + iteration so each run gets a distinct yet
-            // deterministic starting point.
-            let (a, _) = split(Seed(cfg.seed.0 ^ (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)));
-            a
-        }};
+        let seed = if cfg.pinned_seed {
+            cfg.seed
+        } else {
+            {
+                // Mix seed + iteration so each run gets a distinct yet
+                // deterministic starting point.
+                let (a, _) = split(Seed(
+                    cfg.seed.0 ^ (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15),
+                ));
+                a
+            }
+        };
 
         // Derive per-parameter streams from the iteration seed.
         let (mut left, mut right) = split(seed);
@@ -587,7 +657,11 @@ pub fn run_property(
             let mut s = if idx == 0 { left } else { right };
             let v = g.sample(&mut s);
             // Alternate consumers so we never run out of independent splits.
-            if idx % 2 == 0 { left = s; } else { right = s; }
+            if idx % 2 == 0 {
+                left = s;
+            } else {
+                right = s;
+            }
             inputs.push(v);
         }
 
@@ -617,8 +691,7 @@ pub fn run_property(
         if let Err(e) = outcome {
             // Shrink.
             let original = inputs.iter().map(TreeValue::display).collect();
-            let (shrunk, steps) =
-                shrink_failure(&mut interp, fid, inputs, cfg.max_shrinks);
+            let (shrunk, steps) = shrink_failure(&mut interp, fid, inputs, cfg.max_shrinks);
             return PropertyOutcome {
                 iterations: i + 1,
                 duration: start.elapsed(),
@@ -711,8 +784,8 @@ fn call_with_args(
     fid: FunctionId,
     args: &[Value],
 ) -> verum_vbc::interpreter::InterpreterResult<Value> {
-    use verum_vbc::interpreter::{dispatch_loop_table, InterpreterError};
     use verum_vbc::instruction::Reg;
+    use verum_vbc::interpreter::{InterpreterError, dispatch_loop_table};
 
     let func = interp
         .state
@@ -768,8 +841,8 @@ pub fn save_regression_db(db: &RegressionDb) -> Result<()> {
         fs::create_dir_all(parent)
             .map_err(|e| CliError::Custom(format!("mkdir {}: {}", parent.display(), e)))?;
     }
-    let json = serde_json::to_string_pretty(db)
-        .map_err(|e| CliError::Custom(format!("json: {}", e)))?;
+    let json =
+        serde_json::to_string_pretty(db).map_err(|e| CliError::Custom(format!("json: {}", e)))?;
     fs::write(&p, json).map_err(|e| CliError::Custom(format!("write: {}", e)))
 }
 
@@ -781,12 +854,7 @@ pub fn seeds_for(db: &RegressionDb, test: &str) -> Vec<Seed> {
         .collect()
 }
 
-pub fn record_regression(
-    db: &mut RegressionDb,
-    test: &str,
-    seed: Seed,
-    shrunk_input: &str,
-) {
+pub fn record_regression(db: &mut RegressionDb, test: &str, seed: Seed, shrunk_input: &str) {
     let hex = seed.to_hex();
     // Don't duplicate.
     if db.entries.iter().any(|e| e.test == test && e.seed == hex) {
@@ -817,7 +885,11 @@ pub fn discover_properties_in_module(
     let mut out = Vec::new();
     for item in &module.items {
         if let ItemKind::Function(func) = &item.kind {
-            if !func.attributes.iter().any(|a| a.name.as_str() == "property") {
+            if !func
+                .attributes
+                .iter()
+                .any(|a| a.name.as_str() == "property")
+            {
                 continue;
             }
             let (runs, seed) = parse_property_attr_args(&func.attributes);
@@ -868,8 +940,12 @@ fn parse_property_attr_args(attrs: &[verum_ast::Attribute]) -> (Option<u32>, Opt
                     if let verum_ast::LiteralKind::Int(intlit) = &lit.kind {
                         let n = intlit.value;
                         match key.as_str() {
-                            "runs" if n > 0 => { runs = Some(n as u32); }
-                            "seed" => { seed = Some(Seed(n as u64)); }
+                            "runs" if n > 0 => {
+                                runs = Some(n as u32);
+                            }
+                            "seed" => {
+                                seed = Some(Seed(n as u64));
+                            }
                             _ => {}
                         }
                     }

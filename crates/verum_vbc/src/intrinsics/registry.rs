@@ -46,8 +46,7 @@ use crate::instruction::{
 ///
 
 /// Thread-safe lazy initialization ensures the registry is built exactly once.
-pub static INTRINSIC_REGISTRY: LazyLock<IntrinsicRegistry> =
-    LazyLock::new(IntrinsicRegistry::new);
+pub static INTRINSIC_REGISTRY: LazyLock<IntrinsicRegistry> = LazyLock::new(IntrinsicRegistry::new);
 
 /// Intrinsic category for dispatch optimization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -1424,10 +1423,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "hardware_fence",
         category: IntrinsicCategory::Memory,
-        hints: &[
-            IntrinsicHint::MemoryEffect,
-            IntrinsicHint::Inline,
-        ],
+        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline],
         param_count: 1, // ordering
         return_count: 0,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::HardwareFence),
@@ -1521,7 +1517,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         param_count: 1, // value
         return_count: 0,
         strategy: CodegenStrategy::DirectOpcode(Opcode::Nop), // ownership transfer, no runtime cost
-        mlir_op: None, // compile-time only
+        mlir_op: None,                                        // compile-time only
         doc: "Prevent value from being dropped",
     },
     Intrinsic {
@@ -1535,7 +1531,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         param_count: 1, // value
         return_count: 0,
         strategy: CodegenStrategy::DirectOpcode(Opcode::Nop), // ownership transfer, no runtime cost
-        mlir_op: None, // compile-time only
+        mlir_op: None,                                        // compile-time only
         doc: "Prevent value from being dropped (alias for forget)",
     },
     Intrinsic {
@@ -1622,7 +1618,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
             IntrinsicHint::Generic,
             IntrinsicHint::Inline,
         ],
-        param_count: 2, // ptr, len
+        param_count: 2,  // ptr, len
         return_count: 1, // fat pointer (ptr, len)
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::MakeSlice),
         mlir_op: Some("verum.slice.from_raw"),
@@ -1645,8 +1641,13 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "slice_len",
         category: IntrinsicCategory::Memory,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
-        param_count: 1, // slice
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 1,  // slice
         return_count: 1, // len
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SliceLen),
         mlir_op: Some("verum.slice.len"),
@@ -1655,8 +1656,13 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "slice_as_ptr",
         category: IntrinsicCategory::Memory,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
-        param_count: 1, // slice
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 1,  // slice
         return_count: 1, // ptr
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SliceAsPtr),
         mlir_op: Some("verum.slice.as_ptr"),
@@ -1665,8 +1671,13 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "slice_as_mut_ptr",
         category: IntrinsicCategory::Memory,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
-        param_count: 1, // slice
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 1,  // slice
         return_count: 1, // ptr
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SliceAsPtr),
         mlir_op: Some("verum.slice.as_mut_ptr"),
@@ -1675,8 +1686,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "slice_get_unchecked",
         category: IntrinsicCategory::Memory,
-        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::Inline, IntrinsicHint::Generic],
-        param_count: 2, // slice, idx
+        hints: &[
+            IntrinsicHint::Unsafe,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 2,  // slice, idx
         return_count: 1, // &T
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SliceGetUnchecked),
         mlir_op: Some("verum.slice.get_unchecked"),
@@ -1685,8 +1700,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "slice_get_unchecked_mut",
         category: IntrinsicCategory::Memory,
-        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::Inline, IntrinsicHint::Generic],
-        param_count: 2, // slice, idx
+        hints: &[
+            IntrinsicHint::Unsafe,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 2,  // slice, idx
         return_count: 1, // &mut T
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SliceGetUnchecked),
         mlir_op: Some("verum.slice.get_unchecked_mut"),
@@ -1695,8 +1714,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "slice_subslice",
         category: IntrinsicCategory::Memory,
-        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::Inline, IntrinsicHint::Generic],
-        param_count: 3, // slice, start, end
+        hints: &[
+            IntrinsicHint::Unsafe,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 3,  // slice, start, end
         return_count: 1, // &[T]
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SliceSubslice),
         mlir_op: Some("verum.slice.subslice"),
@@ -1705,8 +1728,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "slice_subslice_mut",
         category: IntrinsicCategory::Memory,
-        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::Inline, IntrinsicHint::Generic],
-        param_count: 3, // slice, start, end
+        hints: &[
+            IntrinsicHint::Unsafe,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 3,  // slice, start, end
         return_count: 1, // &mut [T]
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SliceSubslice),
         mlir_op: Some("verum.slice.subslice_mut"),
@@ -1715,8 +1742,13 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "slice_split_at",
         category: IntrinsicCategory::Memory,
-        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::Inline, IntrinsicHint::Generic, IntrinsicHint::MultiReturn],
-        param_count: 2, // slice, mid
+        hints: &[
+            IntrinsicHint::Unsafe,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+            IntrinsicHint::MultiReturn,
+        ],
+        param_count: 2,  // slice, mid
         return_count: 2, // (&[T], &[T])
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SliceSplitAt),
         mlir_op: Some("verum.slice.split_at"),
@@ -1725,8 +1757,13 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "slice_split_at_mut",
         category: IntrinsicCategory::Memory,
-        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::Inline, IntrinsicHint::Generic, IntrinsicHint::MultiReturn],
-        param_count: 2, // slice, mid
+        hints: &[
+            IntrinsicHint::Unsafe,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+            IntrinsicHint::MultiReturn,
+        ],
+        param_count: 2,  // slice, mid
         return_count: 2, // (&mut [T], &mut [T])
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SliceSplitAt),
         mlir_op: Some("verum.slice.split_at_mut"),
@@ -1738,8 +1775,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "text_from_static",
         category: IntrinsicCategory::Memory,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
-        param_count: 1, // static str
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
+        param_count: 1,  // static str
         return_count: 1, // Text
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TextFromStatic),
         mlir_op: Some("verum.text.from_static"),
@@ -1749,7 +1790,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "text_parse_int",
         category: IntrinsicCategory::Memory,
         hints: &[IntrinsicHint::Pure],
-        param_count: 1, // &Text
+        param_count: 1,  // &Text
         return_count: 1, // Maybe<Int>
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TextParseInt),
         mlir_op: Some("verum.text.parse_int"),
@@ -1759,7 +1800,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "text_parse_float",
         category: IntrinsicCategory::Memory,
         hints: &[IntrinsicHint::Pure],
-        param_count: 1, // &Text
+        param_count: 1,  // &Text
         return_count: 1, // Maybe<Float>
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TextParseFloat),
         mlir_op: Some("verum.text.parse_float"),
@@ -1769,7 +1810,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "int_to_text",
         category: IntrinsicCategory::Memory,
         hints: &[IntrinsicHint::Pure],
-        param_count: 1, // Int
+        param_count: 1,  // Int
         return_count: 1, // Text
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::IntToText),
         mlir_op: Some("verum.text.from_int"),
@@ -1779,7 +1820,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "float_to_text",
         category: IntrinsicCategory::Memory,
         hints: &[IntrinsicHint::Pure],
-        param_count: 1, // Float
+        param_count: 1,  // Float
         return_count: 1, // Text
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::FloatToText),
         mlir_op: Some("verum.text.from_float"),
@@ -1789,7 +1830,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "text_byte_len",
         category: IntrinsicCategory::Memory,
         hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline],
-        param_count: 1, // &Text
+        param_count: 1,  // &Text
         return_count: 1, // Int
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TextByteLen),
         mlir_op: Some("verum.text.byte_len"),
@@ -1802,7 +1843,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "utf8_decode_char",
         category: IntrinsicCategory::Char,
         hints: &[IntrinsicHint::Pure],
-        param_count: 2, // bytes, idx
+        param_count: 2,  // bytes, idx
         return_count: 1, // Char
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Utf8DecodeChar),
         mlir_op: Some("verum.utf8.decode_char"),
@@ -1812,7 +1853,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "utf8_decode_char_len",
         category: IntrinsicCategory::Char,
         hints: &[IntrinsicHint::Pure, IntrinsicHint::MultiReturn],
-        param_count: 2, // bytes, idx
+        param_count: 2,  // bytes, idx
         return_count: 2, // (Char, Int)
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Utf8DecodeChar),
         mlir_op: Some("verum.utf8.decode_char_len"),
@@ -1855,8 +1896,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "alloc",
         category: IntrinsicCategory::Memory,
-        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::MemoryEffect, IntrinsicHint::Alloc],
-        param_count: 2, // size, align
+        hints: &[
+            IntrinsicHint::Unsafe,
+            IntrinsicHint::MemoryEffect,
+            IntrinsicHint::Alloc,
+        ],
+        param_count: 2,  // size, align
         return_count: 1, // ptr
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Alloc),
         mlir_op: Some("llvm.call @malloc"),
@@ -1865,8 +1910,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "alloc_zeroed",
         category: IntrinsicCategory::Memory,
-        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::MemoryEffect, IntrinsicHint::Alloc],
-        param_count: 2, // size, align
+        hints: &[
+            IntrinsicHint::Unsafe,
+            IntrinsicHint::MemoryEffect,
+            IntrinsicHint::Alloc,
+        ],
+        param_count: 2,  // size, align
         return_count: 1, // ptr
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::AllocZeroed),
         mlir_op: Some("llvm.call @calloc"),
@@ -1885,8 +1934,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "realloc",
         category: IntrinsicCategory::Memory,
-        hints: &[IntrinsicHint::Unsafe, IntrinsicHint::MemoryEffect, IntrinsicHint::Alloc],
-        param_count: 4, // ptr, old_size, new_size, align
+        hints: &[
+            IntrinsicHint::Unsafe,
+            IntrinsicHint::MemoryEffect,
+            IntrinsicHint::Alloc,
+        ],
+        param_count: 4,  // ptr, old_size, new_size, align
         return_count: 1, // ptr
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Realloc),
         mlir_op: Some("llvm.call @realloc"),
@@ -1906,7 +1959,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "replace",
         category: IntrinsicCategory::Memory,
         hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Generic],
-        param_count: 2, // dest, src
+        param_count: 2,  // dest, src
         return_count: 1, // old value
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Replace),
         mlir_op: Some("verum.replace"),
@@ -1939,7 +1992,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "compiler_fence",
         category: IntrinsicCategory::Atomic,
         hints: &[IntrinsicHint::Pure], // No runtime cost
-        param_count: 1, // ordering (u8)
+        param_count: 1,                // ordering (u8)
         return_count: 0,
         strategy: CodegenStrategy::CompileTimeConstant, // Compile-time only
         mlir_op: Some("llvm.compiler.fence"),
@@ -2084,7 +2137,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
             IntrinsicHint::Inline,
             IntrinsicHint::MultiReturn,
         ],
-        param_count: 5, // ptr, expected, desired, success_order, failure_order
+        param_count: 5,  // ptr, expected, desired, success_order, failure_order
         return_count: 2, // (old_value, success)
         strategy: CodegenStrategy::OpcodeWithSize(Opcode::AtomicCas, 4),
         mlir_op: Some("llvm.cmpxchg"),
@@ -2310,7 +2363,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
             IntrinsicHint::Inline,
             IntrinsicHint::MultiReturn,
         ],
-        param_count: 5, // ptr, expected, desired, success_ordering, failure_ordering
+        param_count: 5,  // ptr, expected, desired, success_ordering, failure_ordering
         return_count: 2, // (old_value, success)
         strategy: CodegenStrategy::OpcodeWithSize(Opcode::AtomicCas, 8), // Int is 64-bit
         mlir_op: Some("llvm.cmpxchg"),
@@ -2735,7 +2788,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "clz",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Clz),
@@ -2745,7 +2802,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "ctz",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Ctz),
@@ -2755,7 +2816,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "ilog2",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Ilog2),
@@ -2765,7 +2830,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "popcnt",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Popcnt),
@@ -2775,7 +2844,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "bswap",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Bswap),
@@ -2785,7 +2858,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "bitreverse",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Bitreverse),
@@ -2795,7 +2872,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "rotate_left",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2, // val, amount
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RotateLeft),
@@ -2805,7 +2886,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "rotate_right",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RotateRight),
@@ -2815,7 +2900,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "rotl",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2, // val, amount
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RotateLeft),
@@ -2825,7 +2914,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "rotr",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RotateRight),
@@ -2977,7 +3070,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_add",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::SaturatingAdd),
@@ -2987,7 +3084,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_sub",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::SaturatingSub),
@@ -2997,7 +3098,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_mul",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::SaturatingMul),
@@ -3017,7 +3122,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_neg",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::SaturatingNeg),
@@ -3027,7 +3136,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_abs",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::SaturatingAbs),
@@ -3046,7 +3159,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "checked_neg",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1, // returns Maybe<T> (single allocated value)
         strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::CheckedNeg),
@@ -3056,7 +3173,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "checked_abs",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::CheckedAbs),
@@ -3163,7 +3284,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "wrapping_add_u8",
         category: IntrinsicCategory::Wrapping,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::WrappingOpcode(ArithSubOpcode::WrappingAdd, 8, false),
@@ -3173,7 +3298,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "wrapping_sub_u8",
         category: IntrinsicCategory::Wrapping,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::WrappingOpcode(ArithSubOpcode::WrappingSub, 8, false),
@@ -3183,7 +3312,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "wrapping_mul_u8",
         category: IntrinsicCategory::Wrapping,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::WrappingOpcode(ArithSubOpcode::WrappingMul, 8, false),
@@ -3194,7 +3327,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "wrapping_add_i8",
         category: IntrinsicCategory::Wrapping,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::WrappingOpcode(ArithSubOpcode::WrappingAdd, 8, true),
@@ -3204,7 +3341,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "wrapping_sub_i8",
         category: IntrinsicCategory::Wrapping,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::WrappingOpcode(ArithSubOpcode::WrappingSub, 8, true),
@@ -3214,7 +3355,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "wrapping_neg_i8",
         category: IntrinsicCategory::Wrapping,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::WrappingOpcode(ArithSubOpcode::WrappingNeg, 8, true),
@@ -3225,7 +3370,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "wrapping_add_u16",
         category: IntrinsicCategory::Wrapping,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::WrappingOpcode(ArithSubOpcode::WrappingAdd, 16, false),
@@ -3235,7 +3384,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "wrapping_sub_u16",
         category: IntrinsicCategory::Wrapping,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::WrappingOpcode(ArithSubOpcode::WrappingSub, 16, false),
@@ -3246,7 +3399,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "wrapping_add_u32",
         category: IntrinsicCategory::Wrapping,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::WrappingOpcode(ArithSubOpcode::WrappingAdd, 32, false),
@@ -3256,7 +3413,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "wrapping_sub_u32",
         category: IntrinsicCategory::Wrapping,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::WrappingOpcode(ArithSubOpcode::WrappingSub, 32, false),
@@ -3266,7 +3427,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "wrapping_shl_u32",
         category: IntrinsicCategory::Wrapping,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::WrappingOpcode(ArithSubOpcode::WrappingShl, 32, false),
@@ -3276,7 +3441,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "wrapping_shr_u32",
         category: IntrinsicCategory::Wrapping,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::WrappingOpcode(ArithSubOpcode::WrappingShr, 32, false),
@@ -3288,7 +3457,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_add_u8",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::SaturatingOpcode(ArithSubOpcode::SaturatingAdd, 8, false),
@@ -3298,7 +3471,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_sub_u8",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::SaturatingOpcode(ArithSubOpcode::SaturatingSub, 8, false),
@@ -3308,7 +3485,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_mul_u8",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::SaturatingOpcode(ArithSubOpcode::SaturatingMul, 8, false),
@@ -3319,7 +3500,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_add_i8",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::SaturatingOpcode(ArithSubOpcode::SaturatingAdd, 8, true),
@@ -3329,7 +3514,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_sub_i8",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::SaturatingOpcode(ArithSubOpcode::SaturatingSub, 8, true),
@@ -3339,7 +3528,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_mul_i8",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::SaturatingOpcode(ArithSubOpcode::SaturatingMul, 8, true),
@@ -3350,7 +3543,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_add_u16",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::SaturatingOpcode(ArithSubOpcode::SaturatingAdd, 16, false),
@@ -3360,7 +3557,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_sub_u16",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::SaturatingOpcode(ArithSubOpcode::SaturatingSub, 16, false),
@@ -3370,7 +3571,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_mul_u16",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::SaturatingOpcode(ArithSubOpcode::SaturatingMul, 16, false),
@@ -3381,7 +3586,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_add_i16",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::SaturatingOpcode(ArithSubOpcode::SaturatingAdd, 16, true),
@@ -3391,7 +3600,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_sub_i16",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::SaturatingOpcode(ArithSubOpcode::SaturatingSub, 16, true),
@@ -3401,7 +3614,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_mul_i16",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::SaturatingOpcode(ArithSubOpcode::SaturatingMul, 16, true),
@@ -3412,7 +3629,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_add_u32",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::SaturatingOpcode(ArithSubOpcode::SaturatingAdd, 32, false),
@@ -3422,7 +3643,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_sub_u32",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::SaturatingOpcode(ArithSubOpcode::SaturatingSub, 32, false),
@@ -3432,7 +3657,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_mul_u32",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::SaturatingOpcode(ArithSubOpcode::SaturatingMul, 32, false),
@@ -3443,7 +3672,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_add_i32",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::SaturatingOpcode(ArithSubOpcode::SaturatingAdd, 32, true),
@@ -3453,7 +3686,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_sub_i32",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::SaturatingOpcode(ArithSubOpcode::SaturatingSub, 32, true),
@@ -3463,7 +3700,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_mul_i32",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::SaturatingOpcode(ArithSubOpcode::SaturatingMul, 32, true),
@@ -3474,7 +3715,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_add_u64",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::SaturatingOpcode(ArithSubOpcode::SaturatingAdd, 64, false),
@@ -3484,7 +3729,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_add_i64",
         category: IntrinsicCategory::Saturating,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::ConstEval],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::ConstEval,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::SaturatingOpcode(ArithSubOpcode::SaturatingAdd, 64, true),
@@ -3509,7 +3758,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "floor_f64",
         category: IntrinsicCategory::Math,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::MathExtendedOpcode(MathSubOpcode::FloorF64),
@@ -3519,7 +3772,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "ceil_f64",
         category: IntrinsicCategory::Math,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::MathExtendedOpcode(MathSubOpcode::CeilF64),
@@ -3529,7 +3786,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "round_f64",
         category: IntrinsicCategory::Math,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::MathExtendedOpcode(MathSubOpcode::RoundF64),
@@ -3539,7 +3800,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "abs_f64",
         category: IntrinsicCategory::Math,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::AbsF),
@@ -3553,7 +3818,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "panic",
         category: IntrinsicCategory::Control,
         hints: &[IntrinsicHint::Cold, IntrinsicHint::MayTrap],
-        param_count: 1, // message
+        param_count: 1,  // message
         return_count: 0, // ! (never returns)
         strategy: CodegenStrategy::DirectOpcode(Opcode::Panic),
         mlir_op: Some("verum.trap"),
@@ -3610,7 +3875,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "verum.process.exit",
         category: IntrinsicCategory::Control,
         hints: &[IntrinsicHint::Cold, IntrinsicHint::MayTrap],
-        param_count: 1, // exit code
+        param_count: 1,  // exit code
         return_count: 0, // ! (never returns)
         strategy: CodegenStrategy::ExtendedSubOp(
             crate::instruction::ExtendedSubOpcode::ProcessExit,
@@ -3635,7 +3900,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "cbgr_validate",
         category: IntrinsicCategory::Cbgr,
         hints: &[IntrinsicHint::Generic],
-        param_count: 1, // reference
+        param_count: 1,  // reference
         return_count: 1, // bool
         strategy: CodegenStrategy::DirectOpcode(Opcode::ChkRef),
         mlir_op: Some("verum.cbgr.validate"),
@@ -3665,8 +3930,8 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "cbgr_get_generation",
         category: IntrinsicCategory::Cbgr,
         hints: &[IntrinsicHint::Unsafe],
-        param_count: 1, // ptr
-        return_count: 1, // generation
+        param_count: 1,                                         // ptr
+        return_count: 1,                                        // generation
         strategy: CodegenStrategy::DirectOpcode(Opcode::Deref), // read header
         mlir_op: Some("verum.cbgr.generation"),
         doc: "Get generation counter for allocation",
@@ -3678,7 +3943,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "futex_wait",
         category: IntrinsicCategory::Futex,
         hints: &[IntrinsicHint::SyncBarrier],
-        param_count: 3, // addr, expected, timeout_ns
+        param_count: 3,  // addr, expected, timeout_ns
         return_count: 1, // result
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::FutexWait),
         mlir_op: Some("verum.futex.wait"),
@@ -3688,7 +3953,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "futex_wake",
         category: IntrinsicCategory::Futex,
         hints: &[IntrinsicHint::SyncBarrier],
-        param_count: 2, // addr, count
+        param_count: 2,  // addr, count
         return_count: 1, // woken count
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::FutexWake),
         mlir_op: Some("verum.futex.wake"),
@@ -3721,8 +3986,8 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "spinlock_try_lock",
         category: IntrinsicCategory::Spinlock,
         hints: &[IntrinsicHint::Inline, IntrinsicHint::MemoryEffect],
-        param_count: 1, // lock
-        return_count: 1, // bool
+        param_count: 1,                                                  // lock
+        return_count: 1,                                                 // bool
         strategy: CodegenStrategy::OpcodeWithSize(Opcode::AtomicCas, 4), // CAS 0→1
         mlir_op: Some("llvm.cmpxchg"),
         doc: "Try to acquire spinlock",
@@ -3751,7 +4016,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "spinlock_is_locked",
         category: IntrinsicCategory::Spinlock,
         hints: &[IntrinsicHint::Inline, IntrinsicHint::MemoryEffect],
-        param_count: 1, // lock
+        param_count: 1,  // lock
         return_count: 1, // bool
         strategy: CodegenStrategy::OpcodeWithSize(Opcode::AtomicLoad, 4),
         mlir_op: Some("llvm.load atomic"),
@@ -4243,7 +4508,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "spawn_with_env",
         category: IntrinsicCategory::Async,
         hints: &[IntrinsicHint::Generic],
-        param_count: 2, // future, task_id
+        param_count: 2,  // future, task_id
         return_count: 1, // JoinHandle
         strategy: CodegenStrategy::DirectOpcode(Opcode::Spawn),
         mlir_op: Some("verum.async.spawn"),
@@ -4359,7 +4624,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "inline_cb_as_ref",
         category: IntrinsicCategory::Context,
         hints: &[IntrinsicHint::Generic, IntrinsicHint::Inline],
-        param_count: 1, // inline_storage
+        param_count: 1,  // inline_storage
         return_count: 1, // &CircuitBreaker
         strategy: CodegenStrategy::DirectOpcode(Opcode::Ref),
         mlir_op: Some("llvm.bitcast"),
@@ -4457,7 +4722,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "add",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::PolyAdd),
@@ -4467,7 +4737,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "sub",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::PolySub),
@@ -4477,7 +4752,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "mul",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::PolyMul),
@@ -4487,7 +4767,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "div",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::PolyDiv),
@@ -4497,7 +4782,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "rem",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::PolyRem),
@@ -4507,7 +4797,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "neg",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::PolyNeg),
@@ -4517,7 +4812,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "abs_signed",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::PolyAbs),
@@ -4527,7 +4827,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "signum",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::PolySignum),
@@ -4537,7 +4842,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "min",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::PolyMin),
@@ -4547,7 +4857,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "max",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::PolyMax),
@@ -4557,7 +4872,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "clamp",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 3,
         return_count: 1,
         strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::PolyClamp),
@@ -4568,7 +4888,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "bitand",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::Band),
@@ -4578,7 +4903,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "bitor",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::Bor),
@@ -4588,7 +4918,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "bitxor",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::Bxor),
@@ -4598,7 +4933,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "bitnot",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::Bnot),
@@ -4608,7 +4948,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "shl",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::Shl),
@@ -4618,7 +4963,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "shr",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::Shr),
@@ -4629,7 +4979,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "add_i64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::AddI),
@@ -4639,7 +4993,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "sub_i64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::SubI),
@@ -4649,7 +5007,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "mul_i64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::MulI),
@@ -4659,7 +5021,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "div_i64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::MayTrap],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::MayTrap,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::DivI),
@@ -4669,7 +5036,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "rem_i64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::MayTrap],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::MayTrap,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::ModI),
@@ -4679,7 +5051,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "neg_i64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::NegI),
@@ -4690,7 +5066,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "and_i64",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::And),
@@ -4700,7 +5080,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "or_i64",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::Or),
@@ -4710,7 +5094,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "xor_i64",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::Xor),
@@ -4720,7 +5108,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "not_i64",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::Not),
@@ -4730,7 +5122,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "shl_i64",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::Shl),
@@ -4740,7 +5136,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "shr_i64",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::Shr),
@@ -4753,7 +5153,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "add_f64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::AddF),
@@ -4763,7 +5167,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "sub_f64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::SubF),
@@ -4773,7 +5181,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "mul_f64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::MulF),
@@ -4783,7 +5195,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "div_f64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::DivF),
@@ -4793,7 +5209,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "rem_f64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::ModF),
@@ -4803,7 +5223,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "neg_f64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::NegF),
@@ -4817,7 +5241,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "eq",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::EqI),
@@ -4827,7 +5256,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "ne",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::NeI),
@@ -4837,7 +5271,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "lt",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::LtI),
@@ -4847,7 +5286,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "le",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::LeI),
@@ -4857,7 +5301,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "gt",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::GtI),
@@ -4867,7 +5316,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "ge",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::GeI),
@@ -4878,7 +5332,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "eq_i64",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::EqI),
@@ -4888,7 +5346,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "ne_i64",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::NeI),
@@ -4898,7 +5360,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "lt_i64",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::LtI),
@@ -4908,7 +5374,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "le_i64",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::LeI),
@@ -4918,7 +5388,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "gt_i64",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::GtI),
@@ -4928,7 +5402,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "ge_i64",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::GeI),
@@ -4938,7 +5416,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "eq_f64",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::EqF),
@@ -4948,7 +5430,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "ne_f64",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::NeF),
@@ -4958,7 +5444,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "lt_f64",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::LtF),
@@ -4968,7 +5458,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "le_f64",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::LeF),
@@ -4978,7 +5472,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "gt_f64",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::GtF),
@@ -4988,7 +5486,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "ge_f64",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::GeF),
@@ -4998,7 +5500,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "eq_bool",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::EqI),
@@ -5008,7 +5514,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "eq_u8",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::EqI),
@@ -5021,7 +5531,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "int_to_float",
         category: IntrinsicCategory::Conversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::CvtIF),
@@ -5031,7 +5545,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "float_to_int",
         category: IntrinsicCategory::Conversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::CvtFI),
@@ -5041,7 +5559,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "i64_to_i32",
         category: IntrinsicCategory::Conversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::IntTrunc),
@@ -5051,7 +5573,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "i32_to_i64",
         category: IntrinsicCategory::Conversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Sext),
@@ -5061,7 +5587,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "u32_to_u64",
         category: IntrinsicCategory::Conversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Zext),
@@ -5071,7 +5601,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "f32_to_f64",
         category: IntrinsicCategory::Conversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Fpext),
@@ -5081,7 +5615,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "f64_to_f32",
         category: IntrinsicCategory::Conversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Fptrunc),
@@ -5158,7 +5696,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "checked_add_i64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::MultiReturn],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::MultiReturn,
+        ],
         param_count: 2,
         return_count: 2, // (result, overflow_flag)
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CheckedAdd),
@@ -5168,7 +5710,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "checked_sub_i64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::MultiReturn],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::MultiReturn,
+        ],
         param_count: 2,
         return_count: 2,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CheckedSub),
@@ -5178,7 +5724,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "checked_mul_i64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::MultiReturn],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::MultiReturn,
+        ],
         param_count: 2,
         return_count: 2,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CheckedMul),
@@ -5188,7 +5738,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "checked_div_i64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::MultiReturn],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::MultiReturn,
+        ],
         param_count: 2,
         return_count: 2,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CheckedDiv),
@@ -5199,7 +5753,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "checked_add_u64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::MultiReturn],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::MultiReturn,
+        ],
         param_count: 2,
         return_count: 2,
         strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::CheckedAddU),
@@ -5209,7 +5767,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "checked_sub_u64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::MultiReturn],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::MultiReturn,
+        ],
         param_count: 2,
         return_count: 2,
         strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::CheckedSubU),
@@ -5219,7 +5781,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "checked_mul_u64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::MultiReturn],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::MultiReturn,
+        ],
         param_count: 2,
         return_count: 2,
         strategy: CodegenStrategy::ArithExtendedOpcode(ArithSubOpcode::CheckedMulU),
@@ -5232,7 +5798,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "wrapping_add_i64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::AddI),
@@ -5242,7 +5812,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "wrapping_sub_i64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::SubI),
@@ -5252,7 +5826,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "wrapping_mul_i64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::MulI),
@@ -5265,7 +5843,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_sub_i64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SaturatingSub),
@@ -5275,7 +5857,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "saturating_sub_u64",
         category: IntrinsicCategory::Arithmetic,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SaturatingSub),
@@ -5288,7 +5874,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "clz_i64",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Clz),
@@ -5298,7 +5888,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "ctz_i64",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Ctz),
@@ -5308,7 +5902,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "popcount_i64",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Popcnt),
@@ -5318,7 +5916,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "bswap_i64",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Bswap),
@@ -5328,7 +5930,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "bitreverse_i64",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::Bitreverse),
@@ -5338,7 +5944,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "rotl_i64",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RotateLeft),
@@ -5348,7 +5958,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "rotr_i64",
         category: IntrinsicCategory::BitManip,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RotateRight),
@@ -5365,7 +5979,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "sqrt_f64",
         category: IntrinsicCategory::Math,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::MathExtendedOpcode(MathSubOpcode::SqrtF64),
@@ -5375,7 +5993,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "trunc_f64",
         category: IntrinsicCategory::Math,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::MathExtendedOpcode(MathSubOpcode::TruncF64),
@@ -5619,7 +6241,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "fma_f64",
         category: IntrinsicCategory::Math,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 3,
         return_count: 1,
         strategy: CodegenStrategy::MathExtendedOpcode(MathSubOpcode::FmaF64),
@@ -5629,7 +6255,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "copysign_f64",
         category: IntrinsicCategory::Math,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::MathExtendedOpcode(MathSubOpcode::CopysignF64),
@@ -5639,7 +6269,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "min_f64",
         category: IntrinsicCategory::Math,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::MathExtendedOpcode(MathSubOpcode::MinnumF64),
@@ -5649,7 +6283,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "minnum_f64",
         category: IntrinsicCategory::Math,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::MathExtendedOpcode(MathSubOpcode::MinnumF64),
@@ -5659,7 +6297,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "max_f64",
         category: IntrinsicCategory::Math,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::MathExtendedOpcode(MathSubOpcode::MaxnumF64),
@@ -5669,7 +6311,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "maxnum_f64",
         category: IntrinsicCategory::Math,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::MathExtendedOpcode(MathSubOpcode::MaxnumF64),
@@ -5711,7 +6357,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "f64_to_bits",
         category: IntrinsicCategory::Conversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::F64ToBits),
@@ -5721,7 +6371,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "f64_from_bits",
         category: IntrinsicCategory::Conversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::F64FromBits),
@@ -5732,7 +6386,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "f64_infinity",
         category: IntrinsicCategory::Math,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 0,
         return_count: 1,
         strategy: CodegenStrategy::CompileTimeConstant,
@@ -5742,7 +6400,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "f64_neg_infinity",
         category: IntrinsicCategory::Math,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 0,
         return_count: 1,
         strategy: CodegenStrategy::CompileTimeConstant,
@@ -5752,7 +6414,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "f64_nan",
         category: IntrinsicCategory::Math,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 0,
         return_count: 1,
         strategy: CodegenStrategy::CompileTimeConstant,
@@ -5762,7 +6428,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "is_nan_f64",
         category: IntrinsicCategory::Math,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::IsNan),
@@ -5772,7 +6442,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "is_infinite_f64",
         category: IntrinsicCategory::Math,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::IsInf),
@@ -5782,7 +6456,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "is_finite_f64",
         category: IntrinsicCategory::Math,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::IsFinite),
@@ -5796,7 +6474,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "to_le_bytes",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::ToLeBytes, 8),
@@ -5806,7 +6489,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "from_le_bytes",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::FromLeBytes, 8),
@@ -5816,7 +6504,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "to_be_bytes",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::ToBeBytes, 8),
@@ -5826,7 +6519,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "from_be_bytes",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::FromBeBytes, 8),
@@ -5837,7 +6535,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "int_to_bytes",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::ToLeBytes, 8),
@@ -5848,7 +6550,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "int_to_le_bytes",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::ToLeBytes, 8),
@@ -5858,7 +6564,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "int_from_le_bytes",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::FromLeBytes, 8),
@@ -5868,7 +6578,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "int_to_be_bytes",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::ToBeBytes, 8),
@@ -5878,7 +6592,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "int_from_be_bytes",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::FromBeBytes, 8),
@@ -5888,7 +6606,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "u64_to_le_bytes",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::ToLeBytes, 8),
@@ -5898,7 +6620,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "u64_from_le_bytes",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::FromLeBytes, 8),
@@ -5908,7 +6634,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "i32_to_le_bytes",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::ToLeBytes, 4),
@@ -5918,7 +6648,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "i32_from_le_bytes",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::FromLeBytes, 4),
@@ -5928,7 +6662,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "u32_to_le_bytes",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::ToLeBytes, 4),
@@ -5938,7 +6676,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "u32_from_le_bytes",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::FromLeBytes, 4),
@@ -5949,7 +6691,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "to_le_bytes_2",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::ToLeBytes, 2),
@@ -5959,7 +6705,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "to_le_bytes_4",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::ToLeBytes, 4),
@@ -5969,7 +6719,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "to_le_bytes_8",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::ToLeBytes, 8),
@@ -5979,7 +6733,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "to_be_bytes_2",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::ToBeBytes, 2),
@@ -5989,7 +6747,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "to_be_bytes_4",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::ToBeBytes, 4),
@@ -5999,7 +6761,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "to_be_bytes_8",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::ToBeBytes, 8),
@@ -6009,7 +6775,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "from_le_bytes_2",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::FromLeBytes, 2),
@@ -6019,7 +6789,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "from_le_bytes_4",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::FromLeBytes, 4),
@@ -6029,7 +6803,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "from_le_bytes_8",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::FromLeBytes, 8),
@@ -6039,7 +6817,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "from_be_bytes_2",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::FromBeBytes, 2),
@@ -6049,7 +6831,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "from_be_bytes_4",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::FromBeBytes, 4),
@@ -6059,7 +6845,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "from_be_bytes_8",
         category: IntrinsicCategory::ByteConversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequenceWithWidth(InlineSequenceId::FromBeBytes, 8),
@@ -6153,7 +6943,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "char_encode_utf8",
         category: IntrinsicCategory::Char,
         hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval],
-        param_count: 2, // char, buffer
+        param_count: 2,  // char, buffer
         return_count: 1, // bytes written
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CharEncodeUtf8),
         mlir_op: None,
@@ -6173,7 +6963,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "char_general_category",
         category: IntrinsicCategory::Char,
         hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval],
-        param_count: 1, // char
+        param_count: 1,  // char
         return_count: 1, // category enum value
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CharGeneralCategory),
         mlir_op: None,
@@ -6185,7 +6975,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "add_f32",
         category: IntrinsicCategory::Float32,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::AddF),
@@ -6195,7 +6989,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "sub_f32",
         category: IntrinsicCategory::Float32,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::SubF),
@@ -6205,7 +7003,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "mul_f32",
         category: IntrinsicCategory::Float32,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::MulF),
@@ -6215,7 +7017,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "div_f32",
         category: IntrinsicCategory::Float32,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::DivF),
@@ -6225,7 +7031,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "neg_f32",
         category: IntrinsicCategory::Float32,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::NegF),
@@ -6235,7 +7045,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "sqrt_f32",
         category: IntrinsicCategory::Float32,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::MathExtendedOpcode(MathSubOpcode::SqrtF32),
@@ -6245,7 +7059,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "abs_f32",
         category: IntrinsicCategory::Float32,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::MathExtendedOpcode(MathSubOpcode::AbsF32),
@@ -6255,7 +7073,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "floor_f32",
         category: IntrinsicCategory::Float32,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::MathExtendedOpcode(MathSubOpcode::FloorF32),
@@ -6265,7 +7087,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "ceil_f32",
         category: IntrinsicCategory::Float32,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::MathExtendedOpcode(MathSubOpcode::CeilF32),
@@ -6275,7 +7101,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "round_f32",
         category: IntrinsicCategory::Float32,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::MathExtendedOpcode(MathSubOpcode::RoundF32),
@@ -6285,7 +7115,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "trunc_f32",
         category: IntrinsicCategory::Float32,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::MathExtendedOpcode(MathSubOpcode::TruncF32),
@@ -6609,7 +7443,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "f32_to_bits",
         category: IntrinsicCategory::Conversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::F32ToBits),
@@ -6619,7 +7457,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "f32_from_bits",
         category: IntrinsicCategory::Conversion,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::F32FromBits),
@@ -6629,7 +7471,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "f32_infinity",
         category: IntrinsicCategory::Float32,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 0,
         return_count: 1,
         strategy: CodegenStrategy::CompileTimeConstant,
@@ -6639,7 +7485,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "f32_neg_infinity",
         category: IntrinsicCategory::Float32,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 0,
         return_count: 1,
         strategy: CodegenStrategy::CompileTimeConstant,
@@ -6649,7 +7499,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "f32_nan",
         category: IntrinsicCategory::Float32,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 0,
         return_count: 1,
         strategy: CodegenStrategy::CompileTimeConstant,
@@ -6659,7 +7513,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "is_nan_f32",
         category: IntrinsicCategory::Float32,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::IsNan),
@@ -6669,7 +7527,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "is_infinite_f32",
         category: IntrinsicCategory::Float32,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::IsInf),
@@ -6679,7 +7541,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "eq_f32",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::EqF),
@@ -6689,7 +7555,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "lt_f32",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::LtF),
@@ -6699,7 +7569,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "le_f32",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::LeF),
@@ -6709,7 +7583,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "gt_f32",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::GtF),
@@ -6719,7 +7597,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "ge_f32",
         category: IntrinsicCategory::Comparison,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Inline],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Inline,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::DirectOpcode(Opcode::GeF),
@@ -6733,8 +7615,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_splat",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
-        param_count: 1, // scalar value
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 1,  // scalar value
         return_count: 1, // vector with all lanes = value
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdSplat),
         mlir_op: Some("vector.splat"),
@@ -6743,8 +7629,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_extract",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
-        param_count: 2, // vector, lane index
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 2,  // vector, lane index
         return_count: 1, // scalar value
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdExtract),
         mlir_op: Some("vector.extractelement"),
@@ -6753,8 +7643,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_insert",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
-        param_count: 3, // vector, lane index, value
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 3,  // vector, lane index, value
         return_count: 1, // new vector
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdInsert),
         mlir_op: Some("vector.insertelement"),
@@ -6764,7 +7658,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_add",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdAdd),
@@ -6774,7 +7672,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_sub",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdSub),
@@ -6784,7 +7686,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_mul",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdMul),
@@ -6794,7 +7700,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_div",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdDiv),
@@ -6804,7 +7714,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_neg",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdNeg),
@@ -6814,7 +7728,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_abs",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdAbs),
@@ -6824,7 +7742,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_sqrt",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdSqrt),
@@ -6834,7 +7756,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_fma",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 3, // a, b, c -> a * b + c
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdFma),
@@ -6844,7 +7770,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_min",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdMin),
@@ -6854,7 +7784,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_max",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdMax),
@@ -6865,7 +7799,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_reduce_add",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1, // scalar
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdReduceAdd),
@@ -6875,7 +7813,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_reduce_mul",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdReduceMul),
@@ -6885,7 +7827,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_reduce_min",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdReduceMin),
@@ -6895,7 +7841,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_reduce_max",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdReduceMax),
@@ -6906,7 +7856,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_cmp_eq",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1, // mask
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdCmpEq),
@@ -6916,7 +7870,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_cmp_ne",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdCmpNe),
@@ -6926,7 +7884,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_cmp_lt",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdCmpLt),
@@ -6936,7 +7898,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_cmp_le",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdCmpLe),
@@ -6946,7 +7912,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_cmp_gt",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdCmpGt),
@@ -6956,7 +7926,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_cmp_ge",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdCmpGe),
@@ -6966,7 +7940,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_select",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 3, // mask, if_true, if_false
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdSelect),
@@ -6977,8 +7955,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_load_aligned",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline, IntrinsicHint::Generic],
-        param_count: 1, // ptr
+        hints: &[
+            IntrinsicHint::MemoryEffect,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 1,  // ptr
         return_count: 1, // vector
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdLoadAligned),
         mlir_op: Some("vector.load"),
@@ -6987,7 +7969,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_load_unaligned",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::MemoryEffect,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdLoadUnaligned),
@@ -6997,7 +7983,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_store_aligned",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::MemoryEffect,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2, // ptr, vector
         return_count: 0,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdStoreAligned),
@@ -7007,7 +7997,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_store_unaligned",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::MemoryEffect,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 0,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdStoreUnaligned),
@@ -7017,8 +8011,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_masked_load",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline, IntrinsicHint::Generic],
-        param_count: 2, // ptr, mask
+        hints: &[
+            IntrinsicHint::MemoryEffect,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 2,  // ptr, mask
         return_count: 1, // vector (inactive lanes become zero)
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdMaskedLoad),
         mlir_op: Some("vector.maskedload"),
@@ -7027,7 +8025,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_masked_store",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::MemoryEffect,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 3, // ptr, mask, vector
         return_count: 0,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdMaskedStore),
@@ -7038,7 +8040,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_shuffle",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 3, // vec1, vec2, indices (compile-time constant)
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdShuffle),
@@ -7048,7 +8054,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_gather",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::MemoryEffect,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2, // base_ptr, index_vector
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdGather),
@@ -7058,7 +8068,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_scatter",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::MemoryEffect, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::MemoryEffect,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 3, // base_ptr, index_vector, value_vector
         return_count: 0,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdScatter),
@@ -7069,7 +8083,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_mask_all",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 0,
         return_count: 1, // all-true mask
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdMaskAll),
@@ -7079,7 +8097,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_mask_none",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 0,
         return_count: 1, // all-false mask
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdMaskNone),
@@ -7089,8 +8111,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_mask_count",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
-        param_count: 1, // mask
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 1,  // mask
         return_count: 1, // count of active lanes
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdMaskCount),
         mlir_op: Some("llvm.intr.ctpop"),
@@ -7099,7 +8125,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_mask_any",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1, // bool
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdMaskAny),
@@ -7110,7 +8140,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_bitwise_and",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdBitwiseAnd),
@@ -7120,7 +8154,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_bitwise_or",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdBitwiseOr),
@@ -7130,7 +8168,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_bitwise_xor",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdBitwiseXor),
@@ -7140,7 +8182,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_bitwise_not",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 1,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdBitwiseNot),
@@ -7150,7 +8196,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_shift_left",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2, // vector, shift_amount
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdShiftLeft),
@@ -7160,7 +8210,11 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_shift_right",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
         param_count: 2,
         return_count: 1,
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdShiftRight),
@@ -7170,8 +8224,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "simd_cast",
         category: IntrinsicCategory::Simd,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::Inline, IntrinsicHint::Generic],
-        param_count: 1, // source vector
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::Inline,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 1,  // source vector
         return_count: 1, // target vector (different element type)
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SimdCast),
         mlir_op: Some("arith.sitofp"), // or other casts based on types
@@ -7629,7 +8687,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "TENSOR_SVD",
         category: IntrinsicCategory::Tensor,
         hints: &[IntrinsicHint::Pure, IntrinsicHint::MultiReturn],
-        param_count: 1, // tensor
+        param_count: 1,  // tensor
         return_count: 3, // u, s, vh
         strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::SVD),
         mlir_op: Some("verum.tensor_svd"),
@@ -7639,7 +8697,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "TENSOR_QR",
         category: IntrinsicCategory::Tensor,
         hints: &[IntrinsicHint::Pure, IntrinsicHint::MultiReturn],
-        param_count: 1, // tensor
+        param_count: 1,  // tensor
         return_count: 2, // q, r
         strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::QR),
         mlir_op: Some("verum.tensor_qr"),
@@ -7649,7 +8707,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "TENSOR_LU",
         category: IntrinsicCategory::Tensor,
         hints: &[IntrinsicHint::Pure, IntrinsicHint::MultiReturn],
-        param_count: 1, // tensor
+        param_count: 1,  // tensor
         return_count: 3, // p, l, u
         strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::LU),
         mlir_op: Some("verum.tensor_lu"),
@@ -7669,7 +8727,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "TENSOR_EIG",
         category: IntrinsicCategory::Tensor,
         hints: &[IntrinsicHint::Pure, IntrinsicHint::MultiReturn],
-        param_count: 1, // tensor
+        param_count: 1,  // tensor
         return_count: 2, // eigenvalues, eigenvectors
         strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::Eig),
         mlir_op: Some("verum.tensor_eig"),
@@ -7679,7 +8737,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "TENSOR_EIGH",
         category: IntrinsicCategory::Tensor,
         hints: &[IntrinsicHint::Pure, IntrinsicHint::MultiReturn],
-        param_count: 1, // tensor
+        param_count: 1,  // tensor
         return_count: 2, // eigenvalues, eigenvectors
         strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::EigSymmetric),
         mlir_op: Some("verum.tensor_eigh"),
@@ -7811,7 +8869,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "TENSOR_TOPK",
         category: IntrinsicCategory::Tensor,
         hints: &[IntrinsicHint::Pure, IntrinsicHint::MultiReturn],
-        param_count: 3, // tensor, k, axis
+        param_count: 3,  // tensor, k, axis
         return_count: 2, // values, indices
         strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::Topk),
         mlir_op: Some("verum.tensor_topk"),
@@ -7913,7 +8971,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "TENSOR_SPLIT",
         category: IntrinsicCategory::Tensor,
         hints: &[IntrinsicHint::Alloc],
-        param_count: 3, // tensor, chunks, axis
+        param_count: 3,  // tensor, chunks, axis
         return_count: 1, // list of tensors
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TensorSplit),
         mlir_op: Some("verum.tensor_split"),
@@ -7923,7 +8981,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "TENSOR_SPLIT_AT",
         category: IntrinsicCategory::Tensor,
         hints: &[IntrinsicHint::Alloc],
-        param_count: 3, // tensor, indices, axis
+        param_count: 3,  // tensor, indices, axis
         return_count: 1, // list of tensors
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TensorSplitAt),
         mlir_op: Some("verum.tensor_split_at"),
@@ -8574,7 +9632,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "GRAD_STOP",
         category: IntrinsicCategory::Autodiff,
         hints: &[IntrinsicHint::Pure],
-        param_count: 1, // value to detach
+        param_count: 1,  // value to detach
         return_count: 1, // detached value
         strategy: CodegenStrategy::DirectOpcode(Opcode::GradStop),
         mlir_op: Some("verum.grad_stop"),
@@ -8584,7 +9642,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "GRAD_CUSTOM",
         category: IntrinsicCategory::Autodiff,
         hints: &[IntrinsicHint::SideEffect],
-        param_count: 2, // primal function, vjp function
+        param_count: 2,  // primal function, vjp function
         return_count: 1, // wrapped function
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::GradCustom),
         mlir_op: Some("verum.grad_custom"),
@@ -8614,7 +9672,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "GRAD_RECOMPUTE",
         category: IntrinsicCategory::Autodiff,
         hints: &[IntrinsicHint::SideEffect, IntrinsicHint::Alloc],
-        param_count: 1, // checkpoint_id
+        param_count: 1,  // checkpoint_id
         return_count: 1, // recomputed tensors
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::GradRecompute),
         mlir_op: Some("verum.grad_recompute"),
@@ -8687,7 +9745,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "GRAD_GET_VJP_RULE",
         category: IntrinsicCategory::Autodiff,
         hints: &[IntrinsicHint::Pure],
-        param_count: 1, // function
+        param_count: 1,  // function
         return_count: 1, // vjp rule
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::GradCustom),
         mlir_op: Some("verum.grad_get_vjp_rule"),
@@ -8697,7 +9755,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "GRAD_GET_JVP_RULE",
         category: IntrinsicCategory::Autodiff,
         hints: &[IntrinsicHint::Pure],
-        param_count: 1, // function
+        param_count: 1,  // function
         return_count: 1, // jvp rule
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::GradCustom),
         mlir_op: Some("verum.grad_get_jvp_rule"),
@@ -8720,7 +9778,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "DIST_NEW_GROUP",
         category: IntrinsicCategory::Distributed,
         hints: &[IntrinsicHint::Alloc],
-        param_count: 1, // ranks list
+        param_count: 1,  // ranks list
         return_count: 1, // group handle
         strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::DistNewGroup),
         mlir_op: Some("verum.dist_new_group"),
@@ -8730,7 +9788,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "DIST_GET_RANK",
         category: IntrinsicCategory::Distributed,
         hints: &[IntrinsicHint::Pure],
-        param_count: 1, // group
+        param_count: 1,  // group
         return_count: 1, // rank
         strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::DistGetRank),
         mlir_op: Some("verum.dist_get_rank"),
@@ -8753,7 +9811,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "P2P_RECV",
         category: IntrinsicCategory::Distributed,
         hints: &[IntrinsicHint::Alloc, IntrinsicHint::SideEffect],
-        param_count: 1, // src_rank
+        param_count: 1,  // src_rank
         return_count: 1, // received tensor
         strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::P2PRecv),
         mlir_op: Some("verum.p2p_recv"),
@@ -8766,7 +9824,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "COLLECTIVE_GATHER",
         category: IntrinsicCategory::Distributed,
         hints: &[IntrinsicHint::Alloc, IntrinsicHint::SideEffect],
-        param_count: 3, // tensor, dst_rank, group
+        param_count: 3,  // tensor, dst_rank, group
         return_count: 1, // gathered tensor (only at dst)
         strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::CollectiveGather),
         mlir_op: Some("verum.collective_gather"),
@@ -8776,7 +9834,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "COLLECTIVE_SCATTER",
         category: IntrinsicCategory::Distributed,
         hints: &[IntrinsicHint::Alloc, IntrinsicHint::SideEffect],
-        param_count: 2, // tensor, group
+        param_count: 2,  // tensor, group
         return_count: 1, // scattered chunk
         strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::CollectiveScatter),
         mlir_op: Some("verum.collective_scatter"),
@@ -8789,7 +9847,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "BUCKET_GRADIENTS",
         category: IntrinsicCategory::Distributed,
         hints: &[IntrinsicHint::Alloc],
-        param_count: 2, // params, bucket_size
+        param_count: 2,  // params, bucket_size
         return_count: 1, // bucketed gradients
         strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::BucketGradients),
         mlir_op: Some("verum.bucket_gradients"),
@@ -8799,7 +9857,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "GET_GRAD",
         category: IntrinsicCategory::Autodiff,
         hints: &[IntrinsicHint::Pure],
-        param_count: 1, // parameter
+        param_count: 1,  // parameter
         return_count: 1, // gradient
         strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::GetGrad),
         mlir_op: Some("verum.get_grad"),
@@ -8819,7 +9877,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "MODULE_BACKWARD",
         category: IntrinsicCategory::Autodiff,
         hints: &[IntrinsicHint::SideEffect, IntrinsicHint::Alloc],
-        param_count: 2, // module, grad_output
+        param_count: 2,  // module, grad_output
         return_count: 1, // grad_input
         strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::ModuleBackward),
         mlir_op: Some("verum.module_backward"),
@@ -8832,7 +9890,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "MESH_SELECT",
         category: IntrinsicCategory::Distributed,
         hints: &[IntrinsicHint::Pure],
-        param_count: 2, // mesh, selector
+        param_count: 2,  // mesh, selector
         return_count: 1, // selected submesh
         strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::MeshSelect),
         mlir_op: Some("verum.mesh_select"),
@@ -8855,7 +9913,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "RDMA_CREATE_REF",
         category: IntrinsicCategory::Distributed,
         hints: &[IntrinsicHint::Alloc],
-        param_count: 2, // tensor, actor_id
+        param_count: 2,  // tensor, actor_id
         return_count: 1, // rdma ref
         strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::RdmaCreateRef),
         mlir_op: Some("verum.rdma_create_ref"),
@@ -8865,7 +9923,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "RDMA_FETCH",
         category: IntrinsicCategory::Distributed,
         hints: &[IntrinsicHint::Alloc, IntrinsicHint::SideEffect],
-        param_count: 1, // rdma ref
+        param_count: 1,  // rdma ref
         return_count: 1, // tensor
         strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::RdmaFetch),
         mlir_op: Some("verum.rdma_fetch"),
@@ -8885,7 +9943,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "RDMA_CHECK_VALID",
         category: IntrinsicCategory::Distributed,
         hints: &[IntrinsicHint::Pure],
-        param_count: 1, // rdma ref
+        param_count: 1,  // rdma ref
         return_count: 1, // bool
         strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::RdmaCheckValid),
         mlir_op: Some("verum.rdma_check_valid"),
@@ -8928,7 +9986,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "TENSOR_ATTENTION_BACKWARD",
         category: IntrinsicCategory::Tensor,
         hints: &[IntrinsicHint::Alloc],
-        param_count: 4, // q, k, v, grad_output
+        param_count: 4,  // q, k, v, grad_output
         return_count: 3, // grad_q, grad_k, grad_v
         strategy: CodegenStrategy::TensorExtExtendedOpcode(TensorExtSubOpcode::FlashAttention),
         mlir_op: Some("verum.tensor_attention_backward"),
@@ -8938,7 +9996,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "TENSOR_CONV2D_BACKWARD_INPUT",
         category: IntrinsicCategory::Tensor,
         hints: &[IntrinsicHint::Alloc],
-        param_count: 2, // grad_output, weight
+        param_count: 2,  // grad_output, weight
         return_count: 1, // grad_input
         strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::Conv),
         mlir_op: Some("verum.tensor_conv2d_backward_input"),
@@ -8948,7 +10006,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "TENSOR_CONV2D_BACKWARD_WEIGHT",
         category: IntrinsicCategory::Tensor,
         hints: &[IntrinsicHint::Alloc],
-        param_count: 2, // grad_output, input
+        param_count: 2,  // grad_output, input
         return_count: 1, // grad_weight
         strategy: CodegenStrategy::TensorExtendedOpcode(TensorSubOpcode::Conv),
         mlir_op: Some("verum.tensor_conv2d_backward_weight"),
@@ -9001,7 +10059,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "CBGR_GET_GENERATION",
         category: IntrinsicCategory::Cbgr,
         hints: &[IntrinsicHint::Pure],
-        param_count: 1, // reference
+        param_count: 1,  // reference
         return_count: 1, // generation id
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrGetGeneration),
         mlir_op: Some("verum.cbgr_get_generation"),
@@ -9021,7 +10079,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "CBGR_GET_EPOCH_CAPS",
         category: IntrinsicCategory::Cbgr,
         hints: &[IntrinsicHint::Pure],
-        param_count: 1, // reference
+        param_count: 1,  // reference
         return_count: 1, // epoch capabilities
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrGetEpochCaps),
         mlir_op: Some("verum.cbgr_get_epoch_caps"),
@@ -9061,7 +10119,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "cbgr_alloc",
         category: IntrinsicCategory::Cbgr,
         hints: &[IntrinsicHint::Alloc, IntrinsicHint::SideEffect],
-        param_count: 2, // size, align
+        param_count: 2,  // size, align
         return_count: 1, // Result<(ptr, generation, epoch)>
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrAlloc),
         mlir_op: Some("verum.cbgr_alloc"),
@@ -9071,7 +10129,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "cbgr_alloc_zeroed",
         category: IntrinsicCategory::Cbgr,
         hints: &[IntrinsicHint::Alloc, IntrinsicHint::SideEffect],
-        param_count: 2, // size, align
+        param_count: 2,  // size, align
         return_count: 1, // Result<(ptr, generation, epoch)>
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrAllocZeroed),
         mlir_op: Some("verum.cbgr_alloc_zeroed"),
@@ -9091,7 +10149,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "cbgr_realloc",
         category: IntrinsicCategory::Cbgr,
         hints: &[IntrinsicHint::Alloc, IntrinsicHint::SideEffect],
-        param_count: 4, // ptr, old_size, new_size, align
+        param_count: 4,  // ptr, old_size, new_size, align
         return_count: 1, // Result<(ptr, generation, epoch)>
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::CbgrRealloc),
         mlir_op: Some("verum.cbgr_realloc"),
@@ -9101,7 +10159,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "memcmp_bytes",
         category: IntrinsicCategory::Memory,
         hints: &[IntrinsicHint::Pure],
-        param_count: 3, // lhs, rhs, len
+        param_count: 3,  // lhs, rhs, len
         return_count: 1, // Int comparison result
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::MemcmpBytes),
         mlir_op: Some("llvm.intr.memcmp"),
@@ -9111,7 +10169,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "get_header_from_ptr",
         category: IntrinsicCategory::Cbgr,
         hints: &[IntrinsicHint::Pure, IntrinsicHint::Unsafe],
-        param_count: 1, // ptr
+        param_count: 1,  // ptr
         return_count: 1, // header
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::GetHeaderFromPtr),
         mlir_op: Some("verum.cbgr_get_header"),
@@ -9164,7 +10222,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "GPU_CAN_PEER",
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::Pure],
-        param_count: 1, // peer device
+        param_count: 1,  // peer device
         return_count: 1, // bool
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::CanAccessPeer),
         mlir_op: Some("verum.gpu_can_peer"),
@@ -9197,7 +10255,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "GPU_MALLOC",
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::Alloc],
-        param_count: 2, // size, memory_space
+        param_count: 2,  // size, memory_space
         return_count: 1, // ptr
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::Alloc),
         mlir_op: Some("verum.gpu_malloc"),
@@ -9207,7 +10265,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "GPU_MALLOC_MANAGED",
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::Alloc],
-        param_count: 1, // size
+        param_count: 1,  // size
         return_count: 1, // ptr
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::MallocManaged),
         mlir_op: Some("verum.gpu_malloc_managed"),
@@ -9343,7 +10401,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "GPU_STREAM_CREATE_PRIO",
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::Alloc],
-        param_count: 1, // priority
+        param_count: 1,  // priority
         return_count: 1, // stream handle
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::StreamCreateWithPriority),
         mlir_op: Some("verum.gpu_stream_create_prio"),
@@ -9363,7 +10421,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "GPU_STREAM_QUERY",
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::Pure],
-        param_count: 1, // stream
+        param_count: 1,  // stream
         return_count: 1, // bool (is_complete)
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::StreamQuery),
         mlir_op: Some("verum.gpu_stream_query"),
@@ -9419,7 +10477,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "GPU_EVENT_CREATE_F",
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::Alloc],
-        param_count: 1, // flags
+        param_count: 1,  // flags
         return_count: 1, // event handle
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::EventCreateWithFlags),
         mlir_op: Some("verum.gpu_event_create_with_flags"),
@@ -9459,7 +10517,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "GPU_EVENT_QUERY",
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::Pure],
-        param_count: 1, // event
+        param_count: 1,  // event
         return_count: 1, // bool
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::EventQuery),
         mlir_op: Some("verum.gpu_event_query"),
@@ -9469,7 +10527,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "GPU_EVENT_ELAPSED",
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::Pure],
-        param_count: 2, // start_event, end_event
+        param_count: 2,  // start_event, end_event
         return_count: 1, // elapsed_ms
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::EventElapsed),
         mlir_op: Some("verum.gpu_event_elapsed"),
@@ -9502,7 +10560,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "GPU_GRAPH_END",
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::SideEffect],
-        param_count: 1, // stream
+        param_count: 1,  // stream
         return_count: 1, // graph handle
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::GraphEndCapture),
         mlir_op: Some("verum.gpu_graph_end"),
@@ -9512,7 +10570,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "GPU_GRAPH_INST",
         category: IntrinsicCategory::Gpu,
         hints: &[IntrinsicHint::Alloc],
-        param_count: 1, // graph
+        param_count: 1,  // graph
         return_count: 1, // exec handle
         strategy: CodegenStrategy::GpuExtendedOpcode(GpuSubOpcode::GraphInstantiate),
         mlir_op: Some("verum.gpu_graph_instantiate"),
@@ -9682,7 +10740,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "regex_find_all",
         category: IntrinsicCategory::Regex,
         hints: &[IntrinsicHint::Alloc],
-        param_count: 2, // pattern, text
+        param_count: 2,  // pattern, text
         return_count: 1, // matches list
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RegexFindAll),
         mlir_op: Some("verum.regex_find_all"),
@@ -9692,7 +10750,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "regex_replace_all",
         category: IntrinsicCategory::Regex,
         hints: &[IntrinsicHint::Alloc],
-        param_count: 3, // pattern, text, replacement
+        param_count: 3,  // pattern, text, replacement
         return_count: 1, // result text
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RegexReplaceAll),
         mlir_op: Some("verum.regex_replace_all"),
@@ -9702,7 +10760,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "regex_is_match",
         category: IntrinsicCategory::Regex,
         hints: &[IntrinsicHint::Pure],
-        param_count: 2, // pattern, text
+        param_count: 2,  // pattern, text
         return_count: 1, // bool
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RegexIsMatch),
         mlir_op: Some("verum.regex_is_match"),
@@ -9712,7 +10770,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "regex_split",
         category: IntrinsicCategory::Regex,
         hints: &[IntrinsicHint::Alloc],
-        param_count: 2, // pattern, text
+        param_count: 2,  // pattern, text
         return_count: 1, // parts list
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RegexSplit),
         mlir_op: Some("verum.regex_split"),
@@ -9722,7 +10780,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "regex_find",
         category: IntrinsicCategory::Regex,
         hints: &[IntrinsicHint::Alloc],
-        param_count: 2, // pattern, text
+        param_count: 2,  // pattern, text
         return_count: 1, // Maybe<Text>
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RegexFind),
         mlir_op: Some("verum.regex_find"),
@@ -9732,7 +10790,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "regex_replace",
         category: IntrinsicCategory::Regex,
         hints: &[IntrinsicHint::Alloc],
-        param_count: 3, // pattern, text, replacement
+        param_count: 3,  // pattern, text, replacement
         return_count: 1, // result text (one replacement)
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RegexReplace),
         mlir_op: Some("verum.regex_replace"),
@@ -9742,7 +10800,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "regex_captures",
         category: IntrinsicCategory::Regex,
         hints: &[IntrinsicHint::Alloc],
-        param_count: 2, // pattern, text
+        param_count: 2,  // pattern, text
         return_count: 1, // Maybe<List<Text>> — group 0 + capture groups
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::RegexCaptures),
         mlir_op: Some("verum.regex_captures"),
@@ -9760,7 +10818,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "permission_check_wire",
         category: IntrinsicCategory::Platform,
         hints: &[IntrinsicHint::Pure, IntrinsicHint::Hot],
-        param_count: 2, // scope_tag (UInt32), target_id (UInt64)
+        param_count: 2,  // scope_tag (UInt32), target_id (UInt64)
         return_count: 1, // decision tag (UInt32)
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::PermissionCheckWire),
         mlir_op: Some("verum.permission_check_wire"),
@@ -9774,7 +10832,7 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
         name: "permission_stats_read",
         category: IntrinsicCategory::Platform,
         hints: &[IntrinsicHint::Pure],
-        param_count: 1, // selector (UInt32)
+        param_count: 1,  // selector (UInt32)
         return_count: 1, // u64 stat value
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::PermissionStatsRead),
         mlir_op: Some("verum.permission_stats_read"),
@@ -9811,8 +10869,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "SIZE_OF",
         category: IntrinsicCategory::Platform,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Generic],
-        param_count: 0, // type parameter only
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 0,  // type parameter only
         return_count: 1, // size in bytes
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::SizeOf),
         mlir_op: Some("verum.size_of"),
@@ -9821,8 +10883,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "ALIGN_OF",
         category: IntrinsicCategory::Platform,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Generic],
-        param_count: 0, // type parameter only
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 0,  // type parameter only
         return_count: 1, // alignment in bytes
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::AlignOf),
         mlir_op: Some("verum.align_of"),
@@ -9831,8 +10897,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "TYPE_ID",
         category: IntrinsicCategory::Platform,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Generic],
-        param_count: 0, // type parameter only
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 0,  // type parameter only
         return_count: 1, // unique type id
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TypeId),
         mlir_op: Some("verum.type_id"),
@@ -9841,8 +10911,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "TYPE_NAME",
         category: IntrinsicCategory::Platform,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Generic],
-        param_count: 0, // type parameter only
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 0,  // type parameter only
         return_count: 1, // type name string
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::TypeName),
         mlir_op: Some("verum.type_name"),
@@ -9851,8 +10925,12 @@ static ALL_INTRINSICS: &[Intrinsic] = &[
     Intrinsic {
         name: "NEEDS_DROP",
         category: IntrinsicCategory::Platform,
-        hints: &[IntrinsicHint::Pure, IntrinsicHint::ConstEval, IntrinsicHint::Generic],
-        param_count: 0, // type parameter only
+        hints: &[
+            IntrinsicHint::Pure,
+            IntrinsicHint::ConstEval,
+            IntrinsicHint::Generic,
+        ],
+        param_count: 0,  // type parameter only
         return_count: 1, // bool
         strategy: CodegenStrategy::InlineSequence(InlineSequenceId::NeedsDrop),
         mlir_op: Some("verum.needs_drop"),
@@ -10234,9 +11312,7 @@ mod tests {
             let intr = INTRINSIC_REGISTRY.lookup(name).unwrap();
             let observational = matches!(
                 intr.category,
-                IntrinsicCategory::Time
-                    | IntrinsicCategory::Platform
-                    | IntrinsicCategory::Logging
+                IntrinsicCategory::Time | IntrinsicCategory::Platform | IntrinsicCategory::Logging
             );
             if !observational {
                 continue;

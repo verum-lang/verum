@@ -11,10 +11,10 @@
 //! Meta context unification: all compile-time features desugar to meta-system
 //! operations, providing one coherent model with convenient syntax sugar.
 
+use verum_ast::PathSegment;
 use verum_ast::decl::{FunctionBody, FunctionDecl};
 use verum_ast::expr::{ArrayExpr, ConditionKind, Expr, ExprKind};
 use verum_ast::stmt::StmtKind;
-use verum_ast::PathSegment;
 use verum_common::{List, Text};
 
 use super::allowlist::AllowlistRegistry;
@@ -159,9 +159,7 @@ impl ExpressionValidator {
                 for cond in &condition.conditions {
                     match cond {
                         ConditionKind::Expr(e) => self.validate_expr(e)?,
-                        ConditionKind::Let { value, .. } => {
-                            self.validate_expr(value)?
-                        }
+                        ConditionKind::Let { value, .. } => self.validate_expr(value)?,
                     }
                 }
 
@@ -192,19 +190,17 @@ impl ExpressionValidator {
                     self.validate_expr(final_expr)?;
                 }
             }
-            ExprKind::Array(array_expr) => {
-                match array_expr {
-                    ArrayExpr::List(elements) => {
-                        for elem in elements.iter() {
-                            self.validate_expr(elem)?;
-                        }
-                    }
-                    ArrayExpr::Repeat { value, count } => {
-                        self.validate_expr(value)?;
-                        self.validate_expr(count)?;
+            ExprKind::Array(array_expr) => match array_expr {
+                ArrayExpr::List(elements) => {
+                    for elem in elements.iter() {
+                        self.validate_expr(elem)?;
                     }
                 }
-            }
+                ArrayExpr::Repeat { value, count } => {
+                    self.validate_expr(value)?;
+                    self.validate_expr(count)?;
+                }
+            },
             ExprKind::Tuple(elements) => {
                 for elem in elements.iter() {
                     self.validate_expr(elem)?;
@@ -315,6 +311,10 @@ mod tests {
     #[test]
     fn test_validator_creation() {
         let validator = ExpressionValidator::new();
-        assert!(validator.allowlist().is_operation_allowed(super::super::errors::Operation::Arithmetic));
+        assert!(
+            validator
+                .allowlist()
+                .is_operation_allowed(super::super::errors::Operation::Arithmetic)
+        );
     }
 }

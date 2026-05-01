@@ -131,25 +131,25 @@
 pub mod context;
 pub mod cost;
 pub mod counterexample;
+pub mod domains; // Phase D.3: sheaf + epistemic domain encodings
+pub mod expr_to_smtlib; // Expr → SMT-LIB2 translator for reflection
 /// Industrial-tactic fast path — adapts the deterministic
 /// `verum_kernel::tactics_industrial::{tactic_lia, tactic_decide,
 /// tactic_induction, tactic_congruence, tactic_eauto}` into the
 /// SMT tactic dispatcher's call site, allowing `apply lia` (etc.)
 /// to be closed in-kernel before falling through to Z3.
 pub mod industrial_fast_path;
-pub mod domains; // Phase D.3: sheaf + epistemic domain encodings
-pub mod refinement_reflection; // Liquid-style: user fns as SMT axioms
-pub mod expr_to_smtlib; // Expr → SMT-LIB2 translator for reflection
-pub mod proof_carrying_code; // PCC: serializable proof bundles attached to VBC
+pub mod proof_carrying_code;
+pub mod refinement_reflection; // Liquid-style: user fns as SMT axioms // PCC: serializable proof bundles attached to VBC
 // Cross-target proof-replay framework (SmtCertificate →
 // Coq/Lean/Agda/Dedukti/Metamath tactic chains). Trait +
 // registry + AdmittedReplay fallback; per-target lowering
 // is shipped incrementally.
-pub mod proof_replay;
 /// Cross-format foreign-system runner. Trait-bounded interface over
 /// per-format external tools (coqc / lean / isabelle / kontroli) plus
 /// adapters that lift `CheckResult` → kernel-side `FormatStatus`.
 pub mod cross_format_runner;
+pub mod proof_replay;
 // Persistent CertificateStore — bridges SMT-verification-emitted
 // SmtCertificates to proof-replay consumption in `verum export`.
 // Trait + FileSystemCertificateStore + InMemoryCertificateStore.
@@ -167,9 +167,9 @@ pub mod type_translator; // verum_types::Type to Z3 translation (dependent types
 // Concrete implementations of traits defined in verum_types (migrated
 // from `verum_types::{smt_backend, dependent_integration, exhaustiveness::smt}`
 // as part of the cycle break).
-pub mod refinement_backend;
 pub mod dependent_backend;
 pub mod exhaustiveness_backend;
+pub mod refinement_backend;
 
 pub mod verification_cache;
 pub mod verify;
@@ -187,43 +187,43 @@ pub mod cvc5_backend;
 // router can be used regardless of which solver(s) are linked.
 #[cfg(feature = "cvc5")]
 pub mod backend_switcher;
+pub mod backend_trait;
 #[cfg(feature = "cvc5")]
 pub mod config;
-pub mod backend_trait;
 
 // P0 Advanced Features (Industrial-Grade Enhancements)
 // Proof certificates for multi-format export (Coq, Lean, Dedukti, OpenTheory, Metamath)
-pub mod certificates;
-pub mod distributed_cache;
-pub mod proof_extraction;
-pub mod smtlib_export;
-pub mod strategy_selection;
 pub mod capability_router; // Complementary Z3 + CVC5 routing (capability-based dispatcher)
+pub mod certificates;
+pub mod cvc5_advanced; // SyGuS, abduction, QE, FMF (CVC5-exclusive features)
+pub mod distributed_cache;
 pub mod portfolio_executor; // Parallel Z3 + CVC5 execution with first-wins/cross-validate semantics
-pub mod solver_adapters;  // PortfolioSolver adapters bridging SmtBackend → portfolio API
-pub mod routing_stats;    // Routing decision telemetry + per-theory statistics
-pub mod verify_strategy;  // @verify(...) attribute → BackendChoice mapping
-pub mod cvc5_advanced;    // SyGuS, abduction, QE, FMF (CVC5-exclusive features)
-pub mod solver_capability; // Unified capability registry: auto-route features to best solver
+pub mod proof_extraction;
+pub mod routing_stats; // Routing decision telemetry + per-theory statistics
+pub mod smtlib_export;
+pub mod solver_adapters; // PortfolioSolver adapters bridging SmtBackend → portfolio API
+pub mod solver_capability;
+pub mod strategy_selection;
+pub mod verify_strategy; // @verify(...) attribute → BackendChoice mapping // Unified capability registry: auto-route features to best solver
 
 // Advanced Z3 Features
 pub mod advanced_model;
 pub mod array_model; // Array theory integration for memory model verification
+pub mod cubical_tactic; // Phase D.4 extension: cubical/category/descent tactic runtime bridge
 pub mod fixedpoint;
 pub mod goal_analysis;
 pub mod interpolation;
 pub mod optimizer;
 pub mod parallel;
+pub mod proof_extraction_bridge; // Phase D.5: proof term extraction + certificate export
 pub mod quantifier_elim;
-pub mod tactics;
-pub mod user_tactic; // Phase D.4: surface tactic DSL → Z3 combinator bridge
-pub mod tactic_registry; // Task #87: cog-level registry for user-authored tactic packages
-pub mod tactic_laws; // Task #86: algebraic laws for tactic combinators + normalize()
 pub mod smtlib_check; // Task #67: direct SMT-LIB file check for --check-smt-formula
 pub mod solver_diagnostics; // Task #67/#93: env-var consumer side for --dump-smt + --solver-protocol
-pub mod cubical_tactic; // Phase D.4 extension: cubical/category/descent tactic runtime bridge
-pub mod proof_extraction_bridge; // Phase D.5: proof term extraction + certificate export
+pub mod tactic_laws; // Task #86: algebraic laws for tactic combinators + normalize()
+pub mod tactic_registry; // Task #87: cog-level registry for user-authored tactic packages
+pub mod tactics;
 pub mod unsat_core;
+pub mod user_tactic; // Phase D.4: surface tactic DSL → Z3 combinator bridge
 pub mod variable_extraction; // Shared utilities for extracting variables from Z3 AST
 
 // Refinement type verification (Tier 1)
@@ -338,11 +338,27 @@ pub use pattern_quantifiers::{
 
 // Re-export Z3 backend advanced features
 pub use z3_backend::{
-    AdvancedResult, ArraySolver, BVSolver, LIASolver, ModelExtractor, ProofCache, ProofWitness,
-    Z3Config, Z3ContextManager, Z3Solver, create_z3_config, list_probes, list_tactics,
+    AdvancedResult,
+    ArraySolver,
+    BVSolver,
     // Bitvector overflow verification for fixed-width integers (i8..i128, u8..u128)
-    BvOverflowChecker, BvOverflowError, IntegerWidth, OverflowVcGenerator,
-    OverflowVerificationContext, OverflowVerificationResult, verify_no_overflow,
+    BvOverflowChecker,
+    BvOverflowError,
+    IntegerWidth,
+    LIASolver,
+    ModelExtractor,
+    OverflowVcGenerator,
+    OverflowVerificationContext,
+    OverflowVerificationResult,
+    ProofCache,
+    ProofWitness,
+    Z3Config,
+    Z3ContextManager,
+    Z3Solver,
+    create_z3_config,
+    list_probes,
+    list_tactics,
+    verify_no_overflow,
 };
 
 // Re-export contract types

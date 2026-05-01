@@ -31,11 +31,11 @@
 //! when to consult them via [`ScriptContext::cache_lookup`] /
 //! [`ScriptContext::cache_store`] / [`ScriptContext::lockfile_path`].
 
-use crate::script::cache::{key_for, CacheEntry, CacheError, CacheKey, ScriptCache};
+use crate::script::cache::{CacheEntry, CacheError, CacheKey, ScriptCache, key_for};
 use crate::script::frontmatter::{self, Frontmatter, FrontmatterError};
 use crate::script::lockfile::ScriptLockfile;
 use crate::script::permission_flags::{
-    build_permission_set, BuildError as PermissionBuildError, PermissionFlags,
+    BuildError as PermissionBuildError, PermissionFlags, build_permission_set,
 };
 use crate::script::permissions::PermissionSet;
 use std::fs;
@@ -144,10 +144,7 @@ impl ScriptContext {
     /// Build a context from a path on disk + caller options. Reads the
     /// file, extracts and validates the frontmatter, computes the source
     /// hash and cache key, and merges permission sources.
-    pub fn from_path(
-        path: &Path,
-        opts: &ScriptContextOptions,
-    ) -> Result<Self, ScriptContextError> {
+    pub fn from_path(path: &Path, opts: &ScriptContextOptions) -> Result<Self, ScriptContextError> {
         let source = fs::read(path).map_err(|source| ScriptContextError::Io {
             path: path.to_path_buf(),
             source,
@@ -218,10 +215,7 @@ impl ScriptContext {
     /// Construct a fresh lockfile for this run. Caller fills in `deps`
     /// from whichever resolver handled the frontmatter dependency list;
     /// this convenience pre-fills the source hash, path, and compiler.
-    pub fn fresh_lockfile(
-        &self,
-        deps: Vec<crate::script::lockfile::LockedDep>,
-    ) -> ScriptLockfile {
+    pub fn fresh_lockfile(&self, deps: Vec<crate::script::lockfile::LockedDep>) -> ScriptLockfile {
         ScriptLockfile::new(
             self.source_path.clone(),
             self.source_hash.clone(),
@@ -276,13 +270,14 @@ mod tests {
         let ctx = ScriptContext::from_path(&path, &opts_with_compiler("0.1.0")).unwrap();
         assert!(ctx.frontmatter.is_some());
         assert_eq!(ctx.frontmatter.as_ref().unwrap().permissions.len(), 1);
-        assert!(ctx
-            .permissions
-            .check(&PermissionRequest::Net {
-                host: "api.example.com",
-                port: Some(443),
-            })
-            .is_ok());
+        assert!(
+            ctx.permissions
+                .check(&PermissionRequest::Net {
+                    host: "api.example.com",
+                    port: Some(443),
+                })
+                .is_ok()
+        );
     }
 
     #[test]
@@ -308,10 +303,11 @@ mod tests {
         };
         let ctx = ScriptContext::from_path(&path, &opts).unwrap();
         assert_eq!(ctx.permissions.len(), 2);
-        assert!(ctx
-            .permissions
-            .check(&PermissionRequest::FsRead(Path::new("./data/file")))
-            .is_ok());
+        assert!(
+            ctx.permissions
+                .check(&PermissionRequest::FsRead(Path::new("./data/file")))
+                .is_ok()
+        );
     }
 
     #[test]

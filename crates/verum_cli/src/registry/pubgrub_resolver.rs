@@ -53,8 +53,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::convert::Infallible;
 
 use pubgrub::{
-    resolve as pubgrub_resolve, DependencyProvider, OfflineDependencyProvider,
-    PackageResolutionStatistics, PubGrubError, Ranges,
+    DependencyProvider, OfflineDependencyProvider, PackageResolutionStatistics, PubGrubError,
+    Ranges, resolve as pubgrub_resolve,
 };
 use semver::{Version, VersionReq};
 
@@ -144,11 +144,7 @@ impl PubGrubBuilder {
     /// (latest first). Used by `choose_version` so the resolver
     /// prefers the most recent compatible version.
     pub fn versions_descending(&self, package: &CogName) -> Vec<Version> {
-        let mut out = self
-            .versions
-            .get(package)
-            .cloned()
-            .unwrap_or_default();
+        let mut out = self.versions.get(package).cloned().unwrap_or_default();
         out.sort();
         out.reverse();
         out
@@ -227,7 +223,11 @@ impl VerumProvider {
                 let pubgrub_deps: Vec<(CogName, Ranges<Version>)> = edges_for
                     .into_iter()
                     .map(|edge| {
-                        let candidates = builder.versions.get(&edge.name).cloned().unwrap_or_default();
+                        let candidates = builder
+                            .versions
+                            .get(&edge.name)
+                            .cloned()
+                            .unwrap_or_default();
                         let range = req_to_ranges(&edge.requirement, &candidates);
                         (edge.name, range)
                     })
@@ -329,34 +329,29 @@ fn req_to_ranges(req: &VersionReq, candidates: &[Version]) -> Ranges<Version> {
 
 // ── Error mapping ──────────────────────────────────────────────────
 
-fn map_pubgrub_error(
-    err: PubGrubError<VerumProvider>,
-    provider: &VerumProvider,
-) -> ResolverError {
+fn map_pubgrub_error(err: PubGrubError<VerumProvider>, provider: &VerumProvider) -> ResolverError {
     match err {
         PubGrubError::NoSolution(derivation) => map_no_solution(&derivation, provider),
-        PubGrubError::ErrorRetrievingDependencies { package, version, .. } => {
-            ResolverError::no_matching_version(
-                package.0.clone(),
-                version.to_string(),
-                provider
-                    .versions_of(&package)
-                    .iter()
-                    .map(|v| v.to_string())
-                    .collect(),
-            )
-        }
-        PubGrubError::ErrorChoosingVersion { package, .. } => {
-            ResolverError::no_matching_version(
-                package.0.clone(),
-                "<resolver-internal>".to_string(),
-                provider
-                    .versions_of(&package)
-                    .iter()
-                    .map(|v| v.to_string())
-                    .collect(),
-            )
-        }
+        PubGrubError::ErrorRetrievingDependencies {
+            package, version, ..
+        } => ResolverError::no_matching_version(
+            package.0.clone(),
+            version.to_string(),
+            provider
+                .versions_of(&package)
+                .iter()
+                .map(|v| v.to_string())
+                .collect(),
+        ),
+        PubGrubError::ErrorChoosingVersion { package, .. } => ResolverError::no_matching_version(
+            package.0.clone(),
+            "<resolver-internal>".to_string(),
+            provider
+                .versions_of(&package)
+                .iter()
+                .map(|v| v.to_string())
+                .collect(),
+        ),
         PubGrubError::ErrorInShouldCancel(_) => {
             ResolverError::cycle(vec!["<resolver cancelled>".to_string()])
         }
@@ -657,10 +652,7 @@ mod tests {
             } => {
                 assert_eq!(package, "c");
                 // Both ^1 and ^2 should appear in the chain.
-                let req_strs: Vec<_> = requirements
-                    .iter()
-                    .map(|o| o.requirement.clone())
-                    .collect();
+                let req_strs: Vec<_> = requirements.iter().map(|o| o.requirement.clone()).collect();
                 assert!(req_strs.iter().any(|r| r.contains('^') && r.contains('1')));
                 assert!(req_strs.iter().any(|r| r.contains('^') && r.contains('2')));
             }

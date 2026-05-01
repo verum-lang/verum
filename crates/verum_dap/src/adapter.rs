@@ -6,9 +6,7 @@
 
 use std::sync::Arc;
 
-use verum_vbc::interpreter::{
-    dispatch_loop_table, InterpreterState,
-};
+use verum_vbc::interpreter::{InterpreterState, dispatch_loop_table};
 use verum_vbc::module::VbcModule;
 
 use crate::session::{DebugSession, StepMode, ThreadState};
@@ -101,11 +99,7 @@ impl DebugAdapter {
             "disconnect" => self.handle_disconnect(request),
             other => {
                 tracing::warn!("Unhandled DAP command: {}", other);
-                (
-                    false,
-                    Some(format!("Unsupported command: {}", other)),
-                    None,
-                )
+                (false, Some(format!("Unsupported command: {}", other)), None)
             }
         };
 
@@ -146,10 +140,11 @@ impl DebugAdapter {
         request: &Request,
     ) -> (bool, Option<String>, Option<serde_json::Value>) {
         if let Some(args) = &request.arguments
-            && let Ok(init_args) = serde_json::from_value::<InitializeArguments>(args.clone()) {
-                self.session.lines_start_at1 = init_args.lines_start_at1;
-                self.session.columns_start_at1 = init_args.columns_start_at1;
-            }
+            && let Ok(init_args) = serde_json::from_value::<InitializeArguments>(args.clone())
+        {
+            self.session.lines_start_at1 = init_args.lines_start_at1;
+            self.session.columns_start_at1 = init_args.columns_start_at1;
+        }
 
         self.session.initialized = true;
 
@@ -194,11 +189,7 @@ impl DebugAdapter {
         let module = match compile_program(&args.program) {
             Ok(m) => Arc::new(m),
             Err(e) => {
-                return (
-                    false,
-                    Some(format!("Compilation failed: {}", e)),
-                    None,
-                );
+                return (false, Some(format!("Compilation failed: {}", e)), None);
             }
         };
 
@@ -212,9 +203,7 @@ impl DebugAdapter {
         (true, None, None)
     }
 
-    fn handle_configuration_done(
-        &mut self,
-    ) -> (bool, Option<String>, Option<serde_json::Value>) {
+    fn handle_configuration_done(&mut self) -> (bool, Option<String>, Option<serde_json::Value>) {
         self.session.configured = true;
         (true, None, None)
     }
@@ -239,11 +228,7 @@ impl DebugAdapter {
             }
         };
 
-        let file_path = args
-            .source
-            .path
-            .as_deref()
-            .unwrap_or("");
+        let file_path = args.source.path.as_deref().unwrap_or("");
 
         let lines: Vec<i64> = args.breakpoints.iter().map(|bp| bp.line).collect();
 
@@ -292,10 +277,7 @@ impl DebugAdapter {
         )
     }
 
-    fn handle_step(
-        &mut self,
-        mode: StepMode,
-    ) -> (bool, Option<String>, Option<serde_json::Value>) {
+    fn handle_step(&mut self, mode: StepMode) -> (bool, Option<String>, Option<serde_json::Value>) {
         if let Some(state) = &self.interpreter {
             self.session.step_start_depth = state.call_stack.depth();
             // Record current source line for step-over detection.
@@ -323,10 +305,13 @@ impl DebugAdapter {
             (
                 true,
                 None,
-                Some(serde_json::to_value(StackTraceResponseBody {
-                    stack_frames: vec![],
-                    total_frames: Some(0),
-                }).unwrap_or_default()),
+                Some(
+                    serde_json::to_value(StackTraceResponseBody {
+                        stack_frames: vec![],
+                        total_frames: Some(0),
+                    })
+                    .unwrap_or_default(),
+                ),
             )
         };
 
@@ -463,10 +448,8 @@ impl DebugAdapter {
                     true,
                     None,
                     Some(
-                        serde_json::to_value(VariablesResponseBody {
-                            variables: vec![],
-                        })
-                        .unwrap_or_default(),
+                        serde_json::to_value(VariablesResponseBody { variables: vec![] })
+                            .unwrap_or_default(),
                     ),
                 );
             }
@@ -479,10 +462,8 @@ impl DebugAdapter {
                     true,
                     None,
                     Some(
-                        serde_json::to_value(VariablesResponseBody {
-                            variables: vec![],
-                        })
-                        .unwrap_or_default(),
+                        serde_json::to_value(VariablesResponseBody { variables: vec![] })
+                            .unwrap_or_default(),
                     ),
                 );
             }
@@ -597,6 +578,5 @@ fn compile_program(path: &str) -> Result<VbcModule, String> {
     let source = std::fs::read_to_string(source_path)
         .map_err(|e| format!("Failed to read source: {}", e))?;
 
-    verum_compiler::api::compile_to_vbc(&source)
-        .map_err(|e| format!("Compilation error: {}", e))
+    verum_compiler::api::compile_to_vbc(&source).map_err(|e| format!("Compilation error: {}", e))
 }

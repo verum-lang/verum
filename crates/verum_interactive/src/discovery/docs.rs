@@ -105,8 +105,12 @@ impl DocEntry {
     }
 
     /// Add see-also references
-    pub fn with_see_also(mut self, references: impl IntoIterator<Item = impl Into<String>>) -> Self {
-        self.see_also.extend(references.into_iter().map(|r| r.into()));
+    pub fn with_see_also(
+        mut self,
+        references: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.see_also
+            .extend(references.into_iter().map(|r| r.into()));
         self
     }
 

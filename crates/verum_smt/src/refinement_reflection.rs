@@ -148,10 +148,7 @@ impl RefinementReflectionRegistry {
     /// Register a reflected function. Returns `Err` if a function
     /// with this name has already been registered with a *different*
     /// definition (re-registration of the same definition is OK).
-    pub fn register(
-        &mut self,
-        f: ReflectedFunction,
-    ) -> Result<(), ReflectionError> {
+    pub fn register(&mut self, f: ReflectedFunction) -> Result<(), ReflectionError> {
         if let Some(existing) = self.by_name.get(&f.name) {
             if existing != &f {
                 return Err(ReflectionError::Conflict {
@@ -390,10 +387,7 @@ mod tests {
         alt.body_smtlib = Text::from("(+ n n)");
         let result = reg.register(alt);
 
-        assert!(matches!(
-            result,
-            Err(ReflectionError::Conflict { .. })
-        ));
+        assert!(matches!(result, Err(ReflectionError::Conflict { .. })));
     }
 
     #[test]

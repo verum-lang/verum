@@ -219,7 +219,10 @@ fn test_motive_substitution_nat_to_zero() {
         assert_eq!(name.as_str(), "Vec");
         assert_eq!(args.len(), 2);
         // Second arg should be Zero (converted from term)
-        if let Type::Generic { name: inner_name, .. } = &args[1] {
+        if let Type::Generic {
+            name: inner_name, ..
+        } = &args[1]
+        {
             assert_eq!(inner_name.as_str(), "Zero");
         } else {
             panic!("Expected Zero in second type arg");
@@ -321,7 +324,10 @@ fn test_motive_type_substitution() {
     if let Type::Generic { name, args } = &result {
         assert_eq!(name.as_str(), "Vec");
         // The 'n' in Vec<T, n> should now be the Meta type for 5
-        if let Type::Meta { name: meta_name, .. } = &args[1] {
+        if let Type::Meta {
+            name: meta_name, ..
+        } = &args[1]
+        {
             assert_eq!(meta_name.as_str(), "5");
         } else {
             panic!("Expected Meta type, got {:?}", &args[1]);
@@ -452,10 +458,7 @@ fn test_constructor_refinement_nil_sets_zero() {
 
     if let Type::Generic { name, args } = &refined {
         assert_eq!(name.as_str(), "Vec");
-        if let Type::Generic {
-            name: idx_name, ..
-        } = &args[1]
-        {
+        if let Type::Generic { name: idx_name, .. } = &args[1] {
             assert_eq!(idx_name.as_str(), "Zero");
         } else {
             panic!("Expected Zero index after refinement");
@@ -561,9 +564,7 @@ fn test_refinement_in_function_type() {
         return_type: Box::new(Type::Unit),
     });
 
-    refinement
-        .index_subst
-        .insert(Text::from("n"), Type::Int);
+    refinement.index_subst.insert(Text::from("n"), Type::Int);
 
     // Function type: (Vec<T, n>) -> n
     let fn_type = Type::Function {
@@ -920,12 +921,17 @@ fn test_eq_term_j_substitution() {
     let result = motive.apply(&replacement);
 
     if let Type::Eq { lhs, rhs, .. } = &result
-        && let EqTerm::J { proof, motive: m, base } = lhs.as_ref() {
-            assert!(matches!(**proof, EqTerm::Const(EqConst::Int(7))));
-            // m should be unchanged (different variable)
-            assert!(matches!(**m, EqTerm::Var(_)));
-            assert!(matches!(**base, EqTerm::Const(EqConst::Int(7))));
-        }
+        && let EqTerm::J {
+            proof,
+            motive: m,
+            base,
+        } = lhs.as_ref()
+    {
+        assert!(matches!(**proof, EqTerm::Const(EqConst::Int(7))));
+        // m should be unchanged (different variable)
+        assert!(matches!(**m, EqTerm::Var(_)));
+        assert!(matches!(**base, EqTerm::Const(EqConst::Int(7))));
+    }
 }
 
 #[test]
@@ -1013,9 +1019,7 @@ fn test_refinement_substitution_in_sigma_type() {
     };
 
     let mut refinement = ConstructorRefinement::empty(ctor);
-    refinement
-        .index_subst
-        .insert(Text::from("n"), Type::Int);
+    refinement.index_subst.insert(Text::from("n"), Type::Int);
 
     let sigma_type = Type::Sigma {
         fst_name: Text::from("x"),
@@ -1044,9 +1048,7 @@ fn test_refinement_pi_shadowing() {
     };
 
     let mut refinement = ConstructorRefinement::empty(ctor);
-    refinement
-        .index_subst
-        .insert(Text::from("n"), Type::Int);
+    refinement.index_subst.insert(Text::from("n"), Type::Int);
 
     let pi_type = Type::Pi {
         param_name: Text::from("n"), // shadows the substitution variable
@@ -1074,9 +1076,7 @@ fn test_refinement_eq_type() {
     };
 
     let mut refinement = ConstructorRefinement::empty(ctor);
-    refinement
-        .index_subst
-        .insert(Text::from("A"), Type::Int);
+    refinement.index_subst.insert(Text::from("A"), Type::Int);
 
     let eq_type = Type::Eq {
         ty: Box::new(Type::Generic {

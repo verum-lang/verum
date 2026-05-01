@@ -1,4 +1,6 @@
-use verum_llvm_sys::core::{LLVMGetNextUse, LLVMGetUsedValue, LLVMGetUser, LLVMIsABasicBlock, LLVMValueAsBasicBlock};
+use verum_llvm_sys::core::{
+    LLVMGetNextUse, LLVMGetUsedValue, LLVMGetUser, LLVMIsABasicBlock, LLVMValueAsBasicBlock,
+};
 use verum_llvm_sys::prelude::LLVMUseRef;
 
 use std::marker::PhantomData;

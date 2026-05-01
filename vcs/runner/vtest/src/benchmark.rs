@@ -250,7 +250,8 @@ impl BenchmarkComparison {
             direction,
             format_ns(self.baseline.mean_ns),
             format_ns(self.current.mean_ns)
-        ).into()
+        )
+        .into()
     }
 }
 
@@ -927,10 +928,14 @@ mod tests {
 
     #[test]
     fn test_benchmark_comparison() {
-        let baseline =
-            BenchmarkStats::from_samples("test".to_string().into(), &vec![Duration::from_nanos(100); 10]);
-        let current =
-            BenchmarkStats::from_samples("test".to_string().into(), &vec![Duration::from_nanos(120); 10]);
+        let baseline = BenchmarkStats::from_samples(
+            "test".to_string().into(),
+            &vec![Duration::from_nanos(100); 10],
+        );
+        let current = BenchmarkStats::from_samples(
+            "test".to_string().into(),
+            &vec![Duration::from_nanos(120); 10],
+        );
 
         let comparison = BenchmarkComparison::compare(baseline, current, 10.0);
 
@@ -962,10 +967,14 @@ mod tests {
 
     #[test]
     fn test_tier_comparison() {
-        let tier0 =
-            BenchmarkStats::from_samples("test".to_string().into(), &vec![Duration::from_nanos(1000); 10]);
-        let tier3 =
-            BenchmarkStats::from_samples("test".to_string().into(), &vec![Duration::from_nanos(100); 10]);
+        let tier0 = BenchmarkStats::from_samples(
+            "test".to_string().into(),
+            &vec![Duration::from_nanos(1000); 10],
+        );
+        let tier3 = BenchmarkStats::from_samples(
+            "test".to_string().into(),
+            &vec![Duration::from_nanos(100); 10],
+        );
 
         let comparison = TierComparison::new(tier0, tier3, true);
 

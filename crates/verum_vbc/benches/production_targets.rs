@@ -9,14 +9,14 @@
 //! Benchmarks VBC interpreter execution on compute-intensive workloads
 //! (fibonacci, sum loops) and compares throughput characteristics.
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 use std::sync::Arc;
 use std::time::Duration;
 
 use verum_vbc::bytecode::encode_instructions_with_fixup;
 use verum_vbc::instruction::{BinaryIntOp, CompareOp, Instruction, Reg, UnaryIntOp};
-use verum_vbc::interpreter::{execute_table, InterpreterState};
+use verum_vbc::interpreter::{InterpreterState, execute_table};
 use verum_vbc::module::{
     CallingConvention, FunctionDescriptor, FunctionId, OptimizationHints, VbcModule,
 };
@@ -70,14 +70,40 @@ fn build_module(name: &str, instructions: Vec<Instruction>, reg_count: u8) -> Ar
 /// Sum loop: sum = 0; for i in 0..n { sum += i; } return sum
 fn create_sum_module(n: i64) -> Arc<VbcModule> {
     let instructions = vec![
-        Instruction::LoadI { dst: Reg(0), value: n },
-        Instruction::LoadI { dst: Reg(1), value: 0 }, // sum
-        Instruction::LoadI { dst: Reg(2), value: 0 }, // i
+        Instruction::LoadI {
+            dst: Reg(0),
+            value: n,
+        },
+        Instruction::LoadI {
+            dst: Reg(1),
+            value: 0,
+        }, // sum
+        Instruction::LoadI {
+            dst: Reg(2),
+            value: 0,
+        }, // i
         // loop:
-        Instruction::CmpI { op: CompareOp::Lt, dst: Reg(3), a: Reg(2), b: Reg(0) },
-        Instruction::JmpNot { cond: Reg(3), offset: 4 },
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(1), a: Reg(1), b: Reg(2) },
-        Instruction::UnaryI { op: UnaryIntOp::Inc, dst: Reg(2), src: Reg(2) },
+        Instruction::CmpI {
+            op: CompareOp::Lt,
+            dst: Reg(3),
+            a: Reg(2),
+            b: Reg(0),
+        },
+        Instruction::JmpNot {
+            cond: Reg(3),
+            offset: 4,
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(1),
+            a: Reg(1),
+            b: Reg(2),
+        },
+        Instruction::UnaryI {
+            op: UnaryIntOp::Inc,
+            dst: Reg(2),
+            src: Reg(2),
+        },
         Instruction::Jmp { offset: -4 },
         // end:
         Instruction::Ret { value: Reg(1) },
@@ -89,21 +115,61 @@ fn create_sum_module(n: i64) -> Arc<VbcModule> {
 fn create_nested_loop_module(n: i64) -> Arc<VbcModule> {
     let instructions = vec![
         // r0 = n, r1 = sum, r2 = i, r3 = j, r4 = cmp_i, r5 = cmp_j
-        Instruction::LoadI { dst: Reg(0), value: n },
-        Instruction::LoadI { dst: Reg(1), value: 0 }, // sum
-        Instruction::LoadI { dst: Reg(2), value: 0 }, // i = 0
+        Instruction::LoadI {
+            dst: Reg(0),
+            value: n,
+        },
+        Instruction::LoadI {
+            dst: Reg(1),
+            value: 0,
+        }, // sum
+        Instruction::LoadI {
+            dst: Reg(2),
+            value: 0,
+        }, // i = 0
         // outer loop:
-        Instruction::CmpI { op: CompareOp::Lt, dst: Reg(4), a: Reg(2), b: Reg(0) },
-        Instruction::JmpNot { cond: Reg(4), offset: 8 }, // to end
-        Instruction::LoadI { dst: Reg(3), value: 0 }, // j = 0
+        Instruction::CmpI {
+            op: CompareOp::Lt,
+            dst: Reg(4),
+            a: Reg(2),
+            b: Reg(0),
+        },
+        Instruction::JmpNot {
+            cond: Reg(4),
+            offset: 8,
+        }, // to end
+        Instruction::LoadI {
+            dst: Reg(3),
+            value: 0,
+        }, // j = 0
         // inner loop:
-        Instruction::CmpI { op: CompareOp::Lt, dst: Reg(5), a: Reg(3), b: Reg(0) },
-        Instruction::JmpNot { cond: Reg(5), offset: 4 }, // to outer_inc
-        Instruction::UnaryI { op: UnaryIntOp::Inc, dst: Reg(1), src: Reg(1) }, // sum++
-        Instruction::UnaryI { op: UnaryIntOp::Inc, dst: Reg(3), src: Reg(3) }, // j++
+        Instruction::CmpI {
+            op: CompareOp::Lt,
+            dst: Reg(5),
+            a: Reg(3),
+            b: Reg(0),
+        },
+        Instruction::JmpNot {
+            cond: Reg(5),
+            offset: 4,
+        }, // to outer_inc
+        Instruction::UnaryI {
+            op: UnaryIntOp::Inc,
+            dst: Reg(1),
+            src: Reg(1),
+        }, // sum++
+        Instruction::UnaryI {
+            op: UnaryIntOp::Inc,
+            dst: Reg(3),
+            src: Reg(3),
+        }, // j++
         Instruction::Jmp { offset: -4 }, // to inner loop
         // outer_inc:
-        Instruction::UnaryI { op: UnaryIntOp::Inc, dst: Reg(2), src: Reg(2) }, // i++
+        Instruction::UnaryI {
+            op: UnaryIntOp::Inc,
+            dst: Reg(2),
+            src: Reg(2),
+        }, // i++
         Instruction::Jmp { offset: -9 }, // to outer loop
         // end:
         Instruction::Ret { value: Reg(1) },
@@ -115,22 +181,72 @@ fn create_nested_loop_module(n: i64) -> Arc<VbcModule> {
 fn create_arith_heavy_module(n: i64) -> Arc<VbcModule> {
     let instructions = vec![
         // r0 = n, r1 = counter, r2 = a, r3 = b, r4 = tmp
-        Instruction::LoadI { dst: Reg(0), value: n },
-        Instruction::LoadI { dst: Reg(1), value: 0 },
-        Instruction::LoadI { dst: Reg(2), value: 1 },
-        Instruction::LoadI { dst: Reg(3), value: 2 },
+        Instruction::LoadI {
+            dst: Reg(0),
+            value: n,
+        },
+        Instruction::LoadI {
+            dst: Reg(1),
+            value: 0,
+        },
+        Instruction::LoadI {
+            dst: Reg(2),
+            value: 1,
+        },
+        Instruction::LoadI {
+            dst: Reg(3),
+            value: 2,
+        },
         // loop:
-        Instruction::CmpI { op: CompareOp::Lt, dst: Reg(5), a: Reg(1), b: Reg(0) },
-        Instruction::JmpNot { cond: Reg(5), offset: 8 },
+        Instruction::CmpI {
+            op: CompareOp::Lt,
+            dst: Reg(5),
+            a: Reg(1),
+            b: Reg(0),
+        },
+        Instruction::JmpNot {
+            cond: Reg(5),
+            offset: 8,
+        },
         // a = a * 3 + b
-        Instruction::LoadI { dst: Reg(4), value: 3 },
-        Instruction::BinaryI { op: BinaryIntOp::Mul, dst: Reg(4), a: Reg(2), b: Reg(4) },
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(2), a: Reg(4), b: Reg(3) },
+        Instruction::LoadI {
+            dst: Reg(4),
+            value: 3,
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Mul,
+            dst: Reg(4),
+            a: Reg(2),
+            b: Reg(4),
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(2),
+            a: Reg(4),
+            b: Reg(3),
+        },
         // b = b + a % 7
-        Instruction::LoadI { dst: Reg(4), value: 7 },
-        Instruction::BinaryI { op: BinaryIntOp::Mod, dst: Reg(4), a: Reg(2), b: Reg(4) },
-        Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(3), a: Reg(3), b: Reg(4) },
-        Instruction::UnaryI { op: UnaryIntOp::Inc, dst: Reg(1), src: Reg(1) },
+        Instruction::LoadI {
+            dst: Reg(4),
+            value: 7,
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Mod,
+            dst: Reg(4),
+            a: Reg(2),
+            b: Reg(4),
+        },
+        Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(3),
+            a: Reg(3),
+            b: Reg(4),
+        },
+        Instruction::UnaryI {
+            op: UnaryIntOp::Inc,
+            dst: Reg(1),
+            src: Reg(1),
+        },
         Instruction::Jmp { offset: -9 },
         // end:
         Instruction::Ret { value: Reg(2) },
@@ -182,24 +298,16 @@ fn bench_vbc_vs_native(c: &mut Criterion) {
         group.throughput(Throughput::Elements(n as u64));
 
         let module = create_sum_module(n);
-        group.bench_with_input(
-            BenchmarkId::new("vbc_sum", n),
-            &n,
-            |b, _| {
-                b.iter(|| {
-                    let mut state = InterpreterState::new(Arc::clone(&module));
-                    black_box(execute_table(&mut state, FunctionId(0)))
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("vbc_sum", n), &n, |b, _| {
+            b.iter(|| {
+                let mut state = InterpreterState::new(Arc::clone(&module));
+                black_box(execute_table(&mut state, FunctionId(0)))
+            });
+        });
 
-        group.bench_with_input(
-            BenchmarkId::new("native_sum", n),
-            &n,
-            |b, &n| {
-                b.iter(|| black_box(native_sum_loop(black_box(n))))
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("native_sum", n), &n, |b, &n| {
+            b.iter(|| black_box(native_sum_loop(black_box(n))))
+        });
     }
 
     group.finish();
@@ -214,24 +322,16 @@ fn bench_nested_loop(c: &mut Criterion) {
         group.throughput(Throughput::Elements(total_ops as u64));
 
         let module = create_nested_loop_module(n);
-        group.bench_with_input(
-            BenchmarkId::new("vbc_nested", n),
-            &n,
-            |b, _| {
-                b.iter(|| {
-                    let mut state = InterpreterState::new(Arc::clone(&module));
-                    black_box(execute_table(&mut state, FunctionId(0)))
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("vbc_nested", n), &n, |b, _| {
+            b.iter(|| {
+                let mut state = InterpreterState::new(Arc::clone(&module));
+                black_box(execute_table(&mut state, FunctionId(0)))
+            });
+        });
 
-        group.bench_with_input(
-            BenchmarkId::new("native_nested", n),
-            &n,
-            |b, &n| {
-                b.iter(|| black_box(native_nested_loop(black_box(n))))
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("native_nested", n), &n, |b, &n| {
+            b.iter(|| black_box(native_nested_loop(black_box(n))))
+        });
     }
 
     group.finish();
@@ -244,16 +344,12 @@ fn bench_arith_throughput(c: &mut Criterion) {
         group.throughput(Throughput::Elements(n as u64));
 
         let module = create_arith_heavy_module(n);
-        group.bench_with_input(
-            BenchmarkId::new("vbc_arith", n),
-            &n,
-            |b, _| {
-                b.iter(|| {
-                    let mut state = InterpreterState::new(Arc::clone(&module));
-                    black_box(execute_table(&mut state, FunctionId(0)))
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("vbc_arith", n), &n, |b, _| {
+            b.iter(|| {
+                let mut state = InterpreterState::new(Arc::clone(&module));
+                black_box(execute_table(&mut state, FunctionId(0)))
+            });
+        });
     }
 
     group.finish();

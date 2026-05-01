@@ -286,7 +286,13 @@ impl LintConfig {
     /// - `-W intrinsic_deprecated` (warn)
     /// - `-A intrinsic_unstable` (allow)
     /// - `-F intrinsic_arg_count` (forbid)
-    pub fn apply_cli_flags(&mut self, deny: &[String], warn: &[String], allow: &[String], forbid: &[String]) {
+    pub fn apply_cli_flags(
+        &mut self,
+        deny: &[String],
+        warn: &[String],
+        allow: &[String],
+        forbid: &[String],
+    ) {
         for lint_name in forbid {
             if let Some(lint) = IntrinsicLint::from_str(lint_name) {
                 self.lint_levels.insert(lint, LintLevel::Forbid);
@@ -482,7 +488,12 @@ impl<'a> IntrinsicDiagnostics<'a> {
     ///
 
     /// This is used for general codegen errors that don't fit specific categories.
-    pub fn codegen_warning(&self, module_name: &str, error: &str, span: Option<Span>) -> Diagnostic {
+    pub fn codegen_warning(
+        &self,
+        module_name: &str,
+        error: &str,
+        span: Option<Span>,
+    ) -> Diagnostic {
         let level = self.config.level_for(IntrinsicLint::MissingImplementation);
         let code = IntrinsicLint::MissingImplementation.code_for_level(level);
 
@@ -525,7 +536,9 @@ impl<'a> IntrinsicDiagnostics<'a> {
 
     /// Check if the missing intrinsic lint is an error.
     pub fn is_missing_intrinsic_error(&self) -> bool {
-        self.config.level_for(IntrinsicLint::MissingImplementation).is_error()
+        self.config
+            .level_for(IntrinsicLint::MissingImplementation)
+            .is_error()
     }
 }
 
@@ -936,7 +949,10 @@ mod tests {
 
     #[test]
     fn test_intrinsic_lint_names() {
-        assert_eq!(IntrinsicLint::MissingImplementation.name(), "missing_intrinsic");
+        assert_eq!(
+            IntrinsicLint::MissingImplementation.name(),
+            "missing_intrinsic"
+        );
         assert_eq!(
             IntrinsicLint::from_str("missing_intrinsic"),
             Some(IntrinsicLint::MissingImplementation)
@@ -967,10 +983,7 @@ mod tests {
     fn test_lint_config_deny_warnings() {
         let config = LintConfig::new().with_deny_warnings(true);
         // Warnings become errors
-        assert_eq!(
-            config.level_for(IntrinsicLint::Deprecated),
-            LintLevel::Deny
-        );
+        assert_eq!(config.level_for(IntrinsicLint::Deprecated), LintLevel::Deny);
         // But explicit errors stay errors (not double-promoted)
         assert_eq!(
             config.level_for(IntrinsicLint::ArgumentCount),
@@ -1119,10 +1132,7 @@ impl StdlibLint {
 ///
 
 /// Accepts both `Map` and `Map<K, V>` forms.
-pub fn detect_stdlib_hazard(
-    method_name: &str,
-    receiver_type_name: &str,
-) -> Option<StdlibLint> {
+pub fn detect_stdlib_hazard(method_name: &str, receiver_type_name: &str) -> Option<StdlibLint> {
     if method_name != "get" {
         return None;
     }
@@ -1131,10 +1141,8 @@ pub fn detect_stdlib_hazard(
     // `HashMap` / `BTreeMap` / etc — those have their own
     // presence semantics and aren't in the same hazard class.
     let ty = receiver_type_name;
-    let matches_map = ty == "Map"
-        || ty.starts_with("Map<")
-        || ty.ends_with(".Map")
-        || ty.ends_with("::Map");
+    let matches_map =
+        ty == "Map" || ty.starts_with("Map<") || ty.ends_with(".Map") || ty.ends_with("::Map");
     if matches_map {
         Some(StdlibLint::MapGetHazard)
     } else {
@@ -1266,9 +1274,7 @@ pub struct StdlibLintFinding {
 /// the type-checker's inferred receiver type) reduces false
 /// positives; the heuristic path is the always-available
 /// fallback.
-pub fn walk_module_for_stdlib_hazards(
-    module: &verum_ast::Module,
-) -> Vec<StdlibLintFinding> {
+pub fn walk_module_for_stdlib_hazards(module: &verum_ast::Module) -> Vec<StdlibLintFinding> {
     let mut walker = HazardCollector::default();
     // Re-use the AST's standard visitor — walk every item in
     // the module, which in turn descends into every
@@ -1293,9 +1299,7 @@ impl verum_ast::visitor::Visitor for HazardCollector {
         // recurses into children for us after this call
         // returns.
         if let verum_ast::expr::ExprKind::MethodCall {
-            receiver,
-            method,
-            ..
+            receiver, method, ..
         } = &expr.kind
         {
             let receiver_repr = format!("{:?}", receiver);
@@ -1303,9 +1307,7 @@ impl verum_ast::visitor::Visitor for HazardCollector {
                 && !receiver_repr.contains("HashMap")
                 && !receiver_repr.contains("BTreeMap");
             if looks_like_map {
-                if let Some(lint) =
-                    detect_stdlib_hazard(method.name.as_str(), "Map")
-                {
+                if let Some(lint) = detect_stdlib_hazard(method.name.as_str(), "Map") {
                     self.findings.push(StdlibLintFinding {
                         lint,
                         span: expr.span,

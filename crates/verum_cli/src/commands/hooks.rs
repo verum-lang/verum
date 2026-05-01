@@ -60,7 +60,10 @@ fn find_hooks_dir(start: &Path) -> Option<PathBuf> {
         // git dir. Worth supporting for monorepo / submodule users.
         if git.is_file() {
             if let Ok(content) = fs::read_to_string(&git) {
-                if let Some(path) = content.lines().next().and_then(|l| l.strip_prefix("gitdir: "))
+                if let Some(path) = content
+                    .lines()
+                    .next()
+                    .and_then(|l| l.strip_prefix("gitdir: "))
                 {
                     let abs = if Path::new(path).is_absolute() {
                         PathBuf::from(path)
@@ -82,8 +85,7 @@ fn pre_commit_path(hooks_dir: &Path) -> PathBuf {
 
 /// `verum hooks install [--force]`.
 pub fn install(force: bool) -> Result<()> {
-    let cwd = std::env::current_dir()
-        .map_err(|e| CliError::Custom(format!("read cwd: {e}")))?;
+    let cwd = std::env::current_dir().map_err(|e| CliError::Custom(format!("read cwd: {e}")))?;
     let hooks_dir = find_hooks_dir(&cwd)
         .ok_or_else(|| CliError::Custom(
             "no enclosing git repository found — `verum hooks install` requires a `.git/` directory".into()
@@ -130,12 +132,9 @@ pub fn install(force: bool) -> Result<()> {
 
 /// `verum hooks uninstall`.
 pub fn uninstall() -> Result<()> {
-    let cwd = std::env::current_dir()
-        .map_err(|e| CliError::Custom(format!("read cwd: {e}")))?;
+    let cwd = std::env::current_dir().map_err(|e| CliError::Custom(format!("read cwd: {e}")))?;
     let hooks_dir = find_hooks_dir(&cwd).ok_or_else(|| {
-        CliError::Custom(
-            "no enclosing git repository found — nothing to uninstall".into(),
-        )
+        CliError::Custom("no enclosing git repository found — nothing to uninstall".into())
     })?;
     let target = pre_commit_path(&hooks_dir);
     if !target.exists() {
@@ -160,8 +159,7 @@ pub fn uninstall() -> Result<()> {
 /// `verum hooks status` — report whether the hook is installed and
 /// whether it's verum-managed.
 pub fn status() -> Result<()> {
-    let cwd = std::env::current_dir()
-        .map_err(|e| CliError::Custom(format!("read cwd: {e}")))?;
+    let cwd = std::env::current_dir().map_err(|e| CliError::Custom(format!("read cwd: {e}")))?;
     let hooks_dir = match find_hooks_dir(&cwd) {
         Some(d) => d,
         None => {
@@ -176,10 +174,7 @@ pub fn status() -> Result<()> {
     }
     let content = fs::read_to_string(&target).unwrap_or_default();
     if content.contains(HOOK_MARKER) {
-        ui::success(&format!(
-            "{}: installed (verum-managed)",
-            target.display()
-        ));
+        ui::success(&format!("{}: installed (verum-managed)", target.display()));
     } else {
         ui::note(&format!(
             "{}: present but NOT verum-managed (will be left alone by `uninstall`)",

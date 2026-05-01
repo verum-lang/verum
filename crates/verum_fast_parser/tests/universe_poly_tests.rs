@@ -31,8 +31,8 @@ use verum_ast::span::FileId;
 use verum_ast::ty::{GenericParamKind, UniverseLevelExpr};
 use verum_ast::{ItemKind, TypeKind};
 use verum_common::List;
-use verum_lexer::Lexer;
 use verum_fast_parser::{ParseError, VerumParser};
+use verum_lexer::Lexer;
 
 /// Parse helper.
 fn parse_module(input: &str) -> Result<verum_ast::Module, List<ParseError>> {
@@ -70,10 +70,7 @@ fn id<universe u, A: Type(u)>(x: A) -> A { x }
                 GenericParamKind::Level { name } => {
                     assert_eq!(name.name.as_str(), "u", "Universe param name should be 'u'");
                 }
-                other => panic!(
-                    "Expected Level param at index 0, got {:?}",
-                    other
-                ),
+                other => panic!("Expected Level param at index 0, got {:?}", other),
             }
         }
         other => panic!("Expected Function item, got {:?}", other),

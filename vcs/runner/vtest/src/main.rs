@@ -1214,7 +1214,9 @@ async fn run_benchmarks(
     runner_config.verbose = verbose;
 
     // Filter to only benchmark tests
-    runner_config.include_tags.insert("benchmark".to_string().into());
+    runner_config
+        .include_tags
+        .insert("benchmark".to_string().into());
 
     // Also filter by patterns if provided
     if !patterns.is_empty() {
@@ -1390,13 +1392,13 @@ async fn verify_stdlib(
 ) -> Result<i32, RunnerError> {
     use std::collections::HashMap;
     use std::time::Instant;
-    use walkdir::WalkDir;
     use verum_ast::FileId;
     use verum_common::{Map, Maybe as CoreMaybe, Text as CoreText};
     use verum_lexer::Lexer;
     use verum_parser::VerumParser;
     use verum_types::TypeChecker;
-    use verum_types::core_pipeline::{StdlibTypeRegistry, ModuleOrder, GlobalPassResult};
+    use verum_types::core_pipeline::{GlobalPassResult, ModuleOrder, StdlibTypeRegistry};
+    use walkdir::WalkDir;
 
     let start = Instant::now();
     let verbose = matches!(verbosity, Verbosity::Debug);
@@ -1407,9 +1409,22 @@ async fn verify_stdlib(
         println!();
         println!("{}", "═".repeat(65));
         println!("  {} - Stdlib Compilation Verification", "VTEST".bold());
-        println!("  Pipeline: Source → Lexer → Parser → AST{}",
-            if parse_only { "" } else { " → Register → TypeCheck" });
-        println!("  Mode: {}", if parse_only { "Parse only" } else { "Dependency-ordered compilation" });
+        println!(
+            "  Pipeline: Source → Lexer → Parser → AST{}",
+            if parse_only {
+                ""
+            } else {
+                " → Register → TypeCheck"
+            }
+        );
+        println!(
+            "  Mode: {}",
+            if parse_only {
+                "Parse only"
+            } else {
+                "Dependency-ordered compilation"
+            }
+        );
         println!("{}", "═".repeat(65));
         println!();
     }
@@ -1437,12 +1452,20 @@ async fn verify_stdlib(
     files.sort();
 
     if files.is_empty() {
-        println!("  {} No .vr files found in {}", "Warning:".yellow(), stdlib_path.display());
+        println!(
+            "  {} No .vr files found in {}",
+            "Warning:".yellow(),
+            stdlib_path.display()
+        );
         return Ok(0);
     }
 
     if !quiet {
-        println!("  Found {} files in {}", files.len().to_string().cyan(), stdlib_path.display());
+        println!(
+            "  Found {} files in {}",
+            files.len().to_string().cyan(),
+            stdlib_path.display()
+        );
         println!();
     }
 
@@ -1489,7 +1512,11 @@ async fn verify_stdlib(
             .to_string_lossy()
             .replace("\\", "/"); // Handle Windows paths
 
-        let display_module = if module_name.is_empty() { "mod" } else { &module_name };
+        let display_module = if module_name.is_empty() {
+            "mod"
+        } else {
+            &module_name
+        };
         file_to_module.insert(file_path.clone(), display_module.to_string());
 
         let module_stats = by_module.entry(display_module.to_string()).or_default();
@@ -1562,8 +1589,11 @@ async fn verify_stdlib(
     }
 
     if !quiet {
-        println!("  Phase 1 complete: {}/{} files parsed successfully",
-            parse_passed.to_string().green(), files.len());
+        println!(
+            "  Phase 1 complete: {}/{} files parsed successfully",
+            parse_passed.to_string().green(),
+            files.len()
+        );
     }
 
     // If parse_only, skip registration and typechecking
@@ -1609,17 +1639,29 @@ async fn verify_stdlib(
             });
         }
 
-        _register_passed = global_result.total_modules.saturating_sub(global_result.total_errors());
+        _register_passed = global_result
+            .total_modules
+            .saturating_sub(global_result.total_errors());
         _register_failed = global_result.total_errors();
 
         if !quiet {
             println!("  Phase 2 complete:");
-            println!("    Pass 1: {} type names registered", global_result.types_registered);
-            println!("    Pass 2: {} protocols ({} errors)",
-                global_result.protocols_registered, global_result.protocol_errors);
-            println!("    Pass 3: {} type definition errors", global_result.type_definition_errors);
-            println!("    Pass 4: {} impls ({} errors)",
-                global_result.impls_registered, global_result.impl_errors);
+            println!(
+                "    Pass 1: {} type names registered",
+                global_result.types_registered
+            );
+            println!(
+                "    Pass 2: {} protocols ({} errors)",
+                global_result.protocols_registered, global_result.protocol_errors
+            );
+            println!(
+                "    Pass 3: {} type definition errors",
+                global_result.type_definition_errors
+            );
+            println!(
+                "    Pass 4: {} impls ({} errors)",
+                global_result.impls_registered, global_result.impl_errors
+            );
         }
 
         // ═══════════════════════════════════════════════════════════════════════
@@ -1640,7 +1682,12 @@ async fn verify_stdlib(
                             stats.typecheck_passed += 1;
                         }
                         if verbose {
-                            println!("  {} {} ({} items checked)", "PASS".green(), module_name, items_checked);
+                            println!(
+                                "  {} {} ({} items checked)",
+                                "PASS".green(),
+                                module_name,
+                                items_checked
+                            );
                         }
                     }
                     Err(e) => {
@@ -1667,8 +1714,11 @@ async fn verify_stdlib(
         }
 
         if !quiet {
-            println!("  Phase 3 complete: {}/{} modules type-checked successfully",
-                typecheck_passed.to_string().green(), all_modules.len());
+            println!(
+                "  Phase 3 complete: {}/{} modules type-checked successfully",
+                typecheck_passed.to_string().green(),
+                all_modules.len()
+            );
         }
     }
 
@@ -1680,20 +1730,46 @@ async fn verify_stdlib(
     match output_format.as_str() {
         "json" => {
             output_stdlib_json_report(
-                total, parse_passed, parse_failed, typecheck_passed, typecheck_failed,
-                &by_module, &failures, duration, output, parse_only,
+                total,
+                parse_passed,
+                parse_failed,
+                typecheck_passed,
+                typecheck_failed,
+                &by_module,
+                &failures,
+                duration,
+                output,
+                parse_only,
             )?;
         }
         "markdown" | "md" => {
             output_stdlib_markdown_report(
-                total, parse_passed, parse_failed, typecheck_passed, typecheck_failed,
-                &by_module, &failures, duration, output, parse_only,
+                total,
+                parse_passed,
+                parse_failed,
+                typecheck_passed,
+                typecheck_failed,
+                &by_module,
+                &failures,
+                duration,
+                output,
+                parse_only,
             )?;
         }
         _ => {
             output_stdlib_console_report(
-                total, parse_passed, parse_failed, typecheck_passed, typecheck_failed,
-                &by_module, &failures, duration, show_failures, use_colors, quiet, parse_only,
+                total,
+                parse_passed,
+                parse_failed,
+                typecheck_passed,
+                typecheck_failed,
+                &by_module,
+                &failures,
+                duration,
+                show_failures,
+                use_colors,
+                quiet,
+                parse_only,
             );
         }
     }
@@ -1750,7 +1826,11 @@ fn output_stdlib_console_report(
     println!("{}", "─".repeat(65));
 
     // Overall stats
-    let parse_rate = if total > 0 { 100.0 * parse_passed as f64 / total as f64 } else { 0.0 };
+    let parse_rate = if total > 0 {
+        100.0 * parse_passed as f64 / total as f64
+    } else {
+        0.0
+    };
 
     println!("  Total Files:   {}", total.to_string().bold());
     println!(
@@ -1768,7 +1848,11 @@ fn output_stdlib_console_report(
 
     if !parse_only {
         let tc_total = parse_passed; // only typecheck files that parsed
-        let tc_rate = if tc_total > 0 { 100.0 * typecheck_passed as f64 / tc_total as f64 } else { 0.0 };
+        let tc_rate = if tc_total > 0 {
+            100.0 * typecheck_passed as f64 / tc_total as f64
+        } else {
+            0.0
+        };
         println!(
             "  Typecheck Passed: {} ({:.1}%)",
             typecheck_passed.to_string().green().bold(),
@@ -1802,7 +1886,11 @@ fn output_stdlib_console_report(
         } else {
             format!("{:.0}%", rate).red().to_string()
         };
-        let module_display = if module.is_empty() { "root" } else { module.as_str() };
+        let module_display = if module.is_empty() {
+            "root"
+        } else {
+            module.as_str()
+        };
         println!(
             "    {}: {}/{} ({})",
             module_display.bold(),
@@ -1829,7 +1917,11 @@ fn output_stdlib_console_report(
 
         for (i, failure) in failures.iter().take(show_count).enumerate() {
             println!("  {}. {}", i + 1, failure.path.cyan());
-            println!("     Module: {}, Phase: {}", failure.module, failure.phase.dimmed());
+            println!(
+                "     Module: {}, Phase: {}",
+                failure.module,
+                failure.phase.dimmed()
+            );
             // Truncate long error messages
             let error_preview: String = failure.error.chars().take(200).collect();
             println!("     Error: {}", error_preview.red());
@@ -1847,7 +1939,10 @@ fn output_stdlib_console_report(
     // Final result
     println!();
     if parse_failed == 0 && (parse_only || typecheck_failed == 0) {
-        println!("  {} All stdlib files compiled successfully!", "RESULT:".green().bold());
+        println!(
+            "  {} All stdlib files compiled successfully!",
+            "RESULT:".green().bold()
+        );
     } else {
         println!(
             "  {} {} parse failures{}",
@@ -1935,7 +2030,10 @@ fn output_stdlib_markdown_report(
     let mut md = String::new();
 
     md.push_str("# Stdlib Compilation Verification Report\n\n");
-    md.push_str(&format!("Generated: {}\n\n", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")));
+    md.push_str(&format!(
+        "Generated: {}\n\n",
+        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+    ));
 
     // Summary
     md.push_str("## Summary\n\n");
@@ -1948,7 +2046,11 @@ fn output_stdlib_markdown_report(
         md.push_str(&format!("| Typecheck Passed | {} |\n", typecheck_passed));
         md.push_str(&format!("| Typecheck Failed | {} |\n", typecheck_failed));
     }
-    let parse_rate = if total > 0 { 100.0 * parse_passed as f64 / total as f64 } else { 0.0 };
+    let parse_rate = if total > 0 {
+        100.0 * parse_passed as f64 / total as f64
+    } else {
+        0.0
+    };
     md.push_str(&format!("| Parse Rate | {:.1}% |\n", parse_rate));
     md.push_str(&format!("| Duration | {:.2}s |\n", duration.as_secs_f64()));
     md.push_str("\n");
@@ -1960,9 +2062,20 @@ fn output_stdlib_markdown_report(
     let mut modules: Vec<_> = by_module.iter().collect();
     modules.sort_by(|a, b| a.0.cmp(b.0));
     for (module, stats) in modules {
-        let rate = if stats.total > 0 { 100.0 * stats.parse_passed as f64 / stats.total as f64 } else { 0.0 };
-        let module_display = if module.is_empty() { "root" } else { module.as_str() };
-        md.push_str(&format!("| {} | {} | {} | {:.1}% |\n", module_display, stats.parse_passed, stats.total, rate));
+        let rate = if stats.total > 0 {
+            100.0 * stats.parse_passed as f64 / stats.total as f64
+        } else {
+            0.0
+        };
+        let module_display = if module.is_empty() {
+            "root"
+        } else {
+            module.as_str()
+        };
+        md.push_str(&format!(
+            "| {} | {} | {} | {:.1}% |\n",
+            module_display, stats.parse_passed, stats.total, rate
+        ));
     }
     md.push_str("\n");
 
@@ -1973,7 +2086,10 @@ fn output_stdlib_markdown_report(
             md.push_str(&format!("### {}. `{}`\n\n", i + 1, failure.path));
             md.push_str(&format!("- **Module**: {}\n", failure.module));
             md.push_str(&format!("- **Phase**: {}\n", failure.phase));
-            md.push_str(&format!("- **Error**: {}\n", failure.error.chars().take(500).collect::<String>()));
+            md.push_str(&format!(
+                "- **Error**: {}\n",
+                failure.error.chars().take(500).collect::<String>()
+            ));
             md.push_str("\n");
         }
     }
@@ -2194,7 +2310,11 @@ async fn verify_common_pipeline(
 
         // Progress output for non-verbose
         if !verbose && !quiet && !show_progress && (i + 1) % 100 == 0 {
-            println!("  ... processed {}/{} tests", i + 1, compile_time_tests.len());
+            println!(
+                "  ... processed {}/{} tests",
+                i + 1,
+                compile_time_tests.len()
+            );
         }
     }
 
@@ -2312,10 +2432,7 @@ fn output_console_report(
         0.0
     };
 
-    println!(
-        "  Total:     {} tests",
-        total_run.to_string().bold()
-    );
+    println!("  Total:     {} tests", total_run.to_string().bold());
     println!(
         "  Passed:    {} ({:.1}%)",
         stats.passed.to_string().green().bold(),
@@ -2448,7 +2565,10 @@ fn output_console_report(
     // Final result
     println!();
     if stats.failed == 0 && stats.errors == 0 {
-        println!("  {} All compile-time tests passed!", "RESULT:".green().bold());
+        println!(
+            "  {} All compile-time tests passed!",
+            "RESULT:".green().bold()
+        );
     } else {
         println!(
             "  {} {} failures, {} errors",
@@ -2531,7 +2651,10 @@ fn output_markdown_report(
     let mut md = String::new();
 
     md.push_str("# Common Pipeline Verification Report\n\n");
-    md.push_str(&format!("Generated: {}\n\n", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")));
+    md.push_str(&format!(
+        "Generated: {}\n\n",
+        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+    ));
 
     // Summary
     md.push_str("## Summary\n\n");
@@ -2542,7 +2665,11 @@ fn output_markdown_report(
     md.push_str(&format!("| Failed | {} |\n", stats.failed));
     md.push_str(&format!("| Errors | {} |\n", stats.errors));
     md.push_str(&format!("| Skipped | {} |\n", stats.skipped));
-    let pass_rate = if stats.total > 0 { 100.0 * stats.passed as f64 / stats.total as f64 } else { 0.0 };
+    let pass_rate = if stats.total > 0 {
+        100.0 * stats.passed as f64 / stats.total as f64
+    } else {
+        0.0
+    };
     md.push_str(&format!("| Pass Rate | {:.1}% |\n", pass_rate));
     md.push_str(&format!("| Duration | {:.2}s |\n", duration.as_secs_f64()));
     md.push_str("\n");
@@ -2553,8 +2680,15 @@ fn output_markdown_report(
     md.push_str("|-------|--------|-------|------|\n");
     for level in [Level::L0, Level::L1, Level::L2, Level::L3, Level::L4] {
         if let Some(lstats) = by_level.get(&level) {
-            let rate = if lstats.total > 0 { 100.0 * lstats.passed as f64 / lstats.total as f64 } else { 0.0 };
-            md.push_str(&format!("| {} | {} | {} | {:.1}% |\n", level, lstats.passed, lstats.total, rate));
+            let rate = if lstats.total > 0 {
+                100.0 * lstats.passed as f64 / lstats.total as f64
+            } else {
+                0.0
+            };
+            md.push_str(&format!(
+                "| {} | {} | {} | {:.1}% |\n",
+                level, lstats.passed, lstats.total, rate
+            ));
         }
     }
     md.push_str("\n");
@@ -2564,15 +2698,27 @@ fn output_markdown_report(
     md.push_str("| Type | Passed | Total | Rate |\n");
     md.push_str("|------|--------|-------|------|\n");
     for ttype in [
-        TestType::ParsePass, TestType::ParseFail, TestType::ParseRecover,
-        TestType::TypecheckPass, TestType::TypecheckFail,
-        TestType::VerifyPass, TestType::VerifyFail,
-        TestType::CommonPipeline, TestType::CommonPipelineFail,
+        TestType::ParsePass,
+        TestType::ParseFail,
+        TestType::ParseRecover,
+        TestType::TypecheckPass,
+        TestType::TypecheckFail,
+        TestType::VerifyPass,
+        TestType::VerifyFail,
+        TestType::CommonPipeline,
+        TestType::CommonPipelineFail,
         TestType::CompileOnly,
     ] {
         if let Some(tstats) = by_type.get(&ttype) {
-            let rate = if tstats.total > 0 { 100.0 * tstats.passed as f64 / tstats.total as f64 } else { 0.0 };
-            md.push_str(&format!("| {} | {} | {} | {:.1}% |\n", ttype, tstats.passed, tstats.total, rate));
+            let rate = if tstats.total > 0 {
+                100.0 * tstats.passed as f64 / tstats.total as f64
+            } else {
+                0.0
+            };
+            md.push_str(&format!(
+                "| {} | {} | {} | {:.1}% |\n",
+                ttype, tstats.passed, tstats.total, rate
+            ));
         }
     }
     md.push_str("\n");
@@ -2626,16 +2772,20 @@ async fn run_parser_tests(
 ) -> Result<i32, RunnerError> {
     use std::collections::HashMap;
     use std::time::Instant;
-    use walkdir::WalkDir;
     use verum_ast::FileId;
     use verum_lexer::Lexer;
+    use walkdir::WalkDir;
 
     let start = Instant::now();
     let verbose = matches!(verbosity, Verbosity::Debug);
     let quiet = matches!(verbosity, Verbosity::Quiet | Verbosity::Summary);
 
     // Determine parser name for display
-    let parser_name = if advanced { "verum_parser (advanced)" } else { "verum_fast_parser" };
+    let parser_name = if advanced {
+        "verum_parser (advanced)"
+    } else {
+        "verum_fast_parser"
+    };
 
     // Print header
     if !quiet {
@@ -2662,7 +2812,8 @@ async fn run_parser_tests(
                 vec![cwd_path]
             } else {
                 return Err(RunnerError::ConfigError(
-                    "Parser test directory not found. Expected vcs/specs/parser or specs/parser".into()
+                    "Parser test directory not found. Expected vcs/specs/parser or specs/parser"
+                        .into(),
                 ));
             }
         }
@@ -2715,18 +2866,27 @@ async fn run_parser_tests(
     test_files.sort_by(|a, b| a.0.cmp(&b.0));
 
     if test_files.is_empty() {
-        println!("  {} No parser tests found in {:?}", "Warning:".yellow(), test_paths);
+        println!(
+            "  {} No parser tests found in {:?}",
+            "Warning:".yellow(),
+            test_paths
+        );
         return Ok(0);
     }
 
-    let success_count = test_files.iter().filter(|(_, is_success)| *is_success).count();
+    let success_count = test_files
+        .iter()
+        .filter(|(_, is_success)| *is_success)
+        .count();
     let fail_count = test_files.len() - success_count;
 
     if !quiet {
-        println!("  Found {} tests ({} success, {} fail)",
+        println!(
+            "  Found {} tests ({} success, {} fail)",
             test_files.len().to_string().cyan(),
             success_count.to_string().green(),
-            fail_count.to_string().yellow());
+            fail_count.to_string().yellow()
+        );
         println!();
     }
 
@@ -2802,14 +2962,24 @@ async fn run_parser_tests(
             let parser = verum_parser::VerumParser::new();
             let parse_result = parser.parse_module(lexer, file_id);
             evaluate_parse_result_advanced(
-                parse_result, *is_success, &expected_error, file_path, &category, &mut failures
+                parse_result,
+                *is_success,
+                &expected_error,
+                file_path,
+                &category,
+                &mut failures,
             )
         } else {
             // Use verum_fast_parser (default) - use parse_module_str for better error analysis
             let parser = verum_fast_parser::FastParser::new();
             let parse_result = parser.parse_module_str(&source, file_id);
             evaluate_parse_result_fast(
-                parse_result, *is_success, &expected_error, file_path, &category, &mut failures
+                parse_result,
+                *is_success,
+                &expected_error,
+                file_path,
+                &category,
+                &mut failures,
             )
         };
 
@@ -2817,7 +2987,8 @@ async fn run_parser_tests(
             passed += 1;
             cat_stats.passed += 1;
             if verbose && !summary_only {
-                let rel_path = file_path.file_name()
+                let rel_path = file_path
+                    .file_name()
                     .map(|s| s.to_string_lossy().to_string())
                     .unwrap_or_else(|| file_path.to_string_lossy().to_string());
                 let test_type = if *is_success { "success" } else { "fail" };
@@ -2827,7 +2998,8 @@ async fn run_parser_tests(
             failed += 1;
             cat_stats.failed += 1;
             if verbose && !summary_only {
-                let rel_path = file_path.file_name()
+                let rel_path = file_path
+                    .file_name()
                     .map(|s| s.to_string_lossy().to_string())
                     .unwrap_or_else(|| file_path.to_string_lossy().to_string());
                 println!("  {} {}", "FAIL".red(), rel_path);
@@ -2854,30 +3026,46 @@ async fn run_parser_tests(
     match output_format.as_str() {
         "json" => {
             output_parser_json_report(
-                total, passed, failed,
-                &by_category, &failures, duration, output, parser_name,
+                total,
+                passed,
+                failed,
+                &by_category,
+                &failures,
+                duration,
+                output,
+                parser_name,
             )?;
         }
         "markdown" | "md" => {
             output_parser_markdown_report(
-                total, passed, failed,
-                &by_category, &failures, duration, output, parser_name,
+                total,
+                passed,
+                failed,
+                &by_category,
+                &failures,
+                duration,
+                output,
+                parser_name,
             )?;
         }
         _ => {
             output_parser_console_report(
-                total, passed, failed,
-                &by_category, &failures, duration, show_failures, use_colors, quiet, parser_name,
+                total,
+                passed,
+                failed,
+                &by_category,
+                &failures,
+                duration,
+                show_failures,
+                use_colors,
+                quiet,
+                parser_name,
             );
         }
     }
 
     // Return exit code
-    if failed > 0 {
-        Ok(1)
-    } else {
-        Ok(0)
-    }
+    if failed > 0 { Ok(1) } else { Ok(0) }
 }
 
 /// Parse expected error code from test file directives.
@@ -2885,7 +3073,12 @@ fn parse_expected_error(source: &str) -> Option<String> {
     for line in source.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with("// @expected-error:") {
-            return Some(trimmed.trim_start_matches("// @expected-error:").trim().to_string());
+            return Some(
+                trimmed
+                    .trim_start_matches("// @expected-error:")
+                    .trim()
+                    .to_string(),
+            );
         }
     }
     None
@@ -2909,7 +3102,11 @@ fn evaluate_parse_result_fast(
                     path: file_path.to_string_lossy().to_string(),
                     category: category.to_string(),
                     is_success_test: true,
-                    error: format!("Expected success but got {} errors: {:?}", errors.len(), errors),
+                    error: format!(
+                        "Expected success but got {} errors: {:?}",
+                        errors.len(),
+                        errors
+                    ),
                     expected_error: None,
                 });
                 false
@@ -2932,10 +3129,12 @@ fn evaluate_parse_result_fast(
                 // Check if expected error matches (if specified)
                 if let Some(expected) = expected_error {
                     let error_str = format!("{:?}", errors);
-                    if error_str.contains(expected) || errors.iter().any(|e| {
-                        let e_str = format!("{:?}", e);
-                        e_str.contains(expected)
-                    }) {
+                    if error_str.contains(expected)
+                        || errors.iter().any(|e| {
+                            let e_str = format!("{:?}", e);
+                            e_str.contains(expected)
+                        })
+                    {
                         true
                     } else {
                         failures.push(ParserTestFailure {
@@ -2974,7 +3173,11 @@ fn evaluate_parse_result_advanced(
                     path: file_path.to_string_lossy().to_string(),
                     category: category.to_string(),
                     is_success_test: true,
-                    error: format!("Expected success but got {} errors: {:?}", errors.len(), errors),
+                    error: format!(
+                        "Expected success but got {} errors: {:?}",
+                        errors.len(),
+                        errors
+                    ),
                     expected_error: None,
                 });
                 false
@@ -2997,10 +3200,12 @@ fn evaluate_parse_result_advanced(
                 // Check if expected error matches (if specified)
                 if let Some(expected) = expected_error {
                     let error_str = format!("{:?}", errors);
-                    if error_str.contains(expected) || errors.iter().any(|e| {
-                        let e_str = format!("{:?}", e);
-                        e_str.contains(expected)
-                    }) {
+                    if error_str.contains(expected)
+                        || errors.iter().any(|e| {
+                            let e_str = format!("{:?}", e);
+                            e_str.contains(expected)
+                        })
+                    {
                         true
                     } else {
                         failures.push(ParserTestFailure {
@@ -3076,16 +3281,29 @@ fn output_golden_console_report(
         // Just print summary line
         if failed > 0 {
             if config.show_skipped {
-                println!("FAIL {} passed, {} failed, {} skipped ({:.2}s)",
-                    passed, failed, skipped, duration.as_secs_f64());
+                println!(
+                    "FAIL {} passed, {} failed, {} skipped ({:.2}s)",
+                    passed,
+                    failed,
+                    skipped,
+                    duration.as_secs_f64()
+                );
             } else {
-                println!("FAIL {} passed, {} failed ({:.2}s)",
-                    passed, failed, duration.as_secs_f64());
+                println!(
+                    "FAIL {} passed, {} failed ({:.2}s)",
+                    passed,
+                    failed,
+                    duration.as_secs_f64()
+                );
             }
         } else {
             if config.show_skipped && skipped > 0 {
-                println!("PASS {} passed, {} skipped ({:.2}s)",
-                    passed, skipped, duration.as_secs_f64());
+                println!(
+                    "PASS {} passed, {} skipped ({:.2}s)",
+                    passed,
+                    skipped,
+                    duration.as_secs_f64()
+                );
             } else {
                 println!("PASS {} passed ({:.2}s)", passed, duration.as_secs_f64());
             }
@@ -3104,25 +3322,52 @@ fn output_golden_console_report(
     println!();
 
     // Summary
-    let pass_rate = if total > 0 { passed as f64 / total as f64 * 100.0 } else { 0.0 };
+    let pass_rate = if total > 0 {
+        passed as f64 / total as f64 * 100.0
+    } else {
+        0.0
+    };
 
     println!("  Total:     {}", total.to_string().bold());
     println!("  Passed:    {}", passed.to_string().green());
-    println!("  Failed:    {}", if failed > 0 { failed.to_string().red().to_string() } else { "0".to_string() });
+    println!(
+        "  Failed:    {}",
+        if failed > 0 {
+            failed.to_string().red().to_string()
+        } else {
+            "0".to_string()
+        }
+    );
     if config.show_skipped {
-        println!("  Skipped:   {}", if skipped > 0 { skipped.to_string().yellow().to_string() } else { "0".to_string() });
+        println!(
+            "  Skipped:   {}",
+            if skipped > 0 {
+                skipped.to_string().yellow().to_string()
+            } else {
+                "0".to_string()
+            }
+        );
     }
     println!("  Pass Rate: {:.1}%", pass_rate);
     println!("  Duration:  {:.2}s", duration.as_secs_f64());
     println!();
 
     // By category table
-    println!("  {}:", format!("BY {}", config.category_label.to_uppercase()).bold());
+    println!(
+        "  {}:",
+        format!("BY {}", config.category_label.to_uppercase()).bold()
+    );
     if config.show_skipped {
-        println!("  {:<24} {:>8} {:>8} {:>8} {:>8}", config.category_label, "Total", "Pass", "Fail", "Skip");
+        println!(
+            "  {:<24} {:>8} {:>8} {:>8} {:>8}",
+            config.category_label, "Total", "Pass", "Fail", "Skip"
+        );
         println!("  {}", "─".repeat(64));
     } else {
-        println!("  {:<24} {:>8} {:>8} {:>8}", config.category_label, "Total", "Pass", "Fail");
+        println!(
+            "  {:<24} {:>8} {:>8} {:>8}",
+            config.category_label, "Total", "Pass", "Fail"
+        );
         println!("  {}", "─".repeat(56));
     }
 
@@ -3136,11 +3381,15 @@ fn output_golden_console_report(
             "PASS".green()
         };
         if config.show_skipped {
-            println!("  {:<24} {:>8} {:>8} {:>8} {:>8}  {}",
-                name, stats.total, stats.passed, stats.failed, stats.skipped, status);
+            println!(
+                "  {:<24} {:>8} {:>8} {:>8} {:>8}  {}",
+                name, stats.total, stats.passed, stats.failed, stats.skipped, status
+            );
         } else {
-            println!("  {:<24} {:>8} {:>8} {:>8}  {}",
-                name, stats.total, stats.passed, stats.failed, status);
+            println!(
+                "  {:<24} {:>8} {:>8} {:>8}  {}",
+                name, stats.total, stats.passed, stats.failed, status
+            );
         }
     }
     println!();
@@ -3168,7 +3417,10 @@ fn output_golden_console_report(
         }
 
         if failures.len() > show_failures {
-            println!("  ... and {} more failures (use --show-failures to see more)", failures.len() - show_failures);
+            println!(
+                "  ... and {} more failures (use --show-failures to see more)",
+                failures.len() - show_failures
+            );
             println!();
         }
     }
@@ -3176,13 +3428,20 @@ fn output_golden_console_report(
     // Final status
     println!("{}", "═".repeat(70));
     if failed > 0 {
-        println!("  {} {} completed with {} failure{}",
+        println!(
+            "  {} {} completed with {} failure{}",
             "FAIL".red().bold(),
             config.suite_name,
             failed,
-            if failed == 1 { "" } else { "s" });
+            if failed == 1 { "" } else { "s" }
+        );
     } else {
-        println!("  {} All {} {} passed!", "PASS".green().bold(), passed, config.suite_name.to_lowercase());
+        println!(
+            "  {} All {} {} passed!",
+            "PASS".green().bold(),
+            passed,
+            config.suite_name.to_lowercase()
+        );
     }
     println!("{}", "═".repeat(70));
 }
@@ -3234,8 +3493,7 @@ fn output_golden_json_report(
         .map_err(|e| RunnerError::IoError(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
 
     if let Some(path) = output {
-        std::fs::write(&path, &json_str)
-            .map_err(|e| RunnerError::IoError(e))?;
+        std::fs::write(&path, &json_str).map_err(|e| RunnerError::IoError(e))?;
         println!("Report written to: {}", path.display());
     } else {
         println!("{}", json_str);
@@ -3274,7 +3532,11 @@ fn output_golden_markdown_report(
     if config.show_skipped {
         md.push_str(&format!("| Skipped | {} |\n", skipped));
     }
-    let pass_rate = if total > 0 { 100.0 * passed as f64 / total as f64 } else { 0.0 };
+    let pass_rate = if total > 0 {
+        100.0 * passed as f64 / total as f64
+    } else {
+        0.0
+    };
     md.push_str(&format!("| Pass Rate | {:.1}% |\n", pass_rate));
     md.push_str(&format!("| Duration | {:.2}s |\n", duration.as_secs_f64()));
     md.push_str("\n");
@@ -3282,10 +3544,16 @@ fn output_golden_markdown_report(
     // By category
     md.push_str(&format!("## By {}\n\n", config.category_label));
     if config.show_skipped {
-        md.push_str(&format!("| {} | Total | Pass | Fail | Skip | Status |\n", config.category_label));
+        md.push_str(&format!(
+            "| {} | Total | Pass | Fail | Skip | Status |\n",
+            config.category_label
+        ));
         md.push_str("|---|-------|------|------|------|--------|\n");
     } else {
-        md.push_str(&format!("| {} | Total | Pass | Fail | Status |\n", config.category_label));
+        md.push_str(&format!(
+            "| {} | Total | Pass | Fail | Status |\n",
+            config.category_label
+        ));
         md.push_str("|---|-------|------|------|--------|\n");
     }
 
@@ -3293,13 +3561,21 @@ fn output_golden_markdown_report(
     categories.sort_by(|a, b| a.0.cmp(b.0));
 
     for (name, stats) in categories {
-        let status = if stats.failed > 0 { "❌ FAIL" } else { "✅ PASS" };
-        if config.show_skipped {
-            md.push_str(&format!("| {} | {} | {} | {} | {} | {} |\n",
-                name, stats.total, stats.passed, stats.failed, stats.skipped, status));
+        let status = if stats.failed > 0 {
+            "❌ FAIL"
         } else {
-            md.push_str(&format!("| {} | {} | {} | {} | {} |\n",
-                name, stats.total, stats.passed, stats.failed, status));
+            "✅ PASS"
+        };
+        if config.show_skipped {
+            md.push_str(&format!(
+                "| {} | {} | {} | {} | {} | {} |\n",
+                name, stats.total, stats.passed, stats.failed, stats.skipped, status
+            ));
+        } else {
+            md.push_str(&format!(
+                "| {} | {} | {} | {} | {} |\n",
+                name, stats.total, stats.passed, stats.failed, status
+            ));
         }
     }
     md.push_str("\n");
@@ -3322,8 +3598,7 @@ fn output_golden_markdown_report(
     }
 
     if let Some(path) = output {
-        std::fs::write(&path, &md)
-            .map_err(|e| RunnerError::IoError(e))?;
+        std::fs::write(&path, &md).map_err(|e| RunnerError::IoError(e))?;
         println!("Report written to: {}", path.display());
     } else {
         println!("{}", md);
@@ -3371,7 +3646,11 @@ impl From<&ParserTestFailure> for GoldenTestFailure {
         GoldenTestFailure {
             path: f.path.clone(),
             category: f.category.clone(),
-            test_type: if f.is_success_test { "success".to_string() } else { "fail".to_string() },
+            test_type: if f.is_success_test {
+                "success".to_string()
+            } else {
+                "fail".to_string()
+            },
             error: f.error.clone(),
             expected_error: f.expected_error.clone(),
             expected_value: None,
@@ -3392,10 +3671,11 @@ fn output_parser_console_report(
     parser_name: &str,
 ) {
     // Convert to unified format
-    let golden_categories: std::collections::HashMap<String, GoldenCategoryStats> =
-        by_category.iter().map(|(k, v)| (k.clone(), v.into())).collect();
-    let golden_failures: Vec<GoldenTestFailure> =
-        failures.iter().map(|f| f.into()).collect();
+    let golden_categories: std::collections::HashMap<String, GoldenCategoryStats> = by_category
+        .iter()
+        .map(|(k, v)| (k.clone(), v.into()))
+        .collect();
+    let golden_failures: Vec<GoldenTestFailure> = failures.iter().map(|f| f.into()).collect();
 
     let config = GoldenReportConfig {
         suite_name: "Parser Tests",
@@ -3431,10 +3711,11 @@ fn output_parser_json_report(
     parser_name: &str,
 ) -> Result<(), RunnerError> {
     // Convert to unified format
-    let golden_categories: std::collections::HashMap<String, GoldenCategoryStats> =
-        by_category.iter().map(|(k, v)| (k.clone(), v.into())).collect();
-    let golden_failures: Vec<GoldenTestFailure> =
-        failures.iter().map(|f| f.into()).collect();
+    let golden_categories: std::collections::HashMap<String, GoldenCategoryStats> = by_category
+        .iter()
+        .map(|(k, v)| (k.clone(), v.into()))
+        .collect();
+    let golden_failures: Vec<GoldenTestFailure> = failures.iter().map(|f| f.into()).collect();
 
     let config = GoldenReportConfig {
         suite_name: "Parser Tests",
@@ -3468,10 +3749,11 @@ fn output_parser_markdown_report(
     parser_name: &str,
 ) -> Result<(), RunnerError> {
     // Convert to unified format
-    let golden_categories: std::collections::HashMap<String, GoldenCategoryStats> =
-        by_category.iter().map(|(k, v)| (k.clone(), v.into())).collect();
-    let golden_failures: Vec<GoldenTestFailure> =
-        failures.iter().map(|f| f.into()).collect();
+    let golden_categories: std::collections::HashMap<String, GoldenCategoryStats> = by_category
+        .iter()
+        .map(|(k, v)| (k.clone(), v.into()))
+        .collect();
+    let golden_failures: Vec<GoldenTestFailure> = failures.iter().map(|f| f.into()).collect();
 
     let config = GoldenReportConfig {
         suite_name: "Parser Tests",
@@ -3492,7 +3774,6 @@ fn output_parser_markdown_report(
         output,
     )
 }
-
 
 /// Get the compiler version by running verum --version.
 fn get_compiler_version() -> Text {
@@ -3577,9 +3858,9 @@ struct MetaTestFile {
 /// Meta test types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MetaTestType {
-    Pass,  // meta-pass: should compile and evaluate without errors
-    Fail,  // meta-fail: should fail with expected error
-    Eval,  // meta-eval: should evaluate to expected value
+    Pass, // meta-pass: should compile and evaluate without errors
+    Fail, // meta-fail: should fail with expected error
+    Eval, // meta-eval: should evaluate to expected value
 }
 
 impl MetaTestType {
@@ -3628,8 +3909,8 @@ async fn run_meta_tests(
 ) -> Result<i32, RunnerError> {
     use std::collections::HashMap;
     use std::time::Instant;
-    use walkdir::WalkDir;
     use verum_ast::FileId;
+    use walkdir::WalkDir;
 
     let start = Instant::now();
     let verbose = verbose_flag || matches!(verbosity, Verbosity::Debug);
@@ -3747,20 +4028,35 @@ async fn run_meta_tests(
     test_files.sort_by(|a, b| a.path.cmp(&b.path));
 
     if test_files.is_empty() {
-        println!("  {} No meta-system tests found in {:?}", "Warning:".yellow(), test_paths);
+        println!(
+            "  {} No meta-system tests found in {:?}",
+            "Warning:".yellow(),
+            test_paths
+        );
         return Ok(0);
     }
 
-    let pass_count = test_files.iter().filter(|t| t.test_type == MetaTestType::Pass).count();
-    let fail_count = test_files.iter().filter(|t| t.test_type == MetaTestType::Fail).count();
-    let eval_count = test_files.iter().filter(|t| t.test_type == MetaTestType::Eval).count();
+    let pass_count = test_files
+        .iter()
+        .filter(|t| t.test_type == MetaTestType::Pass)
+        .count();
+    let fail_count = test_files
+        .iter()
+        .filter(|t| t.test_type == MetaTestType::Fail)
+        .count();
+    let eval_count = test_files
+        .iter()
+        .filter(|t| t.test_type == MetaTestType::Eval)
+        .count();
 
     if !quiet {
-        println!("  Found {} tests ({} meta-pass, {} meta-fail, {} meta-eval)",
+        println!(
+            "  Found {} tests ({} meta-pass, {} meta-fail, {} meta-eval)",
             test_files.len().to_string().cyan(),
             pass_count.to_string().green(),
             fail_count.to_string().yellow(),
-            eval_count.to_string().blue());
+            eval_count.to_string().blue()
+        );
         println!();
     }
 
@@ -3797,8 +4093,7 @@ async fn run_meta_tests(
         total += 1;
 
         // Categorize by subdirectory (subsystem)
-        let category = extract_subsystem(&test_file.path)
-            .unwrap_or_else(|| "root".to_string());
+        let category = extract_subsystem(&test_file.path).unwrap_or_else(|| "root".to_string());
 
         let cat_stats = by_category.entry(category.clone()).or_default();
         cat_stats.total += 1;
@@ -3808,10 +4103,17 @@ async fn run_meta_tests(
             skipped += 1;
             cat_stats.skipped += 1;
             if verbose && !summary_only {
-                let rel_path = test_file.path.file_name()
+                let rel_path = test_file
+                    .path
+                    .file_name()
                     .map(|s| s.to_string_lossy().to_string())
                     .unwrap_or_else(|| test_file.path.to_string_lossy().to_string());
-                println!("  {} {} ({})", "SKIP".yellow(), rel_path, skip_reason.dimmed());
+                println!(
+                    "  {} {} ({})",
+                    "SKIP".yellow(),
+                    rel_path,
+                    skip_reason.dimmed()
+                );
             }
             if let Some(ref pb) = progress_bar {
                 pb.set_message(format!("{} pass, {} fail", passed, failed));
@@ -3840,22 +4142,24 @@ async fn run_meta_tests(
 
         // Run the meta test through the compiler pipeline
         let file_id = FileId::new((idx + 1) as u32);
-        let test_result = run_single_meta_test(
-            &test_file.path,
-            &source,
-            file_id,
-            test_file,
-        );
+        let test_result = run_single_meta_test(&test_file.path, &source, file_id, test_file);
 
         match test_result {
             MetaTestResult::Passed => {
                 passed += 1;
                 cat_stats.passed += 1;
                 if verbose && !summary_only {
-                    let rel_path = test_file.path.file_name()
+                    let rel_path = test_file
+                        .path
+                        .file_name()
                         .map(|s| s.to_string_lossy().to_string())
                         .unwrap_or_else(|| test_file.path.to_string_lossy().to_string());
-                    println!("  {} {} ({})", "PASS".green(), rel_path, test_file.test_type.as_str().dimmed());
+                    println!(
+                        "  {} {} ({})",
+                        "PASS".green(),
+                        rel_path,
+                        test_file.test_type.as_str().dimmed()
+                    );
                 }
             }
             MetaTestResult::Failed(error) => {
@@ -3870,7 +4174,9 @@ async fn run_meta_tests(
                     expected_value: test_file.expected_value.clone(),
                 });
                 if verbose && !summary_only {
-                    let rel_path = test_file.path.file_name()
+                    let rel_path = test_file
+                        .path
+                        .file_name()
                         .map(|s| s.to_string_lossy().to_string())
                         .unwrap_or_else(|| test_file.path.to_string_lossy().to_string());
                     println!("  {} {}", "FAIL".red(), rel_path);
@@ -3883,7 +4189,9 @@ async fn run_meta_tests(
                 skipped += 1;
                 cat_stats.skipped += 1;
                 if verbose && !summary_only {
-                    let rel_path = test_file.path.file_name()
+                    let rel_path = test_file
+                        .path
+                        .file_name()
                         .map(|s| s.to_string_lossy().to_string())
                         .unwrap_or_else(|| test_file.path.to_string_lossy().to_string());
                     println!("  {} {} ({})", "SKIP".yellow(), rel_path, reason.dimmed());
@@ -3908,30 +4216,46 @@ async fn run_meta_tests(
     match output_format.as_str() {
         "json" => {
             output_meta_json_report(
-                total, passed, failed, skipped,
-                &by_category, &failures, duration, output,
+                total,
+                passed,
+                failed,
+                skipped,
+                &by_category,
+                &failures,
+                duration,
+                output,
             )?;
         }
         "markdown" | "md" => {
             output_meta_markdown_report(
-                total, passed, failed, skipped,
-                &by_category, &failures, duration, output,
+                total,
+                passed,
+                failed,
+                skipped,
+                &by_category,
+                &failures,
+                duration,
+                output,
             )?;
         }
         _ => {
             output_meta_console_report(
-                total, passed, failed, skipped,
-                &by_category, &failures, duration, show_failures, use_colors, quiet,
+                total,
+                passed,
+                failed,
+                skipped,
+                &by_category,
+                &failures,
+                duration,
+                show_failures,
+                use_colors,
+                quiet,
             );
         }
     }
 
     // Return exit code
-    if failed > 0 {
-        Ok(1)
-    } else {
-        Ok(0)
-    }
+    if failed > 0 { Ok(1) } else { Ok(0) }
 }
 
 /// Parse a meta test file and extract its directives.
@@ -4007,10 +4331,21 @@ fn extract_subsystem(path: &std::path::Path) -> Option<String> {
     let path_str = path.to_string_lossy();
 
     // Look for known subsystems
-    let subsystems = ["builtins", "expressions", "hygiene", "quote", "sandbox", "type_level", "const_eval", "integration"];
+    let subsystems = [
+        "builtins",
+        "expressions",
+        "hygiene",
+        "quote",
+        "sandbox",
+        "type_level",
+        "const_eval",
+        "integration",
+    ];
 
     for subsystem in &subsystems {
-        if path_str.contains(&format!("/{}/", subsystem)) || path_str.contains(&format!("\\{}\\", subsystem)) {
+        if path_str.contains(&format!("/{}/", subsystem))
+            || path_str.contains(&format!("\\{}\\", subsystem))
+        {
             return Some(subsystem.to_string());
         }
     }
@@ -4043,7 +4378,8 @@ fn run_single_meta_test(
         Ok(m) => m,
         Err(errors) => {
             // Parse failed
-            let error_msg = errors.iter()
+            let error_msg = errors
+                .iter()
                 .map(|e| format!("{:?}", e))
                 .collect::<Vec<_>>()
                 .join("; ");
@@ -4053,11 +4389,15 @@ fn run_single_meta_test(
                     // Check if we expected a parse error
                     if let Some(ref expected) = test_file.expected_error {
                         // Case-insensitive matching for error messages
-                        if error_msg.to_lowercase().contains(&expected.to_lowercase().as_str()) {
+                        if error_msg
+                            .to_lowercase()
+                            .contains(&expected.to_lowercase().as_str())
+                        {
                             MetaTestResult::Passed
                         } else {
                             MetaTestResult::Failed(
-                                format!("Expected error '{}' but got: {}", expected, error_msg).into()
+                                format!("Expected error '{}' but got: {}", expected, error_msg)
+                                    .into(),
                             )
                         }
                     } else {
@@ -4086,7 +4426,7 @@ fn run_single_meta_test(
             // Should fail with expected error
             match meta_result {
                 Ok(_) => MetaTestResult::Failed(
-                    "Expected meta evaluation to fail, but it succeeded".into()
+                    "Expected meta evaluation to fail, but it succeeded".into(),
                 ),
                 Err(error) => {
                     if let Some(ref expected) = test_file.expected_error {
@@ -4101,18 +4441,37 @@ fn run_single_meta_test(
                         //   E400 (type mismatch) → M003
                         let matches = error_lower.contains(&expected_lower.as_str())
                             || match expected_lower.as_str() {
-                                "e100" => error_lower.contains("m001") || error_lower.contains("m004") || error_lower.contains("not found") || error_lower.contains("undefined"),
-                                "e101" => error_lower.contains("m003") || error_lower.contains("m201") || error_lower.contains("requires") || error_lower.contains("type mismatch"),
-                                "e102" => error_lower.contains("m102") || error_lower.contains("arguments"),
-                                "e103" => error_lower.contains("m301") || error_lower.contains("forbidden"),
-                                "e400" => error_lower.contains("m003") || error_lower.contains("type mismatch"),
+                                "e100" => {
+                                    error_lower.contains("m001")
+                                        || error_lower.contains("m004")
+                                        || error_lower.contains("not found")
+                                        || error_lower.contains("undefined")
+                                }
+                                "e101" => {
+                                    error_lower.contains("m003")
+                                        || error_lower.contains("m201")
+                                        || error_lower.contains("requires")
+                                        || error_lower.contains("type mismatch")
+                                }
+                                "e102" => {
+                                    error_lower.contains("m102")
+                                        || error_lower.contains("arguments")
+                                }
+                                "e103" => {
+                                    error_lower.contains("m301")
+                                        || error_lower.contains("forbidden")
+                                }
+                                "e400" => {
+                                    error_lower.contains("m003")
+                                        || error_lower.contains("type mismatch")
+                                }
                                 _ => false,
                             };
                         if matches {
                             MetaTestResult::Passed
                         } else {
                             MetaTestResult::Failed(
-                                format!("Expected error '{}' but got: {}", expected, error).into()
+                                format!("Expected error '{}' but got: {}", expected, error).into(),
                             )
                         }
                     } else {
@@ -4131,7 +4490,8 @@ fn run_single_meta_test(
                             MetaTestResult::Passed
                         } else {
                             MetaTestResult::Failed(
-                                format!("Expected value '{}' but got: '{}'", expected, value).into()
+                                format!("Expected value '{}' but got: '{}'", expected, value)
+                                    .into(),
                             )
                         }
                     } else {
@@ -4152,8 +4512,8 @@ fn run_single_meta_test(
 /// to ensure test behavior matches the actual compiler implementation.
 fn run_meta_evaluation(module: &verum_ast::Module, test_file: &MetaTestFile) -> Result<Text, Text> {
     use verum_ast::{Item, ItemKind};
-    use verum_compiler::meta::{ConstValue, MetaContext, MetaRegistry};
     use verum_common::{Maybe, Text};
+    use verum_compiler::meta::{ConstValue, MetaContext, MetaRegistry};
 
     // Create meta registry and register all meta functions from the module
     let mut registry = MetaRegistry::new();
@@ -4201,15 +4561,15 @@ fn run_meta_evaluation(module: &verum_ast::Module, test_file: &MetaTestFile) -> 
     if context_names.iter().any(|c| c.as_str() == "BuildAssets") {
         if let Some(parent) = test_file.path.parent() {
             let project_root = parent.to_string_lossy().to_string();
-            ctx.build_assets = verum_compiler::meta::BuildAssetsInfo::new()
-                .with_project_root(project_root);
+            ctx.build_assets =
+                verum_compiler::meta::BuildAssetsInfo::new().with_project_root(project_root);
         }
     }
 
     // Register type definitions from the module (for reflection tests)
     for item in module.items.iter() {
         if let ItemKind::Type(type_decl) = &item.kind {
-            use verum_ast::decl::{TypeDeclBody, ProtocolItemKind};
+            use verum_ast::decl::{ProtocolItemKind, TypeDeclBody};
             let type_name = Text::from(type_decl.name.as_str());
 
             match &type_decl.body {
@@ -4236,7 +4596,8 @@ fn run_meta_evaluation(module: &verum_ast::Module, test_file: &MetaTestFile) -> 
                 }
                 TypeDeclBody::Protocol(proto_body) => {
                     // Register as protocol with method names
-                    let methods: verum_common::List<Text> = proto_body.items
+                    let methods: verum_common::List<Text> = proto_body
+                        .items
                         .iter()
                         .filter_map(|proto_item| {
                             if let ProtocolItemKind::Function { decl, .. } = &proto_item.kind {
@@ -4271,25 +4632,26 @@ fn run_meta_evaluation(module: &verum_ast::Module, test_file: &MetaTestFile) -> 
             MetaValue::Text(s) => format!("\"{}\"", s).into(),
             MetaValue::Bytes(bytes) => format!("Bytes[{}]", bytes.len()).into(),
             MetaValue::Array(items) => {
-                let formatted: Vec<String> = items.iter().map(|v| format_value(v).to_string()).collect();
+                let formatted: Vec<String> =
+                    items.iter().map(|v| format_value(v).to_string()).collect();
                 format!("[{}]", formatted.join(", ")).into()
             }
             MetaValue::Tuple(items) => {
-                let formatted: Vec<String> = items.iter().map(|v| format_value(v).to_string()).collect();
+                let formatted: Vec<String> =
+                    items.iter().map(|v| format_value(v).to_string()).collect();
                 format!("({})", formatted.join(", ")).into()
             }
-            MetaValue::Maybe(maybe) => {
-                match maybe {
-                    verum_common::Maybe::Some(v) => format!("Some({})", format_value(v)).into(),
-                    verum_common::Maybe::None => "None".into(),
-                }
-            }
+            MetaValue::Maybe(maybe) => match maybe {
+                verum_common::Maybe::Some(v) => format!("Some({})", format_value(v)).into(),
+                verum_common::Maybe::None => "None".into(),
+            },
             MetaValue::Expr(expr) => format!("Expr({:?})", expr.kind).into(),
             MetaValue::Type(ty) => format!("Type({:?})", ty).into(),
             MetaValue::Pattern(pat) => format!("Pattern({:?})", pat.kind).into(),
             MetaValue::Item(item) => format!("Item({:?})", item.kind).into(),
             MetaValue::Items(items) => {
-                let formatted: Vec<String> = items.iter().map(|v| format_value(v).to_string()).collect();
+                let formatted: Vec<String> =
+                    items.iter().map(|v| format_value(v).to_string()).collect();
                 format!("Items[{}]", formatted.join(", ")).into()
             }
             MetaValue::Map(map) => {
@@ -4350,13 +4712,28 @@ fn run_meta_evaluation(module: &verum_ast::Module, test_file: &MetaTestFile) -> 
             if !context_names.is_empty() {
                 if let Some(func_decl) = module.items.iter().find_map(|item| {
                     if let ItemKind::Function(fd) = &item.kind {
-                        if fd.is_meta && fd.name.as_str() == name.as_str() { Some(fd) } else { None }
-                    } else { None }
+                        if fd.is_meta && fd.name.as_str() == name.as_str() {
+                            Some(fd)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
                 }) {
                     if !func_decl.contexts.is_empty() {
                         for ctx_req in func_decl.contexts.iter() {
-                            let ctx_str = ctx_req.path.segments.last()
-                                .and_then(|s| if let verum_ast::ty::PathSegment::Name(id) = s { Some(id.name.as_str()) } else { None })
+                            let ctx_str = ctx_req
+                                .path
+                                .segments
+                                .last()
+                                .and_then(|s| {
+                                    if let verum_ast::ty::PathSegment::Name(id) = s {
+                                        Some(id.name.as_str())
+                                    } else {
+                                        None
+                                    }
+                                })
                                 .unwrap_or("");
                             if !context_names.iter().any(|c| c.as_str() == ctx_str) {
                                 return Err(format!("M201: Meta function requires context '{}' which is not provided", ctx_str).into());
@@ -4379,8 +4756,12 @@ fn run_meta_evaluation(module: &verum_ast::Module, test_file: &MetaTestFile) -> 
                             let fn_name = fd.name.name.as_str();
                             if fd.is_meta && (fn_name == name_str || name_str.ends_with(fn_name)) {
                                 Some(fd)
-                            } else { None }
-                        } else { None }
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
                     }) {
                         if let verum_common::Maybe::Some(ref ret_ty) = func_decl.return_type {
                             use verum_ast::MetaValue;
@@ -4395,14 +4776,30 @@ fn run_meta_evaluation(module: &verum_ast::Module, test_file: &MetaTestFile) -> 
                                 (MetaValue::Text(_), verum_ast::ty::TypeKind::Bool) => true,
                                 (MetaValue::Text(_), verum_ast::ty::TypeKind::Float) => true,
                                 // Also check Path types (user-defined type names)
-                                (MetaValue::Int(_), verum_ast::ty::TypeKind::Path(path)) => {
-                                    path.segments.last().and_then(|s| if let verum_ast::ty::PathSegment::Name(id) = s { Some(id.name.as_str()) } else { None })
-                                        .map(|n| n == "Bool" || n == "Text").unwrap_or(false)
-                                }
-                                (MetaValue::Text(_), verum_ast::ty::TypeKind::Path(path)) => {
-                                    path.segments.last().and_then(|s| if let verum_ast::ty::PathSegment::Name(id) = s { Some(id.name.as_str()) } else { None })
-                                        .map(|n| n == "Int" || n == "Bool" || n == "Float").unwrap_or(false)
-                                }
+                                (MetaValue::Int(_), verum_ast::ty::TypeKind::Path(path)) => path
+                                    .segments
+                                    .last()
+                                    .and_then(|s| {
+                                        if let verum_ast::ty::PathSegment::Name(id) = s {
+                                            Some(id.name.as_str())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .map(|n| n == "Bool" || n == "Text")
+                                    .unwrap_or(false),
+                                (MetaValue::Text(_), verum_ast::ty::TypeKind::Path(path)) => path
+                                    .segments
+                                    .last()
+                                    .and_then(|s| {
+                                        if let verum_ast::ty::PathSegment::Name(id) = s {
+                                            Some(id.name.as_str())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .map(|n| n == "Int" || n == "Bool" || n == "Float")
+                                    .unwrap_or(false),
                                 _ => false,
                             };
                             if type_mismatch {
@@ -4422,7 +4819,8 @@ fn run_meta_evaluation(module: &verum_ast::Module, test_file: &MetaTestFile) -> 
     // Fallback: evaluate const declarations directly
     for item in module.items.iter() {
         if let ItemKind::Const(const_decl) = &item.kind {
-            let meta_expr = ctx.ast_expr_to_meta_expr(&const_decl.value)
+            let meta_expr = ctx
+                .ast_expr_to_meta_expr(&const_decl.value)
                 .map_err(|e| Text::from(format!("{}", e)))?;
             match ctx.eval_meta_expr(&meta_expr) {
                 Ok(value) => return Ok(format_value(&value)),
@@ -4447,10 +4845,11 @@ fn output_meta_json_report(
     output: Option<PathBuf>,
 ) -> Result<(), RunnerError> {
     // Convert to unified format
-    let golden_categories: std::collections::HashMap<String, GoldenCategoryStats> =
-        by_category.iter().map(|(k, v)| (k.clone(), v.into())).collect();
-    let golden_failures: Vec<GoldenTestFailure> =
-        failures.iter().map(|f| f.into()).collect();
+    let golden_categories: std::collections::HashMap<String, GoldenCategoryStats> = by_category
+        .iter()
+        .map(|(k, v)| (k.clone(), v.into()))
+        .collect();
+    let golden_failures: Vec<GoldenTestFailure> = failures.iter().map(|f| f.into()).collect();
 
     let config = GoldenReportConfig {
         suite_name: "Meta-System Tests",
@@ -4484,10 +4883,11 @@ fn output_meta_markdown_report(
     output: Option<PathBuf>,
 ) -> Result<(), RunnerError> {
     // Convert to unified format
-    let golden_categories: std::collections::HashMap<String, GoldenCategoryStats> =
-        by_category.iter().map(|(k, v)| (k.clone(), v.into())).collect();
-    let golden_failures: Vec<GoldenTestFailure> =
-        failures.iter().map(|f| f.into()).collect();
+    let golden_categories: std::collections::HashMap<String, GoldenCategoryStats> = by_category
+        .iter()
+        .map(|(k, v)| (k.clone(), v.into()))
+        .collect();
+    let golden_failures: Vec<GoldenTestFailure> = failures.iter().map(|f| f.into()).collect();
 
     let config = GoldenReportConfig {
         suite_name: "Meta-System Tests",
@@ -4523,10 +4923,11 @@ fn output_meta_console_report(
     quiet: bool,
 ) {
     // Convert to unified format
-    let golden_categories: std::collections::HashMap<String, GoldenCategoryStats> =
-        by_category.iter().map(|(k, v)| (k.clone(), v.into())).collect();
-    let golden_failures: Vec<GoldenTestFailure> =
-        failures.iter().map(|f| f.into()).collect();
+    let golden_categories: std::collections::HashMap<String, GoldenCategoryStats> = by_category
+        .iter()
+        .map(|(k, v)| (k.clone(), v.into()))
+        .collect();
+    let golden_failures: Vec<GoldenTestFailure> = failures.iter().map(|f| f.into()).collect();
 
     let config = GoldenReportConfig {
         suite_name: "Meta-System Tests",
@@ -4588,7 +4989,10 @@ mod tests {
 
     #[test]
     fn test_tags_to_set() {
-        let tags = tags_to_set(&["cbgr,memory".to_string().into(), "ownership".to_string().into()]);
+        let tags = tags_to_set(&[
+            "cbgr,memory".to_string().into(),
+            "ownership".to_string().into(),
+        ]);
         assert!(tags.contains(&Text::from("cbgr")));
         assert!(tags.contains(&Text::from("memory")));
         assert!(tags.contains(&Text::from("ownership")));

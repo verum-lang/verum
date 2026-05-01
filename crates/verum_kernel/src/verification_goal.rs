@@ -59,9 +59,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::proof_checker::Term;
-use crate::tactic_elaborator::{
-    expr_to_term, proposition_to_term, ElabContext, ElabError,
-};
+use crate::tactic_elaborator::{ElabContext, ElabError, expr_to_term, proposition_to_term};
 
 // =============================================================================
 // VerificationGoal
@@ -340,10 +338,7 @@ pub fn from_fn_decl(
         // Multiple ensures — wrap them in the And connective axiom
         // (registered via tactic_elaborator::register_propositional_connectives).
         let head = match ctx.get_axiom("__verum_kernel_And") {
-            Some(_) => crate::tactic_elaborator::resolve_apply_target(
-                ctx,
-                "__verum_kernel_And",
-            )?,
+            Some(_) => crate::tactic_elaborator::resolve_apply_target(ctx, "__verum_kernel_And")?,
             None => {
                 return Err(ElabError::UnsupportedExpression(
                     "fn with multiple ensures clauses requires \
@@ -357,10 +352,7 @@ pub fn from_fn_decl(
         for clause in iter {
             let next = proposition_to_term(clause, ctx)?;
             acc = Term::App(
-                Box::new(Term::App(
-                    Box::new(head.clone()),
-                    Box::new(acc),
-                )),
+                Box::new(Term::App(Box::new(head.clone()), Box::new(acc))),
                 Box::new(next),
             );
         }
@@ -439,12 +431,9 @@ pub fn from_refined_type(
     ctx: &ElabContext,
 ) -> Result<VerificationGoal, ElabError> {
     match &refined_ty.kind {
-        TypeKind::Refined { base: _, predicate } => from_refinement(
-            Term::Universe(0),
-            &predicate.expr,
-            ty_name,
-            ctx,
-        ),
+        TypeKind::Refined { base: _, predicate } => {
+            from_refinement(Term::Universe(0), &predicate.expr, ty_name, ctx)
+        }
         other => Err(ElabError::UnsupportedExpression(format!(
             "from_refined_type: expected TypeKind::Refined, got {:?}",
             other,
@@ -492,13 +481,12 @@ pub fn from_obligation_source(
     ctx: &ElabContext,
 ) -> Result<VerificationGoal, ElabError> {
     match source {
-        ObligationSource::Theorem { theorem, kind } => {
-            from_theorem_decl(theorem, kind, ctx)
-        }
+        ObligationSource::Theorem { theorem, kind } => from_theorem_decl(theorem, kind, ctx),
         ObligationSource::FnContract(fn_decl) => from_fn_decl(fn_decl, ctx),
-        ObligationSource::RefinedType { refined_ty, ty_name } => {
-            from_refined_type(refined_ty, ty_name, ctx)
-        }
+        ObligationSource::RefinedType {
+            refined_ty,
+            ty_name,
+        } => from_refined_type(refined_ty, ty_name, ctx),
     }
 }
 
@@ -574,8 +562,7 @@ impl VerificationSurface {
 
     /// Whether every visited declaration produced a goal.
     pub fn is_complete(&self) -> bool {
-        self.translation_failures.is_empty()
-            && self.rows.len() == self.total_declarations
+        self.translation_failures.is_empty() && self.rows.len() == self.total_declarations
     }
 }
 
@@ -596,10 +583,7 @@ impl VerificationSurface {
 /// JSON or pretty-printed form. The walker establishes the
 /// contract: every declaration in `items` whose surface generates
 /// an obligation contributes one row to the surface.
-pub fn module_verification_surface(
-    items: &[Item],
-    ctx: &ElabContext,
-) -> VerificationSurface {
+pub fn module_verification_surface(items: &[Item], ctx: &ElabContext) -> VerificationSurface {
     let mut surface = VerificationSurface::empty();
     for item in items {
         let (source, decl_name, kind_tag): (ObligationSource<'_>, String, &'static str) =
@@ -628,15 +612,11 @@ pub fn module_verification_surface(
                     t.name.name.to_string(),
                     "corollary",
                 ),
-                ItemKind::Function(f)
-                    if !f.requires.is_empty() || !f.ensures.is_empty() =>
-                {
-                    (
-                        ObligationSource::FnContract(f),
-                        f.name.name.to_string(),
-                        "fn_contract",
-                    )
-                }
+                ItemKind::Function(f) if !f.requires.is_empty() || !f.ensures.is_empty() => (
+                    ObligationSource::FnContract(f),
+                    f.name.name.to_string(),
+                    "fn_contract",
+                ),
                 _ => continue,
             };
         surface.total_declarations += 1;
@@ -692,10 +672,7 @@ mod tests {
         assert!(!g.is_unconditional());
         assert_eq!(
             g.to_term(),
-            Term::Pi(
-                Box::new(Term::Universe(0)),
-                Box::new(Term::Universe(0)),
-            ),
+            Term::Pi(Box::new(Term::Universe(0)), Box::new(Term::Universe(0)),),
         );
     }
 
@@ -760,9 +737,18 @@ mod tests {
     #[test]
     fn goal_source_kind_tags_are_distinct() {
         let tags: Vec<&'static str> = vec![
-            GoalSource::Theorem { name: String::new() }.kind_tag(),
-            GoalSource::Lemma { name: String::new() }.kind_tag(),
-            GoalSource::Corollary { name: String::new() }.kind_tag(),
+            GoalSource::Theorem {
+                name: String::new(),
+            }
+            .kind_tag(),
+            GoalSource::Lemma {
+                name: String::new(),
+            }
+            .kind_tag(),
+            GoalSource::Corollary {
+                name: String::new(),
+            }
+            .kind_tag(),
             GoalSource::FnContract {
                 fn_name: String::new(),
             }
@@ -778,15 +764,19 @@ mod tests {
             .kind_tag(),
         ];
         let unique: std::collections::BTreeSet<&'static str> = tags.iter().copied().collect();
-        assert_eq!(unique.len(), tags.len(), "kind_tag must be distinct per variant");
+        assert_eq!(
+            unique.len(),
+            tags.len(),
+            "kind_tag must be distinct per variant"
+        );
     }
 
     // ----- AST converter tests -----
 
+    use verum_ast::Literal;
     use verum_ast::decl::TheoremDecl;
     use verum_ast::expr::ExprKind;
     use verum_ast::ty::{Ident, Path, PathSegment};
-    use verum_ast::Literal;
     use verum_common::List;
     use verum_common::Span;
 
@@ -810,7 +800,10 @@ mod tests {
     fn from_theorem_decl_with_true_proposition() {
         let span = Span::dummy();
         let theorem = TheoremDecl::new(
-            Ident { name: "trivial".into(), span },
+            Ident {
+                name: "trivial".into(),
+                span,
+            },
             bool_true_expr(),
             span,
         );
@@ -825,7 +818,10 @@ mod tests {
     fn from_theorem_decl_lemma_kind_marks_source() {
         let span = Span::dummy();
         let theorem = TheoremDecl::new(
-            Ident { name: "helper".into(), span },
+            Ident {
+                name: "helper".into(),
+                span,
+            },
             bool_true_expr(),
             span,
         );
@@ -838,7 +834,10 @@ mod tests {
     fn from_theorem_decl_with_path_proposition_resolves_axiom() {
         let span = Span::dummy();
         let theorem = TheoremDecl::new(
-            Ident { name: "predicate_thm".into(), span },
+            Ident {
+                name: "predicate_thm".into(),
+                span,
+            },
             path_expr("my_pred"),
             span,
         );
@@ -857,7 +856,10 @@ mod tests {
         use verum_ast::ty::{GenericParam, GenericParamKind, Type, TypeKind};
         let span = Span::dummy();
         let mut theorem = TheoremDecl::new(
-            Ident { name: "with_params".into(), span },
+            Ident {
+                name: "with_params".into(),
+                span,
+            },
             bool_true_expr(),
             span,
         );
@@ -865,7 +867,10 @@ mod tests {
         let mut generics = List::new();
         generics.push(GenericParam {
             kind: GenericParamKind::Type {
-                name: Ident { name: "A".into(), span },
+                name: Ident {
+                    name: "A".into(),
+                    span,
+                },
                 bounds: List::new(),
                 default: verum_common::Maybe::None,
             },
@@ -882,7 +887,10 @@ mod tests {
         params.push(FunctionParam::new(
             FunctionParamKind::Regular {
                 pattern: Pattern::ident(
-                    Ident { name: "x".into(), span },
+                    Ident {
+                        name: "x".into(),
+                        span,
+                    },
                     false,
                     span,
                 ),
@@ -894,7 +902,10 @@ mod tests {
         params.push(FunctionParam::new(
             FunctionParamKind::Regular {
                 pattern: Pattern::ident(
-                    Ident { name: "y".into(), span },
+                    Ident {
+                        name: "y".into(),
+                        span,
+                    },
                     false,
                     span,
                 ),
@@ -926,7 +937,9 @@ mod tests {
         let goal = from_refinement(Term::Universe(0), &pred, "PosInt", &ctx).unwrap();
         assert_eq!(goal.hypothesis_count(), 1, "base type is hypothesis");
         assert_eq!(goal.conclusion, Term::Var(0));
-        assert!(matches!(goal.source, GoalSource::Refinement { ref ty_name } if ty_name == "PosInt"));
+        assert!(
+            matches!(goal.source, GoalSource::Refinement { ref ty_name } if ty_name == "PosInt")
+        );
     }
 
     #[test]
@@ -971,9 +984,16 @@ mod tests {
             GoalSource::Theorem { name: "t".into() },
             GoalSource::Lemma { name: "l".into() },
             GoalSource::Corollary { name: "c".into() },
-            GoalSource::FnContract { fn_name: "f".into() },
-            GoalSource::TacticSubgoal { parent: "p".into(), depth: 5 },
-            GoalSource::Refinement { ty_name: "r".into() },
+            GoalSource::FnContract {
+                fn_name: "f".into(),
+            },
+            GoalSource::TacticSubgoal {
+                parent: "p".into(),
+                depth: 5,
+            },
+            GoalSource::Refinement {
+                ty_name: "r".into(),
+            },
         ];
         for src in cases {
             let json = serde_json::to_string(&src).unwrap();
@@ -1014,7 +1034,9 @@ mod tests {
         let goal = from_refined_type(&ty, "PosInt", &ctx).unwrap();
         assert_eq!(goal.hypothesis_count(), 1, "base type as hypothesis");
         assert_eq!(goal.conclusion, Term::Var(0));
-        assert!(matches!(goal.source, GoalSource::Refinement { ref ty_name } if ty_name == "PosInt"));
+        assert!(
+            matches!(goal.source, GoalSource::Refinement { ref ty_name } if ty_name == "PosInt")
+        );
     }
 
     #[test]
@@ -1027,11 +1049,7 @@ mod tests {
         let ctx = ElabContext::new();
         match from_refined_type(&plain_int, "PlainInt", &ctx) {
             Err(ElabError::UnsupportedExpression(msg)) => {
-                assert!(
-                    msg.contains("expected TypeKind::Refined"),
-                    "got: {}",
-                    msg,
-                );
+                assert!(msg.contains("expected TypeKind::Refined"), "got: {}", msg,);
             }
             other => panic!("expected UnsupportedExpression, got {:?}", other),
         }
@@ -1041,7 +1059,10 @@ mod tests {
     fn obligation_source_dispatches_theorem_source() {
         let span = Span::dummy();
         let theorem = TheoremDecl::new(
-            Ident { name: "trivial".into(), span },
+            Ident {
+                name: "trivial".into(),
+                span,
+            },
             bool_true_expr(),
             span,
         );
@@ -1070,7 +1091,9 @@ mod tests {
             &ctx,
         )
         .unwrap();
-        assert!(matches!(goal.source, GoalSource::Refinement { ref ty_name } if ty_name == "PosInt"));
+        assert!(
+            matches!(goal.source, GoalSource::Refinement { ref ty_name } if ty_name == "PosInt")
+        );
     }
 
     // FunctionDecl tests deferred to integration suite — the type
@@ -1087,7 +1110,10 @@ mod tests {
     fn make_theorem_item(name: &str) -> Item {
         let span = Span::dummy();
         let theorem = TheoremDecl::new(
-            Ident { name: name.into(), span },
+            Ident {
+                name: name.into(),
+                span,
+            },
             bool_true_expr(),
             span,
         );
@@ -1118,7 +1144,10 @@ mod tests {
         let span = Span::dummy();
         let make_lemma = |name: &str| {
             let theorem = TheoremDecl::new(
-                Ident { name: name.into(), span },
+                Ident {
+                    name: name.into(),
+                    span,
+                },
                 bool_true_expr(),
                 span,
             );

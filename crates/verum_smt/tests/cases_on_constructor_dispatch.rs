@@ -53,7 +53,9 @@ fn unregistered_constructor_falls_through_to_error() {
     let goal = nontrivial_goal_with_hyp(ctor_call("Some"));
 
     let result = engine.execute_tactic(
-        &ProofTactic::CasesOn { hypothesis: Text::from("h0") },
+        &ProofTactic::CasesOn {
+            hypothesis: Text::from("h0"),
+        },
         &goal,
     );
     assert!(
@@ -74,7 +76,9 @@ fn two_way_variant_emits_two_subgoals() {
     let goal = nontrivial_goal_with_hyp(ctor_call("Some"));
     let subgoals = engine
         .execute_tactic(
-            &ProofTactic::CasesOn { hypothesis: Text::from("h0") },
+            &ProofTactic::CasesOn {
+                hypothesis: Text::from("h0"),
+            },
             &goal,
         )
         .expect("registered constructor must dispatch through cases_on");
@@ -91,17 +95,15 @@ fn three_way_variant_emits_three_subgoals_with_constructor_labels() {
     let mut engine = ProofSearchEngine::new();
     engine.register_variant_type(
         Text::from("Color"),
-        vec![
-            Text::from("Red"),
-            Text::from("Green"),
-            Text::from("Blue"),
-        ],
+        vec![Text::from("Red"), Text::from("Green"), Text::from("Blue")],
     );
 
     let goal = nontrivial_goal_with_hyp(ctor_call("Green"));
     let subgoals = engine
         .execute_tactic(
-            &ProofTactic::CasesOn { hypothesis: Text::from("h0") },
+            &ProofTactic::CasesOn {
+                hypothesis: Text::from("h0"),
+            },
             &goal,
         )
         .expect("3-way variant must dispatch through cases_on");

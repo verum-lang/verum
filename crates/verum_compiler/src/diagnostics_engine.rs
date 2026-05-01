@@ -13,8 +13,8 @@
 
 use colored::Colorize;
 use std::fmt;
-use verum_diagnostics::{Diagnostic, Severity};
 use verum_common::{List, Text};
+use verum_diagnostics::{Diagnostic, Severity};
 
 /// Unified diagnostics engine
 pub struct DiagnosticsEngine {

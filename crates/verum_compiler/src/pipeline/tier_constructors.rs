@@ -28,7 +28,6 @@ use crate::session::Session;
 use super::{CompilationMode, CompilationPipeline};
 
 impl<'s> CompilationPipeline<'s> {
-
     /// Create a pipeline for MLIR JIT mode
     pub fn new_mlir_jit(session: &'s mut Session) -> Self {
         let mut pipeline = Self::new(session);

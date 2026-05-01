@@ -92,7 +92,14 @@ pub fn render_issue(issue: &LintIssue, sources: &mut SourceMap) -> String {
     let help = issue
         .suggestion
         .as_ref()
-        .map(|s| format!("   {} {}: {}", "=".bright_blue().bold(), "help".green().bold(), s))
+        .map(|s| {
+            format!(
+                "   {} {}: {}",
+                "=".bright_blue().bold(),
+                "help".green().bold(),
+                s
+            )
+        })
         .unwrap_or_default();
 
     let mut out = String::new();

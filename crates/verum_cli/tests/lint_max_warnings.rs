@@ -17,7 +17,11 @@ fn binary() -> &'static str {
 
 fn make_fixture(name: &str, body: &str) -> PathBuf {
     let mut dir = std::env::temp_dir();
-    dir.push(format!("verum_lint_maxwarn_{}_{}", name, std::process::id()));
+    dir.push(format!(
+        "verum_lint_maxwarn_{}_{}",
+        name,
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("src")).expect("create src");
     std::fs::write(
@@ -80,10 +84,7 @@ fn budget_exact_passes() {
 fn budget_zero_fails_on_any_warning() {
     let dir = make_fixture("zero", "fn main() {\n    // TODO: a\n}\n");
     let out = run(&dir, &["--max-warnings", "0"]);
-    assert!(
-        !out.status.success(),
-        "budget=0 with 1 warning should fail"
-    );
+    assert!(!out.status.success(), "budget=0 with 1 warning should fail");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("budget") || stderr.contains("max-warnings"),

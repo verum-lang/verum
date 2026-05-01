@@ -192,7 +192,10 @@ pub fn register_builtins(map: &mut BuiltinRegistry) {
 /// Load file content as text
 fn meta_load_text(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
@@ -208,9 +211,15 @@ fn meta_load_text(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<Const
 }
 
 /// Load file content as bytes
-fn meta_include_bytes(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_include_bytes(
+    ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
@@ -229,12 +238,12 @@ fn meta_include_bytes(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<C
 /// pattern as a deterministic-ordered list of (path, bytes)
 /// tuples. Sandbox + caching are inherited from the underlying
 /// `BuildAssetsInfo::load_glob` and `load` paths.
-fn meta_embed_glob(
-    ctx: &mut MetaContext,
-    args: List<ConstValue>,
-) -> Result<ConstValue, MetaError> {
+fn meta_embed_glob(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
     match &args[0] {
         ConstValue::Text(pattern) => {
@@ -263,12 +272,12 @@ fn meta_embed_glob(
 /// the full attribute-form `@codegen` (user meta-fn over the
 /// parsed spec) — once user meta-fns can take a Map argument
 /// they can build whatever AST they want from this surface.
-fn meta_load_toml(
-    ctx: &mut MetaContext,
-    args: List<ConstValue>,
-) -> Result<ConstValue, MetaError> {
+fn meta_load_toml(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
     match &args[0] {
         ConstValue::Text(path) => ctx.build_assets.load_toml(path.as_str()),
@@ -312,10 +321,7 @@ fn meta_load_toml(
 /// canonicalize precheck); the user meta-fn invocation
 /// goes through `execute_user_meta_fn` which enforces the
 /// recursion limit.
-fn meta_codegen(
-    ctx: &mut MetaContext,
-    args: List<ConstValue>,
-) -> Result<ConstValue, MetaError> {
+fn meta_codegen(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if args.len() != 1 && args.len() != 2 {
         return Err(MetaError::ArityMismatch {
             expected: 1,
@@ -396,9 +402,15 @@ fn meta_codegen(
 // ============================================================================
 
 /// Check if file exists
-fn meta_asset_exists(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_asset_exists(
+    ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
@@ -414,9 +426,15 @@ fn meta_asset_exists(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<Co
 }
 
 /// List directory contents
-fn meta_asset_list_dir(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_asset_list_dir(
+    ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
@@ -436,9 +454,15 @@ fn meta_asset_list_dir(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<
 }
 
 /// Get file metadata
-fn meta_asset_metadata(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_asset_metadata(
+    ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
@@ -472,8 +496,7 @@ mod tests {
         let temp_path = temp_dir.path().to_string_lossy().to_string();
 
         let mut ctx = MetaContext::new();
-        ctx.build_assets = BuildAssetsInfo::new()
-            .with_project_root(temp_path);
+        ctx.build_assets = BuildAssetsInfo::new().with_project_root(temp_path);
 
         (ctx, temp_dir)
     }
@@ -646,7 +669,10 @@ mod tests {
         // Resolve the embed alias from the registry and dispatch.
         let mut map = BuiltinRegistry::new();
         register_builtins(&mut map);
-        let info = map.get(&Text::from("embed")).expect("embed registered").clone();
+        let info = map
+            .get(&Text::from("embed"))
+            .expect("embed registered")
+            .clone();
         let args = List::from(vec![ConstValue::Text(Text::from("asset.bin"))]);
         let result = (info.function)(&mut ctx, args).unwrap();
 
@@ -663,7 +689,10 @@ mod tests {
 
         let mut map = BuiltinRegistry::new();
         register_builtins(&mut map);
-        let info = map.get(&Text::from("embed")).expect("embed registered").clone();
+        let info = map
+            .get(&Text::from("embed"))
+            .expect("embed registered")
+            .clone();
         let args = List::from(vec![ConstValue::Text(Text::from("../etc/passwd"))]);
         let result = (info.function)(&mut ctx, args);
         assert!(
@@ -704,7 +733,12 @@ mod tests {
 
         match result {
             ConstValue::Array(pairs) => {
-                assert_eq!(pairs.len(), 2, "expected 2 PNG matches, got {}", pairs.len());
+                assert_eq!(
+                    pairs.len(),
+                    2,
+                    "expected 2 PNG matches, got {}",
+                    pairs.len()
+                );
                 // Deterministic alphabetical order.
                 let icon = match &pairs[0] {
                     ConstValue::Tuple(t) => t,
@@ -1139,10 +1173,7 @@ mod tests {
     #[test]
     fn test_codegen_first_arg_must_be_text() {
         let (mut ctx, _t) = create_test_context();
-        let r = meta_codegen(
-            &mut ctx,
-            List::from(vec![ConstValue::Int(42)]),
-        );
+        let r = meta_codegen(&mut ctx, List::from(vec![ConstValue::Int(42)]));
         assert!(matches!(r, Err(MetaError::TypeMismatch { .. })));
     }
 

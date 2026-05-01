@@ -822,7 +822,10 @@ impl CallGraphBuilder {
             } else {
                 // Create a placeholder function
                 let callee_id = new_function_id();
-                let is_thread_spawn = self.graph.thread_spawn_functions.contains(&callee_name_text);
+                let is_thread_spawn = self
+                    .graph
+                    .thread_spawn_functions
+                    .contains(&callee_name_text);
                 let signature = FunctionSignature {
                     name: callee_name_text.clone(),
                     param_count,

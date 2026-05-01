@@ -28,9 +28,7 @@
 use verum_common::Text;
 use verum_kernel::SmtCertificate;
 
-use super::{
-    DeclarationHeader, DeclKind, ProofReplayBackend, ReplayError, TargetTactic,
-};
+use super::{DeclKind, DeclarationHeader, ProofReplayBackend, ReplayError, TargetTactic};
 
 /// Coq proof-replay backend.
 ///
@@ -168,7 +166,10 @@ fn lower_z3_trace(trace: &verum_common::List<u8>, decl: &DeclarationHeader) -> S
 
     // Universal close-out: `auto` is safe (it does nothing on
     // failure rather than diverging).
-    if matches!(decl.kind, DeclKind::Lemma | DeclKind::Theorem | DeclKind::Corollary) {
+    if matches!(
+        decl.kind,
+        DeclKind::Lemma | DeclKind::Theorem | DeclKind::Corollary
+    ) {
         tactics.push("  auto.");
     }
 
@@ -207,7 +208,10 @@ fn lower_cvc5_trace(trace: &verum_common::List<u8>, decl: &DeclarationHeader) ->
         tactics.push("  reflexivity.");
     }
 
-    if matches!(decl.kind, DeclKind::Lemma | DeclKind::Theorem | DeclKind::Corollary) {
+    if matches!(
+        decl.kind,
+        DeclKind::Lemma | DeclKind::Theorem | DeclKind::Corollary
+    ) {
         tactics.push("  auto.");
     }
 
@@ -276,7 +280,9 @@ mod tests {
     #[test]
     fn coq_replay_z3_asserted_emits_intros() {
         let cert = cert_with_backend_and_trace("z3", "(asserted (= a b))");
-        let t = CoqProofReplay::new().lower(&cert, &theorem_decl("eq_test")).unwrap();
+        let t = CoqProofReplay::new()
+            .lower(&cert, &theorem_decl("eq_test"))
+            .unwrap();
         assert!(!t.admitted);
         assert!(t.source.contains("intros."));
         assert!(t.source.starts_with("Proof."));
@@ -285,47 +291,56 @@ mod tests {
 
     #[test]
     fn coq_replay_z3_th_lemma_emits_lia() {
-        let cert =
-            cert_with_backend_and_trace("z3", "(th-lemma arith :linear)");
-        let t = CoqProofReplay::new().lower(&cert, &theorem_decl("arith")).unwrap();
+        let cert = cert_with_backend_and_trace("z3", "(th-lemma arith :linear)");
+        let t = CoqProofReplay::new()
+            .lower(&cert, &theorem_decl("arith"))
+            .unwrap();
         assert!(t.source.contains("lia."));
     }
 
     #[test]
     fn coq_replay_z3_true_axiom_emits_trivial() {
         let cert = cert_with_backend_and_trace("z3", "(true-axiom)");
-        let t = CoqProofReplay::new().lower(&cert, &theorem_decl("triv")).unwrap();
+        let t = CoqProofReplay::new()
+            .lower(&cert, &theorem_decl("triv"))
+            .unwrap();
         assert!(t.source.contains("trivial."));
     }
 
     #[test]
     fn coq_replay_z3_rewrite_emits_subst() {
         let cert = cert_with_backend_and_trace("z3", "(rewrite (= a b))");
-        let t = CoqProofReplay::new().lower(&cert, &theorem_decl("rw")).unwrap();
+        let t = CoqProofReplay::new()
+            .lower(&cert, &theorem_decl("rw"))
+            .unwrap();
         assert!(t.source.contains("subst."));
     }
 
     #[test]
     fn coq_replay_cvc5_assume_emits_intros() {
         let cert = cert_with_backend_and_trace("cvc5", "(assume h0 phi)");
-        let t = CoqProofReplay::new().lower(&cert, &theorem_decl("c5")).unwrap();
+        let t = CoqProofReplay::new()
+            .lower(&cert, &theorem_decl("c5"))
+            .unwrap();
         assert!(t.source.contains("intros."));
     }
 
     #[test]
     fn coq_replay_cvc5_la_step_emits_lia() {
-        let cert = cert_with_backend_and_trace(
-            "cvc5",
-            "(step t1 (cl phi) :rule la_arith :premises)",
-        );
-        let t = CoqProofReplay::new().lower(&cert, &theorem_decl("c5l")).unwrap();
+        let cert =
+            cert_with_backend_and_trace("cvc5", "(step t1 (cl phi) :rule la_arith :premises)");
+        let t = CoqProofReplay::new()
+            .lower(&cert, &theorem_decl("c5l"))
+            .unwrap();
         assert!(t.source.contains("lia."));
     }
 
     #[test]
     fn coq_replay_unknown_backend_falls_through_to_generic() {
         let cert = cert_with_backend_and_trace("vampire", "any trace");
-        let t = CoqProofReplay::new().lower(&cert, &theorem_decl("v")).unwrap();
+        let t = CoqProofReplay::new()
+            .lower(&cert, &theorem_decl("v"))
+            .unwrap();
         assert!(!t.admitted);
         assert!(t.source.contains("intros."));
         assert!(t.source.contains("auto."));
@@ -334,7 +349,9 @@ mod tests {
     #[test]
     fn coq_replay_unknown_trace_in_z3_falls_back_to_admitted() {
         let cert = cert_with_backend_and_trace("z3", "totally unknown shape");
-        let t = CoqProofReplay::new().lower(&cert, &theorem_decl("u")).unwrap();
+        let t = CoqProofReplay::new()
+            .lower(&cert, &theorem_decl("u"))
+            .unwrap();
         // Theorem kind triggers `auto.` close-out, so source is non-empty.
         // For axiom kind there's no `auto.` emitted → admitted.
         let axiom_t = CoqProofReplay::new()

@@ -17,8 +17,8 @@
 
 // Migrated from src/counterexample.rs to comply with CLAUDE.md test organization.
 
-use verum_smt::counterexample::*;
 use verum_common::{List, Map};
+use verum_smt::counterexample::*;
 
 #[test]
 fn test_counterexample_creation() {

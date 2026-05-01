@@ -96,7 +96,11 @@ pub fn build(
         .run_native_compilation()
         .map_err(|e| CliError::CompilationFailed(e.to_string()))?;
 
-    let opt_tag = if opt_level >= 2 { "optimized" } else { "unoptimized + debuginfo" };
+    let opt_tag = if opt_level >= 2 {
+        "optimized"
+    } else {
+        "unoptimized + debuginfo"
+    };
     ui::success(&format!(
         "[{}] target(s) in {}",
         opt_tag,
@@ -107,11 +111,10 @@ pub fn build(
         let binary_size = std::fs::metadata(&executable_path)
             .map(|m| ui::format_size(m.len()))
             .unwrap_or_else(|_| "unknown".to_string());
-        ui::detail("Binary", &format!(
-            "{} ({})",
-            executable_path.display(),
-            binary_size
-        ));
+        ui::detail(
+            "Binary",
+            &format!("{} ({})", executable_path.display(), binary_size),
+        );
     }
 
     Ok(())
@@ -136,11 +139,21 @@ pub fn check(file: &str, continue_on_error: bool, parse_only: bool) -> Result<()
                 let trimmed = line.trim();
                 if trimmed.starts_with("// @test:") {
                     let test_type = trimmed.trim_start_matches("// @test:").trim();
-                    if matches!(test_type, "parse-pass" | "parser" | "parse-recover" | "parse-fail") {
+                    if matches!(
+                        test_type,
+                        "parse-pass" | "parser" | "parse-recover" | "parse-fail"
+                    ) {
                         is_parse_only = true;
                     }
                     // typecheck-fail, meta-fail, verify-fail tests expect errors
-                    if matches!(test_type, "typecheck-fail" | "parse-fail" | "parse-recover" | "meta-fail" | "verify-fail") {
+                    if matches!(
+                        test_type,
+                        "typecheck-fail"
+                            | "parse-fail"
+                            | "parse-recover"
+                            | "meta-fail"
+                            | "verify-fail"
+                    ) {
                         expects_errors = true;
                     }
                 }
@@ -194,27 +207,51 @@ pub fn check(file: &str, continue_on_error: bool, parse_only: bool) -> Result<()
             // For parse-recover/parse-fail tests with @expect: errors,
             // parse errors are expected — success means errors were found
             if result.is_err() {
-                ui::success(&format!("parsing {} (errors expected) in {}", file, ui::format_duration(start.elapsed())));
+                ui::success(&format!(
+                    "parsing {} (errors expected) in {}",
+                    file,
+                    ui::format_duration(start.elapsed())
+                ));
             } else {
-                ui::success(&format!("parsing {} in {}", file, ui::format_duration(start.elapsed())));
+                ui::success(&format!(
+                    "parsing {} in {}",
+                    file,
+                    ui::format_duration(start.elapsed())
+                ));
             }
         } else {
             result.map_err(|e| CliError::CompilationFailed(e.to_string()))?;
-            ui::success(&format!("parsing {} in {}", file, ui::format_duration(start.elapsed())));
+            ui::success(&format!(
+                "parsing {} in {}",
+                file,
+                ui::format_duration(start.elapsed())
+            ));
         }
     } else if expect_errors {
         // For typecheck-fail tests, errors are expected
         let result = pipeline.run_check_only();
         if result.is_err() {
-            ui::success(&format!("checking {} (errors expected) in {}", file, ui::format_duration(start.elapsed())));
+            ui::success(&format!(
+                "checking {} (errors expected) in {}",
+                file,
+                ui::format_duration(start.elapsed())
+            ));
         } else {
-            ui::success(&format!("checking {} in {}", file, ui::format_duration(start.elapsed())));
+            ui::success(&format!(
+                "checking {} in {}",
+                file,
+                ui::format_duration(start.elapsed())
+            ));
         }
     } else {
         pipeline
             .run_check_only()
             .map_err(|e| CliError::CompilationFailed(e.to_string()))?;
-        ui::success(&format!("checking {} in {}", file, ui::format_duration(start.elapsed())));
+        ui::success(&format!(
+            "checking {} in {}",
+            file,
+            ui::format_duration(start.elapsed())
+        ));
     }
     Ok(())
 }
@@ -363,51 +400,44 @@ pub fn run_with_tier_and_flags(
             // the cached binary directly — sub-millisecond cold
             // start. On miss, run the LLVM pipeline below and
             // store the result.
-            let mut aot_permission_policy:
-                Option<verum_codegen::llvm::AotPermissionPolicy> = None;
-            let aot_cache_key: Option<crate::script::cache::CacheKey> =
-                if is_script_shaped(&input) {
-                    use crate::script::context::{ScriptContext, ScriptContextOptions};
-                    let ctx = ScriptContext::from_path(
-                        &input,
-                        &ScriptContextOptions {
-                            flags: permission_flags.clone(),
-                            compiler_version: env!("CARGO_PKG_VERSION").to_string(),
-                            extra_cache_flags: aot_cache_flag_inputs(),
-                        },
-                    )
-                    .map_err(|e| CliError::Custom(format!("script context: {e}")))?;
-                    if let Some(fm) = ctx.frontmatter.as_ref() {
-                        check_frontmatter_version(fm)?;
-                        if !fm.dependencies.is_empty() {
-                            ui::warn(
-                                "script frontmatter declares dependencies — \
+            let mut aot_permission_policy: Option<verum_codegen::llvm::AotPermissionPolicy> = None;
+            let aot_cache_key: Option<crate::script::cache::CacheKey> = if is_script_shaped(&input)
+            {
+                use crate::script::context::{ScriptContext, ScriptContextOptions};
+                let ctx = ScriptContext::from_path(
+                    &input,
+                    &ScriptContextOptions {
+                        flags: permission_flags.clone(),
+                        compiler_version: env!("CARGO_PKG_VERSION").to_string(),
+                        extra_cache_flags: aot_cache_flag_inputs(),
+                    },
+                )
+                .map_err(|e| CliError::Custom(format!("script context: {e}")))?;
+                if let Some(fm) = ctx.frontmatter.as_ref() {
+                    check_frontmatter_version(fm)?;
+                    if !fm.dependencies.is_empty() {
+                        ui::warn(
+                            "script frontmatter declares dependencies — \
                                  registry resolution lands separately; for \
                                  now they are ignored",
-                            );
-                        }
-                    }
-                    aot_permission_policy = build_aot_permission_policy(&ctx);
-                    if aot_permission_policy.is_some() {
-                        ui::detail(
-                            "Permissions",
-                            &format!(
-                                "{} grants baked into AOT binary",
-                                ctx.permissions.len()
-                            ),
                         );
                     }
-                    if let Some(cached) = lookup_aot_binary(ctx.cache_key) {
-                        ui::status(
-                            "Running",
-                            &format!("`{}` (cached AOT)", cached.display()),
-                        );
-                        return exec_native_binary(&cached, &args);
-                    }
-                    Some(ctx.cache_key)
-                } else {
-                    None
-                };
+                }
+                aot_permission_policy = build_aot_permission_policy(&ctx);
+                if aot_permission_policy.is_some() {
+                    ui::detail(
+                        "Permissions",
+                        &format!("{} grants baked into AOT binary", ctx.permissions.len()),
+                    );
+                }
+                if let Some(cached) = lookup_aot_binary(ctx.cache_key) {
+                    ui::status("Running", &format!("`{}` (cached AOT)", cached.display()));
+                    return exec_native_binary(&cached, &args);
+                }
+                Some(ctx.cache_key)
+            } else {
+                None
+            };
 
             let options = CompilerOptions {
                 input: input.clone(),
@@ -491,8 +521,7 @@ pub fn run_with_tier_and_flags(
                         ..Default::default()
                     };
                     let mut fallback_session = Session::new(fallback_options);
-                    let mut fallback_pipeline =
-                        CompilationPipeline::new(&mut fallback_session);
+                    let mut fallback_pipeline = CompilationPipeline::new(&mut fallback_session);
                     fallback_pipeline
                         .run_interpreter(args)
                         .map_err(|e| CliError::RuntimeError(e.to_string()))?;
@@ -540,20 +569,14 @@ impl Drop for ScriptTempFile {
 /// `kind` is a short descriptor (`"eval"` / `"stdin"`) embedded in
 /// the filename for diagnostic clarity. PID + nanosecond suffix
 /// disambiguates concurrent invocations.
-pub fn synthesize_script_temp(
-    body: &str,
-    kind: &str,
-) -> std::io::Result<ScriptTempFile> {
+pub fn synthesize_script_temp(body: &str, kind: &str) -> std::io::Result<ScriptTempFile> {
     use std::io::Write;
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    let path = std::env::temp_dir().join(format!(
-        "verum-{kind}-{}-{}.vr",
-        std::process::id(),
-        nanos
-    ));
+    let path =
+        std::env::temp_dir().join(format!("verum-{kind}-{}-{}.vr", std::process::id(), nanos));
     let mut f = std::fs::File::create(&path)?;
     if !body.starts_with("#!") {
         writeln!(f, "#!/usr/bin/env verum")?;
@@ -608,9 +631,7 @@ fn is_script_shaped(path: &std::path::Path) -> bool {
 /// frontmatter `verum = "<spec>"` constraint. Returns Ok on match
 /// (or no constraint), Err with a human-actionable message on
 /// mismatch or unparseable spec.
-fn check_frontmatter_version(
-    fm: &crate::script::frontmatter::Frontmatter,
-) -> Result<(), CliError> {
+fn check_frontmatter_version(fm: &crate::script::frontmatter::Frontmatter) -> Result<(), CliError> {
     let Some(spec) = fm.verum.as_deref() else {
         return Ok(());
     };
@@ -693,16 +714,14 @@ fn run_script_interpreted(
         compiler_version: env!("CARGO_PKG_VERSION").to_string(),
         extra_cache_flags: extra_flags,
     };
-    let ctx = ScriptContext::from_path(input, &ctx_opts).map_err(|e| {
-        CliError::Custom(format!("script context: {e}"))
-    })?;
+    let ctx = ScriptContext::from_path(input, &ctx_opts)
+        .map_err(|e| CliError::Custom(format!("script context: {e}")))?;
 
     // 2. Frontmatter version gate. A script with `verum = "X.Y"` that
     //  doesn't match the running build fails fast with a clear
     //  diagnostic instead of producing a confusing parse error
     //  half a megabyte deeper into the pipeline.
-    let mut script_cog_resolver: Option<verum_modules::cog_resolver::CogResolver> =
-        None;
+    let mut script_cog_resolver: Option<verum_modules::cog_resolver::CogResolver> = None;
     if let Some(fm) = ctx.frontmatter.as_ref() {
         check_frontmatter_version(fm)?;
         if !fm.dependencies.is_empty() {
@@ -828,9 +847,8 @@ fn execute_cached_vbc(
     permission_policy: Option<verum_compiler::session::ScriptPermissionPolicy>,
     cog_resolver: Option<verum_modules::cog_resolver::CogResolver>,
 ) -> Result<(), CliError> {
-    let vbc_module = verum_vbc::deserialize::deserialize_module(vbc_bytes).map_err(|e| {
-        CliError::Custom(format!("cached VBC deserialise failed: {e}"))
-    })?;
+    let vbc_module = verum_vbc::deserialize::deserialize_module(vbc_bytes)
+        .map_err(|e| CliError::Custom(format!("cached VBC deserialise failed: {e}")))?;
     options.input = input.to_path_buf();
     let mut session = Session::new(options);
     if let Some(policy) = permission_policy {
@@ -952,10 +970,7 @@ fn resolve_script_dependencies(
                 git_count += 1;
             }
             DepSpec::Long(long) => {
-                let entry = resolve_registry_dep(
-                    long.name.as_str(),
-                    long.version.as_deref(),
-                )?;
+                let entry = resolve_registry_dep(long.name.as_str(), long.version.as_deref())?;
                 resolver.register_cog(
                     long.name.as_str(),
                     entry.version.as_str(),
@@ -979,13 +994,22 @@ fn resolve_script_dependencies(
     }
 
     if path_count > 0 {
-        ui::detail("Dependencies", &format!("{path_count} path-cog(s) registered"));
+        ui::detail(
+            "Dependencies",
+            &format!("{path_count} path-cog(s) registered"),
+        );
     }
     if registry_count > 0 {
-        ui::detail("Dependencies", &format!("{registry_count} registry-cog(s) registered"));
+        ui::detail(
+            "Dependencies",
+            &format!("{registry_count} registry-cog(s) registered"),
+        );
     }
     if git_count > 0 {
-        ui::detail("Dependencies", &format!("{git_count} git-cog(s) registered"));
+        ui::detail(
+            "Dependencies",
+            &format!("{git_count} git-cog(s) registered"),
+        );
     }
     Ok(ResolvedDeps { resolver, locked })
 }
@@ -1062,12 +1086,8 @@ fn resolve_registry_dep(
             name,
             version,
         );
-        let _archive = cache_manager.download_cog(
-            name,
-            &version,
-            url.as_str(),
-            metadata.checksum.as_str(),
-        )?;
+        let _archive =
+            cache_manager.download_cog(name, &version, url.as_str(), metadata.checksum.as_str())?;
         cache_manager.extract(&archive_path, &extracted_root)?;
     }
 
@@ -1079,7 +1099,11 @@ fn resolve_registry_dep(
         source: format!("registry+{}", crate::registry::DEFAULT_REGISTRY),
         integrity,
     };
-    Ok(ResolvedDepEntry { root, version, locked })
+    Ok(ResolvedDepEntry {
+        root,
+        version,
+        locked,
+    })
 }
 
 /// Resolve a git-form dependency: clone into the git cache (skip if
@@ -1089,7 +1113,10 @@ fn resolve_git_dep(
     long: &crate::script::frontmatter::DepLong,
 ) -> Result<ResolvedDepEntry, CliError> {
     let url = long.git.as_deref().ok_or_else(|| {
-        CliError::Custom(format!("git dependency `{}` missing `git = ...` URL", long.name))
+        CliError::Custom(format!(
+            "git dependency `{}` missing `git = ...` URL",
+            long.name
+        ))
     })?;
     let pin = long
         .rev
@@ -1103,40 +1130,61 @@ fn resolve_git_dep(
     if !dest.join(".git").exists() {
         std::fs::create_dir_all(&dest)?;
         let status = std::process::Command::new("git")
-            .arg("clone").arg("--quiet").arg(url).arg(&dest)
+            .arg("clone")
+            .arg("--quiet")
+            .arg(url)
+            .arg(&dest)
             .status()
-            .map_err(|e| CliError::Custom(format!(
-                "git dep `{}`: spawn `git clone` failed: {e}", long.name
-            )))?;
+            .map_err(|e| {
+                CliError::Custom(format!(
+                    "git dep `{}`: spawn `git clone` failed: {e}",
+                    long.name
+                ))
+            })?;
         if !status.success() {
             return Err(CliError::Custom(format!(
                 "git dep `{}`: `git clone {}` failed (exit {})",
-                long.name, url, status.code().unwrap_or(-1),
+                long.name,
+                url,
+                status.code().unwrap_or(-1),
             )));
         }
     }
 
     let status = std::process::Command::new("git")
-        .arg("-C").arg(&dest)
-        .arg("checkout").arg("--quiet").arg(pin)
+        .arg("-C")
+        .arg(&dest)
+        .arg("checkout")
+        .arg("--quiet")
+        .arg(pin)
         .status()
-        .map_err(|e| CliError::Custom(format!(
-            "git dep `{}`: spawn `git checkout` failed: {e}", long.name
-        )))?;
+        .map_err(|e| {
+            CliError::Custom(format!(
+                "git dep `{}`: spawn `git checkout` failed: {e}",
+                long.name
+            ))
+        })?;
     if !status.success() {
         return Err(CliError::Custom(format!(
             "git dep `{}`: `git checkout {}` failed (exit {})",
-            long.name, pin, status.code().unwrap_or(-1),
+            long.name,
+            pin,
+            status.code().unwrap_or(-1),
         )));
     }
 
     let sha_out = std::process::Command::new("git")
-        .arg("-C").arg(&dest)
-        .arg("rev-parse").arg("HEAD")
+        .arg("-C")
+        .arg(&dest)
+        .arg("rev-parse")
+        .arg("HEAD")
         .output()
-        .map_err(|e| CliError::Custom(format!(
-            "git dep `{}`: spawn `git rev-parse` failed: {e}", long.name
-        )))?;
+        .map_err(|e| {
+            CliError::Custom(format!(
+                "git dep `{}`: spawn `git rev-parse` failed: {e}",
+                long.name
+            ))
+        })?;
     let sha = String::from_utf8_lossy(&sha_out.stdout).trim().to_string();
     let version = long.version.clone().unwrap_or_else(|| sha.clone());
 
@@ -1147,7 +1195,11 @@ fn resolve_git_dep(
         source: format!("git+{}#{}", url, sha),
         integrity,
     };
-    Ok(ResolvedDepEntry { root: dest, version, locked })
+    Ok(ResolvedDepEntry {
+        root: dest,
+        version,
+        locked,
+    })
 }
 
 /// Check if the extracted directory looks like a populated cog
@@ -1211,10 +1263,7 @@ fn persist_script_lockfile(
     let path = ScriptLockfile::sidecar_path(script_path);
     let mut fresh = ctx.fresh_lockfile(locked_deps.to_vec());
     if let Err(e) = fresh.write_to(&path) {
-        ui::warn(&format!(
-            "could not write lockfile {}: {e}",
-            path.display()
-        ));
+        ui::warn(&format!("could not write lockfile {}: {e}", path.display()));
     }
     Ok(())
 }
@@ -1229,7 +1278,9 @@ fn persist_script_lockfile(
 fn compute_path_cog_integrity(root: &std::path::Path) -> String {
     let mut entries: Vec<(String, [u8; 32])> = Vec::new();
     fn walk(dir: &std::path::Path, root: &std::path::Path, out: &mut Vec<(String, [u8; 32])>) {
-        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
         for entry in rd.flatten() {
             let path = entry.path();
             if path.is_dir() {
@@ -1384,8 +1435,12 @@ fn build_aot_permission_policy(
     // interpreter policy treats them as always allowed regardless of
     // declared grants. Mirror that here so AOT and interpreter agree
     // on every scope, not just the kinds the script wrote.
-    policy.always_allow.insert(PermissionScope::Memory.to_wire_tag());
-    policy.always_allow.insert(PermissionScope::Cryptography.to_wire_tag());
+    policy
+        .always_allow
+        .insert(PermissionScope::Memory.to_wire_tag());
+    policy
+        .always_allow
+        .insert(PermissionScope::Cryptography.to_wire_tag());
 
     for grant in iterate_grants(&ctx.permissions) {
         let Some(scope) = cli_kind_to_router_scope(grant.kind) else {
@@ -1532,18 +1587,16 @@ fn aot_cache_root() -> Option<std::path::PathBuf> {
 /// Look up a previously-compiled AOT binary for the given cache key.
 /// Returns `Some(path)` on hit (binary exists at the canonical
 /// location), `None` on miss or any I/O failure.
-fn lookup_aot_binary(
-    key: crate::script::cache::CacheKey,
-) -> Option<std::path::PathBuf> {
+fn lookup_aot_binary(key: crate::script::cache::CacheKey) -> Option<std::path::PathBuf> {
     let root = aot_cache_root()?;
     let entry = root.join(key.to_hex());
-    let bin_name = if cfg!(windows) { "binary.exe" } else { "binary" };
-    let bin = entry.join(bin_name);
-    if bin.is_file() {
-        Some(bin)
+    let bin_name = if cfg!(windows) {
+        "binary.exe"
     } else {
-        None
-    }
+        "binary"
+    };
+    let bin = entry.join(bin_name);
+    if bin.is_file() { Some(bin) } else { None }
 }
 
 /// Persist a freshly-compiled AOT binary into the cache. Atomic at
@@ -1559,13 +1612,13 @@ fn store_aot_binary(
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "$HOME unset"))?;
     let entry = root.join(key.to_hex());
     std::fs::create_dir_all(&entry)?;
-    let bin_name = if cfg!(windows) { "binary.exe" } else { "binary" };
+    let bin_name = if cfg!(windows) {
+        "binary.exe"
+    } else {
+        "binary"
+    };
     let final_path = entry.join(bin_name);
-    let tmp_path = entry.join(format!(
-        "{}.tmp-{}",
-        bin_name,
-        std::process::id()
-    ));
+    let tmp_path = entry.join(format!("{}.tmp-{}", bin_name, std::process::id()));
     std::fs::copy(src_binary, &tmp_path)?;
     // Preserve the executable bit on Unix so the cached binary can
     // be exec'd directly without a chmod step on every lookup.
@@ -1584,10 +1637,7 @@ fn store_aot_binary(
 /// exit code. Mirrors the live-compile path's exec semantics so the
 /// observed behaviour is identical between cache-hit and cache-miss
 /// runs.
-fn exec_native_binary(
-    binary: &std::path::Path,
-    args: &List<Text>,
-) -> Result<(), CliError> {
+fn exec_native_binary(binary: &std::path::Path, args: &List<Text>) -> Result<(), CliError> {
     let args_str: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
     let status = std::process::Command::new(binary)
         .args(&args_str)
@@ -1631,7 +1681,11 @@ fn print_phase_timings(session: &Session) {
     let mut total = std::time::Duration::ZERO;
     for (name, duration) in &phases {
         total += *duration;
-        eprintln!("  {:<19}{:>8.1}ms", format!("{}:", name), duration.as_secs_f64() * 1000.0);
+        eprintln!(
+            "  {:<19}{:>8.1}ms",
+            format!("{}:", name),
+            duration.as_secs_f64() * 1000.0
+        );
     }
 
     eprintln!("  ────────────────────────────────────");

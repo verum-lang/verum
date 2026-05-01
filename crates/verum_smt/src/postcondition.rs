@@ -17,8 +17,8 @@ use crate::counterexample::{CounterExample, CounterExampleExtractor};
 use crate::rsl_parser::RslClause;
 use crate::translate::{TranslationError, Translator};
 use verum_ast::Expr;
-use verum_common::{List, Map, Maybe, Text};
 use verum_common::ToText;
+use verum_common::{List, Map, Maybe, Text};
 
 /// Result type for postcondition operations.
 pub type PostconditionResult<T> = Result<T, PostconditionError>;

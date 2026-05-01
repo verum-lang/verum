@@ -112,12 +112,12 @@
 //! dibuilder.finalize();
 //! ```
 
+use crate::AddressSpace;
 use crate::basic_block::BasicBlock;
 use crate::context::{AsContextRef, Context};
 pub use crate::debug_info::flags::{DIFlags, DIFlagsConstants};
 use crate::module::Module;
 use crate::values::{AsValueRef, BasicValueEnum, InstructionValue, MetadataValue, PointerValue};
-use crate::AddressSpace;
 
 use verum_llvm_sys::core::LLVMMetadataAsValue;
 
@@ -130,16 +130,20 @@ use verum_llvm_sys::debuginfo::LLVMTemporaryMDNode;
 use verum_llvm_sys::debuginfo::{LLVMCreateDIBuilder, LLVMCreateDIBuilderDisallowUnresolved};
 use verum_llvm_sys::debuginfo::{
     LLVMDIBuilderCreateArrayType, LLVMDIBuilderCreateAutoVariable, LLVMDIBuilderCreateBasicType,
-    LLVMDIBuilderCreateCompileUnit, LLVMDIBuilderCreateDebugLocation, LLVMDIBuilderCreateExpression,
-    LLVMDIBuilderCreateFile, LLVMDIBuilderCreateFunction, LLVMDIBuilderCreateLexicalBlock,
-    LLVMDIBuilderCreateMemberType, LLVMDIBuilderCreateNameSpace, LLVMDIBuilderCreateParameterVariable,
-    LLVMDIBuilderCreatePointerType, LLVMDIBuilderCreateReferenceType, LLVMDIBuilderCreateStructType,
+    LLVMDIBuilderCreateCompileUnit, LLVMDIBuilderCreateDebugLocation,
+    LLVMDIBuilderCreateExpression, LLVMDIBuilderCreateFile, LLVMDIBuilderCreateFunction,
+    LLVMDIBuilderCreateLexicalBlock, LLVMDIBuilderCreateMemberType, LLVMDIBuilderCreateNameSpace,
+    LLVMDIBuilderCreateParameterVariable, LLVMDIBuilderCreatePointerType,
+    LLVMDIBuilderCreateReferenceType, LLVMDIBuilderCreateStructType,
     LLVMDIBuilderCreateSubroutineType, LLVMDIBuilderCreateUnionType, LLVMDIBuilderFinalize,
-    LLVMDIBuilderGetOrCreateSubrange, LLVMDILocationGetColumn, LLVMDILocationGetLine, LLVMDILocationGetScope,
-    LLVMDITypeGetAlignInBits, LLVMDITypeGetOffsetInBits, LLVMDITypeGetSizeInBits,
+    LLVMDIBuilderGetOrCreateSubrange, LLVMDILocationGetColumn, LLVMDILocationGetLine,
+    LLVMDILocationGetScope, LLVMDITypeGetAlignInBits, LLVMDITypeGetOffsetInBits,
+    LLVMDITypeGetSizeInBits,
 };
 
-use verum_llvm_sys::debuginfo::{LLVMDIBuilderCreateEnumerationType, LLVMDIBuilderCreateEnumerator};
+use verum_llvm_sys::debuginfo::{
+    LLVMDIBuilderCreateEnumerationType, LLVMDIBuilderCreateEnumerator,
+};
 
 // LLVM 17+ renamed debug info insert functions to Record versions
 use verum_llvm_sys::debuginfo::{
@@ -148,14 +152,15 @@ use verum_llvm_sys::debuginfo::{
     LLVMDIBuilderInsertDeclareRecordBefore as LLVMDIBuilderInsertDeclareBefore,
 };
 
-
 use verum_llvm_sys::prelude::LLVMValueRef;
 
-use verum_llvm_sys::debuginfo::{LLVMDIBuilderCreateConstantValueExpression, LLVMDIBuilderCreateGlobalVariableExpression};
-use verum_llvm_sys::prelude::{LLVMDIBuilderRef, LLVMMetadataRef};
 use std::convert::TryInto;
 use std::marker::PhantomData;
 use std::ops::Range;
+use verum_llvm_sys::debuginfo::{
+    LLVMDIBuilderCreateConstantValueExpression, LLVMDIBuilderCreateGlobalVariableExpression,
+};
+use verum_llvm_sys::prelude::{LLVMDIBuilderRef, LLVMMetadataRef};
 
 /// Gets the version of debug metadata produced by the current LLVM version.
 pub fn debug_metadata_version() -> libc::c_uint {
@@ -426,7 +431,9 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
                 line,
                 column,
                 scope.metadata_ref,
-                inlined_at.map(|l| l.metadata_ref).unwrap_or(std::ptr::null_mut()),
+                inlined_at
+                    .map(|l| l.metadata_ref)
+                    .unwrap_or(std::ptr::null_mut()),
             )
         };
         DILocation {
@@ -507,7 +514,8 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
         runtime_language: u32,
         unique_id: &str,
     ) -> DICompositeType<'ctx> {
-        let mut elements: Vec<LLVMMetadataRef> = elements.iter().map(|dt| dt.metadata_ref).collect();
+        let mut elements: Vec<LLVMMetadataRef> =
+            elements.iter().map(|dt| dt.metadata_ref).collect();
         let metadata_ref = unsafe {
             LLVMDIBuilderCreateUnionType(
                 self.builder,
@@ -582,7 +590,8 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
         vtable_holder: Option<DIType<'ctx>>,
         unique_id: &str,
     ) -> DICompositeType<'ctx> {
-        let mut elements: Vec<LLVMMetadataRef> = elements.iter().map(|dt| dt.metadata_ref).collect();
+        let mut elements: Vec<LLVMMetadataRef> =
+            elements.iter().map(|dt| dt.metadata_ref).collect();
         let derived_from = derived_from.map_or(std::ptr::null_mut(), |dt| dt.metadata_ref);
         let vtable_holder = vtable_holder.map_or(std::ptr::null_mut(), |dt| dt.metadata_ref);
         let metadata_ref = unsafe {
@@ -670,7 +679,8 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
 
     /// Creates a pointer type
     pub fn create_reference_type(&self, pointee: DIType<'ctx>, tag: u32) -> DIDerivedType<'ctx> {
-        let metadata_ref = unsafe { LLVMDIBuilderCreateReferenceType(self.builder, tag, pointee.metadata_ref) };
+        let metadata_ref =
+            unsafe { LLVMDIBuilderCreateReferenceType(self.builder, tag, pointee.metadata_ref) };
 
         DIDerivedType {
             metadata_ref,
@@ -725,7 +735,8 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
         elements: &[DIEnumerator<'ctx>],
         inner_type: DIType<'ctx>,
     ) -> DICompositeType<'ctx> {
-        let mut elements: Vec<LLVMMetadataRef> = elements.iter().map(|dt| dt.metadata_ref).collect();
+        let mut elements: Vec<LLVMMetadataRef> =
+            elements.iter().map(|dt| dt.metadata_ref).collect();
         let metadata_ref = unsafe {
             LLVMDIBuilderCreateEnumerationType(
                 self.builder,
@@ -749,9 +760,20 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
     }
 
     /// Create an enumerator
-    pub fn create_enumerator(&self, name: &str, value: i64, is_unsigned: bool) -> DIEnumerator<'ctx> {
+    pub fn create_enumerator(
+        &self,
+        name: &str,
+        value: i64,
+        is_unsigned: bool,
+    ) -> DIEnumerator<'ctx> {
         let metadata_ref = unsafe {
-            LLVMDIBuilderCreateEnumerator(self.builder, name.as_ptr() as _, name.len(), value, is_unsigned as i32)
+            LLVMDIBuilderCreateEnumerator(
+                self.builder,
+                name.as_ptr() as _,
+                name.len(),
+                value,
+                is_unsigned as i32,
+            )
         };
 
         DIEnumerator {
@@ -799,7 +821,8 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
     }
 
     pub fn create_constant_expression(&self, value: i64) -> DIExpression<'ctx> {
-        let metadata_ref = unsafe { LLVMDIBuilderCreateConstantValueExpression(self.builder, value as _) };
+        let metadata_ref =
+            unsafe { LLVMDIBuilderCreateConstantValueExpression(self.builder, value as _) };
 
         DIExpression {
             metadata_ref,
@@ -871,7 +894,12 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
         }
     }
 
-    pub fn create_namespace(&self, scope: DIScope<'ctx>, name: &str, export_symbols: bool) -> DINamespace<'ctx> {
+    pub fn create_namespace(
+        &self,
+        scope: DIScope<'ctx>,
+        name: &str,
+        export_symbols: bool,
+    ) -> DINamespace<'ctx> {
         let metadata_ref = unsafe {
             LLVMDIBuilderCreateNameSpace(
                 self.builder,
@@ -900,8 +928,11 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
             LLVMDIBuilderInsertDeclareBefore(
                 self.builder,
                 storage.as_value_ref(),
-                var_info.map(|v| v.metadata_ref).unwrap_or(std::ptr::null_mut()),
-                expr.unwrap_or_else(|| self.create_expression(vec![])).metadata_ref,
+                var_info
+                    .map(|v| v.metadata_ref)
+                    .unwrap_or(std::ptr::null_mut()),
+                expr.unwrap_or_else(|| self.create_expression(vec![]))
+                    .metadata_ref,
                 debug_loc.metadata_ref,
                 instruction.as_value_ref(),
             )
@@ -926,8 +957,11 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
             LLVMDIBuilderInsertDeclareAtEnd(
                 self.builder,
                 storage.as_value_ref(),
-                var_info.map(|v| v.metadata_ref).unwrap_or(std::ptr::null_mut()),
-                expr.unwrap_or_else(|| self.create_expression(vec![])).metadata_ref,
+                var_info
+                    .map(|v| v.metadata_ref)
+                    .unwrap_or(std::ptr::null_mut()),
+                expr.unwrap_or_else(|| self.create_expression(vec![]))
+                    .metadata_ref,
                 debug_loc.metadata_ref,
                 block.basic_block,
             )
@@ -968,7 +1002,8 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
                 self.builder,
                 value.as_value_ref(),
                 var_info.metadata_ref,
-                expr.unwrap_or_else(|| self.create_expression(vec![])).metadata_ref,
+                expr.unwrap_or_else(|| self.create_expression(vec![]))
+                    .metadata_ref,
                 debug_loc.metadata_ref,
                 instruction.as_value_ref(),
             )
@@ -984,7 +1019,10 @@ impl<'ctx> DebugInfoBuilder<'ctx> {
     ///
 
     /// All placeholders must be replaced before calling finalize().
-    pub unsafe fn create_placeholder_derived_type(&self, context: impl AsContextRef<'ctx>) -> DIDerivedType<'ctx> {
+    pub unsafe fn create_placeholder_derived_type(
+        &self,
+        context: impl AsContextRef<'ctx>,
+    ) -> DIDerivedType<'ctx> {
         let metadata_ref = LLVMTemporaryMDNode(context.as_ctx_ref(), std::ptr::null_mut(), 0);
         DIDerivedType {
             metadata_ref,
@@ -1447,13 +1485,16 @@ mod flags {
         const RVALUE_REFERENCE: DIFlags = verum_llvm_sys::debuginfo::LLVMDIFlagRValueReference;
         const RESERVED: DIFlags = verum_llvm_sys::debuginfo::LLVMDIFlagReserved;
         const SINGLE_INHERITANCE: DIFlags = verum_llvm_sys::debuginfo::LLVMDIFlagSingleInheritance;
-        const MULTIPLE_INHERITANCE: DIFlags = verum_llvm_sys::debuginfo::LLVMDIFlagMultipleInheritance;
-        const VIRTUAL_INHERITANCE: DIFlags = verum_llvm_sys::debuginfo::LLVMDIFlagVirtualInheritance;
+        const MULTIPLE_INHERITANCE: DIFlags =
+            verum_llvm_sys::debuginfo::LLVMDIFlagMultipleInheritance;
+        const VIRTUAL_INHERITANCE: DIFlags =
+            verum_llvm_sys::debuginfo::LLVMDIFlagVirtualInheritance;
         const INTRODUCED_VIRTUAL: DIFlags = verum_llvm_sys::debuginfo::LLVMDIFlagIntroducedVirtual;
         const BIT_FIELD: DIFlags = verum_llvm_sys::debuginfo::LLVMDIFlagBitField;
         const NO_RETURN: DIFlags = verum_llvm_sys::debuginfo::LLVMDIFlagNoReturn;
         const TYPE_PASS_BY_VALUE: DIFlags = verum_llvm_sys::debuginfo::LLVMDIFlagTypePassByValue;
-        const TYPE_PASS_BY_REFERENCE: DIFlags = verum_llvm_sys::debuginfo::LLVMDIFlagTypePassByReference;
+        const TYPE_PASS_BY_REFERENCE: DIFlags =
+            verum_llvm_sys::debuginfo::LLVMDIFlagTypePassByReference;
         //
 
         //const ENUM_CLASS: DIFlags = verum_llvm_sys::debuginfo::LLVMDIFlagEnumClass;
@@ -1462,7 +1503,8 @@ mod flags {
         //
 
         //const LITTLE_ENDIAN: DIFlags = verum_llvm_sys::debuginfo::LLVMDIFlagLittleEndian;
-        const INDIRECT_VIRTUAL_BASE: DIFlags = verum_llvm_sys::debuginfo::LLVMDIFlagIndirectVirtualBase;
+        const INDIRECT_VIRTUAL_BASE: DIFlags =
+            verum_llvm_sys::debuginfo::LLVMDIFlagIndirectVirtualBase;
     }
 
     /// The amount of debug information to emit. Corresponds to `LLVMDWARFEmissionKind` enum from LLVM.
@@ -1561,86 +1603,73 @@ mod flags {
         GOOGLERenderScript,
         #[llvm_variant(LLVMDWARFSourceLanguageBORLAND_Delphi)]
         BORLANDDelphi,
-        
+
         #[llvm_variant(LLVMDWARFSourceLanguageKotlin)]
         Kotlin,
-        
+
         #[llvm_variant(LLVMDWARFSourceLanguageZig)]
         Zig,
-        
+
         #[llvm_variant(LLVMDWARFSourceLanguageCrystal)]
         Crystal,
-        
+
         #[llvm_variant(LLVMDWARFSourceLanguageC_plus_plus_17)]
         CPlusPlus17,
-        
+
         #[llvm_variant(LLVMDWARFSourceLanguageC_plus_plus_20)]
         CPlusPlus20,
-        
+
         #[llvm_variant(LLVMDWARFSourceLanguageC17)]
         C17,
-        
+
         #[llvm_variant(LLVMDWARFSourceLanguageFortran18)]
         Fortran18,
-        
+
         #[llvm_variant(LLVMDWARFSourceLanguageAda2005)]
         Ada2005,
-        
+
         #[llvm_variant(LLVMDWARFSourceLanguageAda2012)]
         Ada2012,
-        
+
         #[llvm_variant(LLVMDWARFSourceLanguageMojo)]
         Mojo,
 
-        
         #[llvm_variant(LLVMDWARFSourceLanguageHIP)]
         Hip,
 
-        
         #[llvm_variant(LLVMDWARFSourceLanguageAssembly)]
         Assembly,
 
-        
         #[llvm_variant(LLVMDWARFSourceLanguageC_sharp)]
         Csharp,
 
-        
         #[llvm_variant(LLVMDWARFSourceLanguageGLSL)]
         Glsl,
 
-        
         #[llvm_variant(LLVMDWARFSourceLanguageGLSL_ES)]
         GlslEs,
 
-        
         #[llvm_variant(LLVMDWARFSourceLanguageHLSL)]
         Hlsl,
 
-        
         #[llvm_variant(LLVMDWARFSourceLanguageOpenCL_CPP)]
         OpenClCpp,
 
-        
         #[llvm_variant(LLVMDWARFSourceLanguageCPP_for_OpenCL)]
         CppForOpenCl,
 
-        
         #[llvm_variant(LLVMDWARFSourceLanguageSYCL)]
         Sycl,
 
-        
         #[llvm_variant(LLVMDWARFSourceLanguageRuby)]
         Ruby,
 
-        
         #[llvm_variant(LLVMDWARFSourceLanguageMove)]
         Move,
 
-        
         #[llvm_variant(LLVMDWARFSourceLanguageHylo)]
         Hylo,
 
-        
         #[llvm_variant(LLVMDWARFSourceLanguageMetal)]
         Metal,
     }

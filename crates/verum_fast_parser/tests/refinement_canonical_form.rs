@@ -31,9 +31,9 @@
 //! produce structurally the same outer variant.
 
 use verum_ast::{
+    TypeKind,
     expr::{BinOp, ExprKind},
     ty::PathSegment,
-    TypeKind,
 };
 use verum_common::Maybe;
 use verum_fast_parser::VerumParser;
@@ -115,7 +115,10 @@ fn declarative_named_predicate_form_is_refined() {
 fn sigma_form_has_explicit_binding_and_predicate() {
     let ty = parse_type("n: Int where n > 0");
     match ty.kind {
-        TypeKind::Refined { ref base, ref predicate } => {
+        TypeKind::Refined {
+            ref base,
+            ref predicate,
+        } => {
             // 1. Explicit binder carried by the predicate.
             let binder = match &predicate.binding {
                 Maybe::Some(id) => id,

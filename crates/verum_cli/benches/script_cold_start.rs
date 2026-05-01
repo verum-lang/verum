@@ -30,7 +30,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::Duration;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 
 fn verum_binary() -> &'static str {
     env!("CARGO_BIN_EXE_verum")
@@ -77,10 +77,7 @@ fn bench_cold_start(c: &mut Criterion) {
     // Tiny representative script — just enough to exercise parser,
     // entry detection, and one print statement. Dominated by stdlib
     // bootstrap, not by user code.
-    let script = temp_script(
-        "#!/usr/bin/env verum\nprint(\"hello\");\n",
-        "cold",
-    );
+    let script = temp_script("#!/usr/bin/env verum\nprint(\"hello\");\n", "cold");
 
     let mut g = c.benchmark_group("script_cold_start");
     // Cold-start runs the full pipeline (~10s on a fresh build);

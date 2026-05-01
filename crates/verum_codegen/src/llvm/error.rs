@@ -98,7 +98,11 @@ pub struct LoweringDiagnostic {
 
 impl LoweringDiagnostic {
     /// Create a warning for an unimplemented sub-opcode.
-    pub fn unimplemented_sub_op(category: impl Into<Text>, sub_op: u8, function_name: impl Into<Text>) -> Self {
+    pub fn unimplemented_sub_op(
+        category: impl Into<Text>,
+        sub_op: u8,
+        function_name: impl Into<Text>,
+    ) -> Self {
         let cat: Text = category.into();
         Self {
             severity: LoweringSeverity::Warning,
@@ -110,7 +114,11 @@ impl LoweringDiagnostic {
     }
 
     /// Create a general warning.
-    pub fn warning(category: impl Into<Text>, message: impl Into<Text>, function_name: impl Into<Text>) -> Self {
+    pub fn warning(
+        category: impl Into<Text>,
+        message: impl Into<Text>,
+        function_name: impl Into<Text>,
+    ) -> Self {
         Self {
             severity: LoweringSeverity::Warning,
             message: message.into(),
@@ -126,7 +134,10 @@ impl LoweringDiagnostic {
             LoweringSeverity::Warning => "warning",
             LoweringSeverity::Info => "info",
         };
-        format!("[AOT {}] in `{}`: {}", prefix, self.function_name, self.message)
+        format!(
+            "[AOT {}] in `{}`: {}",
+            prefix, self.function_name, self.message
+        )
     }
 }
 

@@ -183,7 +183,9 @@ fn test_string_literal_regular() {
 fn test_string_literal_multiline_is_raw() {
     let span = test_span();
     let lit = Literal::new(
-        LiteralKind::Text(StringLit::MultiLine(r#"C:\path\to\file"#.to_string().into())),
+        LiteralKind::Text(StringLit::MultiLine(
+            r#"C:\path\to\file"#.to_string().into(),
+        )),
         span,
     );
 

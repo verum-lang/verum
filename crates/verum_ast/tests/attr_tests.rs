@@ -661,9 +661,9 @@ fn test_tagged_literal_attr_clone_eq() {
 // FrameworkAttr Tests — `@framework(name, "citation")`
 // ============================================================================
 
+use verum_ast::Ident;
 use verum_ast::expr::Expr;
 use verum_ast::literal::{Literal, LiteralKind, StringLit};
-use verum_ast::Ident;
 
 /// Build `@framework(<name_ident>, "<citation>")` as a generic `Attribute`.
 fn build_framework_attr(name: &str, citation: &str) -> Attribute {
@@ -695,28 +695,14 @@ fn test_framework_attr_extracts_from_generic_attribute() {
 
 #[test]
 fn test_framework_attr_rejects_wrong_name() {
-    let raw = Attribute::new(
-        Text::from("inline"),
-        Maybe::None,
-        Span::default(),
-    );
-    assert!(matches!(
-        FrameworkAttr::from_attribute(&raw),
-        Maybe::None
-    ));
+    let raw = Attribute::new(Text::from("inline"), Maybe::None, Span::default());
+    assert!(matches!(FrameworkAttr::from_attribute(&raw), Maybe::None));
 }
 
 #[test]
 fn test_framework_attr_rejects_missing_args() {
-    let raw = Attribute::new(
-        Text::from("framework"),
-        Maybe::None,
-        Span::default(),
-    );
-    assert!(matches!(
-        FrameworkAttr::from_attribute(&raw),
-        Maybe::None
-    ));
+    let raw = Attribute::new(Text::from("framework"), Maybe::None, Span::default());
+    assert!(matches!(FrameworkAttr::from_attribute(&raw), Maybe::None));
 }
 
 #[test]
@@ -766,10 +752,7 @@ fn test_extract_rejects_unknown_target() {
     let mut args = List::new();
     args.push(target_expr);
     let raw = Attribute::new(Text::from("extract"), Maybe::Some(args), span);
-    assert!(matches!(
-        ExtractAttr::from_attribute(&raw),
-        Maybe::None
-    ));
+    assert!(matches!(ExtractAttr::from_attribute(&raw), Maybe::None));
 }
 
 #[test]
@@ -784,11 +767,7 @@ fn test_extract_witness_with_coq() {
     let target_expr = Expr::ident(Ident::new(Text::from("coq"), span));
     let mut args = List::new();
     args.push(target_expr);
-    let raw = Attribute::new(
-        Text::from("extract_witness"),
-        Maybe::Some(args),
-        span,
-    );
+    let raw = Attribute::new(Text::from("extract_witness"), Maybe::Some(args), span);
     match ExtractWitnessAttr::from_attribute(&raw) {
         Maybe::Some(a) => assert_eq!(a.target, ExtractTarget::Coq),
         Maybe::None => panic!("@extract_witness(coq) must parse"),
@@ -797,11 +776,7 @@ fn test_extract_witness_with_coq() {
 
 #[test]
 fn test_extract_contract_bare_defaults_to_verum() {
-    let raw = Attribute::new(
-        Text::from("extract_contract"),
-        Maybe::None,
-        Span::default(),
-    );
+    let raw = Attribute::new(Text::from("extract_contract"), Maybe::None, Span::default());
     match ExtractContractAttr::from_attribute(&raw) {
         Maybe::Some(a) => assert_eq!(a.target, ExtractTarget::Verum),
         Maybe::None => panic!("bare @extract_contract must default to Verum"),
@@ -836,11 +811,7 @@ fn test_extract_attr_display_format() {
 // FrameworkTranslateAttr Tests — `@framework_translate(source, target, "...")`
 // ============================================================================
 
-fn build_framework_translate_attr(
-    source: &str,
-    target: &str,
-    citation: &str,
-) -> Attribute {
+fn build_framework_translate_attr(source: &str, target: &str, citation: &str) -> Attribute {
     let span = Span::default();
     let source_expr = Expr::ident(Ident::new(Text::from(source), span));
     let target_expr = Expr::ident(Ident::new(Text::from(target), span));
@@ -858,11 +829,7 @@ fn build_framework_translate_attr(
 
 #[test]
 fn test_framework_translate_extracts_from_generic_attribute() {
-    let raw = build_framework_translate_attr(
-        "owl2_fs",
-        "lurie_htt",
-        "Class → Presheaf",
-    );
+    let raw = build_framework_translate_attr("owl2_fs", "lurie_htt", "Class → Presheaf");
     let typed = FrameworkTranslateAttr::from_attribute(&raw);
     match typed {
         Maybe::Some(t) => {
@@ -870,9 +837,9 @@ fn test_framework_translate_extracts_from_generic_attribute() {
             assert_eq!(t.target.as_str(), "lurie_htt");
             assert_eq!(t.citation.as_str(), "Class → Presheaf");
         }
-        Maybe::None => panic!(
-            "FrameworkTranslateAttr::from_attribute returned None on valid input"
-        ),
+        Maybe::None => {
+            panic!("FrameworkTranslateAttr::from_attribute returned None on valid input")
+        }
     }
 }
 
@@ -894,11 +861,7 @@ fn test_framework_translate_rejects_two_args() {
     let mut args = List::new();
     args.push(source_expr);
     args.push(target_expr);
-    let raw = Attribute::new(
-        Text::from("framework_translate"),
-        Maybe::Some(args),
-        span,
-    );
+    let raw = Attribute::new(Text::from("framework_translate"), Maybe::Some(args), span);
     assert!(matches!(
         FrameworkTranslateAttr::from_attribute(&raw),
         Maybe::None
@@ -907,11 +870,7 @@ fn test_framework_translate_rejects_two_args() {
 
 #[test]
 fn test_framework_translate_display_roundtrip() {
-    let raw = build_framework_translate_attr(
-        "owl2_fs",
-        "lurie_htt",
-        "ObjectProperty → Functor",
-    );
+    let raw = build_framework_translate_attr("owl2_fs", "lurie_htt", "ObjectProperty → Functor");
     let typed = FrameworkTranslateAttr::from_attribute(&raw);
     let t = match typed {
         Maybe::Some(t) => t,
@@ -980,10 +939,7 @@ fn named_class_list(name: &str, classes: &[&str]) -> Expr {
     for c in classes {
         elems.push(Expr::ident(Ident::new(Text::from(*c), span)));
     }
-    let arr = Expr::new(
-        ExprKind::Array(ArrayExpr::List(elems)),
-        span,
-    );
+    let arr = Expr::new(ExprKind::Array(ArrayExpr::List(elems)), span);
     Expr::new(
         ExprKind::Binary {
             op: BinOp::Assign,
@@ -1015,7 +971,7 @@ fn owl2_class_attr_no_args_defaults_to_closed_world() {
     let typed = Owl2ClassAttr::from_attribute(&raw);
     match typed {
         Maybe::Some(c) => assert!(matches!(c.semantics, Maybe::None)),
-        Maybe::None    => panic!("@owl2_class without args must default-accept"),
+        Maybe::None => panic!("@owl2_class without args must default-accept"),
     }
 }
 
@@ -1027,7 +983,7 @@ fn owl2_class_attr_open_world_explicit() {
     let typed = Owl2ClassAttr::from_attribute(&raw);
     match typed {
         Maybe::Some(c) => assert!(matches!(c.semantics, Maybe::Some(Owl2Semantics::OpenWorld))),
-        Maybe::None    => panic!("@owl2_class(semantics: OpenWorld) must parse"),
+        Maybe::None => panic!("@owl2_class(semantics: OpenWorld) must parse"),
     }
 }
 
@@ -1045,11 +1001,15 @@ fn owl2_class_attr_rejects_unknown_semantics() {
 fn owl2_subclass_of_accepts_path_form() {
     let mut args: List<Expr> = List::new();
     args.push(class_ident("Animal"));
-    let raw = Attribute::new(Text::from("owl2_subclass_of"), Maybe::Some(args), Span::default());
+    let raw = Attribute::new(
+        Text::from("owl2_subclass_of"),
+        Maybe::Some(args),
+        Span::default(),
+    );
     let typed = Owl2SubClassOfAttr::from_attribute(&raw);
     match typed {
         Maybe::Some(s) => assert_eq!(s.parent.as_str(), "Animal"),
-        Maybe::None    => panic!("@owl2_subclass_of(Animal) must parse"),
+        Maybe::None => panic!("@owl2_subclass_of(Animal) must parse"),
     }
 }
 
@@ -1059,7 +1019,11 @@ fn owl2_subclass_of_accepts_path_form() {
 fn owl2_disjoint_with_accepts_bracketed_list() {
     let mut args: List<Expr> = List::new();
     args.push(class_array(&["Foo", "Bar", "Baz"]));
-    let raw = Attribute::new(Text::from("owl2_disjoint_with"), Maybe::Some(args), Span::default());
+    let raw = Attribute::new(
+        Text::from("owl2_disjoint_with"),
+        Maybe::Some(args),
+        Span::default(),
+    );
     let typed = Owl2DisjointWithAttr::from_attribute(&raw);
     match typed {
         Maybe::Some(d) => {
@@ -1076,7 +1040,11 @@ fn owl2_disjoint_with_accepts_positional_form() {
     let mut args: List<Expr> = List::new();
     args.push(class_ident("Pizza"));
     args.push(class_ident("IceCream"));
-    let raw = Attribute::new(Text::from("owl2_disjoint_with"), Maybe::Some(args), Span::default());
+    let raw = Attribute::new(
+        Text::from("owl2_disjoint_with"),
+        Maybe::Some(args),
+        Span::default(),
+    );
     let typed = Owl2DisjointWithAttr::from_attribute(&raw);
     match typed {
         Maybe::Some(d) => {
@@ -1092,8 +1060,13 @@ fn owl2_disjoint_with_accepts_positional_form() {
 #[test]
 fn owl2_characteristic_parses_seven_canonical_names() {
     for &name in &[
-        "Transitive", "Symmetric", "Asymmetric", "Reflexive",
-        "Irreflexive", "Functional", "InverseFunctional",
+        "Transitive",
+        "Symmetric",
+        "Asymmetric",
+        "Reflexive",
+        "Irreflexive",
+        "Functional",
+        "InverseFunctional",
     ] {
         let mut args: List<Expr> = List::new();
         args.push(class_ident(name));
@@ -1105,7 +1078,7 @@ fn owl2_characteristic_parses_seven_canonical_names() {
         let typed = Owl2CharacteristicAttr::from_attribute(&raw);
         match typed {
             Maybe::Some(c) => assert_eq!(c.characteristic.as_str(), name),
-            Maybe::None    => panic!("@owl2_characteristic({name}) must parse"),
+            Maybe::None => panic!("@owl2_characteristic({name}) must parse"),
         }
     }
 }
@@ -1132,7 +1105,10 @@ fn owl2_property_full_form_with_inverse_and_characteristics() {
     let mut args: List<Expr> = List::new();
     args.push(named_class("domain", "Person"));
     args.push(named_class("range", "Person"));
-    args.push(named_class_list("characteristic", &["Symmetric", "Transitive"]));
+    args.push(named_class_list(
+        "characteristic",
+        &["Symmetric", "Transitive"],
+    ));
     args.push(named_class("inverse_of", "knownBy"));
     let raw = Attribute::new(
         Text::from("owl2_property"),
@@ -1145,8 +1121,14 @@ fn owl2_property_full_form_with_inverse_and_characteristics() {
             assert!(matches!(&p.domain, Maybe::Some(d) if d.as_str() == "Person"));
             assert!(matches!(&p.range, Maybe::Some(r) if r.as_str() == "Person"));
             assert_eq!(p.characteristics.len(), 2);
-            assert!(matches!(p.characteristics[0], Owl2Characteristic::Symmetric));
-            assert!(matches!(p.characteristics[1], Owl2Characteristic::Transitive));
+            assert!(matches!(
+                p.characteristics[0],
+                Owl2Characteristic::Symmetric
+            ));
+            assert!(matches!(
+                p.characteristics[1],
+                Owl2Characteristic::Transitive
+            ));
             assert!(matches!(&p.inverse_of, Maybe::Some(i) if i.as_str() == "knownBy"));
         }
         Maybe::None => panic!("full @owl2_property form must parse"),
@@ -1200,7 +1182,7 @@ fn owl2_equivalent_class_parses_class_path() {
     let typed = Owl2EquivalentClassAttr::from_attribute(&raw);
     match typed {
         Maybe::Some(eq) => assert_eq!(eq.equivalent_to.as_str(), "HumanBeing"),
-        Maybe::None     => panic!("@owl2_equivalent_class(HumanBeing) must parse"),
+        Maybe::None => panic!("@owl2_equivalent_class(HumanBeing) must parse"),
     }
 }
 
@@ -1239,7 +1221,7 @@ fn owl2_has_key_accepts_bracketed_form() {
     let typed = Owl2HasKeyAttr::from_attribute(&raw);
     match typed {
         Maybe::Some(k) => assert_eq!(k.key_properties.len(), 2),
-        Maybe::None    => panic!("@owl2_has_key([isbn, edition]) must parse"),
+        Maybe::None => panic!("@owl2_has_key([isbn, edition]) must parse"),
     }
 }
 
@@ -1247,18 +1229,29 @@ fn owl2_has_key_accepts_bracketed_form() {
 
 #[test]
 fn owl2_attrs_reject_wrong_attribute_name() {
-    let raw = Attribute::new(
-        Text::from("inline"),
-        Maybe::None,
-        Span::default(),
-    );
-    assert!(matches!(Owl2ClassAttr::from_attribute(&raw),         Maybe::None));
-    assert!(matches!(Owl2SubClassOfAttr::from_attribute(&raw),    Maybe::None));
-    assert!(matches!(Owl2DisjointWithAttr::from_attribute(&raw),  Maybe::None));
-    assert!(matches!(Owl2CharacteristicAttr::from_attribute(&raw), Maybe::None));
-    assert!(matches!(Owl2PropertyAttr::from_attribute(&raw),      Maybe::None));
-    assert!(matches!(Owl2EquivalentClassAttr::from_attribute(&raw), Maybe::None));
-    assert!(matches!(Owl2HasKeyAttr::from_attribute(&raw),        Maybe::None));
+    let raw = Attribute::new(Text::from("inline"), Maybe::None, Span::default());
+    assert!(matches!(Owl2ClassAttr::from_attribute(&raw), Maybe::None));
+    assert!(matches!(
+        Owl2SubClassOfAttr::from_attribute(&raw),
+        Maybe::None
+    ));
+    assert!(matches!(
+        Owl2DisjointWithAttr::from_attribute(&raw),
+        Maybe::None
+    ));
+    assert!(matches!(
+        Owl2CharacteristicAttr::from_attribute(&raw),
+        Maybe::None
+    ));
+    assert!(matches!(
+        Owl2PropertyAttr::from_attribute(&raw),
+        Maybe::None
+    ));
+    assert!(matches!(
+        Owl2EquivalentClassAttr::from_attribute(&raw),
+        Maybe::None
+    ));
+    assert!(matches!(Owl2HasKeyAttr::from_attribute(&raw), Maybe::None));
 }
 
 // ============================================================================
@@ -1292,7 +1285,7 @@ fn quantity_attr_accepts_zero_via_int_literal() {
     let raw = build_int_quantity_attr(0);
     match QuantityAttr::from_attribute(&raw) {
         Maybe::Some(q) => assert_eq!(q.quantity, Quantity::Zero),
-        Maybe::None    => panic!("@quantity(0) must parse"),
+        Maybe::None => panic!("@quantity(0) must parse"),
     }
 }
 
@@ -1301,7 +1294,7 @@ fn quantity_attr_accepts_one_via_int_literal() {
     let raw = build_int_quantity_attr(1);
     match QuantityAttr::from_attribute(&raw) {
         Maybe::Some(q) => assert_eq!(q.quantity, Quantity::One),
-        Maybe::None    => panic!("@quantity(1) must parse"),
+        Maybe::None => panic!("@quantity(1) must parse"),
     }
 }
 
@@ -1310,7 +1303,7 @@ fn quantity_attr_accepts_omega_via_path() {
     let raw = build_ident_quantity_attr("omega");
     match QuantityAttr::from_attribute(&raw) {
         Maybe::Some(q) => assert_eq!(q.quantity, Quantity::Many),
-        Maybe::None    => panic!("@quantity(omega) must parse"),
+        Maybe::None => panic!("@quantity(omega) must parse"),
     }
 }
 
@@ -1319,7 +1312,10 @@ fn quantity_attr_accepts_keyword_aliases() {
     for &name in &["zero", "linear", "many", "unrestricted", "erased"] {
         let raw = build_ident_quantity_attr(name);
         let parsed = QuantityAttr::from_attribute(&raw);
-        assert!(matches!(parsed, Maybe::Some(_)), "alias '{name}' must parse");
+        assert!(
+            matches!(parsed, Maybe::Some(_)),
+            "alias '{name}' must parse"
+        );
     }
 }
 
@@ -1329,7 +1325,10 @@ fn quantity_attr_rejects_invalid_quantity() {
     assert!(matches!(QuantityAttr::from_attribute(&raw), Maybe::None));
 
     let bad_name = build_ident_quantity_attr("affine");
-    assert!(matches!(QuantityAttr::from_attribute(&bad_name), Maybe::None));
+    assert!(matches!(
+        QuantityAttr::from_attribute(&bad_name),
+        Maybe::None
+    ));
 }
 
 #[test]
@@ -1347,13 +1346,13 @@ fn quantity_attr_rejects_missing_args() {
 #[test]
 fn quantity_predicates_partition_correctly() {
     assert!(Quantity::Zero.is_finite() && Quantity::Zero.is_erased());
-    assert!(Quantity::One.is_finite()  && Quantity::One.is_linear());
+    assert!(Quantity::One.is_finite() && Quantity::One.is_linear());
     assert!(!Quantity::Many.is_finite() && !Quantity::Many.is_linear());
 
     assert_eq!(Quantity::default(), Quantity::Many);
 
     assert_eq!(Quantity::Zero.surface_glyph(), "0");
-    assert_eq!(Quantity::One.surface_glyph(),  "1");
+    assert_eq!(Quantity::One.surface_glyph(), "1");
     assert_eq!(Quantity::Many.surface_glyph(), "ω");
 }
 
@@ -1518,7 +1517,10 @@ mod accessibility_tests {
             args: Maybe::Some(arg_list),
             span: Span::default(),
         };
-        assert!(matches!(AccessibilityAttr::from_attribute(&attr), Maybe::None));
+        assert!(matches!(
+            AccessibilityAttr::from_attribute(&attr),
+            Maybe::None
+        ));
     }
 
     #[test]
@@ -1528,19 +1530,28 @@ mod accessibility_tests {
             args: Maybe::Some(List::new()),
             span: Span::default(),
         };
-        assert!(matches!(AccessibilityAttr::from_attribute(&attr), Maybe::None));
+        assert!(matches!(
+            AccessibilityAttr::from_attribute(&attr),
+            Maybe::None
+        ));
     }
 
     #[test]
     fn from_attribute_two_args_rejected() {
         let attr = build_attr(vec![make_path_arg("omega"), make_path_arg("extra")]);
-        assert!(matches!(AccessibilityAttr::from_attribute(&attr), Maybe::None));
+        assert!(matches!(
+            AccessibilityAttr::from_attribute(&attr),
+            Maybe::None
+        ));
     }
 
     #[test]
     fn from_attribute_garbage_path_rejected() {
         let attr = build_attr(vec![make_path_arg("not_an_ordinal")]);
-        assert!(matches!(AccessibilityAttr::from_attribute(&attr), Maybe::None));
+        assert!(matches!(
+            AccessibilityAttr::from_attribute(&attr),
+            Maybe::None
+        ));
     }
 
     #[test]

@@ -42,14 +42,14 @@
 //! - Types and Programming Languages, Chapter 24
 //! - Type inference for existential types: unifying impl Protocol with concrete implementations
 
+use crate::TypeError;
 use crate::context::TypeContext;
 use crate::protocol::{ProtocolBound, ProtocolChecker};
 use crate::specialization_selection::ProtocolCheckerExt;
 use crate::ty::{Type, TypeVar};
-use crate::TypeError;
 use verum_ast::span::Span;
-use verum_common::{List, Map, Set, Text};
 use verum_common::ToText;
+use verum_common::{List, Map, Set, Text};
 
 /// A skolem constant, representing an opaque type from an unpacked existential.
 ///
@@ -631,7 +631,11 @@ pub mod subtyping {
 
     /// This is generally not decidable without knowing the witness,
     /// so we conservatively return false unless T is also existential.
-    pub fn existential_to_concrete(_subtyping: &Subtyping, _exists: &Type, _concrete: &Type) -> bool {
+    pub fn existential_to_concrete(
+        _subtyping: &Subtyping,
+        _exists: &Type,
+        _concrete: &Type,
+    ) -> bool {
         // Conservative: existentials are not subtypes of concrete types
         // The caller must explicitly unpack to work with the contents
         false

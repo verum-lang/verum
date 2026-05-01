@@ -7900,25 +7900,25 @@ impl EscapeAnalyzer {
 }
 
 /* ============================================================================
- * IMPLEMENTED ENHANCEMENTS
- * ============================================================================
- *
+* IMPLEMENTED ENHANCEMENTS
+* ============================================================================
+*
 
- * STATUS: ✓ ALL ENHANCEMENTS IMPLEMENTED
- *
+* STATUS: ✓ ALL ENHANCEMENTS IMPLEMENTED
+*
 
- * The following enhancements from the original roadmap have been fully
- * implemented and are production-ready. All code below is active and tested.
- *
+* The following enhancements from the original roadmap have been fully
+* implemented and are production-ready. All code below is active and tested.
+*
 
- * Implementation Summary:
- *  - Lifetime Integration: Complete lifetime tracking system
- *  - Region Analysis: Full region-based safety analysis
- *  - SMT Integration: Z3-based alias verification
- *
+* Implementation Summary:
+*  - Lifetime Integration: Complete lifetime tracking system
+*  - Region Analysis: Full region-based safety analysis
+*  - SMT Integration: Z3-based alias verification
+*
 
- * Completion Date: 2025-12-18
- */
+* Completion Date: 2025-12-18
+*/
 
 // ==================================================================================
 // Lifetime Integration (Section 10)

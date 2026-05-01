@@ -12,8 +12,8 @@ use verum_ast::attr::{
     AttributeCategory,
     AttributeMetadata,
     AttributeTarget,
-    BitfieldAttr,
     BitOffsetAttr,
+    BitfieldAttr,
     BitsAttr,
     ColdAttr,
     EndianAttr,
@@ -245,10 +245,13 @@ fn hot_path(x: Int) -> Int { x * 2 }
         .register(
             AttributeMetadata::new("prefetch")
                 .targets(AttributeTarget::Stmt | AttributeTarget::Expr)
-                .args(ArgSpec::Named(vec![
-                    NamedArgSpec::optional("access", ArgType::Ident), // read|write
-                    NamedArgSpec::optional("locality", ArgType::UInt), // 0-3
-                ].into()))
+                .args(ArgSpec::Named(
+                    vec![
+                        NamedArgSpec::optional("access", ArgType::Ident), // read|write
+                        NamedArgSpec::optional("locality", ArgType::UInt), // 0-3
+                    ]
+                    .into(),
+                ))
                 .category(AttributeCategory::Optimization)
                 .doc("Prefetch data into cache")
                 .builtin()
@@ -359,11 +362,14 @@ fn register_serialization_attributes(registry: &mut AttributeRegistry) {
         .register(
             AttributeMetadata::new("serialize")
                 .targets(AttributeTarget::Type | AttributeTarget::Field | AttributeTarget::Variant)
-                .args(ArgSpec::Named(vec![
-                    NamedArgSpec::optional("rename", ArgType::String),
-                    NamedArgSpec::optional("as", ArgType::Expr),
-                    NamedArgSpec::optional("with", ArgType::Path),
-                ].into()))
+                .args(ArgSpec::Named(
+                    vec![
+                        NamedArgSpec::optional("rename", ArgType::String),
+                        NamedArgSpec::optional("as", ArgType::Expr),
+                        NamedArgSpec::optional("with", ArgType::Path),
+                    ]
+                    .into(),
+                ))
                 .category(AttributeCategory::Serialization)
                 .doc("Enable or customize serialization")
                 .builtin()
@@ -376,11 +382,14 @@ fn register_serialization_attributes(registry: &mut AttributeRegistry) {
         .register(
             AttributeMetadata::new("deserialize")
                 .targets(AttributeTarget::Type | AttributeTarget::Field)
-                .args(ArgSpec::Named(vec![
-                    NamedArgSpec::optional("rename", ArgType::String),
-                    NamedArgSpec::optional("default", ArgType::Expr),
-                    NamedArgSpec::optional("with", ArgType::Path),
-                ].into()))
+                .args(ArgSpec::Named(
+                    vec![
+                        NamedArgSpec::optional("rename", ArgType::String),
+                        NamedArgSpec::optional("default", ArgType::Expr),
+                        NamedArgSpec::optional("with", ArgType::Path),
+                    ]
+                    .into(),
+                ))
                 .category(AttributeCategory::Serialization)
                 .doc("Enable or customize deserialization")
                 .builtin()
@@ -419,10 +428,9 @@ fn register_serialization_attributes(registry: &mut AttributeRegistry) {
         .register(
             AttributeMetadata::new("rename")
                 .targets(AttributeTarget::Field | AttributeTarget::Variant)
-                .args(ArgSpec::Named(vec![NamedArgSpec::required(
-                    "name",
-                    ArgType::String,
-                )].into()))
+                .args(ArgSpec::Named(
+                    vec![NamedArgSpec::required("name", ArgType::String)].into(),
+                ))
                 .category(AttributeCategory::Serialization)
                 .doc("Use alternative name in serialization")
                 .builtin()
@@ -468,12 +476,15 @@ fn register_validation_attributes(registry: &mut AttributeRegistry) {
         .register(
             AttributeMetadata::new("validate")
                 .targets(AttributeTarget::Type | AttributeTarget::Field)
-                .args(ArgSpec::Named(vec![
-                    NamedArgSpec::optional("min_length", ArgType::UInt),
-                    NamedArgSpec::optional("max_length", ArgType::UInt),
-                    NamedArgSpec::optional("min", ArgType::Expr),
-                    NamedArgSpec::optional("max", ArgType::Expr),
-                ].into()))
+                .args(ArgSpec::Named(
+                    vec![
+                        NamedArgSpec::optional("min_length", ArgType::UInt),
+                        NamedArgSpec::optional("max_length", ArgType::UInt),
+                        NamedArgSpec::optional("min", ArgType::Expr),
+                        NamedArgSpec::optional("max", ArgType::Expr),
+                    ]
+                    .into(),
+                ))
                 .category(AttributeCategory::Validation)
                 .doc("Enable validation for type/field")
                 .builtin()
@@ -486,10 +497,13 @@ fn register_validation_attributes(registry: &mut AttributeRegistry) {
         .register(
             AttributeMetadata::new("range")
                 .targets(AttributeTarget::Field)
-                .args(ArgSpec::Named(vec![
-                    NamedArgSpec::optional("min", ArgType::Expr),
-                    NamedArgSpec::optional("max", ArgType::Expr),
-                ].into()))
+                .args(ArgSpec::Named(
+                    vec![
+                        NamedArgSpec::optional("min", ArgType::Expr),
+                        NamedArgSpec::optional("max", ArgType::Expr),
+                    ]
+                    .into(),
+                ))
                 .category(AttributeCategory::Validation)
                 .doc("Numeric range constraint")
                 .builtin()
@@ -502,11 +516,14 @@ fn register_validation_attributes(registry: &mut AttributeRegistry) {
         .register(
             AttributeMetadata::new("length")
                 .targets(AttributeTarget::Field)
-                .args(ArgSpec::Named(vec![
-                    NamedArgSpec::optional("min", ArgType::UInt),
-                    NamedArgSpec::optional("max", ArgType::UInt),
-                    NamedArgSpec::optional("exact", ArgType::UInt),
-                ].into()))
+                .args(ArgSpec::Named(
+                    vec![
+                        NamedArgSpec::optional("min", ArgType::UInt),
+                        NamedArgSpec::optional("max", ArgType::UInt),
+                        NamedArgSpec::optional("exact", ArgType::UInt),
+                    ]
+                    .into(),
+                ))
                 .category(AttributeCategory::Validation)
                 .doc("Length constraint for text/collections")
                 .builtin()
@@ -565,11 +582,14 @@ fn register_documentation_attributes(registry: &mut AttributeRegistry) {
         .register(
             AttributeMetadata::new("deprecated")
                 .targets(AttributeTarget::All)
-                .args(ArgSpec::Named(vec![
-                    NamedArgSpec::optional("since", ArgType::String),
-                    NamedArgSpec::optional("use", ArgType::String),
-                    NamedArgSpec::optional("reason", ArgType::String),
-                ].into()))
+                .args(ArgSpec::Named(
+                    vec![
+                        NamedArgSpec::optional("since", ArgType::String),
+                        NamedArgSpec::optional("use", ArgType::String),
+                        NamedArgSpec::optional("reason", ArgType::String),
+                    ]
+                    .into(),
+                ))
                 .category(AttributeCategory::Documentation)
                 .doc("Mark item as deprecated")
                 .builtin()
@@ -985,10 +1005,9 @@ fn register_module_attributes(registry: &mut AttributeRegistry) {
         .register(
             AttributeMetadata::new("feature")
                 .targets(AttributeTarget::Module)
-                .args(ArgSpec::Named(vec![NamedArgSpec::required(
-                    "enable",
-                    ArgType::Expr,
-                )].into()))
+                .args(ArgSpec::Named(
+                    vec![NamedArgSpec::required("enable", ArgType::Expr)].into(),
+                ))
                 .category(AttributeCategory::ModuleControl)
                 .doc("Enable language features: @feature(enable: [\"unsafe\"])")
                 .typed_as::<FeatureAttr>()
@@ -1048,10 +1067,13 @@ fn register_language_core_attributes(registry: &mut AttributeRegistry) {
         .register(
             AttributeMetadata::new("specialize")
                 .targets(AttributeTarget::Impl)
-                .args(ArgSpec::Named(vec![
-                    NamedArgSpec::optional("negative", ArgType::Bool),
-                    NamedArgSpec::optional("rank", ArgType::Int),
-                ].into()))
+                .args(ArgSpec::Named(
+                    vec![
+                        NamedArgSpec::optional("negative", ArgType::Bool),
+                        NamedArgSpec::optional("rank", ArgType::Int),
+                    ]
+                    .into(),
+                ))
                 .category(AttributeCategory::LanguageCore)
                 .doc("Protocol implementation specialization")
                 .typed_as::<SpecializeAttr>()
@@ -1164,10 +1186,9 @@ fn register_concurrency_attributes(registry: &mut AttributeRegistry) {
         .register(
             AttributeMetadata::new("lock_level")
                 .targets(AttributeTarget::Type)
-                .args(ArgSpec::Named(vec![NamedArgSpec::required(
-                    "level",
-                    ArgType::UInt,
-                )].into()))
+                .args(ArgSpec::Named(
+                    vec![NamedArgSpec::required("level", ArgType::UInt)].into(),
+                ))
                 .category(AttributeCategory::Concurrency)
                 .doc("Declare lock ordering level for deadlock prevention")
                 .typed_as::<LockLevelAttr>()
@@ -1181,10 +1202,13 @@ fn register_concurrency_attributes(registry: &mut AttributeRegistry) {
         .register(
             AttributeMetadata::new("deadlock_detection")
                 .targets(AttributeTarget::Function | AttributeTarget::Module)
-                .args(ArgSpec::Named(vec![
-                    NamedArgSpec::optional("enabled", ArgType::Bool),
-                    NamedArgSpec::optional("timeout", ArgType::Duration),
-                ].into()))
+                .args(ArgSpec::Named(
+                    vec![
+                        NamedArgSpec::optional("enabled", ArgType::Bool),
+                        NamedArgSpec::optional("timeout", ArgType::Duration),
+                    ]
+                    .into(),
+                ))
                 .category(AttributeCategory::Concurrency)
                 .doc("Enable runtime deadlock detection")
                 .builtin()
@@ -1243,10 +1267,13 @@ fn register_meta_system_attributes(registry: &mut AttributeRegistry) {
         .register(
             AttributeMetadata::new("differentiable")
                 .targets(AttributeTarget::Function)
-                .args(ArgSpec::Named(vec![
-                    NamedArgSpec::required("wrt", ArgType::String),
-                    NamedArgSpec::optional("mode", ArgType::Ident),
-                ].into()))
+                .args(ArgSpec::Named(
+                    vec![
+                        NamedArgSpec::required("wrt", ArgType::String),
+                        NamedArgSpec::optional("mode", ArgType::Ident),
+                    ]
+                    .into(),
+                ))
                 .category(AttributeCategory::MetaSystem)
                 .doc("Enable automatic differentiation")
                 .stability(Stability::Experimental)
@@ -1305,10 +1332,9 @@ fn register_testing_attributes(registry: &mut AttributeRegistry) {
         .register(
             AttributeMetadata::new("should_panic")
                 .targets(AttributeTarget::Function)
-                .args(ArgSpec::Named(vec![NamedArgSpec::optional(
-                    "expected",
-                    ArgType::String,
-                )].into()))
+                .args(ArgSpec::Named(
+                    vec![NamedArgSpec::optional("expected", ArgType::String)].into(),
+                ))
                 .category(AttributeCategory::Testing)
                 .doc("Test expects a panic")
                 .builtin()
@@ -1340,10 +1366,13 @@ fn register_ffi_attributes(registry: &mut AttributeRegistry) {
         .register(
             AttributeMetadata::new("import")
                 .targets(AttributeTarget::Function)
-                .args(ArgSpec::Named(vec![
-                    NamedArgSpec::required("from", ArgType::String),
-                    NamedArgSpec::optional("name", ArgType::String),
-                ].into()))
+                .args(ArgSpec::Named(
+                    vec![
+                        NamedArgSpec::required("from", ArgType::String),
+                        NamedArgSpec::optional("name", ArgType::String),
+                    ]
+                    .into(),
+                ))
                 .category(AttributeCategory::FFI)
                 .doc("Import external function")
                 .builtin()
@@ -1356,10 +1385,13 @@ fn register_ffi_attributes(registry: &mut AttributeRegistry) {
         .register(
             AttributeMetadata::new("link")
                 .targets(AttributeTarget::Module)
-                .args(ArgSpec::Named(vec![
-                    NamedArgSpec::required("name", ArgType::String),
-                    NamedArgSpec::optional("kind", ArgType::Ident),
-                ].into()))
+                .args(ArgSpec::Named(
+                    vec![
+                        NamedArgSpec::required("name", ArgType::String),
+                        NamedArgSpec::optional("kind", ArgType::Ident),
+                    ]
+                    .into(),
+                ))
                 .category(AttributeCategory::FFI)
                 .doc("Link external library")
                 .builtin()
@@ -1503,6 +1535,9 @@ mod tests {
         register_standard_attributes(&mut registry);
 
         let cold = registry.get("cold").unwrap();
-        assert!(cold.conflicts_with.contains(&verum_common::Text::from("hot")));
+        assert!(
+            cold.conflicts_with
+                .contains(&verum_common::Text::from("hot"))
+        );
     }
 }

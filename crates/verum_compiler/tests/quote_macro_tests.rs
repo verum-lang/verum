@@ -23,13 +23,13 @@ use verum_ast::{
     expr::ExprKind,
     ty::{Ident, Path},
 };
+use verum_common::{FileId, List, Text};
 use verum_compiler::meta::ConstValue;
 use verum_compiler::quote::{MetaContext, ident};
 use verum_compiler::quote_macro::{
     MacroExpansionContext, create_quote_context, create_quote_context_with_repeats, meta_quote,
     meta_unquote, quote_expr, quote_with_context, tokenstream_from_str, unquote_stream,
 };
-use verum_common::{FileId, List, Text};
 
 #[test]
 fn test_quote_simple_expr() {

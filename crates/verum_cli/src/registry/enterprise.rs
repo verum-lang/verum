@@ -125,14 +125,8 @@ impl AuditLevel {
         use super::security::AuditAction::*;
         match self {
             AuditLevel::All => true,
-            AuditLevel::Changes => matches!(
-                action,
-                Install | Update | Remove | Publish | Yank
-            ),
-            AuditLevel::Security => matches!(
-                action,
-                SecurityScan | VulnerabilityFound
-            ),
+            AuditLevel::Changes => matches!(action, Install | Update | Remove | Publish | Yank),
+            AuditLevel::Security => matches!(action, SecurityScan | VulnerabilityFound),
         }
     }
 }
@@ -324,11 +318,7 @@ impl EnterpriseClient {
     /// `is_cog_allowed` for the name-only check and
     /// `requires_signature` to decide whether to look up the
     /// signature before proceeding.
-    pub fn is_cog_allowed_with_signature(
-        &self,
-        cog_name: &str,
-        has_valid_signature: bool,
-    ) -> bool {
+    pub fn is_cog_allowed_with_signature(&self, cog_name: &str, has_valid_signature: bool) -> bool {
         if !self.is_cog_allowed(cog_name) {
             return false;
         }
@@ -386,12 +376,16 @@ impl EnterpriseClient {
     /// (the operator was warned but the install isn't blocked) and
     /// only Critical vulnerabilities trip the gate. Operators who
     /// want strict mode set `max_severity = "low"` to revert.
-    pub fn vulnerability_exceeds_policy(
-        &self,
-        severity: &super::types::Severity,
-    ) -> bool {
+    pub fn vulnerability_exceeds_policy(&self, severity: &super::types::Severity) -> bool {
         use super::types::Severity;
-        let ceiling = match self.config.compliance.max_severity.as_str().to_ascii_lowercase().as_str() {
+        let ceiling = match self
+            .config
+            .compliance
+            .max_severity
+            .as_str()
+            .to_ascii_lowercase()
+            .as_str()
+        {
             "low" => 1u8,
             "medium" => 2,
             "high" => 3,
@@ -726,7 +720,12 @@ mod tests {
         cfg.offline = true;
         cfg.compliance.max_severity = "critical".into();
         let client = EnterpriseClient::new(cfg).expect("offline client builds");
-        for sev in &[Severity::Low, Severity::Medium, Severity::High, Severity::Critical] {
+        for sev in &[
+            Severity::Low,
+            Severity::Medium,
+            Severity::High,
+            Severity::Critical,
+        ] {
             assert!(
                 !client.vulnerability_exceeds_policy(sev),
                 "max_severity=critical must accept {:?}",
@@ -746,7 +745,12 @@ mod tests {
         cfg.offline = true;
         cfg.compliance.max_severity = "hgih".into(); // typo
         let client = EnterpriseClient::new(cfg).expect("offline client builds");
-        for sev in &[Severity::Low, Severity::Medium, Severity::High, Severity::Critical] {
+        for sev in &[
+            Severity::Low,
+            Severity::Medium,
+            Severity::High,
+            Severity::Critical,
+        ] {
             assert!(
                 client.vulnerability_exceeds_policy(sev),
                 "unrecognised max_severity must fail closed for {:?}",

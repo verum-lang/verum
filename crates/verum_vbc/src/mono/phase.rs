@@ -19,6 +19,7 @@ use std::time::Instant;
 use crate::module::{FunctionId, VbcModule};
 use crate::types::TypeRef;
 
+use super::MonoMetrics;
 use super::cache::MonomorphizationCache;
 use super::graph::{InstantiationGraph, InstantiationRequest};
 use super::merger::{MergeStats, ModuleMerger};
@@ -26,7 +27,6 @@ use super::optimizer::SpecializationOptimizer;
 use super::resolver::{CacheMetadata, MonomorphizationResolver, ResolverStats};
 use super::specializer::{BytecodeSpecializer, SpecializationError, SpecializedFunction};
 use super::substitution::TypeSubstitution;
-use super::MonoMetrics;
 
 // ============================================================================
 // Helper Functions
@@ -211,7 +211,9 @@ impl MonomorphizationPhase {
     /// Creates a new monomorphization phase with the given configuration.
     pub fn new(config: MonoPhaseConfig) -> Self {
         let cache = if config.use_cache {
-            config.cache_dir.as_ref()
+            config
+                .cache_dir
+                .as_ref()
                 .map(|dir| MonomorphizationCache::new(dir.clone()))
                 .or_else(MonomorphizationCache::default_cache)
         } else {
@@ -252,9 +254,10 @@ impl MonomorphizationPhase {
         // the user-module pipeline (e.g. for differential testing of
         // the specializer against the precompiled cache).
         if self.config.use_stdlib
-            && let Some(ref stdlib) = self.stdlib {
-                resolver = resolver.with_core(stdlib.clone());
-            }
+            && let Some(ref stdlib) = self.stdlib
+        {
+            resolver = resolver.with_core(stdlib.clone());
+        }
         if let Some(ref cache) = self.cache {
             resolver = resolver.with_cache(cache.clone());
         }
@@ -325,7 +328,8 @@ impl MonomorphizationPhase {
 
         for request in pending {
             // Get the generic function
-            let func = module.get_function(request.function_id)
+            let func = module
+                .get_function(request.function_id)
                 .ok_or(MonoPhaseError::FunctionNotFound(request.function_id))?;
 
             // Create substitution
@@ -364,10 +368,12 @@ impl MonomorphizationPhase {
         // single-source-of-truth so a change to the optimizer hook
         // can't drift between paths.
         let optimize_flag = self.config.optimize;
-        let specialize_one = |request: &InstantiationRequest|
-            -> Result<(InstantiationRequest, SpecializedFunction), MonoPhaseError>
-        {
-            let func = module.get_function(request.function_id)
+        let specialize_one = |request: &InstantiationRequest| -> Result<
+            (InstantiationRequest, SpecializedFunction),
+            MonoPhaseError,
+        > {
+            let func = module
+                .get_function(request.function_id)
                 .ok_or(MonoPhaseError::FunctionNotFound(request.function_id))?;
             let substitution = TypeSubstitution::from_function(func, &request.type_args);
             let mut specializer = BytecodeSpecializer::new(module, &substitution, graph);
@@ -393,9 +399,11 @@ impl MonomorphizationPhase {
             let pool = rayon::ThreadPoolBuilder::new()
                 .num_threads(num_threads)
                 .build()
-                .map_err(|e| MonoPhaseError::ParallelExecution(format!(
-                    "rayon ThreadPool with {num_threads} threads: {e}"
-                )))?;
+                .map_err(|e| {
+                    MonoPhaseError::ParallelExecution(format!(
+                        "rayon ThreadPool with {num_threads} threads: {e}"
+                    ))
+                })?;
             pool.install(|| pending.par_iter().map(&specialize_one).collect())
         } else {
             pending.par_iter().map(specialize_one).collect()
@@ -441,8 +449,7 @@ pub fn monomorphize_with_core(
     graph: &InstantiationGraph,
     stdlib: Arc<VbcModule>,
 ) -> Result<MonoPhaseResult, MonoPhaseError> {
-    let mut phase = MonomorphizationPhase::new(MonoPhaseConfig::default())
-        .with_core(stdlib);
+    let mut phase = MonomorphizationPhase::new(MonoPhaseConfig::default()).with_core(stdlib);
     phase.execute(user_module, graph)
 }
 
@@ -461,11 +468,11 @@ pub fn monomorphize_minimal(
 
 #[cfg(test)]
 mod tests {
+    use super::super::graph::SourceLocation;
     use super::*;
     use crate::instruction::Opcode;
     use crate::module::FunctionDescriptor;
     use crate::types::{TypeId, TypeParamId};
-    use super::super::graph::SourceLocation;
 
     #[test]
     fn test_phase_config_default() {
@@ -520,8 +527,11 @@ mod tests {
         // Add a generic identity function: fn identity<T>(x: T) -> T { x }
         // Bytecode: MOV r0, r1; RET r0
         let bytecode = vec![
-            Opcode::Mov.to_byte(), 0, 1,  // MOV r0, r1
-            Opcode::Ret.to_byte(), 0,      // RET r0
+            Opcode::Mov.to_byte(),
+            0,
+            1, // MOV r0, r1
+            Opcode::Ret.to_byte(),
+            0, // RET r0
         ];
 
         let func = FunctionDescriptor {
@@ -622,8 +632,13 @@ mod tests {
         // fn add<T: Add>(a: T, b: T) -> T { a + b }
         // Bytecode: ADD_G r0, r1, r2, protocol_id; RET r0
         let bytecode = vec![
-            Opcode::AddG.to_byte(), 0, 1, 2, 0, // ADD_G r0, r1, r2, protocol=0
-            Opcode::Ret.to_byte(), 0,           // RET r0
+            Opcode::AddG.to_byte(),
+            0,
+            1,
+            2,
+            0, // ADD_G r0, r1, r2, protocol=0
+            Opcode::Ret.to_byte(),
+            0, // RET r0
         ];
 
         let func = FunctionDescriptor {
@@ -760,7 +775,11 @@ mod tests {
 
         // Bytecode with a useless jump (JMP +0)
         let bytecode = vec![
-            Opcode::Jmp.to_byte(), 0, 0, 0, 0, // JMP +0 (should become NOP)
+            Opcode::Jmp.to_byte(),
+            0,
+            0,
+            0,
+            0, // JMP +0 (should become NOP)
             Opcode::RetV.to_byte(),
         ];
 
@@ -814,22 +833,16 @@ mod tests {
     #[test]
     fn test_instantiation_hash_stability() {
         // Verify that the same instantiation produces the same hash
-        let hash1 = InstantiationRequest::compute_hash(
-            FunctionId(1),
-            &[TypeRef::Concrete(TypeId::INT)],
-        );
-        let hash2 = InstantiationRequest::compute_hash(
-            FunctionId(1),
-            &[TypeRef::Concrete(TypeId::INT)],
-        );
+        let hash1 =
+            InstantiationRequest::compute_hash(FunctionId(1), &[TypeRef::Concrete(TypeId::INT)]);
+        let hash2 =
+            InstantiationRequest::compute_hash(FunctionId(1), &[TypeRef::Concrete(TypeId::INT)]);
 
         assert_eq!(hash1, hash2);
 
         // Different types should have different hashes
-        let hash3 = InstantiationRequest::compute_hash(
-            FunctionId(1),
-            &[TypeRef::Concrete(TypeId::FLOAT)],
-        );
+        let hash3 =
+            InstantiationRequest::compute_hash(FunctionId(1), &[TypeRef::Concrete(TypeId::FLOAT)]);
 
         assert_ne!(hash1, hash3);
     }
@@ -858,11 +871,7 @@ mod tests {
             args: vec![maybe_of_list],
         };
 
-        graph.record_instantiation(
-            FunctionId(0),
-            vec![outer_list],
-            SourceLocation::default(),
-        );
+        graph.record_instantiation(FunctionId(0), vec![outer_list], SourceLocation::default());
 
         let result = monomorphize_minimal(module, &graph);
         assert!(result.is_ok());
@@ -879,8 +888,8 @@ mod tests {
         graph.record_instantiation(
             FunctionId(0),
             vec![
-                TypeRef::Concrete(TypeId(10)),  // K = String
-                TypeRef::Concrete(TypeId::INT), // V = Int
+                TypeRef::Concrete(TypeId(10)),    // K = String
+                TypeRef::Concrete(TypeId::INT),   // V = Int
                 TypeRef::Concrete(TypeId::FLOAT), // R = Float
             ],
             SourceLocation::default(),
@@ -902,11 +911,7 @@ mod tests {
             args: vec![TypeRef::Concrete(TypeId::INT)],
         };
 
-        graph.record_instantiation(
-            FunctionId(0),
-            vec![tree_of_int],
-            SourceLocation::default(),
-        );
+        graph.record_instantiation(FunctionId(0), vec![tree_of_int], SourceLocation::default());
 
         let result = monomorphize_minimal(module, &graph);
         assert!(result.is_ok());
@@ -991,11 +996,7 @@ mod tests {
             args: vec![b_of_a],
         };
 
-        graph.record_instantiation(
-            FunctionId(0),
-            vec![a_of_b],
-            SourceLocation::default(),
-        );
+        graph.record_instantiation(FunctionId(0), vec![a_of_b], SourceLocation::default());
 
         let result = monomorphize_minimal(module, &graph);
         assert!(result.is_ok());
@@ -1033,11 +1034,28 @@ mod tests {
         // Bytecode with various generic ops
         let bytecode = vec![
             // ADD_G, SUB_G, MUL_G, DIV_G
-            Opcode::AddG.to_byte(), 0, 1, 2, 0,
-            Opcode::SubG.to_byte(), 3, 0, 1, 0,
-            Opcode::MulG.to_byte(), 4, 3, 2, 0,
-            Opcode::DivG.to_byte(), 5, 4, 1, 0,
-            Opcode::Ret.to_byte(), 5,
+            Opcode::AddG.to_byte(),
+            0,
+            1,
+            2,
+            0,
+            Opcode::SubG.to_byte(),
+            3,
+            0,
+            1,
+            0,
+            Opcode::MulG.to_byte(),
+            4,
+            3,
+            2,
+            0,
+            Opcode::DivG.to_byte(),
+            5,
+            4,
+            1,
+            0,
+            Opcode::Ret.to_byte(),
+            5,
         ];
 
         let func = FunctionDescriptor {
@@ -1072,11 +1090,28 @@ mod tests {
         // Bytecode with comparison generic ops (CmpG handles all comparison types)
         // CmpG dst, lhs, rhs, cmp_op (op encoded in 4th byte)
         let bytecode = vec![
-            Opcode::CmpG.to_byte(), 0, 1, 2, 0, // CMP_G r0, r1, r2 (LT)
-            Opcode::CmpG.to_byte(), 1, 2, 3, 1, // CMP_G r1, r2, r3 (LE)
-            Opcode::CmpG.to_byte(), 2, 3, 4, 2, // CMP_G r2, r3, r4 (GT)
-            Opcode::CmpG.to_byte(), 3, 4, 5, 3, // CMP_G r3, r4, r5 (GE)
-            Opcode::Ret.to_byte(), 3,
+            Opcode::CmpG.to_byte(),
+            0,
+            1,
+            2,
+            0, // CMP_G r0, r1, r2 (LT)
+            Opcode::CmpG.to_byte(),
+            1,
+            2,
+            3,
+            1, // CMP_G r1, r2, r3 (LE)
+            Opcode::CmpG.to_byte(),
+            2,
+            3,
+            4,
+            2, // CMP_G r2, r3, r4 (GT)
+            Opcode::CmpG.to_byte(),
+            3,
+            4,
+            5,
+            3, // CMP_G r3, r4, r5 (GE)
+            Opcode::Ret.to_byte(),
+            3,
         ];
 
         let func = FunctionDescriptor {
@@ -1216,11 +1251,7 @@ mod tests {
             };
         }
 
-        graph.record_instantiation(
-            FunctionId(0),
-            vec![current],
-            SourceLocation::default(),
-        );
+        graph.record_instantiation(FunctionId(0), vec![current], SourceLocation::default());
 
         let result = monomorphize_minimal(module, &graph);
         assert!(result.is_ok());
@@ -1317,11 +1348,7 @@ mod tests {
             ],
         };
 
-        graph.record_instantiation(
-            FunctionId(0),
-            vec![tuple_type],
-            SourceLocation::default(),
-        );
+        graph.record_instantiation(FunctionId(0), vec![tuple_type], SourceLocation::default());
 
         let result = monomorphize_minimal(module, &graph);
         assert!(result.is_ok());

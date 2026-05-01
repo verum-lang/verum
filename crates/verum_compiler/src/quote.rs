@@ -10,10 +10,16 @@
 //! Pass 1 parses and registers meta handlers, Pass 2 expands using complete
 //! registry, Pass 3+ performs semantic analysis. Sandboxed execution (no I/O).
 
-use verum_ast::{Item, Span, expr::{Expr, RecoverBody}, pattern::Pattern, stmt::Stmt, ty::Type};
-use verum_lexer::{FloatLiteral, IntegerLiteral, Token, TokenKind};
-use verum_fast_parser::VerumParser;
+use verum_ast::{
+    Item, Span,
+    expr::{Expr, RecoverBody},
+    pattern::Pattern,
+    stmt::Stmt,
+    ty::Type,
+};
 use verum_common::{List, Map, Maybe, Text};
+use verum_fast_parser::VerumParser;
+use verum_lexer::{FloatLiteral, IntegerLiteral, Token, TokenKind};
 
 /// A stream of tokens representing generated code
 ///
@@ -361,10 +367,7 @@ impl ToTokens for Expr {
                         ));
                     }
                     LiteralKind::Contract(content) => {
-                        stream.push(Token::new(
-                            TokenKind::Ident("contract".into()),
-                            self.span,
-                        ));
+                        stream.push(Token::new(TokenKind::Ident("contract".into()), self.span));
                         stream.push(Token::new(TokenKind::Hash, self.span));
                         stream.push(Token::new(
                             TokenKind::Text(content.as_str().to_string().into()),
@@ -548,7 +551,11 @@ impl ToTokens for Expr {
                 stream.push(Token::new(TokenKind::RBrace, self.span));
             }
 
-            ExprKind::Loop { label, body, invariants } => {
+            ExprKind::Loop {
+                label,
+                body,
+                invariants,
+            } => {
                 // Optional label: 'loop_name:
                 if let Some(lbl) = label {
                     stream.push(Token::new(
@@ -827,10 +834,7 @@ impl ToTokens for Expr {
                 right.to_tokens(stream);
             }
 
-            ExprKind::TryRecover {
-                try_block,
-                recover,
-            } => {
+            ExprKind::TryRecover { try_block, recover } => {
                 stream.push(Token::new(TokenKind::Try, self.span));
                 try_block.to_tokens(stream);
                 stream.push(Token::new(TokenKind::Recover, self.span));
@@ -1104,10 +1108,7 @@ impl ToTokens for Expr {
                 elem_type,
                 data,
             } => {
-                stream.push(Token::new(
-                    TokenKind::Ident("tensor".into()),
-                    self.span,
-                ));
+                stream.push(Token::new(TokenKind::Ident("tensor".into()), self.span));
                 stream.push(Token::new(TokenKind::Lt, self.span));
                 for (i, dim) in shape.iter().enumerate() {
                     if i > 0 {
@@ -1159,10 +1160,7 @@ impl ToTokens for Expr {
             }
 
             ExprKind::Typeof(expr) => {
-                stream.push(Token::new(
-                    TokenKind::Ident("typeof".into()),
-                    self.span,
-                ));
+                stream.push(Token::new(TokenKind::Ident("typeof".into()), self.span));
                 stream.push(Token::new(TokenKind::LParen, self.span));
                 expr.to_tokens(stream);
                 stream.push(Token::new(TokenKind::RParen, self.span));
@@ -1292,10 +1290,7 @@ impl ToTokens for Expr {
 
             ExprKind::Forall { bindings, body } => {
                 // Use Ident since TokenKind::Forall doesn't exist
-                stream.push(Token::new(
-                    TokenKind::Ident("forall".into()),
-                    self.span,
-                ));
+                stream.push(Token::new(TokenKind::Ident("forall".into()), self.span));
                 for (i, binding) in bindings.iter().enumerate() {
                     if i > 0 {
                         stream.push(Token::new(TokenKind::Comma, self.span));
@@ -1320,10 +1315,7 @@ impl ToTokens for Expr {
 
             ExprKind::Exists { bindings, body } => {
                 // Use Ident since TokenKind::Exists doesn't exist
-                stream.push(Token::new(
-                    TokenKind::Ident("exists".into()),
-                    self.span,
-                ));
+                stream.push(Token::new(TokenKind::Ident("exists".into()), self.span));
                 for (i, binding) in bindings.iter().enumerate() {
                     if i > 0 {
                         stream.push(Token::new(TokenKind::Comma, self.span));
@@ -1358,10 +1350,7 @@ impl ToTokens for Expr {
             } => {
                 context.to_tokens(stream);
                 stream.push(Token::new(TokenKind::Dot, self.span));
-                stream.push(Token::new(
-                    TokenKind::Ident("attenuate".into()),
-                    self.span,
-                ));
+                stream.push(Token::new(TokenKind::Ident("attenuate".into()), self.span));
                 stream.push(Token::new(TokenKind::LParen, self.span));
                 // Output capabilities
                 for (i, cap) in capabilities.capabilities.iter().enumerate() {
@@ -1388,19 +1377,13 @@ impl ToTokens for Expr {
 
             ExprKind::Throw(inner) => {
                 // Output as: throw expr
-                stream.push(Token::new(
-                    TokenKind::Ident("throw".into()),
-                    self.span,
-                ));
+                stream.push(Token::new(TokenKind::Ident("throw".into()), self.span));
                 inner.to_tokens(stream);
             }
 
             ExprKind::Select { arms, .. } => {
                 // Output as: select { ... }
-                stream.push(Token::new(
-                    TokenKind::Ident("select".into()),
-                    self.span,
-                ));
+                stream.push(Token::new(TokenKind::Ident("select".into()), self.span));
                 stream.push(Token::new(TokenKind::LBrace, self.span));
                 for arm in arms.iter() {
                     arm.body.to_tokens(stream);
@@ -1409,15 +1392,16 @@ impl ToTokens for Expr {
                 stream.push(Token::new(TokenKind::RBrace, self.span));
             }
 
-            ExprKind::Is { expr, pattern, negated } => {
+            ExprKind::Is {
+                expr,
+                pattern,
+                negated,
+            } => {
                 // Output as: expr is pattern or expr is not pattern
                 expr.to_tokens(stream);
                 stream.push(Token::new(TokenKind::Is, self.span));
                 if *negated {
-                    stream.push(Token::new(
-                        TokenKind::Ident("not".into()),
-                        self.span,
-                    ));
+                    stream.push(Token::new(TokenKind::Ident("not".into()), self.span));
                 }
                 pattern.to_tokens(stream);
             }
@@ -1528,13 +1512,20 @@ impl ToTokens for Expr {
                 }
             }
 
-            ExprKind::InlineAsm { template, operands, options } => {
+            ExprKind::InlineAsm {
+                template,
+                operands,
+                options,
+            } => {
                 // Output: @asm("template", [operands], options(...))
                 stream.push(Token::new(TokenKind::At, self.span));
                 stream.push(Token::new(TokenKind::Ident("asm".into()), self.span));
                 stream.push(Token::new(TokenKind::LParen, self.span));
                 // Template string
-                stream.push(Token::new(TokenKind::Text(template.to_string().into()), self.span));
+                stream.push(Token::new(
+                    TokenKind::Text(template.to_string().into()),
+                    self.span,
+                ));
                 // Operands (if any)
                 if !operands.is_empty() {
                     stream.push(Token::new(TokenKind::Comma, self.span));
@@ -1545,7 +1536,10 @@ impl ToTokens for Expr {
                         }
                         // Operand name if present
                         if let verum_common::Maybe::Some(name) = &operand.name {
-                            stream.push(Token::new(TokenKind::Ident(name.name.to_string().into()), self.span));
+                            stream.push(Token::new(
+                                TokenKind::Ident(name.name.to_string().into()),
+                                self.span,
+                            ));
                             stream.push(Token::new(TokenKind::Eq, self.span));
                         }
                         // Operand kind
@@ -1554,29 +1548,53 @@ impl ToTokens for Expr {
                             AsmOperandKind::In { constraint, expr } => {
                                 stream.push(Token::new(TokenKind::Ident("in".into()), self.span));
                                 stream.push(Token::new(TokenKind::LParen, self.span));
-                                stream.push(Token::new(TokenKind::Text(constraint.constraint.to_string().into()), self.span));
+                                stream.push(Token::new(
+                                    TokenKind::Text(constraint.constraint.to_string().into()),
+                                    self.span,
+                                ));
                                 stream.push(Token::new(TokenKind::RParen, self.span));
                                 expr.to_tokens(stream);
                             }
-                            AsmOperandKind::Out { constraint, place, late } => {
+                            AsmOperandKind::Out {
+                                constraint,
+                                place,
+                                late,
+                            } => {
                                 let kw = if *late { "lateout" } else { "out" };
                                 stream.push(Token::new(TokenKind::Ident(kw.into()), self.span));
                                 stream.push(Token::new(TokenKind::LParen, self.span));
-                                stream.push(Token::new(TokenKind::Text(constraint.constraint.to_string().into()), self.span));
+                                stream.push(Token::new(
+                                    TokenKind::Text(constraint.constraint.to_string().into()),
+                                    self.span,
+                                ));
                                 stream.push(Token::new(TokenKind::RParen, self.span));
                                 place.to_tokens(stream);
                             }
                             AsmOperandKind::InOut { constraint, place } => {
-                                stream.push(Token::new(TokenKind::Ident("inout".into()), self.span));
+                                stream
+                                    .push(Token::new(TokenKind::Ident("inout".into()), self.span));
                                 stream.push(Token::new(TokenKind::LParen, self.span));
-                                stream.push(Token::new(TokenKind::Text(constraint.constraint.to_string().into()), self.span));
+                                stream.push(Token::new(
+                                    TokenKind::Text(constraint.constraint.to_string().into()),
+                                    self.span,
+                                ));
                                 stream.push(Token::new(TokenKind::RParen, self.span));
                                 place.to_tokens(stream);
                             }
-                            AsmOperandKind::InLateOut { constraint, in_expr, out_place } => {
-                                stream.push(Token::new(TokenKind::Ident("inlateout".into()), self.span));
+                            AsmOperandKind::InLateOut {
+                                constraint,
+                                in_expr,
+                                out_place,
+                            } => {
+                                stream.push(Token::new(
+                                    TokenKind::Ident("inlateout".into()),
+                                    self.span,
+                                ));
                                 stream.push(Token::new(TokenKind::LParen, self.span));
-                                stream.push(Token::new(TokenKind::Text(constraint.constraint.to_string().into()), self.span));
+                                stream.push(Token::new(
+                                    TokenKind::Text(constraint.constraint.to_string().into()),
+                                    self.span,
+                                ));
                                 stream.push(Token::new(TokenKind::RParen, self.span));
                                 in_expr.to_tokens(stream);
                                 stream.push(Token::new(TokenKind::FatArrow, self.span));
@@ -1591,9 +1609,15 @@ impl ToTokens for Expr {
                                 expr.to_tokens(stream);
                             }
                             AsmOperandKind::Clobber { reg } => {
-                                stream.push(Token::new(TokenKind::Ident("clobber_abi".into()), self.span));
+                                stream.push(Token::new(
+                                    TokenKind::Ident("clobber_abi".into()),
+                                    self.span,
+                                ));
                                 stream.push(Token::new(TokenKind::LParen, self.span));
-                                stream.push(Token::new(TokenKind::Text(reg.to_string().into()), self.span));
+                                stream.push(Token::new(
+                                    TokenKind::Text(reg.to_string().into()),
+                                    self.span,
+                                ));
                                 stream.push(Token::new(TokenKind::RParen, self.span));
                             }
                         }
@@ -1601,7 +1625,8 @@ impl ToTokens for Expr {
                     stream.push(Token::new(TokenKind::RBracket, self.span));
                 }
                 // Options
-                let has_options = options.volatile || options.intel_syntax || !options.raw_options.is_empty();
+                let has_options =
+                    options.volatile || options.intel_syntax || !options.raw_options.is_empty();
                 if has_options {
                     stream.push(Token::new(TokenKind::Comma, self.span));
                     stream.push(Token::new(TokenKind::Ident("options".into()), self.span));
@@ -1645,7 +1670,11 @@ impl ToTokens for Expr {
                             stream.push(Token::new(TokenKind::DotDotDot, self.span));
                         }
                     }
-                    StreamLiteralKind::Range { start, end, inclusive } => {
+                    StreamLiteralKind::Range {
+                        start,
+                        end,
+                        inclusive,
+                    } => {
                         start.to_tokens(stream);
                         if *inclusive {
                             stream.push(Token::new(TokenKind::DotDotEq, self.span));
@@ -1661,7 +1690,10 @@ impl ToTokens for Expr {
                 stream.push(Token::new(TokenKind::RBracket, self.span));
             }
 
-            ExprKind::Quote { target_stage, tokens } => {
+            ExprKind::Quote {
+                target_stage,
+                tokens,
+            } => {
                 // Output: quote { tokens } or quote(N) { tokens }
                 stream.push(Token::new(TokenKind::QuoteKeyword, self.span));
                 if let Some(stage) = target_stage {
@@ -1776,20 +1808,20 @@ impl ToTokens for verum_ast::expr::TokenTree {
             TokenTree::Token(tok) => {
                 // Convert TokenTreeToken back to lexer Token
                 let kind = match &tok.kind {
-                    TokenTreeKind::Ident => {
-                        TokenKind::Ident(tok.text.as_str().to_string().into())
-                    }
-                    TokenTreeKind::IntLiteral => {
-                        TokenKind::Integer(IntegerLiteral {
-                            raw_value: tok.text.as_str().to_string().into(),
-                            base: 10,
-                            suffix: None,
-                        })
-                    }
+                    TokenTreeKind::Ident => TokenKind::Ident(tok.text.as_str().to_string().into()),
+                    TokenTreeKind::IntLiteral => TokenKind::Integer(IntegerLiteral {
+                        raw_value: tok.text.as_str().to_string().into(),
+                        base: 10,
+                        suffix: None,
+                    }),
                     TokenTreeKind::FloatLiteral => {
                         // Parse float value from text
                         let value = tok.text.as_str().parse().unwrap_or(0.0);
-                        TokenKind::Float(FloatLiteral { value, suffix: None, raw: tok.text.clone() })
+                        TokenKind::Float(FloatLiteral {
+                            value,
+                            suffix: None,
+                            raw: tok.text.clone(),
+                        })
                     }
                     TokenTreeKind::StringLiteral => {
                         TokenKind::Text(tok.text.as_str().to_string().into())
@@ -1875,7 +1907,11 @@ impl ToTokens for verum_ast::expr::TokenTree {
                 };
                 stream.push(Token::new(kind, tok.span));
             }
-            TokenTree::Group { delimiter, tokens, span } => {
+            TokenTree::Group {
+                delimiter,
+                tokens,
+                span,
+            } => {
                 // Emit opening delimiter
                 let (open, close) = match delimiter {
                     MacroDelimiter::Paren => (TokenKind::LParen, TokenKind::RParen),
@@ -2052,10 +2088,7 @@ impl ToTokens for Type {
 
             TypeKind::CheckedReference { mutable, inner } => {
                 stream.push(Token::new(TokenKind::Ampersand, self.span));
-                stream.push(Token::new(
-                    TokenKind::Ident("checked".into()),
-                    self.span,
-                ));
+                stream.push(Token::new(TokenKind::Ident("checked".into()), self.span));
                 if *mutable {
                     stream.push(Token::new(TokenKind::Ident("mut".into()), self.span));
                 }
@@ -2064,10 +2097,7 @@ impl ToTokens for Type {
 
             TypeKind::UnsafeReference { mutable, inner } => {
                 stream.push(Token::new(TokenKind::Ampersand, self.span));
-                stream.push(Token::new(
-                    TokenKind::Ident("unsafe".into()),
-                    self.span,
-                ));
+                stream.push(Token::new(TokenKind::Ident("unsafe".into()), self.span));
                 if *mutable {
                     stream.push(Token::new(TokenKind::Ident("mut".into()), self.span));
                 }
@@ -2182,10 +2212,7 @@ impl ToTokens for Type {
             }
 
             TypeKind::GenRef { inner } => {
-                stream.push(Token::new(
-                    TokenKind::Ident("GenRef".into()),
-                    self.span,
-                ));
+                stream.push(Token::new(TokenKind::Ident("GenRef".into()), self.span));
                 stream.push(Token::new(TokenKind::Lt, self.span));
                 inner.to_tokens(stream);
                 stream.push(Token::new(TokenKind::Gt, self.span));
@@ -2208,10 +2235,7 @@ impl ToTokens for Type {
                 shape,
                 layout: _,
             } => {
-                stream.push(Token::new(
-                    TokenKind::Ident("Tensor".into()),
-                    self.span,
-                ));
+                stream.push(Token::new(TokenKind::Ident("Tensor".into()), self.span));
                 stream.push(Token::new(TokenKind::Lt, self.span));
                 element.to_tokens(stream);
                 stream.push(Token::new(TokenKind::Comma, self.span));
@@ -2283,7 +2307,10 @@ impl ToTokens for Type {
 
             // General dependent-type application: `carrier(v1, v2, ..)`
             // where `carrier` already embeds its `<type_args>` (if any).
-            TypeKind::DependentApp { carrier, value_args } => {
+            TypeKind::DependentApp {
+                carrier,
+                value_args,
+            } => {
                 carrier.to_tokens(stream);
                 stream.push(Token::new(TokenKind::LParen, self.span));
                 for (i, arg) in value_args.iter().enumerate() {
@@ -2436,7 +2463,11 @@ impl ToTokens for verum_ast::ty::GenericParam {
         }
 
         match &self.kind {
-            GenericParamKind::Type { name, bounds, default } => {
+            GenericParamKind::Type {
+                name,
+                bounds,
+                default,
+            } => {
                 // Type parameter: T or T: Clone or T: Clone = DefaultType
                 stream.push(Token::new(
                     TokenKind::Ident(name.as_str().to_string().into()),
@@ -2456,7 +2487,11 @@ impl ToTokens for verum_ast::ty::GenericParam {
                     default_ty.to_tokens(stream);
                 }
             }
-            GenericParamKind::HigherKinded { name, arity, bounds } => {
+            GenericParamKind::HigherKinded {
+                name,
+                arity,
+                bounds,
+            } => {
                 // Higher-kinded: F<_> or F<_, _>: Functor
                 stream.push(Token::new(
                     TokenKind::Ident(name.as_str().to_string().into()),
@@ -2490,7 +2525,11 @@ impl ToTokens for verum_ast::ty::GenericParam {
                 stream.push(Token::new(TokenKind::Colon, self.span));
                 ty.to_tokens(stream);
             }
-            GenericParamKind::Meta { name, ty, refinement } => {
+            GenericParamKind::Meta {
+                name,
+                ty,
+                refinement,
+            } => {
                 // Meta parameter: N: meta usize
                 stream.push(Token::new(
                     TokenKind::Ident(name.as_str().to_string().into()),
@@ -2510,7 +2549,10 @@ impl ToTokens for verum_ast::ty::GenericParam {
             }
             GenericParamKind::Lifetime { name } => {
                 // Lifetime parameter: 'a
-                stream.push(Token::new(TokenKind::Lifetime(name.name.clone()), self.span));
+                stream.push(Token::new(
+                    TokenKind::Lifetime(name.name.clone()),
+                    self.span,
+                ));
             }
             GenericParamKind::Context { name } => {
                 // Context parameter: using C
@@ -2767,7 +2809,7 @@ impl ToTokens for Pattern {
                             stream.push(Token::new(
                                 TokenKind::Integer(IntegerLiteral {
                                     raw_value: i.value.to_string().into(),
-                                base: 10,
+                                    base: 10,
                                     suffix: None,
                                 }),
                                 self.span,
@@ -2790,7 +2832,7 @@ impl ToTokens for Pattern {
                             stream.push(Token::new(
                                 TokenKind::Integer(IntegerLiteral {
                                     raw_value: i.value.to_string().into(),
-                                base: 10,
+                                    base: 10,
                                     suffix: None,
                                 }),
                                 self.span,
@@ -2808,7 +2850,8 @@ impl ToTokens for Pattern {
                 stream.push(Token::new(TokenKind::LParen, self.span));
                 inner.to_tokens(stream);
                 stream.push(Token::new(TokenKind::RParen, self.span));
-            }            PatternKind::View {
+            }
+            PatternKind::View {
                 view_function,
                 pattern,
             } => {
@@ -2817,7 +2860,11 @@ impl ToTokens for Pattern {
                 pattern.to_tokens(stream);
             }
 
-            PatternKind::Active { name, params, bindings } => {
+            PatternKind::Active {
+                name,
+                params,
+                bindings,
+            } => {
                 // Active pattern support in quote
                 // Format: name(params)(bindings) or name() for total patterns
                 stream.push(Token::new(
@@ -2866,7 +2913,10 @@ impl ToTokens for Pattern {
                 test_type.to_tokens(stream);
             }
 
-            PatternKind::Stream { head_patterns, rest } => {
+            PatternKind::Stream {
+                head_patterns,
+                rest,
+            } => {
                 // Format: stream[pat1, pat2, ...rest]
                 stream.push(Token::new(TokenKind::Stream, self.span));
                 stream.push(Token::new(TokenKind::LBracket, self.span));
@@ -2976,11 +3026,12 @@ impl ToTokens for Stmt {
                 stream.push(Token::new(TokenKind::Semicolon, self.span));
             }
 
-            StmtKind::Provide { context, alias, value } => {
-                stream.push(Token::new(
-                    TokenKind::Ident("provide".into()),
-                    self.span,
-                ));
+            StmtKind::Provide {
+                context,
+                alias,
+                value,
+            } => {
+                stream.push(Token::new(TokenKind::Ident("provide".into()), self.span));
                 stream.push(Token::new(
                     TokenKind::Ident(context.as_str().to_string().into()),
                     self.span,
@@ -2988,10 +3039,7 @@ impl ToTokens for Stmt {
                 // Aliased context: `using [Database as source]` enables multiple instances
                 // of the same context type with different alias names for disambiguation
                 if let verum_common::Maybe::Some(a) = alias {
-                    stream.push(Token::new(
-                        TokenKind::Ident("as".into()),
-                        self.span,
-                    ));
+                    stream.push(Token::new(TokenKind::Ident("as".into()), self.span));
                     stream.push(Token::new(
                         TokenKind::Ident(a.as_str().to_string().into()),
                         self.span,
@@ -3008,10 +3056,7 @@ impl ToTokens for Stmt {
                 value,
                 block,
             } => {
-                stream.push(Token::new(
-                    TokenKind::Ident("provide".into()),
-                    self.span,
-                ));
+                stream.push(Token::new(TokenKind::Ident("provide".into()), self.span));
                 stream.push(Token::new(
                     TokenKind::Ident(context.as_str().to_string().into()),
                     self.span,
@@ -3019,10 +3064,7 @@ impl ToTokens for Stmt {
                 // Aliased context: `using [Database as source]` enables multiple instances
                 // of the same context type with different alias names for disambiguation
                 if let verum_common::Maybe::Some(a) = alias {
-                    stream.push(Token::new(
-                        TokenKind::Ident("as".into()),
-                        self.span,
-                    ));
+                    stream.push(Token::new(TokenKind::Ident("as".into()), self.span));
                     stream.push(Token::new(
                         TokenKind::Ident(a.as_str().to_string().into()),
                         self.span,
@@ -3086,7 +3128,10 @@ impl ToTokens for verum_ast::Item {
                             GenericParamKind::Level { name, .. } => name.name.as_str(),
                             GenericParamKind::KindAnnotated { name, .. } => name.as_str(),
                         };
-                        stream.push(Token::new(TokenKind::Ident(name.to_string().into()), param.span));
+                        stream.push(Token::new(
+                            TokenKind::Ident(name.to_string().into()),
+                            param.span,
+                        ));
                     }
                     stream.push(Token::new(TokenKind::Gt, self.span));
                 }
@@ -3103,67 +3148,57 @@ impl ToTokens for verum_ast::Item {
                             ty.to_tokens(stream);
                         }
                         FunctionParamKind::SelfValue => {
-                            stream
-                                .push(Token::new(TokenKind::Ident("self".into()), param.span));
+                            stream.push(Token::new(TokenKind::Ident("self".into()), param.span));
                         }
                         FunctionParamKind::SelfValueMut => {
                             stream.push(Token::new(TokenKind::Mut, param.span));
-                            stream
-                                .push(Token::new(TokenKind::Ident("self".into()), param.span));
+                            stream.push(Token::new(TokenKind::Ident("self".into()), param.span));
                         }
                         FunctionParamKind::SelfRef => {
                             stream.push(Token::new(TokenKind::Ampersand, param.span));
-                            stream
-                                .push(Token::new(TokenKind::Ident("self".into()), param.span));
+                            stream.push(Token::new(TokenKind::Ident("self".into()), param.span));
                         }
                         FunctionParamKind::SelfRefMut => {
                             stream.push(Token::new(TokenKind::Ampersand, param.span));
                             stream.push(Token::new(TokenKind::Mut, param.span));
-                            stream
-                                .push(Token::new(TokenKind::Ident("self".into()), param.span));
+                            stream.push(Token::new(TokenKind::Ident("self".into()), param.span));
                         }
                         FunctionParamKind::SelfOwn => {
                             // Ownership reference self: %self
                             stream.push(Token::new(TokenKind::Percent, param.span));
-                            stream
-                                .push(Token::new(TokenKind::Ident("self".into()), param.span));
+                            stream.push(Token::new(TokenKind::Ident("self".into()), param.span));
                         }
                         FunctionParamKind::SelfOwnMut => {
                             // Ownership mutable reference self: %mut self
                             stream.push(Token::new(TokenKind::Percent, param.span));
                             stream.push(Token::new(TokenKind::Mut, param.span));
-                            stream
-                                .push(Token::new(TokenKind::Ident("self".into()), param.span));
+                            stream.push(Token::new(TokenKind::Ident("self".into()), param.span));
                         }
                         FunctionParamKind::SelfRefChecked => {
                             // CBGR checked self: &checked self
                             stream.push(Token::new(TokenKind::Ampersand, param.span));
                             stream.push(Token::new(TokenKind::Checked, param.span));
-                            stream
-                                .push(Token::new(TokenKind::Ident("self".into()), param.span));
+                            stream.push(Token::new(TokenKind::Ident("self".into()), param.span));
                         }
                         FunctionParamKind::SelfRefCheckedMut => {
                             // CBGR checked mutable self: &checked mut self
                             stream.push(Token::new(TokenKind::Ampersand, param.span));
                             stream.push(Token::new(TokenKind::Checked, param.span));
                             stream.push(Token::new(TokenKind::Mut, param.span));
-                            stream
-                                .push(Token::new(TokenKind::Ident("self".into()), param.span));
+                            stream.push(Token::new(TokenKind::Ident("self".into()), param.span));
                         }
                         FunctionParamKind::SelfRefUnsafe => {
                             // CBGR unsafe self: &unsafe self
                             stream.push(Token::new(TokenKind::Ampersand, param.span));
                             stream.push(Token::new(TokenKind::Unsafe, param.span));
-                            stream
-                                .push(Token::new(TokenKind::Ident("self".into()), param.span));
+                            stream.push(Token::new(TokenKind::Ident("self".into()), param.span));
                         }
                         FunctionParamKind::SelfRefUnsafeMut => {
                             // CBGR unsafe mutable self: &unsafe mut self
                             stream.push(Token::new(TokenKind::Ampersand, param.span));
                             stream.push(Token::new(TokenKind::Unsafe, param.span));
                             stream.push(Token::new(TokenKind::Mut, param.span));
-                            stream
-                                .push(Token::new(TokenKind::Ident("self".into()), param.span));
+                            stream.push(Token::new(TokenKind::Ident("self".into()), param.span));
                         }
                     }
                 }
@@ -3312,10 +3347,7 @@ impl ToTokens for verum_ast::Item {
             }
             ItemKind::Predicate(pred) => {
                 // predicate Name(params) -> RetType { body }
-                stream.push(Token::new(
-                    TokenKind::Ident("predicate".into()),
-                    self.span,
-                ));
+                stream.push(Token::new(TokenKind::Ident("predicate".into()), self.span));
                 stream.push(Token::new(
                     TokenKind::Ident(pred.name.as_str().to_string().into()),
                     self.span,
@@ -3344,10 +3376,7 @@ impl ToTokens for verum_ast::Item {
                 if ctx_decl.is_async {
                     stream.push(Token::new(TokenKind::Async, self.span));
                 }
-                stream.push(Token::new(
-                    TokenKind::Ident("context".into()),
-                    self.span,
-                ));
+                stream.push(Token::new(TokenKind::Ident("context".into()), self.span));
                 stream.push(Token::new(
                     TokenKind::Ident(ctx_decl.name.as_str().to_string().into()),
                     self.span,
@@ -3370,7 +3399,10 @@ impl ToTokens for verum_ast::Item {
                             GenericParamKind::Level { name, .. } => name.name.as_str(),
                             GenericParamKind::KindAnnotated { name, .. } => name.as_str(),
                         };
-                        stream.push(Token::new(TokenKind::Ident(name.to_string().into()), param.span));
+                        stream.push(Token::new(
+                            TokenKind::Ident(name.to_string().into()),
+                            param.span,
+                        ));
                     }
                     stream.push(Token::new(TokenKind::Gt, self.span));
                 }
@@ -3388,10 +3420,7 @@ impl ToTokens for verum_ast::Item {
             }
             ItemKind::ContextGroup(group_decl) => {
                 // context group Name { Context1, Context2 }
-                stream.push(Token::new(
-                    TokenKind::Ident("context".into()),
-                    self.span,
-                ));
+                stream.push(Token::new(TokenKind::Ident("context".into()), self.span));
                 stream.push(Token::new(TokenKind::Ident("group".into()), self.span));
                 stream.push(Token::new(
                     TokenKind::Ident(group_decl.name.as_str().to_string().into()),
@@ -3495,7 +3524,10 @@ impl ToTokens for verum_ast::Item {
                     ItemKind::Corollary(_) => "corollary",
                     _ => unreachable!(),
                 };
-                stream.push(Token::new(TokenKind::Ident(keyword.to_string().into()), self.span));
+                stream.push(Token::new(
+                    TokenKind::Ident(keyword.to_string().into()),
+                    self.span,
+                ));
                 stream.push(Token::new(
                     TokenKind::Ident(theorem_decl.name.as_str().to_string().into()),
                     self.span,
@@ -3518,7 +3550,10 @@ impl ToTokens for verum_ast::Item {
                             GenericParamKind::Level { name, .. } => name.name.as_str(),
                             GenericParamKind::KindAnnotated { name, .. } => name.as_str(),
                         };
-                        stream.push(Token::new(TokenKind::Ident(name.to_string().into()), param.span));
+                        stream.push(Token::new(
+                            TokenKind::Ident(name.to_string().into()),
+                            param.span,
+                        ));
                     }
                     stream.push(Token::new(TokenKind::Gt, self.span));
                 }
@@ -3571,7 +3606,10 @@ impl ToTokens for verum_ast::Item {
                             GenericParamKind::Level { name, .. } => name.name.as_str(),
                             GenericParamKind::KindAnnotated { name, .. } => name.as_str(),
                         };
-                        stream.push(Token::new(TokenKind::Ident(name.to_string().into()), param.span));
+                        stream.push(Token::new(
+                            TokenKind::Ident(name.to_string().into()),
+                            param.span,
+                        ));
                     }
                     stream.push(Token::new(TokenKind::Gt, self.span));
                 }
@@ -3595,10 +3633,7 @@ impl ToTokens for verum_ast::Item {
             }
             ItemKind::Tactic(tactic_decl) => {
                 // tactic Name(params) is { body }
-                stream.push(Token::new(
-                    TokenKind::Ident("tactic".into()),
-                    self.span,
-                ));
+                stream.push(Token::new(TokenKind::Ident("tactic".into()), self.span));
                 stream.push(Token::new(
                     TokenKind::Ident(tactic_decl.name.as_str().to_string().into()),
                     self.span,
@@ -3663,7 +3698,10 @@ impl ToTokens for verum_ast::Item {
                             GenericParamKind::Level { name, .. } => name.name.as_str(),
                             GenericParamKind::KindAnnotated { name, .. } => name.as_str(),
                         };
-                        stream.push(Token::new(TokenKind::Ident(name.to_string().into()), param.span));
+                        stream.push(Token::new(
+                            TokenKind::Ident(name.to_string().into()),
+                            param.span,
+                        ));
                     }
                     stream.push(Token::new(TokenKind::Gt, self.span));
                 }
@@ -3718,7 +3756,10 @@ impl ToTokens for verum_ast::Item {
                         _ => {}
                     }
                     stream.push(Token::new(TokenKind::Fn, func.span));
-                    stream.push(Token::new(TokenKind::Ident(func.name.as_str().to_string().into()), func.span));
+                    stream.push(Token::new(
+                        TokenKind::Ident(func.name.as_str().to_string().into()),
+                        func.span,
+                    ));
                     stream.push(Token::new(TokenKind::LParen, func.span));
                     for (i, param) in func.params.iter().enumerate() {
                         if i > 0 {
@@ -3944,7 +3985,10 @@ fn emit_impl_item(kind: &verum_ast::decl::ImplItemKind, span: Span, stream: &mut
                         GenericParamKind::Level { name } => name.name.as_str(),
                         GenericParamKind::KindAnnotated { name, .. } => name.as_str(),
                     };
-                    stream.push(Token::new(TokenKind::Ident(name.to_string().into()), param.span));
+                    stream.push(Token::new(
+                        TokenKind::Ident(name.to_string().into()),
+                        param.span,
+                    ));
                 }
                 stream.push(Token::new(TokenKind::Gt, span));
             }
@@ -4059,7 +4103,10 @@ fn emit_impl_item(kind: &verum_ast::decl::ImplItemKind, span: Span, stream: &mut
                         GenericParamKind::Level { name } => name.name.as_str(),
                         GenericParamKind::KindAnnotated { name, .. } => name.as_str(),
                     };
-                    stream.push(Token::new(TokenKind::Ident(name.to_string().into()), param.span));
+                    stream.push(Token::new(
+                        TokenKind::Ident(name.to_string().into()),
+                        param.span,
+                    ));
                 }
                 stream.push(Token::new(TokenKind::Gt, span));
             }
@@ -4080,7 +4127,10 @@ fn emit_impl_item(kind: &verum_ast::decl::ImplItemKind, span: Span, stream: &mut
             value.to_tokens(stream);
             stream.push(Token::new(TokenKind::Semicolon, span));
         }
-        ImplItemKind::Proof { axiom_name, tactic: _ } => {
+        ImplItemKind::Proof {
+            axiom_name,
+            tactic: _,
+        } => {
             // `proof axiom_name by /* tactic */ ;` — quote preserves
             // the keyword sequence; full tactic quotation flows through
             // the tactic-expr quote path (not yet expanded here to
@@ -4223,8 +4273,10 @@ impl QuoteBuilder {
 
     /// Add an identifier token
     pub fn ident(mut self, name: &str) -> Self {
-        self.stream
-            .push(Token::new(TokenKind::Ident(name.to_string().into()), self.span));
+        self.stream.push(Token::new(
+            TokenKind::Ident(name.to_string().into()),
+            self.span,
+        ));
         self
     }
 
@@ -4235,8 +4287,10 @@ impl QuoteBuilder {
     pub fn hygienic_ident(mut self, name: &str) -> Self {
         self.hygiene_counter += 1;
         let hygienic_name = format!("{}__{}", name, self.hygiene_counter);
-        self.stream
-            .push(Token::new(TokenKind::Ident(hygienic_name.into()), self.span));
+        self.stream.push(Token::new(
+            TokenKind::Ident(hygienic_name.into()),
+            self.span,
+        ));
         self
     }
 
@@ -4346,8 +4400,10 @@ impl QuoteBuilder {
 
     /// Add a string literal
     pub fn string(mut self, value: &str) -> Self {
-        self.stream
-            .push(Token::new(TokenKind::Text(value.to_string().into()), self.span));
+        self.stream.push(Token::new(
+            TokenKind::Text(value.to_string().into()),
+            self.span,
+        ));
         self
     }
 

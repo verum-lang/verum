@@ -61,12 +61,7 @@ pub fn compute_selection_ranges(
 }
 
 /// Collect ranges within an item (function, type, etc.)
-fn collect_ranges_in_item(
-    kind: &ItemKind,
-    offset: u32,
-    text: &str,
-    ranges: &mut Vec<Range>,
-) {
+fn collect_ranges_in_item(kind: &ItemKind, offset: u32, text: &str, ranges: &mut Vec<Range>) {
     match kind {
         ItemKind::Function(func) => {
             // Function name
@@ -186,7 +181,10 @@ fn collect_ranges_in_expr(
                 collect_ranges_in_expr(else_expr, offset, text, ranges);
             }
         }
-        ExprKind::Match { expr: scrutinee, arms } => {
+        ExprKind::Match {
+            expr: scrutinee,
+            arms,
+        } => {
             collect_ranges_in_expr(scrutinee, offset, text, ranges);
             for arm in arms {
                 if arm.body.span.start <= offset && offset <= arm.body.span.end {
@@ -201,7 +199,9 @@ fn collect_ranges_in_expr(
                 ranges.push(ast_span_to_range(&body.span, text));
             }
         }
-        ExprKind::While { condition, body, .. } => {
+        ExprKind::While {
+            condition, body, ..
+        } => {
             collect_ranges_in_expr(condition, offset, text, ranges);
             if body.span.start <= offset && offset <= body.span.end {
                 collect_ranges_in_block(body, offset, text, ranges);

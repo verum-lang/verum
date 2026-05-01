@@ -54,13 +54,14 @@
 //! VBC-first execution: Source → VBC → Interpreter (Tier 0) or LLVM AOT (Tier 1).
 
 pub mod autodiff_compilation;
+pub mod bridge_discharge_check;
 pub mod cfg_constructor;
 pub mod codegen_tiers;
-pub mod delegate_expansion;
 pub mod context_validation;
 pub mod contract_verification;
-pub mod dependency_analysis;
 pub mod contract_verification_diagnostics;
+pub mod delegate_expansion;
+pub mod dependency_analysis;
 pub mod entry_detection;
 pub mod ffi_boundary;
 pub mod lexical_parsing;
@@ -69,7 +70,6 @@ pub mod macro_expansion;
 pub mod meta_registry_phase;
 pub mod mir_lowering;
 pub mod optimization;
-pub mod bridge_discharge_check;
 pub mod phase0_stdlib;
 pub mod proof_erasure;
 pub mod proof_verification;
@@ -86,8 +86,8 @@ pub mod verified_contract;
 
 use anyhow::Result;
 use std::time::Duration;
-use verum_diagnostics::Diagnostic;
 use verum_common::{List, Text};
+use verum_diagnostics::Diagnostic;
 
 pub use verified_contract::{
     ContractTarget, RegistryStats, VerifiedContract, VerifiedContractRegistry,
@@ -98,7 +98,7 @@ pub use verified_contract::{
 pub use mir_lowering::MirModule;
 
 // Re-export linking types
-pub use linking::{FinalLinker, LinkingConfig, LTOConfig, OutputKind};
+pub use linking::{FinalLinker, LTOConfig, LinkingConfig, OutputKind};
 
 // Re-export stdlib types
 pub use phase0_stdlib::{Phase0CoreCompiler, StdlibArtifacts};
@@ -110,14 +110,12 @@ pub use vbc_mono::VbcMonomorphizationPhase;
 
 // Re-export verification phase for full verification pipeline integration
 pub use verification_phase::{
-    BoundsEliminationResults, CBGROptimizationResults, SmtVerificationResults,
-    VerificationPhase, VerificationPhaseConfig, VerificationPhaseResults,
+    BoundsEliminationResults, CBGROptimizationResults, SmtVerificationResults, VerificationPhase,
+    VerificationPhaseConfig, VerificationPhaseResults,
 };
 
 // Re-export dependency analysis for embedded constraints
-pub use dependency_analysis::{
-    DependencyAnalyzer, ItemRequirements, TargetError, TargetProfile,
-};
+pub use dependency_analysis::{DependencyAnalyzer, ItemRequirements, TargetError, TargetProfile};
 
 /// Common trait for all compilation phases
 pub trait CompilationPhase: Send + Sync {
@@ -331,7 +329,10 @@ impl PhaseData {
     /// Whether this is one of the MIR-based variants. Convenience
     /// for verification-track guards.
     pub fn is_mir_based(&self) -> bool {
-        matches!(self.kind(), PhaseDataKind::Mir | PhaseDataKind::OptimizedMir)
+        matches!(
+            self.kind(),
+            PhaseDataKind::Mir | PhaseDataKind::OptimizedMir
+        )
     }
 }
 

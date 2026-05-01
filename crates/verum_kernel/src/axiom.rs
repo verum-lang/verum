@@ -121,7 +121,9 @@ pub struct RegisteredAxiom {
 impl AxiomRegistry {
     /// A fresh empty registry.
     pub fn new() -> Self {
-        Self { entries: List::new() }
+        Self {
+            entries: List::new(),
+        }
     }
 
     /// Register a new axiom. Returns `Err` if an axiom with the same
@@ -168,7 +170,12 @@ impl AxiomRegistry {
         ty: CoreTerm,
         framework: FrameworkId,
     ) -> Result<(), KernelError> {
-        self.register_with_regime(name, ty, framework, SubsingletonRegime::ClosedPropositionOnly)
+        self.register_with_regime(
+            name,
+            ty,
+            framework,
+            SubsingletonRegime::ClosedPropositionOnly,
+        )
     }
 
     /// explicit legacy entry for callers
@@ -272,8 +279,7 @@ impl AxiomRegistry {
             SubsingletonRegime::ClosedPropositionOnly => {
                 let free = crate::support::free_vars(&ty);
                 if !free.is_empty() {
-                    let rendered: Vec<&str> =
-                        free.iter().map(|t| t.as_str()).collect();
+                    let rendered: Vec<&str> = free.iter().map(|t| t.as_str()).collect();
                     return Err(KernelError::AxiomNotSubsingleton {
                         name,
                         free_vars_count: free.len(),
@@ -286,11 +292,8 @@ impl AxiomRegistry {
                 // result must inhabit a universe — anything else
                 // means the body isn't a type and the axiom is
                 // category-mistaken.
-                let inferred = crate::infer::infer(
-                    &crate::Context::new(),
-                    &ty,
-                    &AxiomRegistry::new(),
-                );
+                let inferred =
+                    crate::infer::infer(&crate::Context::new(), &ty, &AxiomRegistry::new());
                 match inferred {
                     Ok(crate::CoreTerm::Universe(_)) => {
                         // Pass — body is a type at some universe.
@@ -312,15 +315,12 @@ impl AxiomRegistry {
                         // a render of the term shape.
                         return Err(KernelError::AxiomBodyNotProp {
                             name,
-                            inferred_universe_shape: Text::from(
-                                "infer-failed",
-                            ),
+                            inferred_universe_shape: Text::from("infer-failed"),
                         });
                     }
                 }
             }
-            SubsingletonRegime::UipPermitted
-            | SubsingletonRegime::LegacyUnchecked => {}
+            SubsingletonRegime::UipPermitted | SubsingletonRegime::LegacyUnchecked => {}
         }
         self.entries.push(RegisteredAxiom {
             name,
@@ -363,9 +363,10 @@ impl AxiomRegistry {
         // `register_with_regime`; the just-admitted axiom is
         // therefore the tail.
         if let Some(entry) = self.entries.iter_mut().next_back()
-            && entry.name == name {
-                entry.coord = Some(coord);
-            }
+            && entry.name == name
+        {
+            entry.coord = Some(coord);
+        }
         Ok(())
     }
 
@@ -413,7 +414,10 @@ impl AxiomRegistry {
 
     /// Look up an axiom by name.
     pub fn get(&self, name: &str) -> Maybe<&RegisteredAxiom> {
-        self.entries.iter().find(|&e| e.name.as_str() == name).map(|v| v as _)
+        self.entries
+            .iter()
+            .find(|&e| e.name.as_str() == name)
+            .map(|v| v as _)
     }
 
     /// Enumerate every registered axiom.
@@ -444,11 +448,7 @@ pub fn load_framework_axioms(
     module: &verum_ast::Module,
     registry: &mut AxiomRegistry,
 ) -> LoadAxiomsReport {
-    load_framework_axioms_with_regime(
-        module,
-        registry,
-        SubsingletonRegime::ClosedPropositionOnly,
-    )
+    load_framework_axioms_with_regime(module, registry, SubsingletonRegime::ClosedPropositionOnly)
 }
 
 /// explicit legacy loader entry for
@@ -460,11 +460,7 @@ pub fn load_framework_axioms_legacy_unchecked(
     module: &verum_ast::Module,
     registry: &mut AxiomRegistry,
 ) -> LoadAxiomsReport {
-    load_framework_axioms_with_regime(
-        module,
-        registry,
-        SubsingletonRegime::LegacyUnchecked,
-    )
+    load_framework_axioms_with_regime(module, registry, SubsingletonRegime::LegacyUnchecked)
 }
 
 /// load framework axioms under the strict
@@ -486,11 +482,7 @@ pub fn load_framework_axioms_strict(
     module: &verum_ast::Module,
     registry: &mut AxiomRegistry,
 ) -> LoadAxiomsReport {
-    load_framework_axioms_with_regime(
-        module,
-        registry,
-        SubsingletonRegime::ClosedPropositionOnly,
-    )
+    load_framework_axioms_with_regime(module, registry, SubsingletonRegime::ClosedPropositionOnly)
 }
 
 /// regime-explicit framework-axiom loader.
@@ -589,12 +581,7 @@ pub fn load_framework_axioms_with_regime(
             // Placeholder type at bring-up — the elaborator supplies
             // the real declared type when it submits the proof term.
             let placeholder_ty = CoreTerm::Universe(UniverseLevel::Concrete(0));
-            match registry.register_with_regime(
-                name.clone(),
-                placeholder_ty,
-                framework,
-                regime,
-            ) {
+            match registry.register_with_regime(name.clone(), placeholder_ty, framework, regime) {
                 Ok(()) => report.registered.push(name),
                 Err(KernelError::DuplicateAxiom(n)) => {
                     report.duplicates.push(n);

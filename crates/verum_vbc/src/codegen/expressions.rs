@@ -32,12 +32,15 @@
 
 use super::context::ExprId;
 use super::{CodegenError, CodegenErrorKind, CodegenResult, FunctionInfo, VbcCodegen};
-use crate::instruction::{ArithSubOpcode, BinaryFloatOp, BinaryIntOp, BitwiseOp, CmpSubOpcode, CompareOp, FloatToIntMode, Instruction, Reg, RegRange, UnaryIntOp, UnaryFloatOp};
+use crate::instruction::{
+    ArithSubOpcode, BinaryFloatOp, BinaryIntOp, BitwiseOp, CmpSubOpcode, CompareOp, FloatToIntMode,
+    Instruction, Reg, RegRange, UnaryFloatOp, UnaryIntOp,
+};
+use crate::intrinsics::{IntrinsicInfo, lookup_intrinsic};
 use crate::module::FfiSymbolId;
 use crate::types::CbgrTier;
-use crate::intrinsics::{lookup_intrinsic, IntrinsicInfo};
-use verum_common::well_known_types::{WellKnownType as WKT, WellKnownProtocol as WKP, type_names};
 use verum_common::method_to_protocol;
+use verum_common::well_known_types::{WellKnownProtocol as WKP, WellKnownType as WKT, type_names};
 
 use verum_ast::pattern::VariantPatternData;
 use verum_ast::{
@@ -118,12 +121,39 @@ fn resolve_type_property(type_name: &str, property: &str) -> Option<TypeProperty
         "stride" => bits.map(|b| TypePropertyValue::Int(b / 8)),
         "name" => Some(TypePropertyValue::Str(type_name.to_string())),
         "min" => {
-            let is_signed = matches!(type_name,
-                "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "IntSize"
-                | "i8" | "i16" | "i32" | "i64" | "i128" | "isize");
-            let is_unsigned = matches!(type_name,
-                "UInt8" | "u8" | "Byte" | "UInt16" | "u16" | "UInt32" | "u32"
-                | "UInt64" | "u64" | "UInt128" | "u128" | "UIntSize" | "USize" | "usize");
+            let is_signed = matches!(
+                type_name,
+                "Int"
+                    | "Int8"
+                    | "Int16"
+                    | "Int32"
+                    | "Int64"
+                    | "Int128"
+                    | "IntSize"
+                    | "i8"
+                    | "i16"
+                    | "i32"
+                    | "i64"
+                    | "i128"
+                    | "isize"
+            );
+            let is_unsigned = matches!(
+                type_name,
+                "UInt8"
+                    | "u8"
+                    | "Byte"
+                    | "UInt16"
+                    | "u16"
+                    | "UInt32"
+                    | "u32"
+                    | "UInt64"
+                    | "u64"
+                    | "UInt128"
+                    | "u128"
+                    | "UIntSize"
+                    | "USize"
+                    | "usize"
+            );
             if is_unsigned {
                 return Some(TypePropertyValue::Int(0));
             }
@@ -132,14 +162,41 @@ fn resolve_type_property(type_name: &str, property: &str) -> Option<TypeProperty
                 return Some(TypePropertyValue::Int(-(1i64 << (b - 1))));
             }
             None
-        },
+        }
         "max" => {
-            let is_signed = matches!(type_name,
-                "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "IntSize"
-                | "i8" | "i16" | "i32" | "i64" | "i128" | "isize");
-            let is_unsigned = matches!(type_name,
-                "UInt8" | "u8" | "Byte" | "UInt16" | "u16" | "UInt32" | "u32"
-                | "UInt64" | "u64" | "UInt128" | "u128" | "UIntSize" | "USize" | "usize");
+            let is_signed = matches!(
+                type_name,
+                "Int"
+                    | "Int8"
+                    | "Int16"
+                    | "Int32"
+                    | "Int64"
+                    | "Int128"
+                    | "IntSize"
+                    | "i8"
+                    | "i16"
+                    | "i32"
+                    | "i64"
+                    | "i128"
+                    | "isize"
+            );
+            let is_unsigned = matches!(
+                type_name,
+                "UInt8"
+                    | "u8"
+                    | "Byte"
+                    | "UInt16"
+                    | "u16"
+                    | "UInt32"
+                    | "u32"
+                    | "UInt64"
+                    | "u64"
+                    | "UInt128"
+                    | "u128"
+                    | "UIntSize"
+                    | "USize"
+                    | "usize"
+            );
             if is_signed {
                 let b = bits?;
                 return Some(TypePropertyValue::Int((1i64 << (b - 1)) - 1));
@@ -152,11 +209,11 @@ fn resolve_type_property(type_name: &str, property: &str) -> Option<TypeProperty
                 return Some(TypePropertyValue::Int((1i64 << b) - 1));
             }
             None
-        },
+        }
         "is_signed" => match type_name {
-            "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "IntSize"
-            | "i8" | "i16" | "i32" | "i64" | "i128" | "isize"
-            | "Float" | "Float32" | "Float64" | "f32" | "f64" => Some(TypePropertyValue::Int(1)),
+            "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "IntSize" | "i8" | "i16"
+            | "i32" | "i64" | "i128" | "isize" | "Float" | "Float32" | "Float64" | "f32"
+            | "f64" => Some(TypePropertyValue::Int(1)),
             _ => Some(TypePropertyValue::Int(0)),
         },
         _ => None,
@@ -207,7 +264,7 @@ fn resolve_type_static_constant(type_name: &str, method: &str) -> Option<i128> {
         }
         "Duration" => {
             return match method {
-                "ZERO" => Some(0), // Duration stored as nanoseconds; zero = 0
+                "ZERO" => Some(0),               // Duration stored as nanoseconds; zero = 0
                 "MAX" => Some(u64::MAX as i128), // Duration(UInt64.MAX) stored as bit pattern
                 _ => None,
             };
@@ -260,27 +317,61 @@ fn resolve_stdlib_constant_value(name: &str) -> i64 {
         "ORDERING_ACQ_REL" => 3,
         "ORDERING_SEQ_CST" => 4,
         // POSIX errno (core/sys/darwin/errno.vr)
-        "EPERM" => 1, "ENOENT" => 2, "ESRCH" => 3, "EINTR" => 4,
-        "EIO" => 5, "ENXIO" => 6, "E2BIG" => 7, "ENOEXEC" => 8,
-        "EBADF" => 9, "ECHILD" => 10, "EAGAIN" => 11, "ENOMEM" => 12,
-        "EACCES" => 13, "EFAULT" => 14, "EBUSY" => 16, "EEXIST" => 17,
-        "ENODEV" => 19, "ENOTDIR" => 20, "EISDIR" => 21, "EINVAL" => 22,
-        "EMFILE" => 24, "ENOSPC" => 28, "EPIPE" => 32, "ERANGE" => 34,
-        "ENOSYS" => 78, "ENOTEMPTY" => 66,
-        "ECONNREFUSED" => 61, "ECONNRESET" => 54, "ECONNABORTED" => 53,
-        "ETIMEDOUT" => 60, "EADDRINUSE" => 48, "EADDRNOTAVAIL" => 49,
-        "ENETUNREACH" => 51, "EALREADY" => 37, "EINPROGRESS" => 36,
-        "ENOTCONN" => 57, "EWOULDBLOCK" => 35,
+        "EPERM" => 1,
+        "ENOENT" => 2,
+        "ESRCH" => 3,
+        "EINTR" => 4,
+        "EIO" => 5,
+        "ENXIO" => 6,
+        "E2BIG" => 7,
+        "ENOEXEC" => 8,
+        "EBADF" => 9,
+        "ECHILD" => 10,
+        "EAGAIN" => 11,
+        "ENOMEM" => 12,
+        "EACCES" => 13,
+        "EFAULT" => 14,
+        "EBUSY" => 16,
+        "EEXIST" => 17,
+        "ENODEV" => 19,
+        "ENOTDIR" => 20,
+        "EISDIR" => 21,
+        "EINVAL" => 22,
+        "EMFILE" => 24,
+        "ENOSPC" => 28,
+        "EPIPE" => 32,
+        "ERANGE" => 34,
+        "ENOSYS" => 78,
+        "ENOTEMPTY" => 66,
+        "ECONNREFUSED" => 61,
+        "ECONNRESET" => 54,
+        "ECONNABORTED" => 53,
+        "ETIMEDOUT" => 60,
+        "EADDRINUSE" => 48,
+        "EADDRNOTAVAIL" => 49,
+        "ENETUNREACH" => 51,
+        "EALREADY" => 37,
+        "EINPROGRESS" => 36,
+        "ENOTCONN" => 57,
+        "EWOULDBLOCK" => 35,
         // kqueue filters (core/sys/darwin/libsystem.vr)
-        "EVFILT_READ" => -1, "EVFILT_WRITE" => -2,
-        "EVFILT_TIMER" => -7, "EVFILT_USER" => -10,
+        "EVFILT_READ" => -1,
+        "EVFILT_WRITE" => -2,
+        "EVFILT_TIMER" => -7,
+        "EVFILT_USER" => -10,
         // kqueue flags
-        "EV_ADD" => 0x0001, "EV_DELETE" => 0x0002,
-        "EV_ENABLE" => 0x0004, "EV_DISABLE" => 0x0008,
-        "EV_CLEAR" => 0x0020, "EV_ONESHOT" => 0x0010,
-        "EV_EOF" => 0x8000_i64, "EV_ERROR" => 0x4000,
+        "EV_ADD" => 0x0001,
+        "EV_DELETE" => 0x0002,
+        "EV_ENABLE" => 0x0004,
+        "EV_DISABLE" => 0x0008,
+        "EV_CLEAR" => 0x0020,
+        "EV_ONESHOT" => 0x0010,
+        "EV_EOF" => 0x8000_i64,
+        "EV_ERROR" => 0x4000,
         // Once-init states
-        "ONCE_INIT" => 0, "ONCE_RUNNING" => 1, "ONCE_DONE" => 2,
+        "ONCE_INIT" => 0,
+        "ONCE_RUNNING" => 1,
+        "ONCE_DONE" => 2,
         // Per-thread context slot table (core/sys/common.vr).
         // Mirrored in `register_stdlib_constants` (codegen/mod.rs).
         "CONTEXT_SLOT_COUNT" | "MAX_CONTEXT_SLOTS" => 256,
@@ -304,11 +395,17 @@ fn resolve_stdlib_constant_value(name: &str) -> i64 {
 fn is_unsigned_int_type_name(name: &str) -> bool {
     matches!(
         name,
-        "UInt8" | "u8" | "Byte"
-            | "UInt16" | "u16"
-            | "UInt32" | "u32"
-            | "UInt64" | "u64"
-            | "USize" | "usize"
+        "UInt8"
+            | "u8"
+            | "Byte"
+            | "UInt16"
+            | "u16"
+            | "UInt32"
+            | "u32"
+            | "UInt64"
+            | "u64"
+            | "USize"
+            | "usize"
     )
 }
 
@@ -415,8 +512,8 @@ impl VbcCodegen {
         // must agree on layout, so any mismatch demotes to the
         // legacy form rather than letting bytecode that the runtime
         // would reject leak out.
-        let parent_type_id = parent_type_name
-            .and_then(|name| self.type_name_to_id.get(name).copied());
+        let parent_type_id =
+            parent_type_name.and_then(|name| self.type_name_to_id.get(name).copied());
         let typed_ok = parent_type_id.and_then(|tid| {
             let desc = self.types.iter().find(|d| d.id == tid)?;
             // **MakeVariantTyped survival check** (#168 / TypeId(148)
@@ -462,7 +559,11 @@ impl VbcCodegen {
                 crate::types::VariantKind::Tuple => variant.arity as u32,
                 crate::types::VariantKind::Record => variant.fields.len() as u32,
             };
-            if expected == field_count { Some(tid) } else { None }
+            if expected == field_count {
+                Some(tid)
+            } else {
+                None
+            }
         });
         if let Some(tid) = typed_ok {
             self.ctx.emit(Instruction::MakeVariantTyped {
@@ -472,7 +573,11 @@ impl VbcCodegen {
                 field_count,
             });
         } else {
-            self.ctx.emit(Instruction::MakeVariant { dst, tag, field_count });
+            self.ctx.emit(Instruction::MakeVariant {
+                dst,
+                tag,
+                field_count,
+            });
         }
     }
 
@@ -494,9 +599,9 @@ impl VbcCodegen {
         let last_colon = name.rfind("::");
         let split_at = match (last_dot, last_colon) {
             (Some(d), Some(c)) => Some(d.max(c)),
-            (Some(d), None)    => Some(d),
-            (None, Some(c))    => Some(c),
-            (None, None)       => None,
+            (Some(d), None) => Some(d),
+            (None, Some(c)) => Some(c),
+            (None, None) => None,
         }?;
         let parent = &name[..split_at];
         if self.type_name_to_id.contains_key(parent) {
@@ -540,15 +645,18 @@ impl VbcCodegen {
     fn detect_array_element_ref(arg: &Expr) -> Option<FfiArrayRefInfo> {
         // Check for &arr[idx] or &mut arr[idx] pattern
         let inner = match &arg.kind {
-            ExprKind::Unary { op: UnOp::Ref | UnOp::RefMut, expr: inner } => inner,
+            ExprKind::Unary {
+                op: UnOp::Ref | UnOp::RefMut,
+                expr: inner,
+            } => inner,
             _ => return None,
         };
 
         // Check if inner is an index expression arr[idx] with a simple variable base
         if let ExprKind::Index { expr: base, .. } = &inner.kind
             && let ExprKind::Path(path) = &base.kind
-                && path.segments.len() == 1
-                    && matches!(path.segments[0], PathSegment::Name(_))
+            && path.segments.len() == 1
+            && matches!(path.segments[0], PathSegment::Name(_))
         {
             return Some(FfiArrayRefInfo {
                 arg_idx: 0, // Will be set by caller
@@ -573,16 +681,17 @@ impl VbcCodegen {
         // Check if the argument is a simple path (function reference)
         if let ExprKind::Path(path) = &arg.kind
             && path.segments.len() == 1
-                && let PathSegment::Name(ident) = &path.segments[0] {
-                    // Look up as a function
-                    if let Some(func_info) = self.ctx.lookup_function(&ident.name) {
-                        return Some(FfiCallbackInfo {
-                            arg_idx,
-                            func_id: func_info.id.0,
-                            callback_signature_id,
-                        });
-                    }
-                }
+            && let PathSegment::Name(ident) = &path.segments[0]
+        {
+            // Look up as a function
+            if let Some(func_info) = self.ctx.lookup_function(&ident.name) {
+                return Some(FfiCallbackInfo {
+                    arg_idx,
+                    func_id: func_info.id.0,
+                    callback_signature_id,
+                });
+            }
+        }
         None
     }
 
@@ -665,7 +774,11 @@ impl VbcCodegen {
             // === Field Access ===
             ExprKind::Field { expr: base, field } => {
                 if std::env::var("VERUM_DEBUG_FA").is_ok() {
-                    tracing::debug!("[FA] field '{}' in fn '{}'", field.name, self.ctx.current_function.as_deref().unwrap_or("?"));
+                    tracing::debug!(
+                        "[FA] field '{}' in fn '{}'",
+                        field.name,
+                        self.ctx.current_function.as_deref().unwrap_or("?")
+                    );
                 }
                 self.compile_field_access(base, &field.name)
             }
@@ -699,7 +812,12 @@ impl VbcCodegen {
             } => self.compile_range(start.as_deref(), end.as_deref(), *inclusive),
 
             // === Closure ===
-            ExprKind::Closure { params, body, return_type, .. } => self.compile_closure(params, body, return_type.as_ref()),
+            ExprKind::Closure {
+                params,
+                body,
+                return_type,
+                ..
+            } => self.compile_closure(params, body, return_type.as_ref()),
 
             // === Optional chaining: obj?.field ===
             ExprKind::OptionalChain { expr: base, field } => {
@@ -740,9 +858,7 @@ impl VbcCodegen {
             // === Async ===
             ExprKind::Spawn { expr, contexts: _ } => self.compile_spawn(expr),
 
-            ExprKind::Inject { type_path } => {
-                self.compile_inject(type_path)
-            }
+            ExprKind::Inject { type_path } => self.compile_inject(type_path),
 
             ExprKind::Select { biased, arms, .. } => self.compile_select(*biased, arms),
 
@@ -752,7 +868,12 @@ impl VbcCodegen {
                 async_iterable,
                 body,
                 ..
-            } => self.compile_for_await(label.as_ref().map(|l| l.as_str()), pattern, async_iterable, body),
+            } => self.compile_for_await(
+                label.as_ref().map(|l| l.as_str()),
+                pattern,
+                async_iterable,
+                body,
+            ),
 
             ExprKind::Yield(value) => self.compile_yield(value),
 
@@ -763,12 +884,11 @@ impl VbcCodegen {
             ExprKind::Meta(block) => self.compile_meta_block(block),
             ExprKind::MetaFunction { name, args } => self.compile_meta_function(name, args),
             ExprKind::MacroCall { path, args } => self.compile_macro_call(path, args),
-            ExprKind::Quote { target_stage, tokens } => {
-                self.compile_quote_expr(target_stage, tokens)
-            }
-            ExprKind::StageEscape { stage, expr } => {
-                self.compile_stage_escape(*stage, expr)
-            }
+            ExprKind::Quote {
+                target_stage,
+                tokens,
+            } => self.compile_quote_expr(target_stage, tokens),
+            ExprKind::StageEscape { stage, expr } => self.compile_stage_escape(*stage, expr),
             ExprKind::Lift { expr } => {
                 // Lift is syntactic sugar for stage escape at the current stage
                 // Compile as: $(stage current){ expr }
@@ -834,9 +954,7 @@ impl VbcCodegen {
 
             ExprKind::TypeExpr(ty) => self.compile_type_expr(ty),
 
-            ExprKind::TypeBound { type_param, bound } => {
-                self.compile_type_bound(type_param, bound)
-            }
+            ExprKind::TypeBound { type_param, bound } => self.compile_type_bound(type_param, bound),
 
             // === Verification quantifiers ===
             ExprKind::Forall { bindings, body } => self.compile_forall(bindings, body),
@@ -895,22 +1013,16 @@ impl VbcCodegen {
             }
 
             // Calc blocks are proof constructs - at runtime they are no-ops
-            ExprKind::CalcBlock(_) => {
-                Ok(None)
-            }
+            ExprKind::CalcBlock(_) => Ok(None),
 
             // Named arguments: compile the value expression
-            ExprKind::NamedArg { value, .. } => {
-                self.compile_expr(value)
-            }
+            ExprKind::NamedArg { value, .. } => self.compile_expr(value),
 
             // Copattern body: defines a coinductive value by observation.
             // Each arm specifies what the corresponding destructor returns.
             // At runtime this compiles to a record/object where each slot
             // holds the thunk/closure for the corresponding observation.
-            ExprKind::CopatternBody { arms, .. } => {
-                self.compile_copattern_body(arms)
-            }
+            ExprKind::CopatternBody { arms, .. } => self.compile_copattern_body(arms),
         }
     }
 
@@ -1122,15 +1234,16 @@ impl VbcCodegen {
                 if let Ok(reg) = self.ctx.get_var_reg(name) {
                     // Cell-wrapped mutable capture: dereference through GetF
                     if let Some(info) = self.ctx.lookup_var(name)
-                        && info.is_cell {
-                            let temp = self.ctx.alloc_temp();
-                            self.ctx.emit(Instruction::GetF {
-                                dst: temp,
-                                obj: reg,
-                                field_idx: 0,
-                            });
-                            return Ok(Some(temp));
-                        }
+                        && info.is_cell
+                    {
+                        let temp = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::GetF {
+                            dst: temp,
+                            obj: reg,
+                            field_idx: 0,
+                        });
+                        return Ok(Some(temp));
+                    }
                     return Ok(Some(reg));
                 }
 
@@ -1138,8 +1251,14 @@ impl VbcCodegen {
                 if let Some(slot) = self.ctx.is_thread_local(name) {
                     let dest = self.ctx.alloc_temp();
                     let slot_reg = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadI { dst: slot_reg, value: slot as i64 });
-                    self.ctx.emit(Instruction::TlsGet { dst: dest, slot: slot_reg });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: slot_reg,
+                        value: slot as i64,
+                    });
+                    self.ctx.emit(Instruction::TlsGet {
+                        dst: dest,
+                        slot: slot_reg,
+                    });
                     // Note: slot_reg NOT freed — must remain valid through TlsGet lowering
                     return Ok(Some(dest));
                 }
@@ -1171,7 +1290,8 @@ impl VbcCodegen {
                     }
 
                     // Check if this is a static/constant (0-param function)
-                    if func_info.param_count == 0 && !func_info.is_async && !func_info.is_generator {
+                    if func_info.param_count == 0 && !func_info.is_async && !func_info.is_generator
+                    {
                         if let Ok(reg) = self.ctx.get_var_reg(name) {
                             return Ok(Some(reg));
                         }
@@ -1271,24 +1391,30 @@ impl VbcCodegen {
 
                 // Fallback for nullary variant constructors not yet registered as functions.
                 // Try to find a qualified name (Type.Variant) that matches.
-                if name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+                if name
+                    .chars()
+                    .next()
+                    .map(|c| c.is_uppercase())
+                    .unwrap_or(false)
+                {
                     // Search for any qualified variant "*.Name" in the function registry
                     let suffix = format!(".{}", name);
                     let qualified_info = self.ctx.find_function_by_suffix(&suffix).cloned();
                     if let Some(info) = qualified_info
-                        && let Some(tag) = info.variant_tag {
-                            let result = self.ctx.alloc_temp();
-                            if info.param_count == 0 {
-                                let parent = info.parent_type_name.clone();
-                                self.emit_make_variant(result, tag, 0, parent.as_deref());
-                            } else {
-                                self.ctx.emit(Instruction::LoadI {
-                                    dst: result,
-                                    value: info.id.0 as i64,
-                                });
-                            }
-                            return Ok(Some(result));
+                        && let Some(tag) = info.variant_tag
+                    {
+                        let result = self.ctx.alloc_temp();
+                        if info.param_count == 0 {
+                            let parent = info.parent_type_name.clone();
+                            self.emit_make_variant(result, tag, 0, parent.as_deref());
+                        } else {
+                            self.ctx.emit(Instruction::LoadI {
+                                dst: result,
+                                value: info.id.0 as i64,
+                            });
                         }
+                        return Ok(Some(result));
+                    }
                 }
 
                 // Not found - truly undefined
@@ -1306,7 +1432,9 @@ impl VbcCodegen {
 
             PathSegment::Super | PathSegment::Cog | PathSegment::Relative => {
                 // These require multi-segment paths
-                Err(CodegenError::unsupported_expr("standalone super/crate/relative"))
+                Err(CodegenError::unsupported_expr(
+                    "standalone super/crate/relative",
+                ))
             }
         }
     }
@@ -1421,10 +1549,37 @@ impl VbcCodegen {
             || matches!(right_type, Some(verum_ast::ty::TypeKind::Text));
         // Check if both types are known primitives (Int, Bool, Char)
         // For unknown types (Maybe<T>, Result<T, E>, etc.), use generic comparison
-        let is_primitive = matches!(left_type, Some(verum_ast::ty::TypeKind::Int | verum_ast::ty::TypeKind::Bool | verum_ast::ty::TypeKind::Char))
-            && matches!(right_type, Some(verum_ast::ty::TypeKind::Int | verum_ast::ty::TypeKind::Bool | verum_ast::ty::TypeKind::Char))
-            || (matches!(left_type, Some(verum_ast::ty::TypeKind::Int | verum_ast::ty::TypeKind::Bool | verum_ast::ty::TypeKind::Char)) && right_type.is_none())
-            || (left_type.is_none() && matches!(right_type, Some(verum_ast::ty::TypeKind::Int | verum_ast::ty::TypeKind::Bool | verum_ast::ty::TypeKind::Char)));
+        let is_primitive = matches!(
+            left_type,
+            Some(
+                verum_ast::ty::TypeKind::Int
+                    | verum_ast::ty::TypeKind::Bool
+                    | verum_ast::ty::TypeKind::Char
+            )
+        ) && matches!(
+            right_type,
+            Some(
+                verum_ast::ty::TypeKind::Int
+                    | verum_ast::ty::TypeKind::Bool
+                    | verum_ast::ty::TypeKind::Char
+            )
+        ) || (matches!(
+            left_type,
+            Some(
+                verum_ast::ty::TypeKind::Int
+                    | verum_ast::ty::TypeKind::Bool
+                    | verum_ast::ty::TypeKind::Char
+            )
+        ) && right_type.is_none())
+            || (left_type.is_none()
+                && matches!(
+                    right_type,
+                    Some(
+                        verum_ast::ty::TypeKind::Int
+                            | verum_ast::ty::TypeKind::Bool
+                            | verum_ast::ty::TypeKind::Char
+                    )
+                ));
         // Check if either operand is unsigned — ordering comparisons need CmpU
         let is_unsigned = self.infer_expr_is_unsigned(left) || self.infer_expr_is_unsigned(right);
 
@@ -1446,33 +1601,33 @@ impl VbcCodegen {
                 _ => None,
             };
             if let Some(method) = op_method_name
-                && let Some(type_name) = self.extract_expr_type_name(left) {
-                    let qualified = format!("{}.{}", type_name, method);
-                    if self.ctx.lookup_function(&qualified).is_some() {
-                        // Found operator method — emit CallM with qualified name
-                        // (e.g., "Weight.add" not just "add") so the LLVM handler
-                        // resolves the correct type's method when multiple types
-                        // have the same operator method name.
-                        let method_id = self.intern_string(&qualified);
-                        self.ctx.emit(Instruction::CallM {
-                            dst: dest,
-                            receiver: left_reg,
-                            method_id,
-                            args: crate::instruction::RegRange {
-                                start: right_reg,
-                                count: 1,
-                            },
-                        });
-                        self.ctx.free_temp(left_reg);
-                        self.ctx.free_temp(right_reg);
-                        // Track return type for chained operations
-                        self.ctx.variable_type_names.insert(
-                            format!("__r{}", dest.0),
-                            type_name.clone(),
-                        );
-                        return Ok(Some(dest));
-                    }
+                && let Some(type_name) = self.extract_expr_type_name(left)
+            {
+                let qualified = format!("{}.{}", type_name, method);
+                if self.ctx.lookup_function(&qualified).is_some() {
+                    // Found operator method — emit CallM with qualified name
+                    // (e.g., "Weight.add" not just "add") so the LLVM handler
+                    // resolves the correct type's method when multiple types
+                    // have the same operator method name.
+                    let method_id = self.intern_string(&qualified);
+                    self.ctx.emit(Instruction::CallM {
+                        dst: dest,
+                        receiver: left_reg,
+                        method_id,
+                        args: crate::instruction::RegRange {
+                            start: right_reg,
+                            count: 1,
+                        },
+                    });
+                    self.ctx.free_temp(left_reg);
+                    self.ctx.free_temp(right_reg);
+                    // Track return type for chained operations
+                    self.ctx
+                        .variable_type_names
+                        .insert(format!("__r{}", dest.0), type_name.clone());
+                    return Ok(Some(dest));
                 }
+            }
         }
 
         // Emit appropriate instruction based on operator
@@ -1558,7 +1713,11 @@ impl VbcCodegen {
                         .as_deref()
                         .map(is_unsigned_int_type_name)
                         .unwrap_or(false);
-                    let op = if use_unsigned { BinaryIntOp::UDiv } else { BinaryIntOp::Div };
+                    let op = if use_unsigned {
+                        BinaryIntOp::UDiv
+                    } else {
+                        BinaryIntOp::Div
+                    };
                     self.ctx.emit(Instruction::BinaryI {
                         op,
                         dst: dest,
@@ -1583,7 +1742,11 @@ impl VbcCodegen {
                         .as_deref()
                         .map(is_unsigned_int_type_name)
                         .unwrap_or(false);
-                    let op = if use_unsigned { BinaryIntOp::UMod } else { BinaryIntOp::Mod };
+                    let op = if use_unsigned {
+                        BinaryIntOp::UMod
+                    } else {
+                        BinaryIntOp::Mod
+                    };
                     self.ctx.emit(Instruction::BinaryI {
                         op,
                         dst: dest,
@@ -1652,7 +1815,10 @@ impl VbcCodegen {
                         protocol_id: 0,
                     });
                     // Negate the result
-                    self.ctx.emit(Instruction::Not { dst: dest, src: tmp });
+                    self.ctx.emit(Instruction::Not {
+                        dst: dest,
+                        src: tmp,
+                    });
                     self.ctx.free_temp(tmp);
                 } else if is_primitive {
                     // Use integer comparison for known primitive types
@@ -1676,7 +1842,10 @@ impl VbcCodegen {
                         protocol_id,
                     });
                     // Negate the result: not equal = !equal
-                    self.ctx.emit(Instruction::Not { dst: dest, src: tmp });
+                    self.ctx.emit(Instruction::Not {
+                        dst: dest,
+                        src: tmp,
+                    });
                     self.ctx.free_temp(tmp);
                 }
             }
@@ -1827,14 +1996,18 @@ impl VbcCodegen {
                     .as_deref()
                     .map(is_unsigned_int_type_name)
                     .unwrap_or(false);
-                let op = if use_logical { BitwiseOp::Ushr } else { BitwiseOp::Shr };
+                let op = if use_logical {
+                    BitwiseOp::Ushr
+                } else {
+                    BitwiseOp::Shr
+                };
                 self.ctx.emit(Instruction::Bitwise {
                     op,
                     dst: dest,
                     a: left_reg,
                     b: right_reg,
                 })
-            },
+            }
 
             // Power operator
             BinOp::Pow => self.ctx.emit(Instruction::BinaryI {
@@ -1886,10 +2059,19 @@ impl VbcCodegen {
             }
 
             // Already handled above (in early-return match at top of function)
-            BinOp::And | BinOp::Or | BinOp::Assign
-            | BinOp::AddAssign | BinOp::SubAssign | BinOp::MulAssign | BinOp::DivAssign
-            | BinOp::RemAssign | BinOp::BitAndAssign | BinOp::BitOrAssign
-            | BinOp::BitXorAssign | BinOp::ShlAssign | BinOp::ShrAssign => unreachable!()
+            BinOp::And
+            | BinOp::Or
+            | BinOp::Assign
+            | BinOp::AddAssign
+            | BinOp::SubAssign
+            | BinOp::MulAssign
+            | BinOp::DivAssign
+            | BinOp::RemAssign
+            | BinOp::BitAndAssign
+            | BinOp::BitOrAssign
+            | BinOp::BitXorAssign
+            | BinOp::ShlAssign
+            | BinOp::ShrAssign => unreachable!(),
         }
 
         // Free operand temporaries
@@ -1914,8 +2096,10 @@ impl VbcCodegen {
             .ok_or_else(|| CodegenError::internal("and left has no value"))?;
 
         // Copy to destination
-        self.ctx
-            .emit(Instruction::Mov { dst: dest, src: left_reg });
+        self.ctx.emit(Instruction::Mov {
+            dst: dest,
+            src: left_reg,
+        });
         self.ctx.free_temp(left_reg);
 
         // If false, skip right side
@@ -1931,8 +2115,10 @@ impl VbcCodegen {
             .ok_or_else(|| CodegenError::internal("and right has no value"))?;
 
         // Copy to destination
-        self.ctx
-            .emit(Instruction::Mov { dst: dest, src: right_reg });
+        self.ctx.emit(Instruction::Mov {
+            dst: dest,
+            src: right_reg,
+        });
         self.ctx.free_temp(right_reg);
 
         self.ctx.define_label(&end_label);
@@ -1955,8 +2141,10 @@ impl VbcCodegen {
             .ok_or_else(|| CodegenError::internal("or left has no value"))?;
 
         // Copy to destination
-        self.ctx
-            .emit(Instruction::Mov { dst: dest, src: left_reg });
+        self.ctx.emit(Instruction::Mov {
+            dst: dest,
+            src: left_reg,
+        });
         self.ctx.free_temp(left_reg);
 
         // If true, skip right side
@@ -1972,8 +2160,10 @@ impl VbcCodegen {
             .ok_or_else(|| CodegenError::internal("or right has no value"))?;
 
         // Copy to destination
-        self.ctx
-            .emit(Instruction::Mov { dst: dest, src: right_reg });
+        self.ctx.emit(Instruction::Mov {
+            dst: dest,
+            src: right_reg,
+        });
         self.ctx.free_temp(right_reg);
 
         self.ctx.define_label(&end_label);
@@ -1986,11 +2176,7 @@ impl VbcCodegen {
 
     /// Implication is used in formal proofs and verification.
     /// It short-circuits: if !a is true, b is not evaluated.
-    fn compile_implication(
-        &mut self,
-        left: &Expr,
-        right: &Expr,
-    ) -> CodegenResult<Option<Reg>> {
+    fn compile_implication(&mut self, left: &Expr, right: &Expr) -> CodegenResult<Option<Reg>> {
         let dest = self.ctx.alloc_temp();
         let end_label = self.ctx.new_label("imply_end");
 
@@ -2001,13 +2187,17 @@ impl VbcCodegen {
 
         // Negate left (compute !a)
         let not_left = self.ctx.alloc_temp();
-        self.ctx
-            .emit(Instruction::Not { dst: not_left, src: left_reg });
+        self.ctx.emit(Instruction::Not {
+            dst: not_left,
+            src: left_reg,
+        });
         self.ctx.free_temp(left_reg);
 
         // Copy !a to destination
-        self.ctx
-            .emit(Instruction::Mov { dst: dest, src: not_left });
+        self.ctx.emit(Instruction::Mov {
+            dst: dest,
+            src: not_left,
+        });
         self.ctx.free_temp(not_left);
 
         // If !a is true (a is false), skip right side - implication is true
@@ -2023,8 +2213,10 @@ impl VbcCodegen {
             .ok_or_else(|| CodegenError::internal("imply right has no value"))?;
 
         // Result is b
-        self.ctx
-            .emit(Instruction::Mov { dst: dest, src: right_reg });
+        self.ctx.emit(Instruction::Mov {
+            dst: dest,
+            src: right_reg,
+        });
         self.ctx.free_temp(right_reg);
 
         self.ctx.define_label(&end_label);
@@ -2057,7 +2249,8 @@ impl VbcCodegen {
             ExprKind::Field { expr: base, field } => {
                 let base_type = self.infer_expr_type_name(base);
                 base_type.and_then(|bt| {
-                    self.field_type_name(&bt, field.name.as_str()).map(|s| s.to_string())
+                    self.field_type_name(&bt, field.name.as_str())
+                        .map(|s| s.to_string())
                 })
             }
             _ => None,
@@ -2082,11 +2275,7 @@ impl VbcCodegen {
                 let name: &str = match &path.segments[0] {
                     PathSegment::Name(ident) => &ident.name,
                     PathSegment::SelfValue => "self",
-                    _ => {
-                        return Err(CodegenError::unsupported_expr(
-                            "non-name assignment target",
-                        ))
-                    }
+                    _ => return Err(CodegenError::unsupported_expr("non-name assignment target")),
                 };
 
                 // First try local variable
@@ -2095,11 +2284,12 @@ impl VbcCodegen {
                     let var_is_cell = self.ctx.lookup_var(name).is_some_and(|i| i.is_cell);
                     if let Some(info) = self.ctx.lookup_var(name)
                         && !info.is_mutable
-                        && info.is_initialized {
-                            return Err(CodegenError::new(CodegenErrorKind::ImmutableAssignment(
-                                name.to_string(),
-                            )));
-                        }
+                        && info.is_initialized
+                    {
+                        return Err(CodegenError::new(CodegenErrorKind::ImmutableAssignment(
+                            name.to_string(),
+                        )));
+                    }
 
                     // Mark as initialized after first assignment
                     if let Some(info) = self.ctx.lookup_var_mut(name) {
@@ -2126,7 +2316,9 @@ impl VbcCodegen {
                     // `state = transition(state, "ack")`, the match on `state`
                     // must know the scrutinee type to resolve variant tags.
                     if let Some(rhs_type) = self.extract_expr_type_name(value) {
-                        self.ctx.variable_type_names.insert(name.to_string(), rhs_type);
+                        self.ctx
+                            .variable_type_names
+                            .insert(name.to_string(), rhs_type);
                     }
 
                     return Ok(Some(target_reg));
@@ -2135,8 +2327,14 @@ impl VbcCodegen {
                 // Check if it's a @thread_local static variable
                 if let Some(slot) = self.ctx.is_thread_local(name) {
                     let slot_reg = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadI { dst: slot_reg, value: slot as i64 });
-                    self.ctx.emit(Instruction::TlsSet { slot: slot_reg, val: value_reg });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: slot_reg,
+                        value: slot as i64,
+                    });
+                    self.ctx.emit(Instruction::TlsSet {
+                        slot: slot_reg,
+                        val: value_reg,
+                    });
                     // Note: slot_reg NOT freed — must remain valid through TlsSet lowering
                     return Ok(Some(value_reg));
                 }
@@ -2145,17 +2343,18 @@ impl VbcCodegen {
                 // For bootstrap: define a local variable for the static and assign to it
                 // This is a workaround until proper global variable support is added
                 if let Some(func_info) = self.ctx.lookup_function(name)
-                    && func_info.param_count == 0 {
-                        // This is a static variable - create a local shadow and assign
-                        // The static's value is effectively stored in the local
-                        let target_reg = self.ctx.define_var(name, true);
-                        self.ctx.emit(Instruction::Mov {
-                            dst: target_reg,
-                            src: value_reg,
-                        });
-                        self.ctx.free_temp(value_reg);
-                        return Ok(Some(target_reg));
-                    }
+                    && func_info.param_count == 0
+                {
+                    // This is a static variable - create a local shadow and assign
+                    // The static's value is effectively stored in the local
+                    let target_reg = self.ctx.define_var(name, true);
+                    self.ctx.emit(Instruction::Mov {
+                        dst: target_reg,
+                        src: value_reg,
+                    });
+                    self.ctx.free_temp(value_reg);
+                    return Ok(Some(target_reg));
+                }
 
                 // Neither local nor static - error
                 Err(CodegenError::undefined_variable(name.to_string()))
@@ -2203,7 +2402,10 @@ impl VbcCodegen {
 
             // Dereference assignment: *ref = value
             // Uses DerefMut instruction to write through mutable reference
-            ExprKind::Unary { op: UnOp::Deref, expr: ref_expr } => {
+            ExprKind::Unary {
+                op: UnOp::Deref,
+                expr: ref_expr,
+            } => {
                 // Get the mutable reference
                 let ref_reg = self
                     .compile_expr(ref_expr)?
@@ -2280,7 +2482,7 @@ impl VbcCodegen {
                     _ => {
                         return Err(CodegenError::unsupported_expr(
                             "non-name compound assignment target",
-                        ))
+                        ));
                     }
                 };
 
@@ -2289,29 +2491,44 @@ impl VbcCodegen {
                     // Load current TLS value
                     let current_reg = self.ctx.alloc_temp();
                     let slot_reg = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadI { dst: slot_reg, value: slot as i64 });
-                    self.ctx.emit(Instruction::TlsGet { dst: current_reg, slot: slot_reg });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: slot_reg,
+                        value: slot as i64,
+                    });
+                    self.ctx.emit(Instruction::TlsGet {
+                        dst: current_reg,
+                        slot: slot_reg,
+                    });
 
                     // Evaluate right side
-                    let right_reg = self
-                        .compile_expr(value)?
-                        .ok_or_else(|| CodegenError::internal("compound assign value has no value"))?;
+                    let right_reg = self.compile_expr(value)?.ok_or_else(|| {
+                        CodegenError::internal("compound assign value has no value")
+                    })?;
 
                     // Perform operation into current_reg
                     if let Some(bop) = bitwise_op {
                         self.ctx.emit(Instruction::Bitwise {
-                            op: bop, dst: current_reg, a: current_reg, b: right_reg,
+                            op: bop,
+                            dst: current_reg,
+                            a: current_reg,
+                            b: right_reg,
                         });
                     } else if let Some(iop) = binary_op {
                         self.ctx.emit(Instruction::BinaryI {
-                            op: iop, dst: current_reg, a: current_reg, b: right_reg,
+                            op: iop,
+                            dst: current_reg,
+                            a: current_reg,
+                            b: right_reg,
                         });
                     } else {
                         return Err(CodegenError::internal("not a compound assignment"));
                     }
 
                     // Store result back to TLS
-                    self.ctx.emit(Instruction::TlsSet { slot: slot_reg, val: current_reg });
+                    self.ctx.emit(Instruction::TlsSet {
+                        slot: slot_reg,
+                        val: current_reg,
+                    });
                     self.ctx.free_temp(current_reg);
                     self.ctx.free_temp(right_reg);
                     // Note: slot_reg NOT freed — must remain valid through TlsSet lowering
@@ -2322,28 +2539,33 @@ impl VbcCodegen {
                 // from the current static value, then do the compound operation
                 if self.ctx.get_var_reg(name).is_err()
                     && let Some(func_info) = self.ctx.lookup_function(name).cloned()
-                        && func_info.param_count == 0 {
-                            let init_reg = self.ctx.alloc_temp();
-                            self.ctx.emit(Instruction::Call {
-                                dst: init_reg,
-                                func_id: func_info.id.0,
-                                args: RegRange::new(Reg(0), 0),
-                            });
-                            let shadow_reg = self.ctx.define_var(name, true);
-                            self.ctx.emit(Instruction::Mov { dst: shadow_reg, src: init_reg });
-                            self.ctx.free_temp(init_reg);
-                        }
+                    && func_info.param_count == 0
+                {
+                    let init_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::Call {
+                        dst: init_reg,
+                        func_id: func_info.id.0,
+                        args: RegRange::new(Reg(0), 0),
+                    });
+                    let shadow_reg = self.ctx.define_var(name, true);
+                    self.ctx.emit(Instruction::Mov {
+                        dst: shadow_reg,
+                        src: init_reg,
+                    });
+                    self.ctx.free_temp(init_reg);
+                }
 
                 let target_reg = self.ctx.get_var_reg(name)?;
                 let var_is_cell = self.ctx.lookup_var(name).is_some_and(|i| i.is_cell);
 
                 // Check mutability
                 if let Some(info) = self.ctx.lookup_var(name)
-                    && !info.is_mutable {
-                        return Err(CodegenError::new(CodegenErrorKind::ImmutableAssignment(
-                            name.to_string(),
-                        )));
-                    }
+                    && !info.is_mutable
+                {
+                    return Err(CodegenError::new(CodegenErrorKind::ImmutableAssignment(
+                        name.to_string(),
+                    )));
+                }
 
                 // Evaluate right side
                 let right_reg = self
@@ -2523,7 +2745,10 @@ impl VbcCodegen {
             }
 
             // Tuple index: tuple.0 += value
-            ExprKind::TupleIndex { expr: tuple_expr, index } => {
+            ExprKind::TupleIndex {
+                expr: tuple_expr,
+                index,
+            } => {
                 // Load tuple
                 let tuple_reg = self
                     .compile_expr(tuple_expr)?
@@ -2584,7 +2809,10 @@ impl VbcCodegen {
 
             // Dereference: *ptr += value
             // Uses DerefMut instruction to write through mutable reference
-            ExprKind::Unary { op: UnOp::Deref, expr: ref_expr } => {
+            ExprKind::Unary {
+                op: UnOp::Deref,
+                expr: ref_expr,
+            } => {
                 // Get the mutable reference
                 let ref_reg = self
                     .compile_expr(ref_expr)?
@@ -2596,9 +2824,9 @@ impl VbcCodegen {
                 self.emit_deref_instruction(current_val, ref_reg, tier);
 
                 // Compile the right-hand side
-                let right_reg = self
-                    .compile_expr(value)?
-                    .ok_or_else(|| CodegenError::internal("compound assignment value has no value"))?;
+                let right_reg = self.compile_expr(value)?.ok_or_else(|| {
+                    CodegenError::internal("compound assignment value has no value")
+                })?;
 
                 // Perform the operation
                 let result = self.ctx.alloc_temp();
@@ -2676,8 +2904,15 @@ impl VbcCodegen {
         // lower to `CbgrSubOpcode::RefSlice` instead, which knows how
         // to walk a List's `backing_ptr` and produce a proper FatRef.
         if matches!(op, UnOp::Ref | UnOp::RefMut)
-            && let ExprKind::Index { expr: arr_expr, index: idx_expr } = &inner.kind
-            && let ExprKind::Range { start, end, inclusive } = &idx_expr.kind
+            && let ExprKind::Index {
+                expr: arr_expr,
+                index: idx_expr,
+            } = &inner.kind
+            && let ExprKind::Range {
+                start,
+                end,
+                inclusive,
+            } = &idx_expr.kind
         {
             let arr_reg = self
                 .compile_expr(arr_expr)?
@@ -2689,10 +2924,16 @@ impl VbcCodegen {
                 let s_reg = self
                     .compile_expr(s)?
                     .ok_or_else(|| CodegenError::internal("slice start has no value"))?;
-                self.ctx.emit(Instruction::Mov { dst: start_reg, src: s_reg });
+                self.ctx.emit(Instruction::Mov {
+                    dst: start_reg,
+                    src: s_reg,
+                });
                 self.ctx.free_temp(s_reg);
             } else {
-                self.ctx.emit(Instruction::LoadSmallI { dst: start_reg, value: 0 });
+                self.ctx.emit(Instruction::LoadSmallI {
+                    dst: start_reg,
+                    value: 0,
+                });
             }
 
             // len = (end_or_arr_len + (inclusive ? 1 : 0)) - start.
@@ -2702,11 +2943,17 @@ impl VbcCodegen {
                 let e_reg = self
                     .compile_expr(e)?
                     .ok_or_else(|| CodegenError::internal("slice end has no value"))?;
-                self.ctx.emit(Instruction::Mov { dst: end_reg, src: e_reg });
+                self.ctx.emit(Instruction::Mov {
+                    dst: end_reg,
+                    src: e_reg,
+                });
                 self.ctx.free_temp(e_reg);
                 if *inclusive {
                     let one_reg = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadSmallI { dst: one_reg, value: 1 });
+                    self.ctx.emit(Instruction::LoadSmallI {
+                        dst: one_reg,
+                        value: 1,
+                    });
                     self.ctx.emit(Instruction::BinaryI {
                         op: BinaryIntOp::Add,
                         dst: end_reg,
@@ -2755,7 +3002,10 @@ impl VbcCodegen {
         // a pointer into the List's backing storage and DerefMut
         // writes through to `arr[i]` directly.
         if matches!(op, UnOp::Ref | UnOp::RefMut)
-            && let ExprKind::Index { expr: arr_expr, index: idx_expr } = &inner.kind
+            && let ExprKind::Index {
+                expr: arr_expr,
+                index: idx_expr,
+            } = &inner.kind
         {
             let list_reg = self
                 .compile_expr(arr_expr)?
@@ -2847,17 +3097,28 @@ impl VbcCodegen {
                 let type_name = self.extract_expr_type_name(inner);
                 let is_builtin_not = matches!(
                     type_name.as_deref(),
-                    None
-                        | Some("Bool")
+                    None | Some("Bool")
                         | Some("Int")
-                        | Some("Int8") | Some("Int16") | Some("Int32") | Some("Int64") | Some("Int128")
-                        | Some("UInt") | Some("UInt8") | Some("UInt16") | Some("UInt32") | Some("UInt64") | Some("UInt128")
-                        | Some("ISize") | Some("USize") | Some("Byte")
+                        | Some("Int8")
+                        | Some("Int16")
+                        | Some("Int32")
+                        | Some("Int64")
+                        | Some("Int128")
+                        | Some("UInt")
+                        | Some("UInt8")
+                        | Some("UInt16")
+                        | Some("UInt32")
+                        | Some("UInt64")
+                        | Some("UInt128")
+                        | Some("ISize")
+                        | Some("USize")
+                        | Some("Byte")
                 );
-                let has_not_method = !is_builtin_not && type_name.as_ref().is_some_and(|name| {
-                    let qualified = format!("{}.not", name);
-                    self.ctx.lookup_function(&qualified).is_some()
-                });
+                let has_not_method = !is_builtin_not
+                    && type_name.as_ref().is_some_and(|name| {
+                        let qualified = format!("{}.not", name);
+                        self.ctx.lookup_function(&qualified).is_some()
+                    });
                 if has_not_method {
                     self.ctx.free_temp(dest);
                     let method_result = self.ctx.alloc_temp();
@@ -2874,8 +3135,10 @@ impl VbcCodegen {
                     self.ctx.free_temp(inner_reg);
                     return Ok(Some(method_result));
                 }
-                self.ctx
-                    .emit(Instruction::Not { dst: dest, src: inner_reg });
+                self.ctx.emit(Instruction::Not {
+                    dst: dest,
+                    src: inner_reg,
+                });
             }
             UnOp::BitNot => {
                 self.ctx.emit(Instruction::Bitwise {
@@ -2945,10 +3208,12 @@ impl VbcCodegen {
             UnOp::Deref => {
                 // Check if inner expression is Heap<T> or Shared<T> — these are transparent
                 // wrappers, so *heap_val is just a Mov (no actual pointer dereference)
-                let inner_type = self.infer_expr_type_name(inner)
+                let inner_type = self
+                    .infer_expr_type_name(inner)
                     .or_else(|| self.extract_expr_type_name(inner));
                 let is_heap_deref = inner_type.as_ref().is_some_and(|t| {
-                    t.starts_with("Heap<") || t.starts_with("Shared<")
+                    t.starts_with("Heap<")
+                        || t.starts_with("Shared<")
                         || self.is_allocating_wrapper(t)
                 });
                 // Typed-primitive deref dispatch (#26 codegen tail).
@@ -2998,7 +3263,10 @@ impl VbcCodegen {
 
                     // For non-CBGR receivers (user-defined Heap structs), Deref
                     // falls through to identity deref which matches Mov semantics.
-                    self.ctx.emit(Instruction::Deref { dst: dest, ref_reg: inner_reg });
+                    self.ctx.emit(Instruction::Deref {
+                        dst: dest,
+                        ref_reg: inner_reg,
+                    });
                 } else {
                     // Generic Value-sized deref - tier affects whether we emit ChkRef.
                     let tier = self.get_deref_tier_for_expr(inner);
@@ -3055,11 +3323,7 @@ impl VbcCodegen {
                             name
                         }
                         PathSegment::SelfValue => "self".to_string(),
-                        _ => {
-                            return Err(CodegenError::unsupported_expr(
-                                "non-name function path",
-                            ))
-                        }
+                        _ => return Err(CodegenError::unsupported_expr("non-name function path")),
                     }
                 } else {
                     // Qualified path - use full path
@@ -3150,10 +3414,11 @@ impl VbcCodegen {
         };
 
         // Look up function - use arity-based disambiguation when available
-        let (resolved_name, func_info) = match module_qualified_lookup
-            .or_else(|| self.ctx.lookup_function_with_arity(&func_name, args.len())
-                .map(|info| (func_name.clone(), info.clone())))
-        {
+        let (resolved_name, func_info) = match module_qualified_lookup.or_else(|| {
+            self.ctx
+                .lookup_function_with_arity(&func_name, args.len())
+                .map(|info| (func_name.clone(), info.clone()))
+        }) {
             Some(result) => result,
             None => {
                 // Try fallback: if qualified path like "darwin::tls::init_main_thread_tls" fails,
@@ -3195,7 +3460,12 @@ impl VbcCodegen {
                 } else {
                     // If not found and name starts with uppercase, treat as variant constructor
                     // This handles cross-module variant constructors like Ok, Err, Some, None
-                    if func_name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+                    if func_name
+                        .chars()
+                        .next()
+                        .map(|c| c.is_uppercase())
+                        .unwrap_or(false)
+                    {
                         return self.compile_variant_constructor(&func_name, args);
                     }
 
@@ -3258,11 +3528,14 @@ impl VbcCodegen {
         // produce a layout-mismatched payload at runtime — symptom
         // class #76. Mirrors the same fix in compile_variant_constructor.
         if let Some(tag) = func_info.variant_tag {
-            let context_type: Option<String> = self.ctx.current_return_type_name
+            let context_type: Option<String> = self
+                .ctx
+                .current_return_type_name
                 .as_ref()
                 .map(|t| t.split('<').next().unwrap_or(t.as_str()).to_string())
                 .or_else(|| {
-                    self.ctx.match_scrutinee_type
+                    self.ctx
+                        .match_scrutinee_type
                         .as_ref()
                         .map(|t| t.split('<').next().unwrap_or(t.as_str()).to_string())
                 });
@@ -3277,7 +3550,9 @@ impl VbcCodegen {
                 // Try to redirect via the suffix-and-args lookup; if it
                 // resolves to a different variant whose parent matches the
                 // context, use that one.
-                let simple_name = func_name.rsplit("::").next()
+                let simple_name = func_name
+                    .rsplit("::")
+                    .next()
                     .or_else(|| func_name.rsplit('.').next())
                     .unwrap_or(&func_name);
                 self.ctx
@@ -3297,9 +3572,9 @@ impl VbcCodegen {
                 func_info.parent_type_name.as_deref(),
             );
             for (i, arg) in args.iter().enumerate() {
-                let arg_val = self
-                    .compile_expr(arg)?
-                    .ok_or_else(|| CodegenError::internal("variant constructor arg has no value"))?;
+                let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
+                    CodegenError::internal("variant constructor arg has no value")
+                })?;
                 self.ctx.emit(Instruction::SetVariantData {
                     variant: result,
                     field: i as u32,
@@ -3314,12 +3589,13 @@ impl VbcCodegen {
         // This is the primary intrinsic resolution path - intrinsic identity is established
         // at declaration time via @intrinsic attribute, not at call-site via name matching.
         if let Some(intrinsic_name) = &func_info.intrinsic_name
-            && let Some(intrinsic_info) = lookup_intrinsic(intrinsic_name) {
-                return self.compile_imported_intrinsic_call(&intrinsic_info, args);
-            }
-            // Intrinsic declared but not in registry — fall through to compile function body.
-            // This allows @intrinsic functions with fallback bodies (e.g., process_spawn)
-            // to work when the intrinsic isn't wired yet.
+            && let Some(intrinsic_info) = lookup_intrinsic(intrinsic_name)
+        {
+            return self.compile_imported_intrinsic_call(&intrinsic_info, args);
+        }
+        // Intrinsic declared but not in registry — fall through to compile function body.
+        // This allows @intrinsic functions with fallback bodies (e.g., process_spawn)
+        // to work when the intrinsic isn't wired yet.
 
         // Handle type constructors with sentinel IDs (newtypes, unit types, etc.).
         // These are registered with FunctionId(u32::MAX / 2) and don't have bytecode.
@@ -3383,36 +3659,42 @@ impl VbcCodegen {
 
         for (i, arg) in args.iter().enumerate() {
             // Check for array element reference pattern (&arr[idx]) for FFI calls
-            if is_ffi_call
-                && let Some(mut info) = Self::detect_array_element_ref(arg) {
-                    info.arg_idx = i as u8;
-                    array_ref_infos.push(info);
-                    continue; // Don't check for other patterns
-                }
+            if is_ffi_call && let Some(mut info) = Self::detect_array_element_ref(arg) {
+                info.arg_idx = i as u8;
+                array_ref_infos.push(info);
+                continue; // Don't check for other patterns
+            }
 
             // Check for function callback pattern for FFI calls
             // If this parameter expects a FnPtr and the argument is a function reference,
             // we need to create a trampoline callback
             if let Some(ffi_symbol_id) = ffi_symbol_id_opt
-                && let Some(callback_sig_id) = self.get_callback_signature_id(ffi_symbol_id, i as u8) {
-                    // This parameter expects a function pointer - check if arg is a function reference
-                    if let Some(info) = self.detect_function_reference(arg, i as u8, callback_sig_id) {
-                        callback_infos.push(info);
-                        continue; // Don't check for other patterns
-                    }
+                && let Some(callback_sig_id) =
+                    self.get_callback_signature_id(ffi_symbol_id, i as u8)
+            {
+                // This parameter expects a function pointer - check if arg is a function reference
+                if let Some(info) = self.detect_function_reference(arg, i as u8, callback_sig_id) {
+                    callback_infos.push(info);
+                    continue; // Don't check for other patterns
                 }
+            }
 
             // Check for &mut variable pattern
-            if let ExprKind::Unary { op: UnOp::RefMut, expr: inner } = &arg.kind {
+            if let ExprKind::Unary {
+                op: UnOp::RefMut,
+                expr: inner,
+            } = &arg.kind
+            {
                 // Check if inner is a simple variable path
                 if let ExprKind::Path(path) = &inner.kind
                     && path.segments.len() == 1
-                        && let PathSegment::Name(ident) = &path.segments[0] {
-                            // Found &mut variable - look up the variable's register
-                            if let Ok(source_reg) = self.ctx.get_var_reg(&ident.name) {
-                                mut_ref_sources.push((i as u8, source_reg));
-                            }
-                        }
+                    && let PathSegment::Name(ident) = &path.segments[0]
+                {
+                    // Found &mut variable - look up the variable's register
+                    if let Ok(source_reg) = self.ctx.get_var_reg(&ident.name) {
+                        mut_ref_sources.push((i as u8, source_reg));
+                    }
+                }
             }
 
             // For FFI calls: detect &var or &mut var scalar reference patterns
@@ -3420,11 +3702,15 @@ impl VbcCodegen {
             // because the Verum Ref instruction stores a register index, not a pointer,
             // which is wrong for C FFI (the marshaller needs the actual value).
             if is_ffi_call
-                && let ExprKind::Unary { op: UnOp::Ref | UnOp::RefMut, expr: inner } = &arg.kind
-                    && let ExprKind::Path(path) = &inner.kind
-                        && path.segments.len() == 1 {
-                            scalar_ref_args.insert(i as u8);
-                        }
+                && let ExprKind::Unary {
+                    op: UnOp::Ref | UnOp::RefMut,
+                    expr: inner,
+                } = &arg.kind
+                && let ExprKind::Path(path) = &inner.kind
+                && path.segments.len() == 1
+            {
+                scalar_ref_args.insert(i as u8);
+            }
         }
 
         let args_start = if !args.is_empty() {
@@ -3452,7 +3738,10 @@ impl VbcCodegen {
                     // FFI scalar reference: strip the &/&mut and compile just the inner expression
                     // The marshaller will create RefArgStorage with the actual value
                     let inner_expr = match &arg.kind {
-                        ExprKind::Unary { op: UnOp::Ref | UnOp::RefMut, expr: inner } => inner,
+                        ExprKind::Unary {
+                            op: UnOp::Ref | UnOp::RefMut,
+                            expr: inner,
+                        } => inner,
                         _ => arg, // shouldn't happen
                     };
                     let arg_val = self
@@ -3541,8 +3830,7 @@ impl VbcCodegen {
         let user_fn_matches_arity = func_info.param_count == args.len()
             && func_info.intrinsic_name.is_none()
             && func_info.id.0 != u32::MAX;
-        if !user_fn_matches_arity
-            && let Some(ffi_symbol_id) = self.get_ffi_symbol_id(&func_name) {
+        if !user_fn_matches_arity && let Some(ffi_symbol_id) = self.get_ffi_symbol_id(&func_name) {
             // Emit FfiExtended.CallFfiC instruction
             // Format: symbol_idx:u32, arg_count:u8, ret_reg:reg, [arg_regs...],
             //  mut_ref_count:u8, [(arg_idx:u8, source_reg:reg)...]
@@ -3573,24 +3861,26 @@ impl VbcCodegen {
 
             // Phase 4: Emit requires assertions before FFI call (debug mode only)
             if self.optimization_level() < 2
-                && let Some(contract) = self.get_ffi_contract_exprs(&func_name) {
-                    let requires_exprs: Vec<_> = contract.requires.clone();
-                    let fn_name = contract.function_name.clone();
-                    for (i, req_expr) in requires_exprs.iter().enumerate() {
-                        if let Ok(Some(cond_reg)) = self.compile_expr(req_expr) {
-                            let msg = format!(
-                                "FFI requires violation: condition {} of {}()",
-                                i + 1, fn_name
-                            );
-                            let message_id = self.intern_string(&msg);
-                            self.ctx.emit(Instruction::Assert {
-                                cond: cond_reg,
-                                message_id,
-                            });
-                            self.ctx.free_temp(cond_reg);
-                        }
+                && let Some(contract) = self.get_ffi_contract_exprs(&func_name)
+            {
+                let requires_exprs: Vec<_> = contract.requires.clone();
+                let fn_name = contract.function_name.clone();
+                for (i, req_expr) in requires_exprs.iter().enumerate() {
+                    if let Ok(Some(cond_reg)) = self.compile_expr(req_expr) {
+                        let msg = format!(
+                            "FFI requires violation: condition {} of {}()",
+                            i + 1,
+                            fn_name
+                        );
+                        let message_id = self.intern_string(&msg);
+                        self.ctx.emit(Instruction::Assert {
+                            cond: cond_reg,
+                            message_id,
+                        });
+                        self.ctx.free_temp(cond_reg);
                     }
                 }
+            }
 
             self.ctx.emit(Instruction::FfiExtended {
                 sub_op: 0x10, // CallFfiC
@@ -3606,32 +3896,34 @@ impl VbcCodegen {
             // Phase 4: Emit ensures assertions after FFI call (debug mode only)
             if self.optimization_level() < 2
                 && let Some(contract) = self.get_ffi_contract_exprs(&func_name)
-                    && !contract.ensures.is_empty() {
-                        let ensures_exprs: Vec<_> = contract.ensures.clone();
-                        let fn_name = contract.function_name.clone();
-                        // Create a "result" variable pointing to the return value
-                        self.ctx.enter_scope();
-                        let result_var = self.ctx.define_var("result", false);
-                        self.ctx.emit(Instruction::Mov {
-                            dst: result_var,
-                            src: result,
+                && !contract.ensures.is_empty()
+            {
+                let ensures_exprs: Vec<_> = contract.ensures.clone();
+                let fn_name = contract.function_name.clone();
+                // Create a "result" variable pointing to the return value
+                self.ctx.enter_scope();
+                let result_var = self.ctx.define_var("result", false);
+                self.ctx.emit(Instruction::Mov {
+                    dst: result_var,
+                    src: result,
+                });
+                for (i, ens_expr) in ensures_exprs.iter().enumerate() {
+                    if let Ok(Some(cond_reg)) = self.compile_expr(ens_expr) {
+                        let msg = format!(
+                            "FFI ensures violation: condition {} of {}()",
+                            i + 1,
+                            fn_name
+                        );
+                        let message_id = self.intern_string(&msg);
+                        self.ctx.emit(Instruction::Assert {
+                            cond: cond_reg,
+                            message_id,
                         });
-                        for (i, ens_expr) in ensures_exprs.iter().enumerate() {
-                            if let Ok(Some(cond_reg)) = self.compile_expr(ens_expr) {
-                                let msg = format!(
-                                    "FFI ensures violation: condition {} of {}()",
-                                    i + 1, fn_name
-                                );
-                                let message_id = self.intern_string(&msg);
-                                self.ctx.emit(Instruction::Assert {
-                                    cond: cond_reg,
-                                    message_id,
-                                });
-                                self.ctx.free_temp(cond_reg);
-                            }
-                        }
-                        self.ctx.exit_scope(false);
+                        self.ctx.free_temp(cond_reg);
                     }
+                }
+                self.ctx.exit_scope(false);
+            }
         } else if func_info.is_generator {
             // Generator function call - create generator instance instead of calling
             // The generator's initial registers are populated from the arguments
@@ -3690,21 +3982,35 @@ impl VbcCodegen {
     ) -> CodegenResult<Reg> {
         // Extract the array element reference pattern components
         let (is_mutable, base, index) = match &arg.kind {
-            ExprKind::Unary { op: UnOp::Ref, expr: inner } => {
+            ExprKind::Unary {
+                op: UnOp::Ref,
+                expr: inner,
+            } => {
                 if let ExprKind::Index { expr: base, index } = &inner.kind {
                     (false, base.as_ref(), index.as_ref())
                 } else {
-                    return Err(CodegenError::internal("expected index expression in &arr[idx]"));
+                    return Err(CodegenError::internal(
+                        "expected index expression in &arr[idx]",
+                    ));
                 }
             }
-            ExprKind::Unary { op: UnOp::RefMut, expr: inner } => {
+            ExprKind::Unary {
+                op: UnOp::RefMut,
+                expr: inner,
+            } => {
                 if let ExprKind::Index { expr: base, index } = &inner.kind {
                     (true, base.as_ref(), index.as_ref())
                 } else {
-                    return Err(CodegenError::internal("expected index expression in &mut arr[idx]"));
+                    return Err(CodegenError::internal(
+                        "expected index expression in &mut arr[idx]",
+                    ));
                 }
             }
-            _ => return Err(CodegenError::internal("expected array element reference pattern")),
+            _ => {
+                return Err(CodegenError::internal(
+                    "expected array element reference pattern",
+                ));
+            }
         };
 
         // Compile the array expression to get the array register
@@ -3718,9 +4024,9 @@ impl VbcCodegen {
             .ok_or_else(|| CodegenError::internal("index expression has no value"))?;
 
         // Get the FFI symbol to determine the expected element type
-        let ffi_symbol_id = self
-            .get_ffi_symbol_id(func_name)
-            .ok_or_else(|| CodegenError::internal("FFI function not found for array marshalling"))?;
+        let ffi_symbol_id = self.get_ffi_symbol_id(func_name).ok_or_else(|| {
+            CodegenError::internal("FFI function not found for array marshalling")
+        })?;
 
         // Determine element type from FFI signature parameter type
         // The parameter type should be CType::Ptr or CType::ArrayPtr
@@ -3798,7 +4104,12 @@ impl VbcCodegen {
     /// - 0x05: f32
     /// - 0x06: f64 (default for Float)
     /// - 0x07: ptr (pointer types)
-    fn get_ffi_array_element_type(&self, _symbol_id: crate::module::FfiSymbolId, _arg_idx: usize, func_name: &str) -> u8 {
+    fn get_ffi_array_element_type(
+        &self,
+        _symbol_id: crate::module::FfiSymbolId,
+        _arg_idx: usize,
+        func_name: &str,
+    ) -> u8 {
         // Use function name heuristic to determine element type
         // This is a pragmatic approach that works for standard naming conventions:
         // - ffi_sum_array_i32 -> i32 elements
@@ -3877,7 +4188,12 @@ impl VbcCodegen {
                             // Non-string literal - show generic message
                             self.intern_string("explicit panic")
                         }
-                    } else if let ExprKind::Unary { op: UnOp::Ref, expr, .. } = &args[0].kind {
+                    } else if let ExprKind::Unary {
+                        op: UnOp::Ref,
+                        expr,
+                        ..
+                    } = &args[0].kind
+                    {
                         // Handle &"string" case
                         if let ExprKind::Literal(lit) = &expr.kind {
                             if let LiteralKind::Text(text) = &lit.kind {
@@ -3981,7 +4297,10 @@ impl VbcCodegen {
                 // For now, compute based on known type layouts
                 let offset = self.compute_field_offset(&type_name, &field_name);
                 let dest = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: offset });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: offset,
+                });
                 Ok(Some(Some(dest)))
             }
 
@@ -4006,7 +4325,10 @@ impl VbcCodegen {
                 // Place inner value in a consecutive arg register
                 let arg_reg = self.ctx.registers.alloc_fresh();
                 if inner != arg_reg {
-                    self.ctx.emit(Instruction::Mov { dst: arg_reg, src: inner });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: arg_reg,
+                        src: inner,
+                    });
                     self.ctx.free_temp(inner);
                 }
 
@@ -4047,7 +4369,8 @@ impl VbcCodegen {
                 let saved_assert_rt = if let ExprKind::Path(p) = &args[0].kind
                     && p.segments.len() == 1
                     && let Some(PathSegment::Name(id)) = p.segments.first()
-                    && let Some(type_name) = self.ctx.variable_type_names.get(id.name.as_str()).cloned()
+                    && let Some(type_name) =
+                        self.ctx.variable_type_names.get(id.name.as_str()).cloned()
                 {
                     let base = type_name
                         .split('<')
@@ -4194,7 +4517,8 @@ impl VbcCodegen {
                     let arg_reg = self
                         .compile_expr(&args[0])?
                         .ok_or_else(|| CodegenError::internal("drop arg has no value"))?;
-                    self.ctx.emit(crate::instruction::Instruction::DropRef { src: arg_reg });
+                    self.ctx
+                        .emit(crate::instruction::Instruction::DropRef { src: arg_reg });
                     self.ctx.free_temp(arg_reg);
                 }
                 Ok(Some(None))
@@ -4388,11 +4712,12 @@ impl VbcCodegen {
             // File I/O and networking convenience functions — emitted as Call
             // instructions that the LLVM lowering intercepts.
             "file_write" | "file_read" | "file_append" | "file_delete" | "file_exists"
-            | "file_read_all" | "file_write_all" | "file_open" | "file_close"
-            | "tcp_connect" | "tcp_listen" | "tcp_listen_v2" | "tcp_local_port"
-            | "tcp_accept" | "tcp_send" | "tcp_recv"
-            | "tcp_close" | "udp_bind" | "udp_send" | "udp_recv" | "udp_close" => {
-                let func_id = self.ctx.lookup_function(name)
+            | "file_read_all" | "file_write_all" | "file_open" | "file_close" | "tcp_connect"
+            | "tcp_listen" | "tcp_listen_v2" | "tcp_local_port" | "tcp_accept" | "tcp_send"
+            | "tcp_recv" | "tcp_close" | "udp_bind" | "udp_send" | "udp_recv" | "udp_close" => {
+                let func_id = self
+                    .ctx
+                    .lookup_function(name)
                     .map(|f| f.id.0)
                     .unwrap_or(u32::MAX);
                 let result = self.ctx.alloc_temp();
@@ -4400,7 +4725,8 @@ impl VbcCodegen {
                 // Phase 1: Compile all argument expressions
                 let mut arg_results = Vec::new();
                 for arg in args.iter() {
-                    let r = self.compile_expr(arg)?
+                    let r = self
+                        .compile_expr(arg)?
                         .ok_or_else(|| CodegenError::internal("runtime I/O arg has no value"))?;
                     arg_results.push(r);
                 }
@@ -4441,10 +4767,10 @@ impl VbcCodegen {
             // CubicalExtended VBC instructions. At runtime, Path values are
             // closures (functions I → A), and cubical operations manipulate
             // them according to CCHM reduction rules.
-
             "@builtin_refl" | "refl" if args.len() == 1 => {
                 // refl(x) = λi. x — constant path
-                let x = self.compile_expr(&args[0])?
+                let x = self
+                    .compile_expr(&args[0])?
                     .ok_or_else(|| CodegenError::internal("refl arg has no value"))?;
                 let dst = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::CubicalExtended {
@@ -4458,9 +4784,11 @@ impl VbcCodegen {
 
             "@builtin_transport" | "transport" if args.len() == 2 => {
                 // transport(type_path, value) — move value along type path
-                let type_path = self.compile_expr(&args[0])?
+                let type_path = self
+                    .compile_expr(&args[0])?
                     .ok_or_else(|| CodegenError::internal("transport type_path has no value"))?;
-                let value = self.compile_expr(&args[1])?
+                let value = self
+                    .compile_expr(&args[1])?
                     .ok_or_else(|| CodegenError::internal("transport value has no value"))?;
                 let dst = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::CubicalExtended {
@@ -4475,11 +4803,14 @@ impl VbcCodegen {
 
             "@builtin_hcomp" | "hcomp" if args.len() == 3 => {
                 // hcomp(φ, walls, base) — homogeneous composition
-                let face = self.compile_expr(&args[0])?
+                let face = self
+                    .compile_expr(&args[0])?
                     .ok_or_else(|| CodegenError::internal("hcomp face has no value"))?;
-                let walls = self.compile_expr(&args[1])?
+                let walls = self
+                    .compile_expr(&args[1])?
                     .ok_or_else(|| CodegenError::internal("hcomp walls has no value"))?;
-                let base = self.compile_expr(&args[2])?
+                let base = self
+                    .compile_expr(&args[2])?
                     .ok_or_else(|| CodegenError::internal("hcomp base has no value"))?;
                 let dst = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::CubicalExtended {
@@ -4497,7 +4828,8 @@ impl VbcCodegen {
                 // sym(p) = λi. p @ (1-i) — path symmetry
                 // In hott.vr: sym<A>(a, b, p) — we only need the path arg
                 let path_idx = args.len() - 1; // last arg is the path
-                let path = self.compile_expr(&args[path_idx])?
+                let path = self
+                    .compile_expr(&args[path_idx])?
                     .ok_or_else(|| CodegenError::internal("sym path has no value"))?;
                 let dst = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::CubicalExtended {
@@ -4514,9 +4846,11 @@ impl VbcCodegen {
                 // In hott.vr: trans<A>(a, b, c, p, q) — last 2 args are paths
                 let n = args.len();
                 if n >= 2 {
-                    let p = self.compile_expr(&args[n - 2])?
+                    let p = self
+                        .compile_expr(&args[n - 2])?
                         .ok_or_else(|| CodegenError::internal("trans p has no value"))?;
-                    let q = self.compile_expr(&args[n - 1])?
+                    let q = self
+                        .compile_expr(&args[n - 1])?
                         .ok_or_else(|| CodegenError::internal("trans q has no value"))?;
                     let dst = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::CubicalExtended {
@@ -4537,9 +4871,11 @@ impl VbcCodegen {
                 // In hott.vr: ap<A,B>(f, a, b, p) — first and last args
                 let n = args.len();
                 if n >= 2 {
-                    let f = self.compile_expr(&args[0])?
+                    let f = self
+                        .compile_expr(&args[0])?
                         .ok_or_else(|| CodegenError::internal("ap func has no value"))?;
-                    let path = self.compile_expr(&args[n - 1])?
+                    let path = self
+                        .compile_expr(&args[n - 1])?
                         .ok_or_else(|| CodegenError::internal("ap path has no value"))?;
                     let dst = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::CubicalExtended {
@@ -4559,9 +4895,11 @@ impl VbcCodegen {
                 // apd is dependent ap — same runtime behavior as ap
                 let n = args.len();
                 if n >= 2 {
-                    let f = self.compile_expr(&args[0])?
+                    let f = self
+                        .compile_expr(&args[0])?
                         .ok_or_else(|| CodegenError::internal("apd func has no value"))?;
-                    let path = self.compile_expr(&args[n - 1])?
+                    let path = self
+                        .compile_expr(&args[n - 1])?
                         .ok_or_else(|| CodegenError::internal("apd path has no value"))?;
                     let dst = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::CubicalExtended {
@@ -4601,9 +4939,11 @@ impl VbcCodegen {
                 // sigma_path(p, q) — path in a sigma type
                 // At runtime: a pair of paths is just a pair
                 if args.len() >= 2 {
-                    let p = self.compile_expr(&args[0])?
+                    let p = self
+                        .compile_expr(&args[0])?
                         .ok_or_else(|| CodegenError::internal("sigma_path p has no value"))?;
-                    let q = self.compile_expr(&args[1])?
+                    let q = self
+                        .compile_expr(&args[1])?
                         .ok_or_else(|| CodegenError::internal("sigma_path q has no value"))?;
                     let dst = self.ctx.alloc_temp();
                     // Pack the pair of paths
@@ -4624,7 +4964,8 @@ impl VbcCodegen {
                 // transport roundtrip: transport(p, transport(sym(p), x)) ≡ x
                 // This is a proof term — at runtime it's the identity
                 if !args.is_empty() {
-                    let x = self.compile_expr(&args[args.len() - 1])?
+                    let x = self
+                        .compile_expr(&args[args.len() - 1])?
                         .ok_or_else(|| CodegenError::internal("roundtrip arg has no value"))?;
                     let dst = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::CubicalExtended {
@@ -4752,9 +5093,9 @@ impl VbcCodegen {
             });
             self.ctx.free_temp(data_val);
             for i in 1..args.len() {
-                let next_val = self
-                    .compile_expr(&args[i])?
-                    .ok_or_else(|| CodegenError::internal("variant constructor arg has no value"))?;
+                let next_val = self.compile_expr(&args[i])?.ok_or_else(|| {
+                    CodegenError::internal("variant constructor arg has no value")
+                })?;
                 self.ctx.emit(Instruction::SetVariantData {
                     variant: result,
                     field: i as u32,
@@ -4790,11 +5131,14 @@ impl VbcCodegen {
         // collapse the simple name onto whichever was registered first, and
         // the wrong constructor's tag flows through to MakeVariant —
         // producing a layout-mismatched payload at runtime. Tracked as #76.
-        let context_type: Option<String> = self.ctx.current_return_type_name
+        let context_type: Option<String> = self
+            .ctx
+            .current_return_type_name
             .as_ref()
             .map(|t| t.split('<').next().unwrap_or(t.as_str()).to_string())
             .or_else(|| {
-                self.ctx.match_scrutinee_type
+                self.ctx
+                    .match_scrutinee_type
                     .as_ref()
                     .map(|t| t.split('<').next().unwrap_or(t.as_str()).to_string())
             });
@@ -4817,14 +5161,19 @@ impl VbcCodegen {
                 // Last-resort: re-try the direct lookup ignoring parent
                 // matching, in case the disambiguation rejected it
                 // because the context type wasn't actually populated.
-                self.ctx.lookup_function(name).and_then(|info| info.variant_tag)
+                self.ctx
+                    .lookup_function(name)
+                    .and_then(|info| info.variant_tag)
             })
             .unwrap_or_else(|| {
                 // Final fallback for variants we still cannot resolve — most
                 // commonly forward references mid-pass-1. Hash the name so two
                 // call sites at least agree on the same wrong tag rather than
                 // diverging silently.
-                name.as_bytes().iter().fold(0u32, |acc, &b| acc.wrapping_add(b as u32)) % 256
+                name.as_bytes()
+                    .iter()
+                    .fold(0u32, |acc, &b| acc.wrapping_add(b as u32))
+                    % 256
             });
 
         let result = self.ctx.alloc_temp();
@@ -4848,9 +5197,9 @@ impl VbcCodegen {
 
             // Handle additional arguments for record variants
             for (i, arg) in args.iter().skip(1).enumerate() {
-                let arg_val = self
-                    .compile_expr(arg)?
-                    .ok_or_else(|| CodegenError::internal("variant constructor arg has no value"))?;
+                let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
+                    CodegenError::internal("variant constructor arg has no value")
+                })?;
 
                 self.ctx.emit(Instruction::SetVariantData {
                     variant: result,
@@ -4909,7 +5258,8 @@ impl VbcCodegen {
         // codegen has registered in `newtype_names` as a pass-through
         // carrier) — the quotient layer is compile-time only, so the
         // static constructor is just an identity Mov at Tier-0.
-        if method.name == "of" && args.len() == 1
+        if method.name == "of"
+            && args.len() == 1
             && let Some(ref tn) = static_receiver_type
             && self.ctx.newtype_names.contains(tn)
         {
@@ -4922,7 +5272,8 @@ impl VbcCodegen {
             // Record the result's type so subsequent method lookups on the
             // returned value see the quotient's nominal name instead of
             // the carrier's.
-            self.ctx.variable_type_names
+            self.ctx
+                .variable_type_names
                 .insert(format!("__temp_r{}", dst.0), tn.clone());
             return Ok(Some(dst));
         }
@@ -4932,29 +5283,37 @@ impl VbcCodegen {
         // a quotient registered in `newtype_names`; a non-quotient type
         // that happens to define its own `rep` method falls through to
         // the regular dispatch path below.
-        if method.name == "rep" && args.is_empty()
+        if method.name == "rep"
+            && args.is_empty()
             && let Some(receiver_type_name) = self.infer_expr_type_name(receiver)
-                && self.ctx.newtype_names.contains(&receiver_type_name)
+            && self.ctx.newtype_names.contains(&receiver_type_name)
+        {
+            let base_reg = self
+                .compile_expr(receiver)?
+                .ok_or_else(|| CodegenError::internal("q.rep receiver has no value"))?;
+            let dst = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::Mov { dst, src: base_reg });
+            self.ctx.free_temp(base_reg);
+            if let Some(inner) = self
+                .ctx
+                .newtype_inner_type
+                .get(&receiver_type_name)
+                .cloned()
             {
-                let base_reg = self
-                    .compile_expr(receiver)?
-                    .ok_or_else(|| CodegenError::internal("q.rep receiver has no value"))?;
-                let dst = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::Mov { dst, src: base_reg });
-                self.ctx.free_temp(base_reg);
-                if let Some(inner) = self.ctx.newtype_inner_type.get(&receiver_type_name).cloned() {
-                    self.ctx.variable_type_names
-                        .insert(format!("__temp_r{}", dst.0), inner);
-                }
-                return Ok(Some(dst));
+                self.ctx
+                    .variable_type_names
+                    .insert(format!("__temp_r{}", dst.0), inner);
             }
+            return Ok(Some(dst));
+        }
 
         // Intercept Heap.new(value) / Shared.new(value) — emit CBGR-tracked allocation
         // via CallM so the interpreter's `dispatch_primitive_method` runs the
         // intrinsic path (method_dispatch.rs `Heap.new` / `Shared.new`). The stdlib's
         // user-defined .new returns a flat struct that breaks builtin CBGR introspection
         // (header_generation, raw_ptr, weak_count, …) on the returned value.
-        if method.name == "new" && args.len() == 1
+        if method.name == "new"
+            && args.len() == 1
             && let Some(ref tn) = static_receiver_type
             && (tn == "Heap" || tn == "Shared")
         {
@@ -4973,7 +5332,10 @@ impl VbcCodegen {
             // Place inner value in a consecutive arg register
             let arg_reg = self.ctx.registers.alloc_fresh();
             if inner != arg_reg {
-                self.ctx.emit(Instruction::Mov { dst: arg_reg, src: inner });
+                self.ctx.emit(Instruction::Mov {
+                    dst: arg_reg,
+                    src: inner,
+                });
                 self.ctx.free_temp(inner);
             }
 
@@ -5003,7 +5365,8 @@ impl VbcCodegen {
         // with "world" treated as a Char. `encode_utf8` is then called on
         // the string and the result is garbage. Short-circuit to
         // `from_utf8_unchecked(arg.as_bytes())` when arg is a Text.
-        if method.name == "from" && args.len() == 1
+        if method.name == "from"
+            && args.len() == 1
             && let Some(ref tn) = static_receiver_type
             && tn == "Text"
         {
@@ -5014,7 +5377,9 @@ impl VbcCodegen {
                 .map(str::to_string);
             let is_text_arg = arg_type
                 .as_deref()
-                .map(|t| t == "Text" || t == "&Text" || t == "&mut Text" || t == "str" || t == "&str")
+                .map(|t| {
+                    t == "Text" || t == "&Text" || t == "&mut Text" || t == "str" || t == "&str"
+                })
                 .unwrap_or(false);
             if is_text_arg {
                 // Compile arg, then route through `Text.from_utf8_unchecked(arg.as_bytes())`
@@ -5043,12 +5408,19 @@ impl VbcCodegen {
                 // registered stdlib function whose body was already fixed
                 // by commit 90bcb59 (raw-pointer Clone handling) + 02dd6c8
                 // (Text list-dispatch guard).
-                if let Some(func_info) = self.ctx.lookup_function("Text.from_utf8_unchecked").cloned() {
+                if let Some(func_info) = self
+                    .ctx
+                    .lookup_function("Text.from_utf8_unchecked")
+                    .cloned()
+                {
                     let result = self.ctx.alloc_temp();
                     let mut args_reg = self.ctx.registers.alloc_fresh();
                     // Move bytes_reg to args_reg if different
                     if bytes_reg != args_reg {
-                        self.ctx.emit(Instruction::Mov { dst: args_reg, src: bytes_reg });
+                        self.ctx.emit(Instruction::Mov {
+                            dst: args_reg,
+                            src: bytes_reg,
+                        });
                         self.ctx.free_temp(bytes_reg);
                     } else {
                         // Same register — consume the fresh alloc
@@ -5058,7 +5430,10 @@ impl VbcCodegen {
                     self.ctx.emit(Instruction::Call {
                         dst: result,
                         func_id: func_info.id.0,
-                        args: crate::instruction::RegRange { start: args_reg, count: 1 },
+                        args: crate::instruction::RegRange {
+                            start: args_reg,
+                            count: 1,
+                        },
                     });
                     return Ok(Some(result));
                 }
@@ -5070,7 +5445,8 @@ impl VbcCodegen {
         // interpreter creates proper heap objects with TypeId::LIST/MAP/SET headers.
         // The stdlib compiled .new() functions return flat structs with raw pointers
         // incompatible with the interpreter's builtin methods (push, get, insert, len).
-        if method.name == "new" && args.is_empty()
+        if method.name == "new"
+            && args.is_empty()
             && let Some(ref tn) = static_receiver_type
         {
             if tn == type_names::LIST {
@@ -5104,7 +5480,8 @@ impl VbcCodegen {
         // the same `NewList` / `NewMap` / `NewSet` opcodes used for
         // `<Collection>.new()` and drop the capacity argument — our
         // heap auto-grows, so the hint has no runtime effect.
-        if method.name == "with_capacity" && args.len() == 1
+        if method.name == "with_capacity"
+            && args.len() == 1
             && let Some(ref tn) = static_receiver_type
         {
             let opcode = if tn == type_names::LIST {
@@ -5127,9 +5504,9 @@ impl VbcCodegen {
                 }
                 let dest = self.ctx.alloc_temp();
                 let instr = match template {
-                    Instruction::NewList  { .. } => Instruction::NewList  { dst: dest },
-                    Instruction::NewMap   { .. } => Instruction::NewMap   { dst: dest },
-                    Instruction::NewSet   { .. } => Instruction::NewSet   { dst: dest },
+                    Instruction::NewList { .. } => Instruction::NewList { dst: dest },
+                    Instruction::NewMap { .. } => Instruction::NewMap { dst: dest },
+                    Instruction::NewSet { .. } => Instruction::NewSet { dst: dest },
                     Instruction::NewDeque { .. } => Instruction::NewDeque { dst: dest },
                     other => other,
                 };
@@ -5180,21 +5557,26 @@ impl VbcCodegen {
 
             // Try Rust-style first - only use if argument count matches
             if let Some(func_info) = self.ctx.lookup_qualified_function(&qualified_rust).cloned()
-                && func_info.param_count == args.len() {
-                    if let Some(tag) = func_info.variant_tag {
-                        return self.compile_variant_constructor_with_tag(tag, args);
-                    }
-                    return self.compile_static_method_call(&func_info, args);
+                && func_info.param_count == args.len()
+            {
+                if let Some(tag) = func_info.variant_tag {
+                    return self.compile_variant_constructor_with_tag(tag, args);
                 }
+                return self.compile_static_method_call(&func_info, args);
+            }
 
             // Try Verum-style - only use if argument count matches
-            if let Some(func_info) = self.ctx.lookup_qualified_function(&qualified_verum).cloned()
-                && func_info.param_count == args.len() {
-                    if let Some(tag) = func_info.variant_tag {
-                        return self.compile_variant_constructor_with_tag(tag, args);
-                    }
-                    return self.compile_static_method_call(&func_info, args);
+            if let Some(func_info) = self
+                .ctx
+                .lookup_qualified_function(&qualified_verum)
+                .cloned()
+                && func_info.param_count == args.len()
+            {
+                if let Some(tag) = func_info.variant_tag {
+                    return self.compile_variant_constructor_with_tag(tag, args);
                 }
+                return self.compile_static_method_call(&func_info, args);
+            }
 
             // Try just the function name (it may have been imported).
             // Keep param_count check to avoid false positives with unqualified names.
@@ -5220,26 +5602,37 @@ impl VbcCodegen {
             let is_qualified_module_path = self.path_was_rooted_module_path(receiver);
             if !is_qualified_module_path
                 && let Some(func_info) = self.ctx.lookup_function(&method.name).cloned()
-                    && func_info.param_count == args.len() {
-                        if let Some(tag) = func_info.variant_tag {
-                            return self.compile_variant_constructor_with_tag(tag, args);
-                        }
-                        return self.compile_static_method_call(&func_info, args);
-                    }
+                && func_info.param_count == args.len()
+            {
+                if let Some(tag) = func_info.variant_tag {
+                    return self.compile_variant_constructor_with_tag(tag, args);
+                }
+                return self.compile_static_method_call(&func_info, args);
+            }
 
             // If this is a module/type namespace (not a local variable),
             // emit a stub call rather than trying to compile the receiver as a value.
             // This avoids "undefined variable: sys" / "undefined variable: IoError" errors.
             if !parts.is_empty() {
                 let first = &parts[0];
-                let is_module_ns = first == "super" || first == "cog" || first == "."
-                    || (first.chars().next().map(|c| c.is_lowercase()).unwrap_or(false)
+                let is_module_ns = first == "super"
+                    || first == "cog"
+                    || first == "."
+                    || (first
+                        .chars()
+                        .next()
+                        .map(|c| c.is_lowercase())
+                        .unwrap_or(false)
                         && self.ctx.get_var_reg(first).is_err()
                         && !is_type_name(first));
                 // Also treat uppercase names as type namespaces if they have qualified
                 // functions registered (e.g., IoError.WouldBlock, IoError.from_errno)
                 let is_type_ns = !is_module_ns
-                    && first.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+                    && first
+                        .chars()
+                        .next()
+                        .map(|c| c.is_uppercase())
+                        .unwrap_or(false)
                     && self.ctx.get_var_reg(first).is_err()
                     && self.ctx.has_functions_with_prefix(&format!("{}.", first));
                 if is_module_ns || is_type_ns {
@@ -5278,8 +5671,10 @@ impl VbcCodegen {
                 let first_val = self
                     .compile_expr(&args[0])?
                     .ok_or_else(|| CodegenError::internal("context method arg has no value"))?;
-                self.ctx
-                    .emit(Instruction::Mov { dst: first, src: first_val });
+                self.ctx.emit(Instruction::Mov {
+                    dst: first,
+                    src: first_val,
+                });
                 if first_val != first {
                     self.ctx.free_temp(first_val);
                 }
@@ -5289,8 +5684,10 @@ impl VbcCodegen {
                     let arg_val = self
                         .compile_expr(arg)?
                         .ok_or_else(|| CodegenError::internal("context method arg has no value"))?;
-                    self.ctx
-                        .emit(Instruction::Mov { dst: arg_reg, src: arg_val });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: arg_reg,
+                        src: arg_val,
+                    });
                     if arg_val != arg_reg {
                         self.ctx.free_temp(arg_val);
                     }
@@ -5328,234 +5725,250 @@ impl VbcCodegen {
         // If so, try to look up Type::method as a registered function
         if let ExprKind::Path(ref path) = receiver.kind
             && path.segments.len() == 1
-                && let PathSegment::Name(ref type_ident) = path.segments[0] {
-                    let type_name = type_ident.name.to_string();
-                    let method_name = method.name.to_string();
+            && let PathSegment::Name(ref type_ident) = path.segments[0]
+        {
+            let type_name = type_ident.name.to_string();
+            let method_name = method.name.to_string();
 
-                    // Intercept builtin collection constructors — emit CallM with the
-                    // type name string as receiver so the interpreter's builtin handler
-                    // creates heap objects with the correct TypeId and memory layout.
-                    // Without this, stdlib user-defined constructors (e.g., Map.new()
-                    // from core/collections/map.vr) would create plain struct records
-                    // that don't work with builtin instance methods (insert, get, len, etc.).
-                    let is_builtin_collection_ctor = method_name == "new"
-                        && self.is_builtin_ctor_collection(&type_name);
-                    if is_builtin_collection_ctor {
-                        let receiver_reg = self.ctx.alloc_temp();
-                        let type_const = self.ctx.add_const_string(&type_name);
-                        self.ctx.emit(Instruction::LoadK {
-                            dst: receiver_reg,
-                            const_id: type_const.0,
-                        });
-                        let args_start = if !args.is_empty() {
-                            let mut arg_vals: Vec<Reg> = Vec::with_capacity(args.len());
-                            for arg in args.iter() {
-                                let arg_val = self.compile_expr(arg)?
-                                    .ok_or_else(|| CodegenError::internal("collection .new() arg has no value"))?;
-                                arg_vals.push(arg_val);
-                            }
-                            let first = self.ctx.registers.alloc_fresh();
-                            for _ in 1..args.len() {
-                                self.ctx.registers.alloc_fresh();
-                            }
-                            for (i, arg_val) in arg_vals.iter().enumerate() {
-                                let d = Reg(first.0 + i as u16);
-                                if *arg_val != d {
-                                    self.ctx.emit(Instruction::Mov { dst: d, src: *arg_val });
-                                    self.ctx.free_temp(*arg_val);
-                                }
-                            }
-                            first
-                        } else {
-                            Reg(0)
-                        };
-                        let dst = self.ctx.alloc_temp();
-                        let method_id = self.intern_string("new");
-                        self.ctx.emit(Instruction::CallM {
-                            dst,
-                            receiver: receiver_reg,
-                            method_id,
-                            args: crate::instruction::RegRange {
-                                start: args_start,
-                                count: args.len() as u8,
-                            },
-                        });
-                        self.ctx.free_temp(receiver_reg);
-                        return Ok(Some(dst));
+            // Intercept builtin collection constructors — emit CallM with the
+            // type name string as receiver so the interpreter's builtin handler
+            // creates heap objects with the correct TypeId and memory layout.
+            // Without this, stdlib user-defined constructors (e.g., Map.new()
+            // from core/collections/map.vr) would create plain struct records
+            // that don't work with builtin instance methods (insert, get, len, etc.).
+            let is_builtin_collection_ctor =
+                method_name == "new" && self.is_builtin_ctor_collection(&type_name);
+            if is_builtin_collection_ctor {
+                let receiver_reg = self.ctx.alloc_temp();
+                let type_const = self.ctx.add_const_string(&type_name);
+                self.ctx.emit(Instruction::LoadK {
+                    dst: receiver_reg,
+                    const_id: type_const.0,
+                });
+                let args_start = if !args.is_empty() {
+                    let mut arg_vals: Vec<Reg> = Vec::with_capacity(args.len());
+                    for arg in args.iter() {
+                        let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
+                            CodegenError::internal("collection .new() arg has no value")
+                        })?;
+                        arg_vals.push(arg_val);
                     }
+                    let first = self.ctx.registers.alloc_fresh();
+                    for _ in 1..args.len() {
+                        self.ctx.registers.alloc_fresh();
+                    }
+                    for (i, arg_val) in arg_vals.iter().enumerate() {
+                        let d = Reg(first.0 + i as u16);
+                        if *arg_val != d {
+                            self.ctx.emit(Instruction::Mov {
+                                dst: d,
+                                src: *arg_val,
+                            });
+                            self.ctx.free_temp(*arg_val);
+                        }
+                    }
+                    first
+                } else {
+                    Reg(0)
+                };
+                let dst = self.ctx.alloc_temp();
+                let method_id = self.intern_string("new");
+                self.ctx.emit(Instruction::CallM {
+                    dst,
+                    receiver: receiver_reg,
+                    method_id,
+                    args: crate::instruction::RegRange {
+                        start: args_start,
+                        count: args.len() as u8,
+                    },
+                });
+                self.ctx.free_temp(receiver_reg);
+                return Ok(Some(dst));
+            }
 
-                    // First, ALWAYS try to find Type.method as a registered static method.
-                    // This takes precedence even if the type is also registered as a type constructor,
-                    // because static method calls like `Time.now()` should resolve to Time.now,
-                    // not treat `Time` as a value.
-                    //
+            // First, ALWAYS try to find Type.method as a registered static method.
+            // This takes precedence even if the type is also registered as a type constructor,
+            // because static method calls like `Time.now()` should resolve to Time.now,
+            // not treat `Time` as a value.
+            //
 
-                    // Variants are a special case: `Maybe.Some(42)`, `Result.Ok(x)`, etc.
-                    // are registered under the qualified name too (variant_tag set), but they
-                    // don't have an ordinary bytecode body — compile_static_method_call would
-                    // emit a plain Call to a non-existent function, and the runtime would fall
-                    // through to method dispatch which panics with
-                    // "method 'Some' not found on value". Dispatch them through
-                    // compile_variant_constructor instead so a MakeVariant opcode is emitted.
-                    let qualified_name = format!("{}.{}", type_name, method_name);
-                    if let Some(func_info) = self.ctx.lookup_function(&qualified_name).cloned() {
-                        // Only use if argument count matches to avoid wrong function resolution
+            // Variants are a special case: `Maybe.Some(42)`, `Result.Ok(x)`, etc.
+            // are registered under the qualified name too (variant_tag set), but they
+            // don't have an ordinary bytecode body — compile_static_method_call would
+            // emit a plain Call to a non-existent function, and the runtime would fall
+            // through to method dispatch which panics with
+            // "method 'Some' not found on value". Dispatch them through
+            // compile_variant_constructor instead so a MakeVariant opcode is emitted.
+            let qualified_name = format!("{}.{}", type_name, method_name);
+            if let Some(func_info) = self.ctx.lookup_function(&qualified_name).cloned() {
+                // Only use if argument count matches to avoid wrong function resolution
+                if func_info.param_count == args.len() {
+                    if func_info.variant_tag.is_some() {
+                        return self.compile_variant_constructor(&method_name, args);
+                    }
+                    return self.compile_static_method_call(&func_info, args);
+                }
+            }
+
+            // Check if this type name is NOT a local variable and NOT a static/const
+            // If it's a variable or static/const, treat as regular method call on a value
+            let is_static_or_const = self
+                .ctx
+                .lookup_function(&type_name)
+                .map(|f| f.param_count == 0 && !f.is_async && !f.is_generator)
+                .unwrap_or(false);
+
+            let registers_contains = self.ctx.registers.contains(&type_name);
+            let known_type = is_type_name(&type_name);
+
+            if known_type || (!registers_contains && !is_static_or_const) {
+                // Static method not found by qualified name, try other resolution paths
+                let qualified_name = format!("{}.{}", type_name, method_name);
+                if let Some(func_info) = self.ctx.lookup_function(&qualified_name).cloned() {
+                    // Only use if argument count matches to avoid wrong function resolution
+                    if func_info.param_count == args.len() {
+                        // Check if this is an associated constant with a known value
+                        // (registered via __const_val_N naming convention).
+                        if func_info.param_count == 0
+                            && let Some(ref iname) = func_info.intrinsic_name
+                            && let Some(val_str) = iname.strip_prefix("__const_val_")
+                        {
+                            let value: i64 = val_str.parse().unwrap_or(0);
+                            let dest = self.ctx.alloc_temp();
+                            self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                            return Ok(Some(dest));
+                        }
+                        // Found static method - compile as direct function call
+                        return self.compile_static_method_call(&func_info, args);
+                    }
+                }
+
+                // Try resolving user-defined type aliases (Vec4f -> Vec, etc.)
+                // This enables method calls like Vec4f.splat() to resolve to Vec.splat()
+                // when `type Vec4f = Vec<Float32, 4>` is defined.
+                let resolved_type = self.resolve_type_alias(&type_name);
+                if resolved_type != type_name {
+                    let aliased_qualified = format!("{}.{}", resolved_type, method_name);
+                    if let Some(func_info) = self.ctx.lookup_function(&aliased_qualified).cloned() {
+                        // Only use if argument count matches
                         if func_info.param_count == args.len() {
-                            if func_info.variant_tag.is_some() {
-                                return self.compile_variant_constructor(&method_name, args);
-                            }
                             return self.compile_static_method_call(&func_info, args);
                         }
                     }
+                }
 
-                    // Check if this type name is NOT a local variable and NOT a static/const
-                    // If it's a variable or static/const, treat as regular method call on a value
-                    let is_static_or_const = self
-                        .ctx
-                        .lookup_function(&type_name)
-                        .map(|f| f.param_count == 0 && !f.is_async && !f.is_generator)
-                        .unwrap_or(false);
-
-                    let registers_contains = self.ctx.registers.contains(&type_name);
-                    let known_type = is_type_name(&type_name);
-
-                    if known_type || (!registers_contains && !is_static_or_const) {
-                        // Static method not found by qualified name, try other resolution paths
-                        let qualified_name = format!("{}.{}", type_name, method_name);
-                        if let Some(func_info) = self.ctx.lookup_function(&qualified_name).cloned() {
-                            // Only use if argument count matches to avoid wrong function resolution
-                            if func_info.param_count == args.len() {
-                                // Check if this is an associated constant with a known value
-                                // (registered via __const_val_N naming convention).
-                                if func_info.param_count == 0
-                                    && let Some(ref iname) = func_info.intrinsic_name
-                                        && let Some(val_str) = iname.strip_prefix("__const_val_") {
-                                            let value: i64 = val_str.parse().unwrap_or(0);
-                                            let dest = self.ctx.alloc_temp();
-                                            self.ctx.emit(Instruction::LoadI { dst: dest, value });
-                                            return Ok(Some(dest));
-                                        }
-                                // Found static method - compile as direct function call
-                                return self.compile_static_method_call(&func_info, args);
-                            }
+                // Try resolving built-in numeric type aliases (u8, u16, u32, u64, i8, i16, i32, i64 -> Int)
+                // These types are defined as aliases in the type system and their methods
+                // are implemented on the base type (Int).
+                if let Some(base_type) = resolve_numeric_type_alias(&type_name) {
+                    let aliased_qualified = format!("{}.{}", base_type, method_name);
+                    if let Some(func_info) = self.ctx.lookup_function(&aliased_qualified).cloned() {
+                        // Only use if argument count matches
+                        if func_info.param_count == args.len() {
+                            return self.compile_static_method_call(&func_info, args);
                         }
-
-                        // Try resolving user-defined type aliases (Vec4f -> Vec, etc.)
-                        // This enables method calls like Vec4f.splat() to resolve to Vec.splat()
-                        // when `type Vec4f = Vec<Float32, 4>` is defined.
-                        let resolved_type = self.resolve_type_alias(&type_name);
-                        if resolved_type != type_name {
-                            let aliased_qualified = format!("{}.{}", resolved_type, method_name);
-                            if let Some(func_info) =
-                                self.ctx.lookup_function(&aliased_qualified).cloned()
-                            {
-                                // Only use if argument count matches
-                                if func_info.param_count == args.len() {
-                                    return self.compile_static_method_call(&func_info, args);
-                                }
-                            }
-                        }
-
-                        // Try resolving built-in numeric type aliases (u8, u16, u32, u64, i8, i16, i32, i64 -> Int)
-                        // These types are defined as aliases in the type system and their methods
-                        // are implemented on the base type (Int).
-                        if let Some(base_type) = resolve_numeric_type_alias(&type_name) {
-                            let aliased_qualified = format!("{}.{}", base_type, method_name);
-                            if let Some(func_info) =
-                                self.ctx.lookup_function(&aliased_qualified).cloned()
-                            {
-                                // Only use if argument count matches
-                                if func_info.param_count == args.len() {
-                                    return self.compile_static_method_call(&func_info, args);
-                                }
-                            }
-                        }
-
-                        // Try to resolve primitive type static constants (MIN, MAX, BITS)
-                        if args.is_empty()
-                            && let Some(value) = resolve_type_static_constant(&type_name, &method_name) {
-                                let result = self.ctx.alloc_temp();
-                                let is_float_type = matches!(type_name.as_str(),
-                                    "Float" | "Float32" | "Float64" | "f32" | "f64");
-                                if is_float_type && method_name != "BITS" {
-                                    // Float constants: value is stored as bit pattern, convert back
-                                    let f = f64::from_bits(value as u64);
-                                    self.ctx.emit(Instruction::LoadF { dst: result, value: f });
-                                } else {
-                                    self.ctx.emit(Instruction::LoadI { dst: result, value: value as i64 });
-                                }
-                                return Ok(Some(result));
-                            }
-
-                        // Check if the method is a variant constructor (e.g., Maybe.None, Result.Ok)
-                        // Variant constructors are registered as functions with variant_tag set.
-                        if let Some(func_info) = self.ctx.lookup_function(&method_name).cloned()
-                            && func_info.variant_tag.is_some() && func_info.param_count == args.len() {
-                                return self.compile_variant_constructor(&method_name, args);
-                            }
-
-                        // For primitive types with static methods (e.g., Int.from_le_bytes,
-                        // Char.from_digit), emit as method call on a zero receiver.
-                        // The interpreter dispatches these via dispatch_primitive_method.
-                        if is_primitive_type(&type_name) {
-                            let receiver_reg = self.ctx.alloc_temp();
-                            self.ctx.emit(Instruction::LoadI { dst: receiver_reg, value: 0 });
-
-                            // Compile args into consecutive registers
-                            let first = if args.is_empty() {
-                                Reg(0) // dummy, won't be used
-                            } else {
-                                let mut arg_vals: Vec<Reg> = Vec::with_capacity(args.len());
-                                for arg in args.iter() {
-                                    let arg_val = self
-                                        .compile_expr(arg)?
-                                        .ok_or_else(|| CodegenError::internal("static method arg has no value"))?;
-                                    arg_vals.push(arg_val);
-                                }
-                                let f = self.ctx.registers.alloc_fresh();
-                                for _ in 1..args.len() {
-                                    self.ctx.registers.alloc_fresh();
-                                }
-                                for (i, arg_val) in arg_vals.iter().enumerate() {
-                                    let dst = Reg(f.0 + i as u16);
-                                    if *arg_val != dst {
-                                        self.ctx.emit(Instruction::Mov { dst, src: *arg_val });
-                                        self.ctx.free_temp(*arg_val);
-                                    }
-                                }
-                                f
-                            };
-
-                            // Prefix method name with type for typed primitives
-                            let prefixed_method = match type_name.as_str() {
-                                "Int32" | "i32" => format!("int32${}", method_name),
-                                "UInt64" | "u64" => format!("uint64${}", method_name),
-                                "Byte" | "UInt8" | "u8" => format!("byte${}", method_name),
-                                _ => method_name.clone(),
-                            };
-
-                            let result = self.ctx.alloc_temp();
-                            let method_id = self.intern_string(&prefixed_method);
-                            self.ctx.emit(Instruction::CallM {
-                                dst: result,
-                                receiver: receiver_reg,
-                                method_id,
-                                args: crate::instruction::RegRange {
-                                    start: first,
-                                    count: args.len() as u8,
-                                },
-                            });
-                            self.ctx.free_temp(receiver_reg);
-                            return Ok(Some(result));
-                        }
-
-                        // For generic type parameters (like T.default()), emit a type method call.
-                        // This will be resolved during monomorphization when T is replaced
-                        // with a concrete type. For now, emit a CallTypeMethod instruction
-                        // that stores the type parameter name and method name.
-                        return self.compile_type_param_method_call(&type_name, method, args);
                     }
                 }
+
+                // Try to resolve primitive type static constants (MIN, MAX, BITS)
+                if args.is_empty()
+                    && let Some(value) = resolve_type_static_constant(&type_name, &method_name)
+                {
+                    let result = self.ctx.alloc_temp();
+                    let is_float_type = matches!(
+                        type_name.as_str(),
+                        "Float" | "Float32" | "Float64" | "f32" | "f64"
+                    );
+                    if is_float_type && method_name != "BITS" {
+                        // Float constants: value is stored as bit pattern, convert back
+                        let f = f64::from_bits(value as u64);
+                        self.ctx.emit(Instruction::LoadF {
+                            dst: result,
+                            value: f,
+                        });
+                    } else {
+                        self.ctx.emit(Instruction::LoadI {
+                            dst: result,
+                            value: value as i64,
+                        });
+                    }
+                    return Ok(Some(result));
+                }
+
+                // Check if the method is a variant constructor (e.g., Maybe.None, Result.Ok)
+                // Variant constructors are registered as functions with variant_tag set.
+                if let Some(func_info) = self.ctx.lookup_function(&method_name).cloned()
+                    && func_info.variant_tag.is_some()
+                    && func_info.param_count == args.len()
+                {
+                    return self.compile_variant_constructor(&method_name, args);
+                }
+
+                // For primitive types with static methods (e.g., Int.from_le_bytes,
+                // Char.from_digit), emit as method call on a zero receiver.
+                // The interpreter dispatches these via dispatch_primitive_method.
+                if is_primitive_type(&type_name) {
+                    let receiver_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: receiver_reg,
+                        value: 0,
+                    });
+
+                    // Compile args into consecutive registers
+                    let first = if args.is_empty() {
+                        Reg(0) // dummy, won't be used
+                    } else {
+                        let mut arg_vals: Vec<Reg> = Vec::with_capacity(args.len());
+                        for arg in args.iter() {
+                            let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
+                                CodegenError::internal("static method arg has no value")
+                            })?;
+                            arg_vals.push(arg_val);
+                        }
+                        let f = self.ctx.registers.alloc_fresh();
+                        for _ in 1..args.len() {
+                            self.ctx.registers.alloc_fresh();
+                        }
+                        for (i, arg_val) in arg_vals.iter().enumerate() {
+                            let dst = Reg(f.0 + i as u16);
+                            if *arg_val != dst {
+                                self.ctx.emit(Instruction::Mov { dst, src: *arg_val });
+                                self.ctx.free_temp(*arg_val);
+                            }
+                        }
+                        f
+                    };
+
+                    // Prefix method name with type for typed primitives
+                    let prefixed_method = match type_name.as_str() {
+                        "Int32" | "i32" => format!("int32${}", method_name),
+                        "UInt64" | "u64" => format!("uint64${}", method_name),
+                        "Byte" | "UInt8" | "u8" => format!("byte${}", method_name),
+                        _ => method_name.clone(),
+                    };
+
+                    let result = self.ctx.alloc_temp();
+                    let method_id = self.intern_string(&prefixed_method);
+                    self.ctx.emit(Instruction::CallM {
+                        dst: result,
+                        receiver: receiver_reg,
+                        method_id,
+                        args: crate::instruction::RegRange {
+                            start: first,
+                            count: args.len() as u8,
+                        },
+                    });
+                    self.ctx.free_temp(receiver_reg);
+                    return Ok(Some(result));
+                }
+
+                // For generic type parameters (like T.default()), emit a type method call.
+                // This will be resolved during monomorphization when T is replaced
+                // with a concrete type. For now, emit a CallTypeMethod instruction
+                // that stores the type parameter name and method name.
+                return self.compile_type_param_method_call(&type_name, method, args);
+            }
+        }
 
         // Compile receiver as value
         let receiver_reg = self
@@ -5587,7 +6000,10 @@ impl VbcCodegen {
             // args in a contiguous range starting at `start`).
             let arg_reg = self.ctx.registers.alloc_fresh();
             if receiver_reg != arg_reg {
-                self.ctx.emit(Instruction::Mov { dst: arg_reg, src: receiver_reg });
+                self.ctx.emit(Instruction::Mov {
+                    dst: arg_reg,
+                    src: receiver_reg,
+                });
                 // Carry the raw-pointer flag onto the new register so
                 // any subsequent operation on it remains correct.
                 self.ctx.mark_raw_pointer(arg_reg);
@@ -5597,7 +6013,10 @@ impl VbcCodegen {
             self.ctx.emit(Instruction::Call {
                 dst: result,
                 func_id: func_info.id.0,
-                args: crate::instruction::RegRange { start: arg_reg, count: 1 },
+                args: crate::instruction::RegRange {
+                    start: arg_reg,
+                    count: 1,
+                },
             });
             return Ok(Some(result));
         }
@@ -5722,7 +6141,10 @@ impl VbcCodegen {
                             .map(|wkt| wkt.requires_builtin_len())
                             .unwrap_or(false);
                         found = !use_builtin_len
-                            && self.ctx.lookup_function(&format!("{}.len", base_type)).is_some();
+                            && self
+                                .ctx
+                                .lookup_function(&format!("{}.len", base_type))
+                                .is_some();
                     }
                 }
                 // Fallback: check via extract_expr_type_name (handles typed let bindings)
@@ -5738,7 +6160,10 @@ impl VbcCodegen {
                             .map(|wkt| wkt.requires_builtin_len())
                             .unwrap_or(false);
                         found = !use_builtin_len
-                            && self.ctx.lookup_function(&format!("{}.len", base_type)).is_some();
+                            && self
+                                .ctx
+                                .lookup_function(&format!("{}.len", base_type))
+                                .is_some();
                     }
                 } else if !found {
                     // hint already set from first path, still check fallback for found
@@ -5750,7 +6175,10 @@ impl VbcCodegen {
                             .map(|wkt| wkt.requires_builtin_len())
                             .unwrap_or(false);
                         found = !use_builtin_len
-                            && self.ctx.lookup_function(&format!("{}.len", base_type)).is_some();
+                            && self
+                                .ctx
+                                .lookup_function(&format!("{}.len", base_type))
+                                .is_some();
                     }
                 }
                 (found, hint)
@@ -5852,7 +6280,11 @@ impl VbcCodegen {
                         // (is_empty compiles to Len + CmpI 0 for stdlib collections).
                         hint = WKT::from_name(base_type).map_or(0, |wkt| wkt.len_type_hint());
                         let is_stdlib_type = type_names::is_builtin_method_type(base_type);
-                        found = !is_stdlib_type && self.ctx.lookup_function(&format!("{}.is_empty", base_type)).is_some();
+                        found = !is_stdlib_type
+                            && self
+                                .ctx
+                                .lookup_function(&format!("{}.is_empty", base_type))
+                                .is_some();
                     }
                 }
                 // Method 2: Check via extract_expr_type_name (handles typed let bindings)
@@ -5862,14 +6294,21 @@ impl VbcCodegen {
                         // VBC-internal: fallback Len hint for is_empty (same as Method 1).
                         hint = WKT::from_name(base_type).map_or(0, |wkt| wkt.len_type_hint());
                         let is_stdlib_type = type_names::is_builtin_method_type(base_type);
-                        found = !is_stdlib_type && self.ctx.lookup_function(&format!("{}.is_empty", base_type)).is_some();
+                        found = !is_stdlib_type
+                            && self
+                                .ctx
+                                .lookup_function(&format!("{}.is_empty", base_type))
+                                .is_some();
                     }
-                } else if !found
-                    && let Some(type_name) = self.extract_expr_type_name(receiver) {
-                        let base_type = VbcCodegen::strip_generic_args(&type_name);
-                        let is_stdlib_type = type_names::is_builtin_method_type(base_type);
-                        found = !is_stdlib_type && self.ctx.lookup_function(&format!("{}.is_empty", base_type)).is_some();
-                    }
+                } else if !found && let Some(type_name) = self.extract_expr_type_name(receiver) {
+                    let base_type = VbcCodegen::strip_generic_args(&type_name);
+                    let is_stdlib_type = type_names::is_builtin_method_type(base_type);
+                    found = !is_stdlib_type
+                        && self
+                            .ctx
+                            .lookup_function(&format!("{}.is_empty", base_type))
+                            .is_some();
+                }
                 (found, hint)
             };
 
@@ -5883,7 +6322,10 @@ impl VbcCodegen {
                 });
                 // Emit a proper comparison with zero
                 let zero_reg = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadI { dst: zero_reg, value: 0 });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: zero_reg,
+                    value: 0,
+                });
                 let result = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::CmpI {
                     op: crate::instruction::CompareOp::Eq,
@@ -5941,8 +6383,8 @@ impl VbcCodegen {
         // Duration/Instant intrinsics, even if the method name happens to overlap
         // (e.g., saturating_add exists on both Byte and Duration).
         {
-            use crate::intrinsics::registry::CodegenStrategy;
             use crate::codegen::context::VarTypeKind;
+            use crate::intrinsics::registry::CodegenStrategy;
 
             // Determine if the receiver is a known primitive numeric type
             // This includes:
@@ -5956,20 +6398,40 @@ impl VbcCodegen {
             {
                 matches!(
                     self.ctx.get_variable_type(&ident.name),
-                    VarTypeKind::Int | VarTypeKind::Float | VarTypeKind::Bool
-                    | VarTypeKind::Byte | VarTypeKind::Char | VarTypeKind::Int32
-                    | VarTypeKind::UInt64
+                    VarTypeKind::Int
+                        | VarTypeKind::Float
+                        | VarTypeKind::Bool
+                        | VarTypeKind::Byte
+                        | VarTypeKind::Char
+                        | VarTypeKind::Int32
+                        | VarTypeKind::UInt64
                 )
             } else if let ExprKind::Literal(lit) = &receiver.kind {
                 // Direct literal receivers are primitive
                 use verum_ast::literal::LiteralKind;
-                matches!(lit.kind, LiteralKind::Int(_) | LiteralKind::Float(_) | LiteralKind::Bool(_) | LiteralKind::Char(_))
+                matches!(
+                    lit.kind,
+                    LiteralKind::Int(_)
+                        | LiteralKind::Float(_)
+                        | LiteralKind::Bool(_)
+                        | LiteralKind::Char(_)
+                )
             } else if let ExprKind::Paren(inner) = &receiver.kind {
                 // Paren-wrapped literals are primitive
                 use verum_ast::literal::LiteralKind;
                 if let ExprKind::Literal(lit) = &inner.kind {
-                    matches!(lit.kind, LiteralKind::Int(_) | LiteralKind::Float(_) | LiteralKind::Bool(_) | LiteralKind::Char(_))
-                } else if let ExprKind::Unary { op: verum_ast::expr::UnOp::Neg, expr: inner_unary } = &inner.kind {
+                    matches!(
+                        lit.kind,
+                        LiteralKind::Int(_)
+                            | LiteralKind::Float(_)
+                            | LiteralKind::Bool(_)
+                            | LiteralKind::Char(_)
+                    )
+                } else if let ExprKind::Unary {
+                    op: verum_ast::expr::UnOp::Neg,
+                    expr: inner_unary,
+                } = &inner.kind
+                {
                     // Negated literals in parens: (-5), (-0.0)
                     if let ExprKind::Literal(lit) = &inner_unary.kind {
                         matches!(lit.kind, LiteralKind::Int(_) | LiteralKind::Float(_))
@@ -5979,7 +6441,11 @@ impl VbcCodegen {
                 } else {
                     false
                 }
-            } else if let ExprKind::Unary { op: verum_ast::expr::UnOp::Neg, expr: inner } = &receiver.kind {
+            } else if let ExprKind::Unary {
+                op: verum_ast::expr::UnOp::Neg,
+                expr: inner,
+            } = &receiver.kind
+            {
                 // Negated literals without parens: -5, -0.0 (if parsed this way)
                 use verum_ast::literal::LiteralKind;
                 if let ExprKind::Literal(lit) = &inner.kind {
@@ -5998,9 +6464,25 @@ impl VbcCodegen {
                     // Check if the base is a known primitive type name
                     matches!(
                         ident.name.as_str(),
-                        "Int" | "Float" | "Bool" | "Byte" | "Char" | "Int32" | "UInt64" |
-                        "Float32" | "Float64" | "i8" | "i16" | "i32" | "i64" |
-                        "u8" | "u16" | "u32" | "u64" | "f32" | "f64"
+                        "Int"
+                            | "Float"
+                            | "Bool"
+                            | "Byte"
+                            | "Char"
+                            | "Int32"
+                            | "UInt64"
+                            | "Float32"
+                            | "Float64"
+                            | "i8"
+                            | "i16"
+                            | "i32"
+                            | "i64"
+                            | "u8"
+                            | "u16"
+                            | "u32"
+                            | "u64"
+                            | "f32"
+                            | "f64"
                     )
                 } else {
                     false
@@ -6011,17 +6493,25 @@ impl VbcCodegen {
 
             if !receiver_is_primitive_numeric {
                 static INTRINSIC_TYPES: &[&str] = &[
-                    "Duration", "Instant", "Stopwatch", "PerfCounter", "DeadlineTimer",
+                    "Duration",
+                    "Instant",
+                    "Stopwatch",
+                    "PerfCounter",
+                    "DeadlineTimer",
                 ];
 
                 // If the receiver has a known type name, only check that specific type.
                 // This prevents mismatches like sw.elapsed() (Stopwatch) incorrectly
                 // dispatching to Instant::elapsed because the method name matches.
-                let receiver_type_name: Option<String> = if let ExprKind::Path(path) = &receiver.kind
+                let receiver_type_name: Option<String> = if let ExprKind::Path(path) =
+                    &receiver.kind
                     && path.segments.len() == 1
                     && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
                 {
-                    self.ctx.variable_type_names.get(&ident.name.to_string()).cloned()
+                    self.ctx
+                        .variable_type_names
+                        .get(&ident.name.to_string())
+                        .cloned()
                 } else if let ExprKind::MethodCall { .. } = &receiver.kind {
                     // For chained method calls like Num.new(1).add(2) or deeper chains,
                     // determine the return type to avoid dispatching to wrong intrinsic type
@@ -6044,46 +6534,47 @@ impl VbcCodegen {
                 for type_name in INTRINSIC_TYPES {
                     // If we know the receiver type, skip non-matching types
                     if let Some(ref rtn) = receiver_type_name
-                        && rtn.as_str() != *type_name {
-                            continue;
-                        }
+                        && rtn.as_str() != *type_name
+                    {
+                        continue;
+                    }
 
                     // Use "." separator to match how intrinsics are registered (e.g., "Duration.saturating_add")
                     let qualified = format!("{}.{}", type_name, method.name);
                     if let Some(func_info) = self.ctx.lookup_function(&qualified).cloned()
                         && let Some(ref intrinsic_name) = func_info.intrinsic_name
-                            && let Some(info) = lookup_intrinsic(intrinsic_name)
-                                && let CodegenStrategy::InlineSequence(seq_id) = info.intrinsic.strategy {
-                                    if receiver_type_name.is_some() {
-                                        // Known type match: dispatch immediately
-                                        let mut inline_args = vec![receiver_reg];
-                                        for i in 0..args.len() {
-                                            inline_args.push(Reg(args_start.0 + i as u16));
-                                        }
-                                        self.emit_intrinsic_inline_sequence(seq_id, &inline_args, result, 0)?;
-                                        self.ctx.free_temp(receiver_reg);
-                                        return Ok(Some(result));
-                                    }
-                                    // Unknown type: track match for ambiguity check
-                                    if found_match.is_some() {
-                                        ambiguous = true;
-                                    } else {
-                                        found_match = Some(seq_id);
-                                    }
-                                }
+                        && let Some(info) = lookup_intrinsic(intrinsic_name)
+                        && let CodegenStrategy::InlineSequence(seq_id) = info.intrinsic.strategy
+                    {
+                        if receiver_type_name.is_some() {
+                            // Known type match: dispatch immediately
+                            let mut inline_args = vec![receiver_reg];
+                            for i in 0..args.len() {
+                                inline_args.push(Reg(args_start.0 + i as u16));
+                            }
+                            self.emit_intrinsic_inline_sequence(seq_id, &inline_args, result, 0)?;
+                            self.ctx.free_temp(receiver_reg);
+                            return Ok(Some(result));
+                        }
+                        // Unknown type: track match for ambiguity check
+                        if found_match.is_some() {
+                            ambiguous = true;
+                        } else {
+                            found_match = Some(seq_id);
+                        }
+                    }
                 }
 
                 // For unknown receiver type, only dispatch if unambiguous (exactly one match)
-                if !ambiguous
-                    && let Some(seq_id) = found_match {
-                        let mut inline_args = vec![receiver_reg];
-                        for i in 0..args.len() {
-                            inline_args.push(Reg(args_start.0 + i as u16));
-                        }
-                        self.emit_intrinsic_inline_sequence(seq_id, &inline_args, result, 0)?;
-                        self.ctx.free_temp(receiver_reg);
-                        return Ok(Some(result));
+                if !ambiguous && let Some(seq_id) = found_match {
+                    let mut inline_args = vec![receiver_reg];
+                    for i in 0..args.len() {
+                        inline_args.push(Reg(args_start.0 + i as u16));
                     }
+                    self.emit_intrinsic_inline_sequence(seq_id, &inline_args, result, 0)?;
+                    self.ctx.free_temp(receiver_reg);
+                    return Ok(Some(result));
+                }
             }
         }
 
@@ -6116,7 +6607,11 @@ impl VbcCodegen {
                                 // For type parameters, DON'T prefix - use method name only
                                 // and let runtime dispatch based on actual value type.
                                 let is_type_param = type_name.len() == 1
-                                    && type_name.chars().next().map(|c| c.is_ascii_uppercase()).unwrap_or(false);
+                                    && type_name
+                                        .chars()
+                                        .next()
+                                        .map(|c| c.is_ascii_uppercase())
+                                        .unwrap_or(false);
 
                                 if is_type_param {
                                     // Generic type parameter - let runtime dispatch
@@ -6155,14 +6650,15 @@ impl VbcCodegen {
             // Case 2: Receiver is a function call - check return type
             // Extract function name from the call expression
             let func_name = match &func.kind {
-                ExprKind::Path(path) => {
-                    path.segments.iter().filter_map(|seg| {
-                        match seg {
-                            verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
-                            _ => None,
-                        }
-                    }).collect::<Vec<_>>().join("::")
-                }
+                ExprKind::Path(path) => path
+                    .segments
+                    .iter()
+                    .filter_map(|seg| match seg {
+                        verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("::"),
                 _ => String::new(),
             };
 
@@ -6190,7 +6686,12 @@ impl VbcCodegen {
             } else {
                 method.name.to_string()
             }
-        } else if let ExprKind::MethodCall { receiver: inner_receiver, method: inner_method, .. } = &receiver.kind {
+        } else if let ExprKind::MethodCall {
+            receiver: inner_receiver,
+            method: inner_method,
+            ..
+        } = &receiver.kind
+        {
             // Case 3: Receiver is a method call - determine return type of the inner method
             // This handles chains like: obj.as_nanos().checked_add(...)
             self.determine_method_return_type_prefix(inner_receiver, inner_method, method)
@@ -6201,7 +6702,12 @@ impl VbcCodegen {
                 if path.segments.len() == 1 {
                     if let verum_ast::ty::PathSegment::Name(ref type_ident) = path.segments[0] {
                         let type_name = type_ident.name.to_string();
-                        if type_name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+                        if type_name
+                            .chars()
+                            .next()
+                            .map(|c| c.is_uppercase())
+                            .unwrap_or(false)
+                        {
                             // Type name (e.g., FileDesc.STDIN.is_valid)
                             let resolved_type = self.resolve_type_alias(&type_name);
                             let base_type = VbcCodegen::strip_generic_args(&resolved_type);
@@ -6211,7 +6717,9 @@ impl VbcCodegen {
                             // Look up variable type, then field type for method prefix
                             if let Some(var_type) = self.ctx.variable_type_names.get(&type_name) {
                                 let base_type = VbcCodegen::strip_generic_args(var_type);
-                                if let Some(field_type) = self.field_type_name(base_type, &field.name) {
+                                if let Some(field_type) =
+                                    self.field_type_name(base_type, &field.name)
+                                {
                                     let field_base = VbcCodegen::strip_generic_args(field_type);
                                     format!("{}.{}", field_base, method.name)
                                 } else {
@@ -6273,9 +6781,7 @@ impl VbcCodegen {
                 LiteralKind::Tagged { .. }
                 | LiteralKind::Contract(_)
                 | LiteralKind::Composite(_)
-                | LiteralKind::ContextAdaptive(_) => {
-                    method.name.to_string()
-                }
+                | LiteralKind::ContextAdaptive(_) => method.name.to_string(),
             }
         } else if let ExprKind::Unary { op, expr: inner } = &receiver.kind {
             // Case 6: Receiver is a unary expression
@@ -6302,21 +6808,22 @@ impl VbcCodegen {
                 // This handles `(*l).method()` where l: Heap<T> → method on T
                 if let Some(inner_type) = self.extract_expr_type_name(inner) {
                     // Strip Heap<T> or Shared<T> wrapper to get inner type T
-                    let derefed_type = if inner_type.starts_with("Heap<") || inner_type.starts_with("Shared<") {
-                        // Extract T from Heap<T>
-                        if let Some(start) = inner_type.find('<') {
-                            let end = inner_type.rfind('>').unwrap_or(inner_type.len());
-                            inner_type[start + 1..end].to_string()
+                    let derefed_type =
+                        if inner_type.starts_with("Heap<") || inner_type.starts_with("Shared<") {
+                            // Extract T from Heap<T>
+                            if let Some(start) = inner_type.find('<') {
+                                let end = inner_type.rfind('>').unwrap_or(inner_type.len());
+                                inner_type[start + 1..end].to_string()
+                            } else {
+                                inner_type.clone()
+                            }
+                        } else if self.is_allocating_wrapper(&inner_type) {
+                            // Plain Heap/Shared without generic args — can't determine inner type
+                            method.name.to_string();
+                            inner_type.clone()
                         } else {
                             inner_type.clone()
-                        }
-                    } else if self.is_allocating_wrapper(&inner_type) {
-                        // Plain Heap/Shared without generic args — can't determine inner type
-                        method.name.to_string();
-                        inner_type.clone()
-                    } else {
-                        inner_type.clone()
-                    };
+                        };
                     let base_type = VbcCodegen::strip_generic_args(&derefed_type);
                     format!("{}.{}", base_type, method.name)
                 } else {
@@ -6341,7 +6848,11 @@ impl VbcCodegen {
                     LiteralKind::ByteChar(_) => format!("Byte.{}", method.name),
                     _ => method.name.to_string(),
                 }
-            } else if let ExprKind::Unary { op, expr: inner_unary } = &inner.kind {
+            } else if let ExprKind::Unary {
+                op,
+                expr: inner_unary,
+            } = &inner.kind
+            {
                 use verum_ast::expr::UnOp;
                 match op {
                     UnOp::Neg => {
@@ -6359,7 +6870,9 @@ impl VbcCodegen {
                     UnOp::Deref => {
                         // Handle `(*x).method()` — infer inner type and unwrap Heap<T>/Shared<T>
                         if let Some(inner_type) = self.extract_expr_type_name(inner_unary) {
-                            let derefed_type = if inner_type.starts_with("Heap<") || inner_type.starts_with("Shared<") {
+                            let derefed_type = if inner_type.starts_with("Heap<")
+                                || inner_type.starts_with("Shared<")
+                            {
                                 if let Some(start) = inner_type.find('<') {
                                     let end = inner_type.rfind('>').unwrap_or(inner_type.len());
                                     inner_type[start + 1..end].to_string()
@@ -6404,31 +6917,30 @@ impl VbcCodegen {
         // name (no `.` separator), retry via `infer_expr_type_name`,
         // which is a generic best-effort type-inference helper that
         // handles arbitrary receiver expressions.
-        let effective_method_name = if !effective_method_name.contains('.')
-            && !effective_method_name.contains('$')
-        {
-            if let Some(inferred_type) = self.infer_expr_type_name(receiver) {
-                let base_type = VbcCodegen::strip_generic_args(&inferred_type);
-                let resolved = self.resolve_type_alias(base_type);
-                let final_base = VbcCodegen::strip_generic_args(&resolved);
-                if !final_base.is_empty()
-                    && final_base
-                        .chars()
-                        .next()
-                        .map(|c| c.is_ascii_uppercase())
-                        .unwrap_or(false)
-                    && final_base.len() > 1
-                {
-                    format!("{}.{}", final_base, method.name)
+        let effective_method_name =
+            if !effective_method_name.contains('.') && !effective_method_name.contains('$') {
+                if let Some(inferred_type) = self.infer_expr_type_name(receiver) {
+                    let base_type = VbcCodegen::strip_generic_args(&inferred_type);
+                    let resolved = self.resolve_type_alias(base_type);
+                    let final_base = VbcCodegen::strip_generic_args(&resolved);
+                    if !final_base.is_empty()
+                        && final_base
+                            .chars()
+                            .next()
+                            .map(|c| c.is_ascii_uppercase())
+                            .unwrap_or(false)
+                        && final_base.len() > 1
+                    {
+                        format!("{}.{}", final_base, method.name)
+                    } else {
+                        effective_method_name
+                    }
                 } else {
                     effective_method_name
                 }
             } else {
                 effective_method_name
-            }
-        } else {
-            effective_method_name
-        };
+            };
 
         // Normalize slice-type prefixes: `[T].method` is the natural name
         // produced by `extract_type_name_from_ast` for field/variable types
@@ -6455,22 +6967,23 @@ impl VbcCodegen {
         // If so, we need to create a CBGR reference to the receiver and pass that
         // instead of the value directly. This enables `*self = value` inside the
         // method to write back to the caller's variable.
-        let actual_receiver = if let Some(func_info) = self.ctx.lookup_function(&effective_method_name) {
-            if func_info.takes_self_mut_ref {
-                // Create a mutable reference to the receiver
-                let ref_reg = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::RefMut {
-                    dst: ref_reg,
-                    src: receiver_reg,
-                });
-                // The original receiver_reg will be freed below, but ref_reg is the actual receiver
-                ref_reg
+        let actual_receiver =
+            if let Some(func_info) = self.ctx.lookup_function(&effective_method_name) {
+                if func_info.takes_self_mut_ref {
+                    // Create a mutable reference to the receiver
+                    let ref_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::RefMut {
+                        dst: ref_reg,
+                        src: receiver_reg,
+                    });
+                    // The original receiver_reg will be freed below, but ref_reg is the actual receiver
+                    ref_reg
+                } else {
+                    receiver_reg
+                }
             } else {
                 receiver_reg
-            }
-        } else {
-            receiver_reg
-        };
+            };
 
         // Emit method call instruction
         self.ctx.emit(Instruction::CallM {
@@ -6486,40 +6999,45 @@ impl VbcCodegen {
         // Track element type for List variables when push/insert is called.
         // This allows `let n = nodes[0]` to infer the correct element type
         // for field access resolution (e.g., n.value → Node.value idx 0).
-        if matches!(method.name.as_str(), "push" | "push_back" | "push_front" | "insert" | "append") && !args.is_empty()
+        if matches!(
+            method.name.as_str(),
+            "push" | "push_back" | "push_front" | "insert" | "append"
+        ) && !args.is_empty()
             && let ExprKind::Path(ref path) = receiver.kind
-                && path.segments.len() == 1
-                    && let PathSegment::Name(ref ident) = path.segments[0] {
-                        let var_name = ident.name.to_string();
-                        if let Some(current_type) = self.ctx.variable_type_names.get(&var_name).cloned() {
-                            // Only update if current type is bare collection name or has
-                            // unresolved generic params (e.g., "List<T>", "Set<K>").
-                            let base_type = VbcCodegen::strip_generic_args(&current_type);
-                            let has_bare_generic = if let Some(start) = current_type.find('<') {
-                                if let Some(end) = current_type.rfind('>') {
-                                    let inner = current_type[start+1..end].trim();
-                                    inner.len() <= 2 && inner.chars().all(|c| c.is_ascii_uppercase())
-                                } else {
-                                    true
-                                }
-                            } else {
-                                true // No generic args at all (bare "List")
-                            };
-                            if matches!(base_type, "List" | "Set" | "Deque") && has_bare_generic {
-                                // Infer element type from the first arg (for push) or second arg (for insert)
-                                let elem_expr = if method.name.as_str() == "insert" && args.len() >= 2 {
-                                    Some(&args[1])
-                                } else {
-                                    Some(&args[0])
-                                };
-                                if let Some(elem) = elem_expr
-                                    && let Some(elem_type) = self.extract_expr_type_name(elem) {
-                                        let new_type = format!("{}<{}>", base_type, elem_type);
-                                        self.ctx.variable_type_names.insert(var_name, new_type);
-                                    }
-                            }
-                        }
+            && path.segments.len() == 1
+            && let PathSegment::Name(ref ident) = path.segments[0]
+        {
+            let var_name = ident.name.to_string();
+            if let Some(current_type) = self.ctx.variable_type_names.get(&var_name).cloned() {
+                // Only update if current type is bare collection name or has
+                // unresolved generic params (e.g., "List<T>", "Set<K>").
+                let base_type = VbcCodegen::strip_generic_args(&current_type);
+                let has_bare_generic = if let Some(start) = current_type.find('<') {
+                    if let Some(end) = current_type.rfind('>') {
+                        let inner = current_type[start + 1..end].trim();
+                        inner.len() <= 2 && inner.chars().all(|c| c.is_ascii_uppercase())
+                    } else {
+                        true
                     }
+                } else {
+                    true // No generic args at all (bare "List")
+                };
+                if matches!(base_type, "List" | "Set" | "Deque") && has_bare_generic {
+                    // Infer element type from the first arg (for push) or second arg (for insert)
+                    let elem_expr = if method.name.as_str() == "insert" && args.len() >= 2 {
+                        Some(&args[1])
+                    } else {
+                        Some(&args[0])
+                    };
+                    if let Some(elem) = elem_expr
+                        && let Some(elem_type) = self.extract_expr_type_name(elem)
+                    {
+                        let new_type = format!("{}<{}>", base_type, elem_type);
+                        self.ctx.variable_type_names.insert(var_name, new_type);
+                    }
+                }
+            }
+        }
 
         // Free the temporary registers
         if actual_receiver != receiver_reg {
@@ -6541,23 +7059,27 @@ impl VbcCodegen {
             ExprKind::Path(path) => {
                 // Base case: a variable or type name
                 if path.segments.len() == 1
-                    && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0] {
-                        let name = ident.name.to_string();
-                        // Check variable_type_names first
-                        if let Some(type_name) = self.ctx.variable_type_names.get(&name) {
-                            return Some(type_name.clone());
-                        }
-                        // Check if it's a type name (constructor)
-                        if let Some(func_info) = self.ctx.lookup_function(&name)
-                            && func_info.param_count == 0 {
-                                return func_info.return_type_name.clone();
-                            }
-                        // Could be a type name itself (e.g., "Num" for static methods)
-                        return Some(name);
+                    && let verum_ast::ty::PathSegment::Name(ident) = &path.segments[0]
+                {
+                    let name = ident.name.to_string();
+                    // Check variable_type_names first
+                    if let Some(type_name) = self.ctx.variable_type_names.get(&name) {
+                        return Some(type_name.clone());
                     }
+                    // Check if it's a type name (constructor)
+                    if let Some(func_info) = self.ctx.lookup_function(&name)
+                        && func_info.param_count == 0
+                    {
+                        return func_info.return_type_name.clone();
+                    }
+                    // Could be a type name itself (e.g., "Num" for static methods)
+                    return Some(name);
+                }
                 None
             }
-            ExprKind::MethodCall { receiver, method, .. } => {
+            ExprKind::MethodCall {
+                receiver, method, ..
+            } => {
                 // Recursive case: determine receiver type, then look up method return type
                 if let Some(recv_type) = self.infer_method_chain_return_type(receiver) {
                     // Strip generic args for function lookup (e.g., "Wrapper<Int>" → "Wrapper")
@@ -6607,20 +7129,23 @@ impl VbcCodegen {
         // stdlib/core type knowledge in the compiler". This list
         // shrinks to the minimum that's legitimately type-specific.
         const UINT64_METHODS: &[&str] = &[
-            "as_nanos", "as_micros", "as_millis", "as_secs", "as_secs_f64",
+            "as_nanos",
+            "as_micros",
+            "as_millis",
+            "as_secs",
+            "as_secs_f64",
             "to_bits",
-            "elapsed_nanos", "elapsed_micros", "elapsed_millis", "elapsed_secs",
+            "elapsed_nanos",
+            "elapsed_micros",
+            "elapsed_millis",
+            "elapsed_secs",
         ];
 
         // Known methods that return Int32
-        const INT32_METHODS: &[&str] = &[
-            "to_i32", "as_i32", "len_i32",
-        ];
+        const INT32_METHODS: &[&str] = &["to_i32", "as_i32", "len_i32"];
 
         // Known methods that return Byte
-        const BYTE_METHODS: &[&str] = &[
-            "first_byte", "last_byte", "as_byte", "to_byte",
-        ];
+        const BYTE_METHODS: &[&str] = &["first_byte", "last_byte", "as_byte", "to_byte"];
 
         // Methods that return Maybe<T> - these methods ALWAYS return Maybe regardless of input
         // When chained with Maybe methods, we need to emit Maybe.method
@@ -6628,35 +7153,100 @@ impl VbcCodegen {
         // return the same type as the receiver, not necessarily Maybe.
         const MAYBE_RETURNING_METHODS: &[&str] = &[
             // Result -> Maybe conversion methods
-            "ok", "err",
+            "ok",
+            "err",
             // Maybe transformation methods that return Maybe<T> (critical for chaining!)
             // These specifically return Maybe when called ON a Maybe
-            "map", "and_then", "or_else", "and", "or", "xor",
-            "zip", "zip_with", "flatten", "filter",
+            "map",
+            "and_then",
+            "or_else",
+            "and",
+            "or",
+            "xor",
+            "zip",
+            "zip_with",
+            "flatten",
+            "filter",
             // Maybe reference methods that return Maybe<&T> or Maybe<&mut T>
-            "as_ref", "as_mut", "take", "replace",
+            "as_ref",
+            "as_mut",
+            "take",
+            "replace",
             // Iterator methods that return Maybe
-            "next", "first", "last", "nth", "find", "find_map",
-            "min", "max", "min_by", "max_by", "min_by_key", "max_by_key",
-            "reduce", "try_reduce", "try_fold",
+            "next",
+            "first",
+            "last",
+            "nth",
+            "find",
+            "find_map",
+            "min",
+            "max",
+            "min_by",
+            "max_by",
+            "min_by_key",
+            "max_by_key",
+            "reduce",
+            "try_reduce",
+            "try_fold",
             // Collection lookup methods
-            "get", "get_mut", "front", "back", "pop", "pop_front", "pop_back",
+            "get",
+            "get_mut",
+            "front",
+            "back",
+            "pop",
+            "pop_front",
+            "pop_back",
             // Checked arithmetic returning Maybe
-            "checked_add", "checked_sub", "checked_mul", "checked_div",
-            "checked_rem", "checked_neg", "checked_abs",
+            "checked_add",
+            "checked_sub",
+            "checked_mul",
+            "checked_div",
+            "checked_rem",
+            "checked_neg",
+            "checked_abs",
             // Data type methods returning Maybe
-            "as_bool", "as_int", "as_float", "as_text",
-            "as_array", "as_array_mut", "as_object", "as_object_mut",
-            "at", "at_mut", "remove", "path", "to_number",
+            "as_bool",
+            "as_int",
+            "as_float",
+            "as_text",
+            "as_array",
+            "as_array_mut",
+            "as_object",
+            "as_object_mut",
+            "at",
+            "at_mut",
+            "remove",
+            "path",
+            "to_number",
         ];
 
         // Methods that belong to Maybe type (used when outer method should be qualified)
         const MAYBE_METHODS: &[&str] = &[
-            "unwrap", "unwrap_or", "unwrap_or_else", "unwrap_or_default",
-            "expect", "is_some", "is_none", "is_some_and",
-            "map", "map_or", "map_or_else", "and_then", "or_else",
-            "ok_or", "ok_or_else", "and", "or", "xor", "zip", "zip_with",
-            "flatten", "inspect", "iter", "iter_mut", "into_iter",
+            "unwrap",
+            "unwrap_or",
+            "unwrap_or_else",
+            "unwrap_or_default",
+            "expect",
+            "is_some",
+            "is_none",
+            "is_some_and",
+            "map",
+            "map_or",
+            "map_or_else",
+            "and_then",
+            "or_else",
+            "ok_or",
+            "ok_or_else",
+            "and",
+            "or",
+            "xor",
+            "zip",
+            "zip_with",
+            "flatten",
+            "inspect",
+            "iter",
+            "iter_mut",
+            "into_iter",
         ];
 
         let method_name_str = inner_method.name.as_str();
@@ -6675,7 +7265,9 @@ impl VbcCodegen {
 
         // Check if inner method returns Maybe and outer method is a Maybe method
         // This handles patterns like: result.ok().unwrap(), iter.next().map(...)
-        if MAYBE_RETURNING_METHODS.contains(&method_name_str) && MAYBE_METHODS.contains(&outer_method_str) {
+        if MAYBE_RETURNING_METHODS.contains(&method_name_str)
+            && MAYBE_METHODS.contains(&outer_method_str)
+        {
             return format!("Maybe.{}", outer_method_name.name);
         }
 
@@ -6687,7 +7279,8 @@ impl VbcCodegen {
             let var_name = ident.name.to_string();
 
             // First, try variable_type_names (for local variables)
-            let receiver_type = if let Some(type_name) = self.ctx.variable_type_names.get(&var_name) {
+            let receiver_type = if let Some(type_name) = self.ctx.variable_type_names.get(&var_name)
+            {
                 Some(type_name.clone())
             } else if let Some(func_info) = self.ctx.lookup_function(&var_name) {
                 // For constants/statics (functions with 0 params), get return type
@@ -6721,22 +7314,25 @@ impl VbcCodegen {
                 let base_type = VbcCodegen::strip_generic_args(&type_name);
                 let qualified_inner_method = format!("{}.{}", base_type, inner_method.name);
                 if let Some(inner_func_info) = self.ctx.lookup_function(&qualified_inner_method)
-                    && let Some(ref inner_ret_type) = inner_func_info.return_type_name {
-                        // Use the inner method's return type to qualify the outer method
-                        // Strip generic args so "Wrapper<Int>.map_add" becomes "Wrapper.map_add"
-                        let ret_base = VbcCodegen::strip_generic_args(inner_ret_type);
-                        return format!("{}.{}", ret_base, outer_method_name.name);
-                    }
+                    && let Some(ref inner_ret_type) = inner_func_info.return_type_name
+                {
+                    // Use the inner method's return type to qualify the outer method
+                    // Strip generic args so "Wrapper<Int>.map_add" becomes "Wrapper.map_add"
+                    let ret_base = VbcCodegen::strip_generic_args(inner_ret_type);
+                    return format!("{}.{}", ret_base, outer_method_name.name);
+                }
 
                 // Fallback heuristics based on type name patterns
                 if type_name.contains("Duration") && method_name_str == "as_nanos" {
                     return format!("uint64${}", outer_method_name.name);
                 }
                 // If receiver is Result and inner method is ok/err, outer method should use Maybe
-                if type_name.starts_with("Result") && (method_name_str == "ok" || method_name_str == "err")
-                    && MAYBE_METHODS.contains(&outer_method_str) {
-                        return format!("Maybe.{}", outer_method_name.name);
-                    }
+                if type_name.starts_with("Result")
+                    && (method_name_str == "ok" || method_name_str == "err")
+                    && MAYBE_METHODS.contains(&outer_method_str)
+                {
+                    return format!("Maybe.{}", outer_method_name.name);
+                }
             }
         }
 
@@ -6751,10 +7347,11 @@ impl VbcCodegen {
                 let base_ret = VbcCodegen::strip_generic_args(&inner_ret_type);
                 let qualified = format!("{}.{}", base_ret, inner_method.name);
                 if let Some(func_info) = self.ctx.lookup_function(&qualified)
-                    && let Some(ref ret_type) = func_info.return_type_name {
-                        let ret_base = VbcCodegen::strip_generic_args(ret_type);
-                        return format!("{}.{}", ret_base, outer_method_name.name);
-                    }
+                    && let Some(ref ret_type) = func_info.return_type_name
+                {
+                    let ret_base = VbcCodegen::strip_generic_args(ret_type);
+                    return format!("{}.{}", ret_base, outer_method_name.name);
+                }
             }
         }
 
@@ -6786,9 +7383,9 @@ impl VbcCodegen {
                 func_info.parent_type_name.as_deref(),
             );
             for (i, arg) in args.iter().enumerate() {
-                let arg_val = self
-                    .compile_expr(arg)?
-                    .ok_or_else(|| CodegenError::internal("variant constructor arg has no value"))?;
+                let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
+                    CodegenError::internal("variant constructor arg has no value")
+                })?;
                 self.ctx.emit(Instruction::SetVariantData {
                     variant: result,
                     field: i as u32,
@@ -6817,9 +7414,10 @@ impl VbcCodegen {
 
         // Check if this function is an intrinsic — resolve inline instead of emitting Call
         if let Some(intrinsic_name) = &func_info.intrinsic_name
-            && let Some(intrinsic_info) = lookup_intrinsic(intrinsic_name) {
-                return self.compile_imported_intrinsic_call(&intrinsic_info, args);
-            }
+            && let Some(intrinsic_info) = lookup_intrinsic(intrinsic_name)
+        {
+            return self.compile_imported_intrinsic_call(&intrinsic_info, args);
+        }
 
         // Check argument count
         if args.len() != func_info.param_count {
@@ -6894,8 +7492,10 @@ impl VbcCodegen {
             let first_val = self
                 .compile_expr(&args[0])?
                 .ok_or_else(|| CodegenError::internal("type method arg has no value"))?;
-            self.ctx
-                .emit(Instruction::Mov { dst: first, src: first_val });
+            self.ctx.emit(Instruction::Mov {
+                dst: first,
+                src: first_val,
+            });
             if first_val != first {
                 self.ctx.free_temp(first_val);
             }
@@ -6905,8 +7505,10 @@ impl VbcCodegen {
                 let arg_val = self
                     .compile_expr(arg)?
                     .ok_or_else(|| CodegenError::internal("type method arg has no value"))?;
-                self.ctx
-                    .emit(Instruction::Mov { dst: arg_reg, src: arg_val });
+                self.ctx.emit(Instruction::Mov {
+                    dst: arg_reg,
+                    src: arg_val,
+                });
                 if arg_val != arg_reg {
                     self.ctx.free_temp(arg_val);
                 }
@@ -6921,8 +7523,7 @@ impl VbcCodegen {
         // Infer protocol name from the centralized method→protocol registry
         // (verum_common::method_to_protocol). This enables "dyn:" dispatch at
         // the LLVM level when monomorphization hasn't resolved the concrete type.
-        let protocol_name = method_to_protocol(method.name.as_str())
-            .map(|p| p.as_str());
+        let protocol_name = method_to_protocol(method.name.as_str()).map(|p| p.as_str());
 
         // Emit "dyn:Protocol.method" for protocol dispatch, or type-param-prefixed
         // name for monomorphization to resolve later.
@@ -7001,7 +7602,12 @@ impl VbcCodegen {
                 ConditionKind::Let { .. } => true,
                 ConditionKind::Expr(expr) => {
                     // Check if expr is an Is pattern with bindings
-                    if let ExprKind::Is { pattern, negated: false, .. } = &expr.kind {
+                    if let ExprKind::Is {
+                        pattern,
+                        negated: false,
+                        ..
+                    } = &expr.kind
+                    {
                         Self::pattern_has_bindings(pattern)
                     } else {
                         false
@@ -7031,32 +7637,37 @@ impl VbcCodegen {
             match condition_kind {
                 ConditionKind::Expr(expr) => {
                     // Check if this is an Is expression with pattern bindings
-                    if let ExprKind::Is { expr: scrutinee_expr, pattern, negated: false } = &expr.kind
-                        && Self::pattern_has_bindings(pattern) {
-                            // Handle like a Let binding: evaluate, test, bind
-                            let scrutinee = self
-                                .compile_expr(scrutinee_expr)?
-                                .ok_or_else(|| CodegenError::internal("is pattern scrutinee has no value"))?;
+                    if let ExprKind::Is {
+                        expr: scrutinee_expr,
+                        pattern,
+                        negated: false,
+                    } = &expr.kind
+                        && Self::pattern_has_bindings(pattern)
+                    {
+                        // Handle like a Let binding: evaluate, test, bind
+                        let scrutinee = self.compile_expr(scrutinee_expr)?.ok_or_else(|| {
+                            CodegenError::internal("is pattern scrutinee has no value")
+                        })?;
 
-                            // Track for cleanup on else path
-                            scrutinee_regs.push(scrutinee);
+                        // Track for cleanup on else path
+                        scrutinee_regs.push(scrutinee);
 
-                            // Test if pattern matches
-                            let match_reg = self.ctx.alloc_temp();
-                            self.compile_pattern_test(pattern, scrutinee, match_reg)?;
+                        // Test if pattern matches
+                        let match_reg = self.ctx.alloc_temp();
+                        self.compile_pattern_test(pattern, scrutinee, match_reg)?;
 
-                            // Jump to else if pattern doesn't match
-                            self.ctx
-                                .emit_forward_jump(&else_label, |offset| Instruction::JmpNot {
-                                    cond: match_reg,
-                                    offset,
-                                });
-                            self.ctx.free_temp(match_reg);
+                        // Jump to else if pattern doesn't match
+                        self.ctx
+                            .emit_forward_jump(&else_label, |offset| Instruction::JmpNot {
+                                cond: match_reg,
+                                offset,
+                            });
+                        self.ctx.free_temp(match_reg);
 
-                            // Bind pattern variables - available for subsequent conditions and then branch
-                            self.compile_pattern_bind(pattern, scrutinee)?;
-                            continue;
-                        }
+                        // Bind pattern variables - available for subsequent conditions and then branch
+                        self.compile_pattern_bind(pattern, scrutinee)?;
+                        continue;
+                    }
 
                     // Regular boolean expression condition
                     let cond_reg = self
@@ -7104,8 +7715,10 @@ impl VbcCodegen {
         // All conditions passed - compile then branch
         let then_result = self.compile_block(then_branch)?;
         if let Some(reg) = then_result {
-            self.ctx
-                .emit(Instruction::Mov { dst: result, src: reg });
+            self.ctx.emit(Instruction::Mov {
+                dst: result,
+                src: reg,
+            });
         } else {
             self.ctx.emit(Instruction::LoadUnit { dst: result });
         }
@@ -7136,8 +7749,10 @@ impl VbcCodegen {
         if let Some(else_expr) = else_branch {
             let else_result = self.compile_expr(else_expr)?;
             if let Some(reg) = else_result {
-                self.ctx
-                    .emit(Instruction::Mov { dst: result, src: reg });
+                self.ctx.emit(Instruction::Mov {
+                    dst: result,
+                    src: reg,
+                });
             } else {
                 self.ctx.emit(Instruction::LoadUnit { dst: result });
             }
@@ -7267,7 +7882,10 @@ impl VbcCodegen {
                 verum_ast::StmtKind::Expr { expr, .. } => {
                     self.scan_expr_for_mutable_captures(expr);
                 }
-                verum_ast::StmtKind::Let { value: verum_common::Maybe::Some(val), .. } => {
+                verum_ast::StmtKind::Let {
+                    value: verum_common::Maybe::Some(val),
+                    ..
+                } => {
                     self.scan_expr_for_mutable_captures(val);
                 }
                 _ => {}
@@ -7283,44 +7901,51 @@ impl VbcCodegen {
         match &expr.kind {
             ExprKind::Closure { params, body, .. } => {
                 // Found a closure — check which free variables are mutable
-                let param_names: Vec<String> = params.iter().map(|p| {
-                    match &p.pattern.kind {
+                let param_names: Vec<String> = params
+                    .iter()
+                    .map(|p| match &p.pattern.kind {
                         verum_ast::PatternKind::Ident { name, .. } => name.to_string(),
                         _ => String::new(),
-                    }
-                }).collect();
+                    })
+                    .collect();
                 let free_vars = self.analyze_free_variables(body, &param_names);
                 for var_name in &free_vars {
                     if let Some(info) = self.ctx.lookup_var(var_name)
-                        && info.is_mutable && !info.is_cell {
-                            // Pre-wrap this mutable variable in a cell
-                            let var_reg = info.reg;
-                            let cell_reg = self.ctx.alloc_temp();
-                            self.ctx.emit(Instruction::New {
-                                dst: cell_reg,
-                                type_id: 0,
-                                field_count: 1,
-                            });
-                            self.ctx.emit(Instruction::SetF {
-                                obj: cell_reg,
-                                field_idx: 0,
-                                value: var_reg,
-                            });
-                            self.ctx.emit(Instruction::Mov {
-                                dst: var_reg,
-                                src: cell_reg,
-                            });
-                            if let Some(outer_info) = self.ctx.lookup_var_mut(var_name) {
-                                outer_info.is_cell = true;
-                            }
+                        && info.is_mutable
+                        && !info.is_cell
+                    {
+                        // Pre-wrap this mutable variable in a cell
+                        let var_reg = info.reg;
+                        let cell_reg = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::New {
+                            dst: cell_reg,
+                            type_id: 0,
+                            field_count: 1,
+                        });
+                        self.ctx.emit(Instruction::SetF {
+                            obj: cell_reg,
+                            field_idx: 0,
+                            value: var_reg,
+                        });
+                        self.ctx.emit(Instruction::Mov {
+                            dst: var_reg,
+                            src: cell_reg,
+                        });
+                        if let Some(outer_info) = self.ctx.lookup_var_mut(var_name) {
+                            outer_info.is_cell = true;
                         }
+                    }
                 }
             }
             // Recurse into sub-expressions that might contain closures
             ExprKind::Block(block) => {
                 self.pre_wrap_mutable_captures_in_block(block);
             }
-            ExprKind::If { then_branch, else_branch, .. } => {
+            ExprKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
                 self.pre_wrap_mutable_captures_in_block(then_branch);
                 if let verum_common::Maybe::Some(eb) = else_branch {
                     self.scan_expr_for_mutable_captures(eb);
@@ -7328,7 +7953,9 @@ impl VbcCodegen {
             }
             ExprKind::Call { func, args, .. } => {
                 self.scan_expr_for_mutable_captures(func);
-                for arg in args { self.scan_expr_for_mutable_captures(arg); }
+                for arg in args {
+                    self.scan_expr_for_mutable_captures(arg);
+                }
             }
             ExprKind::Binary { left, right, .. } => {
                 self.scan_expr_for_mutable_captures(left);
@@ -7476,24 +8103,26 @@ impl VbcCodegen {
         // Using compile_for_custom_iterator would emit CallM{has_next}/CallM{next}
         // which dispatches to Generator.has_next from generator.vr with wrong ABI.
         if let ExprKind::Call { func, .. } = &iter.kind
-            && let ExprKind::Path(path) = &func.kind {
-                let func_name: String = path
-                    .segments
-                    .iter()
-                    .filter_map(|s| {
-                        if let verum_ast::PathSegment::Name(i) = s {
-                            Some(i.name.as_str())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join("::");
-                if let Some(info) = self.ctx.lookup_function(&func_name)
-                    && info.is_generator {
-                        return false; // Use IterNew/IterNext (gen_register path)
+            && let ExprKind::Path(path) = &func.kind
+        {
+            let func_name: String = path
+                .segments
+                .iter()
+                .filter_map(|s| {
+                    if let verum_ast::PathSegment::Name(i) = s {
+                        Some(i.name.as_str())
+                    } else {
+                        None
                     }
+                })
+                .collect::<Vec<_>>()
+                .join("::");
+            if let Some(info) = self.ctx.lookup_function(&func_name)
+                && info.is_generator
+            {
+                return false; // Use IterNew/IterNext (gen_register path)
             }
+        }
 
         // Try to infer the type name
         if let Some(type_name) = self.infer_expr_type_name(iter) {
@@ -7507,10 +8136,25 @@ impl VbcCodegen {
             // `has_next` / `next` methods.
             !matches!(
                 base,
-                "List" | "Map" | "Set" | "Deque" | "Range" | "Text" | "Array"
-                    | "BTreeMap" | "BTreeSet" | "BinaryHeap"
-                    | "MapIter" | "MapIterMut" | "MapKeys" | "MapValues" | "MapValuesMut"
-                    | "SetIter" | "ListIter" | "ListIterMut" | "DequeIter"
+                "List"
+                    | "Map"
+                    | "Set"
+                    | "Deque"
+                    | "Range"
+                    | "Text"
+                    | "Array"
+                    | "BTreeMap"
+                    | "BTreeSet"
+                    | "BinaryHeap"
+                    | "MapIter"
+                    | "MapIterMut"
+                    | "MapKeys"
+                    | "MapValues"
+                    | "MapValuesMut"
+                    | "SetIter"
+                    | "ListIter"
+                    | "ListIterMut"
+                    | "DequeIter"
             )
         } else {
             // Can't determine type — use standard IterNew/IterNext (safe default)
@@ -7536,7 +8180,10 @@ impl VbcCodegen {
             .compile_expr(iter)?
             .ok_or_else(|| CodegenError::internal("for iter has no value"))?;
         let iter_reg = self.ctx.define_var("__for_iter", true);
-        self.ctx.emit(Instruction::Mov { dst: iter_reg, src: iter_val });
+        self.ctx.emit(Instruction::Mov {
+            dst: iter_reg,
+            src: iter_val,
+        });
         self.ctx.free_temp(iter_val);
 
         let loop_ctx = self.ctx.enter_loop(label.map(|s| s.to_string()), None);
@@ -7687,7 +8334,9 @@ impl VbcCodegen {
             };
             if let Some(t) = elem_ty {
                 let binder = name.name.to_string();
-                self.ctx.variable_type_names.insert(binder.clone(), t.clone());
+                self.ctx
+                    .variable_type_names
+                    .insert(binder.clone(), t.clone());
                 let var_type = self.type_name_to_var_type(&t);
                 self.ctx.register_variable_type(&binder, var_type);
             }
@@ -7769,9 +8418,10 @@ impl VbcCodegen {
                     // Update scrutinee type to inner type: "Heap<IntList>" -> "IntList"
                     // No Deref needed — Heap<T> is transparent (value IS the inner value)
                     if let Some(inner_start) = stype.find('<')
-                        && let Some(inner) = stype[inner_start + 1..].strip_suffix('>') {
-                            self.ctx.match_scrutinee_type = Some(inner.to_string());
-                        }
+                        && let Some(inner) = stype[inner_start + 1..].strip_suffix('>')
+                    {
+                        self.ctx.match_scrutinee_type = Some(inner.to_string());
+                    }
                 }
             }
         }
@@ -7826,8 +8476,10 @@ impl VbcCodegen {
             // Compile arm body
             let arm_result = self.compile_expr(&arm.body)?;
             if let Some(reg) = arm_result {
-                self.ctx
-                    .emit(Instruction::Mov { dst: result, src: reg });
+                self.ctx.emit(Instruction::Mov {
+                    dst: result,
+                    src: reg,
+                });
             } else {
                 self.ctx.emit(Instruction::LoadUnit { dst: result });
             }
@@ -7881,7 +8533,9 @@ impl VbcCodegen {
                 self.ctx.emit(Instruction::LoadTrue { dst: result });
             }
 
-            PatternKind::Ident { subpattern, name, .. } => {
+            PatternKind::Ident {
+                subpattern, name, ..
+            } => {
                 if let verum_common::Maybe::Some(sub_pat) = subpattern {
                     // x @ <subpattern> — must test the subpattern (e.g. range check)
                     self.compile_pattern_test(sub_pat, scrutinee, result)?;
@@ -7891,19 +8545,29 @@ impl VbcCodegen {
                     // If so, this is a variant pattern and we must test the tag,
                     // not unconditionally match (which would shadow later arms).
                     let ident_name = name.name.as_str();
-                    let is_variant = ident_name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
-                        && self.ctx.lookup_function(ident_name)
+                    let is_variant = ident_name
+                        .chars()
+                        .next()
+                        .map(|c| c.is_uppercase())
+                        .unwrap_or(false)
+                        && self
+                            .ctx
+                            .lookup_function(ident_name)
                             .and_then(|info| info.variant_tag)
                             .is_some();
 
                     if is_variant {
                         // Lookup tag — prefer scrutinee type when known
-                        let tag = self.ctx.lookup_function(ident_name)
+                        let tag = self
+                            .ctx
+                            .lookup_function(ident_name)
                             .and_then(|info| info.variant_tag)
                             .or_else(|| {
                                 if let Some(ref scrutinee_type) = self.ctx.match_scrutinee_type {
-                                    let base_type = scrutinee_type.split('<').next().unwrap_or(scrutinee_type);
-                                    self.ctx.find_variant_by_type_and_name(base_type, ident_name)
+                                    let base_type =
+                                        scrutinee_type.split('<').next().unwrap_or(scrutinee_type);
+                                    self.ctx
+                                        .find_variant_by_type_and_name(base_type, ident_name)
                                 } else {
                                     None
                                 }
@@ -7948,7 +8612,8 @@ impl VbcCodegen {
                         if patterns.len() == 1 {
                             let inner_pat = &patterns[0];
                             if matches!(inner_pat.kind, PatternKind::Wildcard)
-                                || matches!(&inner_pat.kind, PatternKind::Ident { subpattern, .. } if subpattern.is_none()) {
+                                || matches!(&inner_pat.kind, PatternKind::Ident { subpattern, .. } if subpattern.is_none())
+                            {
                                 // Heap(_) or Heap(x) always matches
                                 self.ctx.emit(Instruction::LoadTrue { dst: result });
                             } else {
@@ -7971,7 +8636,9 @@ impl VbcCodegen {
                     // arm). Constants from imported modules are parsed as Variant patterns
                     // because they start with uppercase letters. We detect them by checking
                     // if the function info has a __const_val_ intrinsic name.
-                    let const_value = self.ctx.lookup_function(&variant_name)
+                    let const_value = self
+                        .ctx
+                        .lookup_function(&variant_name)
                         .or_else(|| self.ctx.lookup_function(&dot_name))
                         .or_else(|| {
                             if let Some(simple) = variant_name.rsplit("::").next() {
@@ -7982,7 +8649,8 @@ impl VbcCodegen {
                         })
                         .and_then(|info| {
                             info.intrinsic_name.as_ref().and_then(|iname| {
-                                iname.strip_prefix("__const_val_")
+                                iname
+                                    .strip_prefix("__const_val_")
                                     .and_then(|v| v.parse::<i64>().ok())
                             })
                         });
@@ -7996,14 +8664,25 @@ impl VbcCodegen {
                     // (which matches nothing) so the next arm runs. This is
                     // strictly safer than emitting IsVar on a non-pointer value.
                     // Tracked under #109.
-                    let scrutinee_is_int = self.ctx
-                        .match_scrutinee_type
-                        .as_deref()
-                        .is_some_and(|t| {
+                    let scrutinee_is_int =
+                        self.ctx.match_scrutinee_type.as_deref().is_some_and(|t| {
                             let base = t.split('<').next().unwrap_or(t);
-                            matches!(base, "Int" | "Int64" | "Int32" | "Int16" | "Int8"
-                                | "UInt" | "UInt64" | "UInt32" | "UInt16" | "UInt8"
-                                | "Byte" | "Char" | "Bool")
+                            matches!(
+                                base,
+                                "Int"
+                                    | "Int64"
+                                    | "Int32"
+                                    | "Int16"
+                                    | "Int8"
+                                    | "UInt"
+                                    | "UInt64"
+                                    | "UInt32"
+                                    | "UInt16"
+                                    | "UInt8"
+                                    | "Byte"
+                                    | "Char"
+                                    | "Bool"
+                            )
                         });
 
                     if let Some(const_val) = const_value {
@@ -8021,127 +8700,152 @@ impl VbcCodegen {
                         });
                         self.ctx.free_temp(const_reg);
                     } else {
-                    // Regular variant — check tag
-                    // Try multiple name forms: original (may use "::"), dot-separated,
-                    // and simple (last segment only) for unqualified variants
-                    let tag = self.ctx.lookup_function(&variant_name)
-                        .and_then(|info| info.variant_tag)
-                        .or_else(|| {
-                            self.ctx.lookup_function(&dot_name)
-                                .and_then(|info| info.variant_tag)
-                        })
-                        .or_else(|| {
-                            // Try simple name (last segment) for unqualified lookup
-                            if let Some(simple) = variant_name.rsplit("::").next() {
-                                self.ctx.lookup_function(simple)
+                        // Regular variant — check tag
+                        // Try multiple name forms: original (may use "::"), dot-separated,
+                        // and simple (last segment only) for unqualified variants
+                        let tag = self
+                            .ctx
+                            .lookup_function(&variant_name)
+                            .and_then(|info| info.variant_tag)
+                            .or_else(|| {
+                                self.ctx
+                                    .lookup_function(&dot_name)
                                     .and_then(|info| info.variant_tag)
-                            } else {
-                                None
-                            }
-                        })
-                        .or_else(|| {
-                            // Simple name not found (likely in collision set).
-                            // Try qualified name using match scrutinee type if available.
-                            let simple = variant_name.rsplit("::").next().unwrap_or(&variant_name);
-                            if let Some(ref scrutinee_type) = self.ctx.match_scrutinee_type {
-                                // Strip generic arguments from scrutinee type
-                                // (e.g., "Maybe<Int>" -> "Maybe") since variants are
-                                // registered under the base type name without generics.
-                                let base_type = scrutinee_type.split('<').next().unwrap_or(scrutinee_type);
-                                // Try direct qualified lookup first
-                                self.ctx.find_variant_by_type_and_name(base_type, simple)
-                                    .or_else(|| {
-                                        // scrutinee_type might be a variant name itself
-                                        // (e.g., variable typed as "Done" instead of "State").
-                                        // Look up the parent type of the scrutinee_type variant.
-                                        let parent = self.ctx.find_variant_parent_type(base_type);
-                                        parent.and_then(|p| self.ctx.find_variant_by_type_and_name(&p, simple))
-                                    })
-                            } else {
-                                None
-                            }
-                        })
-                        .unwrap_or_else(|| {
-                            variant_name.as_bytes().iter().fold(0u32, |acc, &b| acc.wrapping_add(b as u32)) % 256
-                        });
-                    if scrutinee_is_int {
-                        // #109 guard: Int scrutinee + unresolved-constant arm.
-                        // Compare against zero (which won't match any non-zero
-                        // errno-style code) so dispatch falls through to the
-                        // next arm instead of dereferencing a primitive value
-                        // as a sum-type pointer.
-                        let zero_reg = self.ctx.alloc_temp();
-                        self.ctx.emit(Instruction::LoadI { dst: zero_reg, value: 0 });
-                        self.ctx.emit(Instruction::CmpI {
-                            op: CompareOp::Eq,
+                            })
+                            .or_else(|| {
+                                // Try simple name (last segment) for unqualified lookup
+                                if let Some(simple) = variant_name.rsplit("::").next() {
+                                    self.ctx
+                                        .lookup_function(simple)
+                                        .and_then(|info| info.variant_tag)
+                                } else {
+                                    None
+                                }
+                            })
+                            .or_else(|| {
+                                // Simple name not found (likely in collision set).
+                                // Try qualified name using match scrutinee type if available.
+                                let simple =
+                                    variant_name.rsplit("::").next().unwrap_or(&variant_name);
+                                if let Some(ref scrutinee_type) = self.ctx.match_scrutinee_type {
+                                    // Strip generic arguments from scrutinee type
+                                    // (e.g., "Maybe<Int>" -> "Maybe") since variants are
+                                    // registered under the base type name without generics.
+                                    let base_type =
+                                        scrutinee_type.split('<').next().unwrap_or(scrutinee_type);
+                                    // Try direct qualified lookup first
+                                    self.ctx
+                                        .find_variant_by_type_and_name(base_type, simple)
+                                        .or_else(|| {
+                                            // scrutinee_type might be a variant name itself
+                                            // (e.g., variable typed as "Done" instead of "State").
+                                            // Look up the parent type of the scrutinee_type variant.
+                                            let parent =
+                                                self.ctx.find_variant_parent_type(base_type);
+                                            parent.and_then(|p| {
+                                                self.ctx.find_variant_by_type_and_name(&p, simple)
+                                            })
+                                        })
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap_or_else(|| {
+                                variant_name
+                                    .as_bytes()
+                                    .iter()
+                                    .fold(0u32, |acc, &b| acc.wrapping_add(b as u32))
+                                    % 256
+                            });
+                        if scrutinee_is_int {
+                            // #109 guard: Int scrutinee + unresolved-constant arm.
+                            // Compare against zero (which won't match any non-zero
+                            // errno-style code) so dispatch falls through to the
+                            // next arm instead of dereferencing a primitive value
+                            // as a sum-type pointer.
+                            let zero_reg = self.ctx.alloc_temp();
+                            self.ctx.emit(Instruction::LoadI {
+                                dst: zero_reg,
+                                value: 0,
+                            });
+                            self.ctx.emit(Instruction::CmpI {
+                                op: CompareOp::Eq,
+                                dst: result,
+                                a: scrutinee,
+                                b: zero_reg,
+                            });
+                            self.ctx.free_temp(zero_reg);
+                            // Skip the tag-payload pattern walk below; nothing to bind.
+                            let _ = tag;
+                            return Ok(());
+                        }
+                        self.ctx.emit(Instruction::IsVar {
                             dst: result,
-                            a: scrutinee,
-                            b: zero_reg,
+                            value: scrutinee,
+                            tag,
                         });
-                        self.ctx.free_temp(zero_reg);
-                        // Skip the tag-payload pattern walk below; nothing to bind.
-                        let _ = tag;
-                        return Ok(());
-                    }
-                    self.ctx.emit(Instruction::IsVar {
-                        dst: result,
-                        value: scrutinee,
-                        tag,
-                    });
 
-                    // Recursively check sub-patterns in variant data
-                    if let Some(data) = data {
-                        let sub_patterns: Vec<&verum_ast::Pattern> = match data {
-                            verum_ast::VariantPatternData::Tuple(patterns) => {
-                                patterns.iter().collect()
-                            }
-                            verum_ast::VariantPatternData::Record { fields, .. } => {
-                                fields.iter().filter_map(|f| f.pattern.as_ref()).collect()
-                            }
-                        };
+                        // Recursively check sub-patterns in variant data
+                        if let Some(data) = data {
+                            let sub_patterns: Vec<&verum_ast::Pattern> = match data {
+                                verum_ast::VariantPatternData::Tuple(patterns) => {
+                                    patterns.iter().collect()
+                                }
+                                verum_ast::VariantPatternData::Record { fields, .. } => {
+                                    fields.iter().filter_map(|f| f.pattern.as_ref()).collect()
+                                }
+                            };
 
-                        let has_non_wildcard = sub_patterns.iter().any(|p| {
+                            let has_non_wildcard = sub_patterns.iter().any(|p| {
                             !matches!(p.kind, PatternKind::Wildcard)
                             && !matches!(&p.kind, PatternKind::Ident { subpattern, .. } if subpattern.is_none())
                         });
-                        if has_non_wildcard {
-                            let var_end = self.ctx.new_label("var_end");
+                            if has_non_wildcard {
+                                let var_end = self.ctx.new_label("var_end");
 
-                            // If tag doesn't match, skip sub-pattern checks
-                            self.ctx.emit_forward_jump(&var_end, |offset| Instruction::JmpNot {
-                                cond: result,
-                                offset,
-                            });
-
-                            // Tag matched — now check sub-patterns
-                            for (i, sub_pat) in sub_patterns.iter().enumerate() {
-                                if matches!(sub_pat.kind, PatternKind::Wildcard)
-                                    || matches!(&sub_pat.kind, PatternKind::Ident { subpattern, .. } if subpattern.is_none()) {
-                                    continue;
-                                }
-                                let field_reg = self.ctx.alloc_temp();
-                                self.ctx.emit(Instruction::GetVariantData {
-                                    dst: field_reg,
-                                    variant: scrutinee,
-                                    field: i as u32,
-                                });
-                                let sub_result = self.ctx.alloc_temp();
-                                self.compile_pattern_test(sub_pat, field_reg, sub_result)?;
-                                self.ctx.emit(Instruction::Mov { dst: result, src: sub_result });
-                                self.ctx.free_temp(sub_result);
-                                self.ctx.free_temp(field_reg);
-
-                                if i < sub_patterns.len() - 1 {
-                                    self.ctx.emit_forward_jump(&var_end, |offset| Instruction::JmpNot {
+                                // If tag doesn't match, skip sub-pattern checks
+                                self.ctx.emit_forward_jump(&var_end, |offset| {
+                                    Instruction::JmpNot {
                                         cond: result,
                                         offset,
-                                    });
-                                }
-                            }
+                                    }
+                                });
 
-                            self.ctx.define_label(&var_end);
+                                // Tag matched — now check sub-patterns
+                                for (i, sub_pat) in sub_patterns.iter().enumerate() {
+                                    if matches!(sub_pat.kind, PatternKind::Wildcard)
+                                        || matches!(&sub_pat.kind, PatternKind::Ident { subpattern, .. } if subpattern.is_none())
+                                    {
+                                        continue;
+                                    }
+                                    let field_reg = self.ctx.alloc_temp();
+                                    self.ctx.emit(Instruction::GetVariantData {
+                                        dst: field_reg,
+                                        variant: scrutinee,
+                                        field: i as u32,
+                                    });
+                                    let sub_result = self.ctx.alloc_temp();
+                                    self.compile_pattern_test(sub_pat, field_reg, sub_result)?;
+                                    self.ctx.emit(Instruction::Mov {
+                                        dst: result,
+                                        src: sub_result,
+                                    });
+                                    self.ctx.free_temp(sub_result);
+                                    self.ctx.free_temp(field_reg);
+
+                                    if i < sub_patterns.len() - 1 {
+                                        self.ctx.emit_forward_jump(&var_end, |offset| {
+                                            Instruction::JmpNot {
+                                                cond: result,
+                                                offset,
+                                            }
+                                        });
+                                    }
+                                }
+
+                                self.ctx.define_label(&var_end);
+                            }
                         }
-                    }
                     } // close else (variant tag path)
                 }
             }
@@ -8397,15 +9101,19 @@ impl VbcCodegen {
                 let type_name = format!("{}", path);
 
                 // Check if this is a variant constructor (record variant pattern)
-                let variant_tag = self.ctx.lookup_function(&type_name)
+                let variant_tag = self
+                    .ctx
+                    .lookup_function(&type_name)
                     .and_then(|info| info.variant_tag)
                     .or_else(|| {
                         // Simple name not found (likely in collision set).
                         // Try qualified name via scrutinee type or arg count.
                         if let Some(ref scrutinee_type) = self.ctx.match_scrutinee_type {
-                            self.ctx.find_variant_by_type_and_name(scrutinee_type, &type_name)
+                            self.ctx
+                                .find_variant_by_type_and_name(scrutinee_type, &type_name)
                         } else {
-                            self.ctx.find_variant_by_suffix_and_args(&type_name, fields.len())
+                            self.ctx
+                                .find_variant_by_suffix_and_args(&type_name, fields.len())
                         }
                     });
 
@@ -8428,12 +9136,14 @@ impl VbcCodegen {
 
                     if has_non_wildcard {
                         let check_fields = self.ctx.new_label("rec_check");
-                        self.ctx.emit_forward_jump(&check_fields, |offset| Instruction::JmpIf {
-                            cond: result,
-                            offset,
-                        });
+                        self.ctx
+                            .emit_forward_jump(&check_fields, |offset| Instruction::JmpIf {
+                                cond: result,
+                                offset,
+                            });
                         let rec_end = self.ctx.new_label("rec_end");
-                        self.ctx.emit_forward_jump(&rec_end, |offset| Instruction::Jmp { offset });
+                        self.ctx
+                            .emit_forward_jump(&rec_end, |offset| Instruction::Jmp { offset });
                         self.ctx.define_label(&check_fields);
 
                         for field in fields.iter() {
@@ -8442,7 +9152,8 @@ impl VbcCodegen {
                                     continue;
                                 }
                                 let field_reg = self.ctx.alloc_temp();
-                                let field_idx = self.resolve_field_index(Some(&type_name), &field.name.name);
+                                let field_idx =
+                                    self.resolve_field_index(Some(&type_name), &field.name.name);
                                 self.ctx.emit(Instruction::GetVariantData {
                                     dst: field_reg,
                                     variant: scrutinee,
@@ -8453,12 +9164,17 @@ impl VbcCodegen {
                                 self.compile_pattern_test(inner_pattern, field_reg, field_match)?;
 
                                 let and_label = self.ctx.new_label("rec_and");
-                                self.ctx.emit_forward_jump(&and_label, |offset| Instruction::JmpIf {
-                                    cond: field_match,
-                                    offset,
+                                self.ctx.emit_forward_jump(&and_label, |offset| {
+                                    Instruction::JmpIf {
+                                        cond: field_match,
+                                        offset,
+                                    }
                                 });
                                 self.ctx.emit(Instruction::LoadFalse { dst: result });
-                                self.ctx.emit_forward_jump(&rec_end, |offset| Instruction::Jmp { offset });
+                                self.ctx
+                                    .emit_forward_jump(&rec_end, |offset| Instruction::Jmp {
+                                        offset,
+                                    });
                                 self.ctx.define_label(&and_label);
 
                                 self.ctx.free_temp(field_match);
@@ -8671,7 +9387,11 @@ impl VbcCodegen {
                 ));
             }
 
-            PatternKind::Active { name, params, bindings } => {
+            PatternKind::Active {
+                name,
+                params,
+                bindings,
+            } => {
                 // Active patterns (F#-style): user-defined pattern matchers declared as
                 // `pattern Name(params)(value) -> Bool|Maybe<T> = expr;`
                 // Total patterns return Bool (test-only), partial patterns return Maybe<T>
@@ -8738,9 +9458,9 @@ impl VbcCodegen {
 
                         for arg in params.iter().skip(1) {
                             let arg_reg = self.ctx.alloc_temp();
-                            let arg_val = self
-                                .compile_expr(arg)?
-                                .ok_or_else(|| CodegenError::internal("pattern arg has no value"))?;
+                            let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
+                                CodegenError::internal("pattern arg has no value")
+                            })?;
                             self.ctx.emit(Instruction::Mov {
                                 dst: arg_reg,
                                 src: arg_val,
@@ -8789,10 +9509,13 @@ impl VbcCodegen {
                     // For patterns with bindings, test bindings against the call result
                     if !bindings.is_empty() {
                         // Cache the result for use in compile_pattern_bind
-                        self.ctx.cache_active_pattern_result(scrutinee, &pattern_name, call_result);
+                        self.ctx
+                            .cache_active_pattern_result(scrutinee, &pattern_name, call_result);
 
                         // Check if this is a partial pattern (returns Maybe<T>)
-                        let is_partial = self.ctx.lookup_function(&pattern_name)
+                        let is_partial = self
+                            .ctx
+                            .lookup_function(&pattern_name)
                             .map(|f| f.is_partial_pattern)
                             .unwrap_or(false);
 
@@ -8800,7 +9523,9 @@ impl VbcCodegen {
                             // Partial pattern: test that result is Some(...), not None
                             // Maybe<T> is None | Some(T), so Some has tag 1
                             // Look up the actual tag from the "Some" variant constructor
-                            let some_tag = self.ctx.lookup_function("Some")
+                            let some_tag = self
+                                .ctx
+                                .lookup_function("Some")
                                 .and_then(|info| info.variant_tag)
                                 .unwrap_or(1); // fallback: Some is typically tag 1
                             self.ctx.emit(Instruction::IsVar {
@@ -8816,11 +9541,16 @@ impl VbcCodegen {
                                 self.compile_pattern_test(binding, call_result, bind_test)?;
                                 // result = result && bind_test
                                 let cont_label = self.ctx.new_label("active_bind");
-                                self.ctx.emit_forward_jump(&cont_label, |offset| Instruction::JmpNot {
-                                    cond: result,
-                                    offset,
+                                self.ctx.emit_forward_jump(&cont_label, |offset| {
+                                    Instruction::JmpNot {
+                                        cond: result,
+                                        offset,
+                                    }
                                 });
-                                self.ctx.emit(Instruction::Mov { dst: result, src: bind_test });
+                                self.ctx.emit(Instruction::Mov {
+                                    dst: result,
+                                    src: bind_test,
+                                });
                                 self.ctx.define_label(&cont_label);
                                 self.ctx.free_temp(bind_test);
                             }
@@ -8881,7 +9611,10 @@ impl VbcCodegen {
                 });
             }
 
-            PatternKind::Stream { head_patterns, rest } => {
+            PatternKind::Stream {
+                head_patterns,
+                rest,
+            } => {
                 // Stream pattern: stream[first, second, ...rest]
                 // Tests if the iterator/stream can produce the required number of elements.
                 //
@@ -9003,7 +9736,8 @@ impl VbcCodegen {
                         offset,
                     });
                 // Pattern didn't match - jump to done (result is false)
-                self.ctx.emit_forward_jump(&done_label, |offset| Instruction::Jmp { offset });
+                self.ctx
+                    .emit_forward_jump(&done_label, |offset| Instruction::Jmp { offset });
 
                 // Pattern matched - now evaluate the guard
                 self.ctx.define_label(&guard_label);
@@ -9013,9 +9747,7 @@ impl VbcCodegen {
 
                 // Evaluate guard expression
                 let guard_result = self.compile_expr(guard)?.ok_or_else(|| {
-                    crate::codegen::CodegenError::internal(
-                        "guard expression produced no result",
-                    )
+                    crate::codegen::CodegenError::internal("guard expression produced no result")
                 })?;
                 self.ctx.emit(Instruction::Mov {
                     dst: result,
@@ -9032,10 +9764,11 @@ impl VbcCodegen {
                 self.compile_pattern_test(head, scrutinee, result)?;
                 // Short-circuit: if head doesn't match, skip tail test
                 let done_label = self.ctx.new_label("cons_done");
-                self.ctx.emit_forward_jump(&done_label, |offset| Instruction::JmpNot {
-                    cond: result,
-                    offset,
-                });
+                self.ctx
+                    .emit_forward_jump(&done_label, |offset| Instruction::JmpNot {
+                        cond: result,
+                        offset,
+                    });
                 // Head matched, test tail
                 self.compile_pattern_test(tail, scrutinee, result)?;
                 self.ctx.define_label(&done_label);
@@ -9059,9 +9792,7 @@ impl VbcCodegen {
             }
             PatternKind::Literal(_) => false,
             PatternKind::Range { .. } => false,
-            PatternKind::Tuple(elements) => {
-                elements.iter().any(Self::pattern_has_bindings)
-            }
+            PatternKind::Tuple(elements) => elements.iter().any(Self::pattern_has_bindings),
             PatternKind::Record { fields, .. } => {
                 fields.iter().any(|f| {
                     // Shorthand { x } binds x, explicit { x: pat } checks pat
@@ -9073,10 +9804,13 @@ impl VbcCodegen {
             }
             PatternKind::Variant { data, .. } => {
                 match data {
-                    verum_common::Maybe::Some(verum_ast::pattern::VariantPatternData::Tuple(elems)) => {
-                        elems.iter().any(Self::pattern_has_bindings)
-                    }
-                    verum_common::Maybe::Some(verum_ast::pattern::VariantPatternData::Record { fields, .. }) => {
+                    verum_common::Maybe::Some(verum_ast::pattern::VariantPatternData::Tuple(
+                        elems,
+                    )) => elems.iter().any(Self::pattern_has_bindings),
+                    verum_common::Maybe::Some(verum_ast::pattern::VariantPatternData::Record {
+                        fields,
+                        ..
+                    }) => {
                         fields.iter().any(|f| {
                             match &f.pattern {
                                 verum_common::Maybe::Some(p) => Self::pattern_has_bindings(p),
@@ -9093,30 +9827,30 @@ impl VbcCodegen {
             }
             PatternKind::Reference { inner, .. } => Self::pattern_has_bindings(inner),
             PatternKind::Guard { pattern, .. } => Self::pattern_has_bindings(pattern),
-            PatternKind::Slice { before, rest, after } => {
+            PatternKind::Slice {
+                before,
+                rest,
+                after,
+            } => {
                 before.iter().any(Self::pattern_has_bindings)
                     || rest.as_ref().is_some_and(|r| Self::pattern_has_bindings(r))
                     || after.iter().any(Self::pattern_has_bindings)
             }
-            PatternKind::Array(elements) => {
-                elements.iter().any(Self::pattern_has_bindings)
-            }
+            PatternKind::Array(elements) => elements.iter().any(Self::pattern_has_bindings),
             PatternKind::Paren(inner) => Self::pattern_has_bindings(inner),
             #[allow(deprecated)]
             PatternKind::View { pattern, .. } => Self::pattern_has_bindings(pattern),
-            PatternKind::Active { bindings, .. } => {
-                bindings.iter().any(Self::pattern_has_bindings)
-            }
-            PatternKind::And(patterns) => {
-                patterns.iter().any(Self::pattern_has_bindings)
-            }
+            PatternKind::Active { bindings, .. } => bindings.iter().any(Self::pattern_has_bindings),
+            PatternKind::And(patterns) => patterns.iter().any(Self::pattern_has_bindings),
             PatternKind::TypeTest { .. } => {
                 // TypeTest binds a variable with the narrowed type
                 true
             }
-            PatternKind::Stream { head_patterns, rest } => {
-                head_patterns.iter().any(Self::pattern_has_bindings)
-                    || rest.is_some() // rest binding is a variable
+            PatternKind::Stream {
+                head_patterns,
+                rest,
+            } => {
+                head_patterns.iter().any(Self::pattern_has_bindings) || rest.is_some() // rest binding is a variable
             }
             PatternKind::Cons { head, tail } => {
                 Self::pattern_has_bindings(head) || Self::pattern_has_bindings(tail)
@@ -9149,7 +9883,12 @@ impl VbcCodegen {
                 // Nothing to bind
             }
 
-            PatternKind::Ident { mutable, name, subpattern, by_ref: _by_ref } => {
+            PatternKind::Ident {
+                mutable,
+                name,
+                subpattern,
+                by_ref: _by_ref,
+            } => {
                 let var_reg = self.ctx.define_var(&name.name, *mutable);
                 // When by_ref is true, the scrutinee is already a pointer to the value
                 // (from GetVariantDataRef). We bind this pointer directly - it acts as
@@ -9221,20 +9960,31 @@ impl VbcCodegen {
                     let dot_variant = variant_name.replace("::", ".");
 
                     // First try qualified lookup using the match scrutinee type
-                    let qualified_lookup = self.ctx.match_scrutinee_type.as_ref().and_then(|parent_type| {
-                        // Try "ParentType.SimpleVariant" (e.g., "Val.Num")
-                        let qualified_name = format!("{}.{}", parent_type, simple_variant);
-                        self.ctx.lookup_function(&qualified_name)
-                            .and_then(|info| info.variant_payload_types.clone())
-                    });
+                    let qualified_lookup =
+                        self.ctx
+                            .match_scrutinee_type
+                            .as_ref()
+                            .and_then(|parent_type| {
+                                // Try "ParentType.SimpleVariant" (e.g., "Val.Num")
+                                let qualified_name = format!("{}.{}", parent_type, simple_variant);
+                                self.ctx
+                                    .lookup_function(&qualified_name)
+                                    .and_then(|info| info.variant_payload_types.clone())
+                            });
 
                     qualified_lookup
                         // Try dot-separated form directly (e.g., "Val.Num")
-                        .or_else(|| self.ctx.lookup_function(&dot_variant)
-                            .and_then(|info| info.variant_payload_types.clone()))
+                        .or_else(|| {
+                            self.ctx
+                                .lookup_function(&dot_variant)
+                                .and_then(|info| info.variant_payload_types.clone())
+                        })
                         // Fall back to simple name lookup (e.g., "Num")
-                        .or_else(|| self.ctx.lookup_function(simple_variant)
-                            .and_then(|info| info.variant_payload_types.clone()))
+                        .or_else(|| {
+                            self.ctx
+                                .lookup_function(simple_variant)
+                                .and_then(|info| info.variant_payload_types.clone())
+                        })
                         // Fall back to searching for qualified names
                         .or_else(|| {
                             let suffix = format!(".{}", simple_variant);
@@ -9243,7 +9993,8 @@ impl VbcCodegen {
                                 Some(VariantPatternData::Record { fields, .. }) => fields.len(),
                                 None => 0,
                             };
-                            self.ctx.find_variant_with_suffix(&suffix, expected_param_count)
+                            self.ctx
+                                .find_variant_with_suffix(&suffix, expected_param_count)
                                 .and_then(|info| info.variant_payload_types.clone())
                         })
                 };
@@ -9292,12 +10043,14 @@ impl VbcCodegen {
                                     // For generic types, fall back to extracting concrete types from scrutinee type
                                     let is_generic_param = |s: &str| -> bool {
                                         // Single uppercase letter or common generic names
-                                        s.len() <= 2 && s.chars().all(|c| c.is_uppercase() || c.is_numeric())
+                                        s.len() <= 2
+                                            && s.chars().all(|c| c.is_uppercase() || c.is_numeric())
                                     };
 
                                     let field_type: Option<String> = {
                                         // Check if we have concrete (non-generic) payload types
-                                        let concrete_payload = payload_types.as_ref()
+                                        let concrete_payload = payload_types
+                                            .as_ref()
                                             .and_then(|types| types.get(i))
                                             .filter(|t| !is_generic_param(t));
 
@@ -9351,15 +10104,15 @@ impl VbcCodegen {
                                     };
 
                                     if let Some(type_name) = field_type
-                                        && let PatternKind::Ident { name, .. } = &pat.kind {
-                                            self.ctx.variable_type_names.insert(
-                                                name.name.to_string(),
-                                                type_name.clone(),
-                                            );
-                                            // Also register VarTypeKind for type-aware codegen
-                                            let var_type = self.type_name_to_var_type(&type_name);
-                                            self.ctx.register_variable_type(&name.name, var_type);
-                                        }
+                                        && let PatternKind::Ident { name, .. } = &pat.kind
+                                    {
+                                        self.ctx
+                                            .variable_type_names
+                                            .insert(name.name.to_string(), type_name.clone());
+                                        // Also register VarTypeKind for type-aware codegen
+                                        let var_type = self.type_name_to_var_type(&type_name);
+                                        self.ctx.register_variable_type(&name.name, var_type);
+                                    }
                                 }
                             }
                         }
@@ -9369,14 +10122,16 @@ impl VbcCodegen {
                             // Use resolve_field_index to get the actual field position,
                             // not the enumeration index — handles `Node { left, .. }`
                             // where `left` is at position 1, not 0.
-                            let simple_variant = variant_name.rsplit("::").next().unwrap_or(&variant_name);
+                            let simple_variant =
+                                variant_name.rsplit("::").next().unwrap_or(&variant_name);
                             for field in fields.iter() {
                                 let field_name = field.name.name.to_string();
 
                                 let field_reg = self.ctx.alloc_temp();
 
                                 // Resolve actual field position from type layout
-                                let field_idx = self.resolve_field_index(Some(simple_variant), &field_name);
+                                let field_idx =
+                                    self.resolve_field_index(Some(simple_variant), &field_name);
                                 self.ctx.emit(Instruction::GetVariantData {
                                     dst: field_reg,
                                     variant: scrutinee,
@@ -9384,20 +10139,21 @@ impl VbcCodegen {
                                 });
 
                                 // Bind the field value
-                                if let verum_common::Maybe::Some(ref inner_pattern) = field.pattern {
+                                if let verum_common::Maybe::Some(ref inner_pattern) = field.pattern
+                                {
                                     self.compile_pattern_bind(inner_pattern, field_reg)?;
                                     // Track type for inner pattern if it's an identifier
                                     if let Some(ref types) = payload_types
                                         && let Some(type_name) = types.get(field_idx as usize)
-                                            && let PatternKind::Ident { name, .. } = &inner_pattern.kind {
-                                                self.ctx.variable_type_names.insert(
-                                                    name.name.to_string(),
-                                                    type_name.clone(),
-                                                );
-                                                // Also register VarTypeKind for type-aware codegen
-                                                let var_type = self.type_name_to_var_type(type_name);
-                                                self.ctx.register_variable_type(&name.name, var_type);
-                                            }
+                                        && let PatternKind::Ident { name, .. } = &inner_pattern.kind
+                                    {
+                                        self.ctx
+                                            .variable_type_names
+                                            .insert(name.name.to_string(), type_name.clone());
+                                        // Also register VarTypeKind for type-aware codegen
+                                        let var_type = self.type_name_to_var_type(type_name);
+                                        self.ctx.register_variable_type(&name.name, var_type);
+                                    }
                                 } else {
                                     // Shorthand: { field } means { field: field }
                                     let var_reg = self.ctx.define_var(&field_name, false);
@@ -9407,15 +10163,15 @@ impl VbcCodegen {
                                     });
                                     // Track type for shorthand field
                                     if let Some(ref types) = payload_types
-                                        && let Some(type_name) = types.get(field_idx as usize) {
-                                            self.ctx.variable_type_names.insert(
-                                                field_name.clone(),
-                                                type_name.clone(),
-                                            );
-                                            // Also register VarTypeKind for type-aware codegen
-                                            let var_type = self.type_name_to_var_type(type_name);
-                                            self.ctx.register_variable_type(&field_name, var_type);
-                                        }
+                                        && let Some(type_name) = types.get(field_idx as usize)
+                                    {
+                                        self.ctx
+                                            .variable_type_names
+                                            .insert(field_name.clone(), type_name.clone());
+                                        // Also register VarTypeKind for type-aware codegen
+                                        let var_type = self.type_name_to_var_type(type_name);
+                                        self.ctx.register_variable_type(&field_name, var_type);
+                                    }
                                 }
 
                                 self.ctx.free_temp(field_reg);
@@ -9478,33 +10234,48 @@ impl VbcCodegen {
             PatternKind::Record { path, fields, .. } => {
                 // Check if this is a record variant pattern
                 let type_name = format!("{}", path);
-                let is_variant = self.ctx.lookup_function(&type_name)
+                let is_variant = self
+                    .ctx
+                    .lookup_function(&type_name)
                     .and_then(|info| info.variant_tag)
                     .is_some()
                     || {
                         // Also check collision-aware paths: qualified lookup via
                         // scrutinee type, or suffix+arg search
                         if let Some(ref scrutinee_type) = self.ctx.match_scrutinee_type {
-                            self.ctx.find_variant_by_type_and_name(scrutinee_type, &type_name).is_some()
+                            self.ctx
+                                .find_variant_by_type_and_name(scrutinee_type, &type_name)
+                                .is_some()
                         } else {
-                            self.ctx.find_variant_by_suffix_and_args(&type_name, fields.len()).is_some()
+                            self.ctx
+                                .find_variant_by_suffix_and_args(&type_name, fields.len())
+                                .is_some()
                         }
                     };
 
                 // Look up payload types for type registration (mirrors VariantPatternData::Record)
                 let payload_types: Option<Vec<String>> = if is_variant {
                     // For variant records, try qualified lookup then simple lookup
-                    let qualified_lookup = self.ctx.match_scrutinee_type.as_ref().and_then(|parent_type| {
-                        let qualified_name = format!("{}.{}", parent_type, type_name);
-                        self.ctx.lookup_function(&qualified_name)
-                            .and_then(|info| info.variant_payload_types.clone())
-                    });
+                    let qualified_lookup =
+                        self.ctx
+                            .match_scrutinee_type
+                            .as_ref()
+                            .and_then(|parent_type| {
+                                let qualified_name = format!("{}.{}", parent_type, type_name);
+                                self.ctx
+                                    .lookup_function(&qualified_name)
+                                    .and_then(|info| info.variant_payload_types.clone())
+                            });
                     qualified_lookup
-                        .or_else(|| self.ctx.lookup_function(&type_name)
-                            .and_then(|info| info.variant_payload_types.clone()))
+                        .or_else(|| {
+                            self.ctx
+                                .lookup_function(&type_name)
+                                .and_then(|info| info.variant_payload_types.clone())
+                        })
                         .or_else(|| {
                             let suffix = format!(".{}", type_name);
-                            self.ctx.find_variant_with_suffix(&suffix, fields.len())
+                            self.ctx
+                                .find_variant_with_suffix(&suffix, fields.len())
                                 .and_then(|info| info.variant_payload_types.clone())
                         })
                 } else {
@@ -9537,24 +10308,27 @@ impl VbcCodegen {
                     let field_type_name: Option<String> = if is_variant {
                         // Variant record: resolve by field name from type layout
                         let field_idx = self.resolve_field_index(Some(&type_name), &field_name);
-                        payload_types.as_ref().and_then(|types| types.get(field_idx as usize).cloned())
+                        payload_types
+                            .as_ref()
+                            .and_then(|types| types.get(field_idx as usize).cloned())
                     } else {
                         // Plain record: look up field type via type_field_type_names
-                        self.field_type_name(&type_name, &field_name).map(|s| s.to_string())
+                        self.field_type_name(&type_name, &field_name)
+                            .map(|s| s.to_string())
                     };
 
                     if let verum_common::Maybe::Some(ref inner_pattern) = field.pattern {
                         self.compile_pattern_bind(inner_pattern, field_reg)?;
                         // Track type for inner pattern if it's an identifier
                         if let Some(ref ft) = field_type_name
-                            && let PatternKind::Ident { name, .. } = &inner_pattern.kind {
-                                self.ctx.variable_type_names.insert(
-                                    name.name.to_string(),
-                                    ft.clone(),
-                                );
-                                let var_type = self.type_name_to_var_type(ft);
-                                self.ctx.register_variable_type(&name.name, var_type);
-                            }
+                            && let PatternKind::Ident { name, .. } = &inner_pattern.kind
+                        {
+                            self.ctx
+                                .variable_type_names
+                                .insert(name.name.to_string(), ft.clone());
+                            let var_type = self.type_name_to_var_type(ft);
+                            self.ctx.register_variable_type(&name.name, var_type);
+                        }
                     } else {
                         // Shorthand: { x } means bind x to the field value
                         let var_reg = self.ctx.define_var(&field_name, false);
@@ -9564,10 +10338,9 @@ impl VbcCodegen {
                         });
                         // Track type for shorthand field
                         if let Some(ref ft) = field_type_name {
-                            self.ctx.variable_type_names.insert(
-                                field_name.clone(),
-                                ft.clone(),
-                            );
+                            self.ctx
+                                .variable_type_names
+                                .insert(field_name.clone(), ft.clone());
                             let var_type = self.type_name_to_var_type(ft);
                             self.ctx.register_variable_type(&field_name, var_type);
                         }
@@ -9649,7 +10422,11 @@ impl VbcCodegen {
                 ));
             }
 
-            PatternKind::Active { name, params, bindings } => {
+            PatternKind::Active {
+                name,
+                params,
+                bindings,
+            } => {
                 // Active pattern binding: for partial patterns (-> Maybe<T>), unwrap the
                 // Some value and bind it to the pattern variable. Total patterns (-> Bool)
                 // produce no bindings.
@@ -9672,7 +10449,10 @@ impl VbcCodegen {
                     let pattern_name = name.name.to_string();
 
                     // Try to get cached result first (optimization)
-                    let maybe_result = if let Some(cached_reg) = self.ctx.get_cached_active_pattern_result(scrutinee, &pattern_name) {
+                    let maybe_result = if let Some(cached_reg) = self
+                        .ctx
+                        .get_cached_active_pattern_result(scrutinee, &pattern_name)
+                    {
                         cached_reg
                     } else {
                         // Fallback: call the function (shouldn't happen in normal flow)
@@ -9686,10 +10466,14 @@ impl VbcCodegen {
 
                             if !params.is_empty() {
                                 for (i, arg) in params.iter().enumerate() {
-                                    let arg_reg = if i == 0 { args_start } else { self.ctx.alloc_temp() };
-                                    let arg_val = self
-                                        .compile_expr(arg)?
-                                        .ok_or_else(|| CodegenError::internal("pattern arg has no value"))?;
+                                    let arg_reg = if i == 0 {
+                                        args_start
+                                    } else {
+                                        self.ctx.alloc_temp()
+                                    };
+                                    let arg_val = self.compile_expr(arg)?.ok_or_else(|| {
+                                        CodegenError::internal("pattern arg has no value")
+                                    })?;
                                     self.ctx.emit(Instruction::Mov {
                                         dst: arg_reg,
                                         src: arg_val,
@@ -9728,7 +10512,9 @@ impl VbcCodegen {
                     };
 
                     // Check if this is a partial pattern (returns Maybe<T>)
-                    let is_partial = self.ctx.lookup_function(&pattern_name)
+                    let is_partial = self
+                        .ctx
+                        .lookup_function(&pattern_name)
                         .map(|f| f.is_partial_pattern)
                         .unwrap_or(false);
 
@@ -9783,7 +10569,10 @@ impl VbcCodegen {
                 });
             }
 
-            PatternKind::Stream { head_patterns, rest } => {
+            PatternKind::Stream {
+                head_patterns,
+                rest,
+            } => {
                 // Stream pattern binding: stream[first, second, ...rest]
                 // Consumes elements from the iterator and binds them to pattern variables.
                 // If rest is specified, binds the remaining iterator.
@@ -9911,9 +10700,7 @@ impl VbcCodegen {
                 Ok(())
             }
 
-            PatternKind::Paren(inner) => {
-                self.compile_compound_destructuring(inner, value_reg, op)
-            }
+            PatternKind::Paren(inner) => self.compile_compound_destructuring(inner, value_reg, op),
 
             PatternKind::Ident { .. } => {
                 // Single identifier - apply compound operation directly
@@ -9925,9 +10712,10 @@ impl VbcCodegen {
                 Ok(())
             }
 
-            _ => Err(crate::codegen::CodegenError::unsupported_expr(
-                format!("compound destructuring not supported for pattern kind: {:?}", pattern.kind),
-            )),
+            _ => Err(crate::codegen::CodegenError::unsupported_expr(format!(
+                "compound destructuring not supported for pattern kind: {:?}",
+                pattern.kind
+            ))),
         }
     }
 
@@ -9950,8 +10738,14 @@ impl VbcCodegen {
                     // Load current TLS value
                     let current_reg = self.ctx.alloc_temp();
                     let slot_reg = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadI { dst: slot_reg, value: slot as i64 });
-                    self.ctx.emit(Instruction::TlsGet { dst: current_reg, slot: slot_reg });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: slot_reg,
+                        value: slot as i64,
+                    });
+                    self.ctx.emit(Instruction::TlsGet {
+                        dst: current_reg,
+                        slot: slot_reg,
+                    });
 
                     // Apply operation
                     let result_reg = self.ctx.alloc_temp();
@@ -9959,7 +10753,10 @@ impl VbcCodegen {
                     self.emit_binary_int_op(result_reg, current_reg, value_reg, &bin_op)?;
 
                     // Store back to TLS
-                    self.ctx.emit(Instruction::TlsSet { slot: slot_reg, val: result_reg });
+                    self.ctx.emit(Instruction::TlsSet {
+                        slot: slot_reg,
+                        val: result_reg,
+                    });
                     self.ctx.free_temp(current_reg);
                     self.ctx.free_temp(result_reg);
                     // Note: slot_reg NOT freed — must remain valid through TlsSet lowering
@@ -9969,17 +10766,21 @@ impl VbcCodegen {
                 // Handle non-local static: create shadow if needed
                 if self.ctx.get_var_reg(var_name).is_err()
                     && let Some(func_info) = self.ctx.lookup_function(var_name).cloned()
-                        && func_info.param_count == 0 {
-                            let init_reg = self.ctx.alloc_temp();
-                            self.ctx.emit(Instruction::Call {
-                                dst: init_reg,
-                                func_id: func_info.id.0,
-                                args: RegRange::new(Reg(0), 0),
-                            });
-                            let shadow_reg = self.ctx.define_var(var_name, true);
-                            self.ctx.emit(Instruction::Mov { dst: shadow_reg, src: init_reg });
-                            self.ctx.free_temp(init_reg);
-                        }
+                    && func_info.param_count == 0
+                {
+                    let init_reg = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::Call {
+                        dst: init_reg,
+                        func_id: func_info.id.0,
+                        args: RegRange::new(Reg(0), 0),
+                    });
+                    let shadow_reg = self.ctx.define_var(var_name, true);
+                    self.ctx.emit(Instruction::Mov {
+                        dst: shadow_reg,
+                        src: init_reg,
+                    });
+                    self.ctx.free_temp(init_reg);
+                }
 
                 // Get the variable's register
                 let var_reg = self.ctx.get_var_reg(var_name)?;
@@ -10011,9 +10812,10 @@ impl VbcCodegen {
                 self.compile_compound_destructuring_element(inner, value_reg, op)
             }
 
-            _ => Err(crate::codegen::CodegenError::unsupported_expr(
-                format!("compound destructuring element not supported for pattern kind: {:?}", pattern.kind),
-            )),
+            _ => Err(crate::codegen::CodegenError::unsupported_expr(format!(
+                "compound destructuring element not supported for pattern kind: {:?}",
+                pattern.kind
+            ))),
         }
     }
 
@@ -10044,8 +10846,8 @@ impl VbcCodegen {
         right: Reg,
         op: &verum_ast::BinOp,
     ) -> CodegenResult<()> {
-        use verum_ast::BinOp;
         use crate::instruction::{BinaryIntOp, BitwiseOp};
+        use verum_ast::BinOp;
 
         match op {
             // Arithmetic operations use BinaryI instruction
@@ -10132,9 +10934,10 @@ impl VbcCodegen {
                 });
             }
             _ => {
-                return Err(crate::codegen::CodegenError::unsupported_expr(
-                    format!("unsupported binary operation for compound destructuring: {:?}", op),
-                ));
+                return Err(crate::codegen::CodegenError::unsupported_expr(format!(
+                    "unsupported binary operation for compound destructuring: {:?}",
+                    op
+                )));
             }
         }
 
@@ -10604,11 +11407,7 @@ impl VbcCodegen {
     }
 
     /// Backing logic shared between TypeExpr and bare-Path layout-property paths.
-    fn layout_property_for_named(
-        &self,
-        type_name: &str,
-        field: &str,
-    ) -> Option<TypePropertyValue> {
+    fn layout_property_for_named(&self, type_name: &str, field: &str) -> Option<TypePropertyValue> {
         // Primitive types route through resolve_type_property for size/alignment/etc.
         if let Some(value) = resolve_type_property(type_name, field) {
             return Some(value);
@@ -10759,7 +11558,9 @@ impl VbcCodegen {
         // per-codegen-session and is "main" for single-file user runs; the
         // source module tracks the actual file whose items are being
         // processed right now.
-        let module_name = self.ctx.current_source_module
+        let module_name = self
+            .ctx
+            .current_source_module
             .as_deref()
             .unwrap_or(&self.config.module_name);
         if module_name.is_empty() || module_name == "main" {
@@ -10777,8 +11578,10 @@ impl VbcCodegen {
                     return None; // walked above the module root
                 }
                 let base_len = module_parts.len() - super_count;
-                let mut absolute: Vec<String> =
-                    module_parts[..base_len].iter().map(|s| s.to_string()).collect();
+                let mut absolute: Vec<String> = module_parts[..base_len]
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect();
                 absolute.extend(parts[super_count..].iter().cloned());
                 Some(absolute)
             }
@@ -10851,7 +11654,10 @@ impl VbcCodegen {
         // and .alignment are resolved at compile time from the reference tier.
         if let Some(size) = self.try_resolve_ref_type_property(base, field) {
             let result = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::LoadI { dst: result, value: size });
+            self.ctx.emit(Instruction::LoadI {
+                dst: result,
+                value: size,
+            });
             return Ok(Some(result));
         }
 
@@ -10867,14 +11673,23 @@ impl VbcCodegen {
             let result = self.ctx.alloc_temp();
             match value {
                 TypePropertyValue::Int(v) => {
-                    self.ctx.emit(Instruction::LoadI { dst: result, value: v });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: result,
+                        value: v,
+                    });
                 }
                 TypePropertyValue::UInt(v) => {
-                    self.ctx.emit(Instruction::LoadI { dst: result, value: v as i64 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: result,
+                        value: v as i64,
+                    });
                 }
                 TypePropertyValue::Str(s) => {
                     let const_id = self.ctx.add_const_string(&s);
-                    self.ctx.emit(Instruction::LoadK { dst: result, const_id: const_id.0 });
+                    self.ctx.emit(Instruction::LoadK {
+                        dst: result,
+                        const_id: const_id.0,
+                    });
                 }
             }
             return Ok(Some(result));
@@ -10895,17 +11710,19 @@ impl VbcCodegen {
             if let Some(func_info) = self.ctx.lookup_qualified_function(&qualified_rust).cloned() {
                 // If it's a variant constructor, emit MakeVariant instead of Call
                 if let Some(tag) = func_info.variant_tag {
-                    return self.compile_variant_constructor_with_tag(tag, &verum_common::List::new());
+                    return self
+                        .compile_variant_constructor_with_tag(tag, &verum_common::List::new());
                 }
                 let dest = self.ctx.alloc_temp();
                 if func_info.param_count == 0 && !func_info.is_async && !func_info.is_generator {
                     // Check if this is an inlineable constant (__const_val_N)
                     if let Some(ref iname) = func_info.intrinsic_name
-                        && let Some(val_str) = iname.strip_prefix("__const_val_") {
-                            let value: i64 = val_str.parse().unwrap_or(0);
-                            self.ctx.emit(Instruction::LoadI { dst: dest, value });
-                            return Ok(Some(dest));
-                        }
+                        && let Some(val_str) = iname.strip_prefix("__const_val_")
+                    {
+                        let value: i64 = val_str.parse().unwrap_or(0);
+                        self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                        return Ok(Some(dest));
+                    }
                     // It's a constant - call it to get value
                     self.ctx.emit(Instruction::Call {
                         dst: dest,
@@ -10933,20 +11750,26 @@ impl VbcCodegen {
             }
 
             // Try Verum-style
-            if let Some(func_info) = self.ctx.lookup_qualified_function(&qualified_verum).cloned() {
+            if let Some(func_info) = self
+                .ctx
+                .lookup_qualified_function(&qualified_verum)
+                .cloned()
+            {
                 // If it's a variant constructor, emit MakeVariant instead of Call
                 if let Some(tag) = func_info.variant_tag {
-                    return self.compile_variant_constructor_with_tag(tag, &verum_common::List::new());
+                    return self
+                        .compile_variant_constructor_with_tag(tag, &verum_common::List::new());
                 }
                 let dest = self.ctx.alloc_temp();
                 if func_info.param_count == 0 && !func_info.is_async && !func_info.is_generator {
                     // Check if this is an inlineable constant (__const_val_N)
                     if let Some(ref iname) = func_info.intrinsic_name
-                        && let Some(val_str) = iname.strip_prefix("__const_val_") {
-                            let value: i64 = val_str.parse().unwrap_or(0);
-                            self.ctx.emit(Instruction::LoadI { dst: dest, value });
-                            return Ok(Some(dest));
-                        }
+                        && let Some(val_str) = iname.strip_prefix("__const_val_")
+                    {
+                        let value: i64 = val_str.parse().unwrap_or(0);
+                        self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                        return Ok(Some(dest));
+                    }
                     self.ctx.emit(Instruction::Call {
                         dst: dest,
                         func_id: func_info.id.0,
@@ -10998,14 +11821,16 @@ impl VbcCodegen {
                         return self.compile_variant_constructor(field, &verum_common::List::new());
                     }
                     let dest = self.ctx.alloc_temp();
-                    if func_info.param_count == 0 && !func_info.is_async && !func_info.is_generator {
+                    if func_info.param_count == 0 && !func_info.is_async && !func_info.is_generator
+                    {
                         // Check if this is an inlineable constant (__const_val_N)
                         if let Some(ref iname) = func_info.intrinsic_name
-                            && let Some(val_str) = iname.strip_prefix("__const_val_") {
-                                let value: i64 = val_str.parse().unwrap_or(0);
-                                self.ctx.emit(Instruction::LoadI { dst: dest, value });
-                                return Ok(Some(dest));
-                            }
+                            && let Some(val_str) = iname.strip_prefix("__const_val_")
+                        {
+                            let value: i64 = val_str.parse().unwrap_or(0);
+                            self.ctx.emit(Instruction::LoadI { dst: dest, value });
+                            return Ok(Some(dest));
+                        }
                         self.ctx.emit(Instruction::Call {
                             dst: dest,
                             func_id: func_info.id.0,
@@ -11038,194 +11863,241 @@ impl VbcCodegen {
         // Check if this is a variant constructor access pattern: TypeName.Variant
         if let ExprKind::Path(ref path) = base.kind
             && path.segments.len() == 1
-                && let PathSegment::Name(ref type_ident) = path.segments[0] {
-                    let type_name = type_ident.name.as_str();
-                    // Lowercase FFI-compat integer/float aliases (`i64`, `u32`,
-                    // `f64`, …) are legitimate type names that carry associated
-                    // constants like `MAX` / `MIN` / `BITS`. The `TypeName.field`
-                    // disambiguation below only considers uppercase type names
-                    // (to avoid mistaking variable.field for variant dispatch);
-                    // accept lowercase names when they're primitive numeric types.
-                    let base_is_type = type_name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
-                        || is_type_name(type_name);
-                    if base_is_type
-                        && field.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
-                    {
-                        // Try to look up the variant constructor as a registered function.
-                        // Use qualified name (TypeName.Variant) to avoid collision with
-                        // stdlib variants (e.g., "Empty" colliding with TryRecvError.Empty).
-                        let qualified_variant = format!("{}.{}", type_name, field);
-                        if let Some(fi) = self.ctx.lookup_function(&qualified_variant).cloned() {
-                            if let Some(tag) = fi.variant_tag {
-                                return self.compile_variant_constructor_with_tag(tag, &verum_common::List::new());
-                            }
-                            return self.compile_variant_constructor(&qualified_variant, &verum_common::List::new());
-                        }
-                        // Fallback: try simple name for non-colliding variants
-                        if self.ctx.lookup_function(field).is_some() {
-                            return self.compile_variant_constructor(field, &verum_common::List::new());
-                        }
-                        // Before treating as variant, check if this is a type static constant
-                        // (e.g., Duration.ZERO, Int.MAX where field is uppercase)
-                        if is_type_name(type_name)
-                            && let Some(value) = resolve_type_static_constant(type_name, field) {
-                                let result = self.ctx.alloc_temp();
-                                let is_float_type = matches!(type_name,
-                                    "Float" | "Float32" | "Float64" | "f32" | "f64");
-                                if is_float_type && field != "BITS" {
-                                    let f = f64::from_bits(value as u64);
-                                    self.ctx.emit(Instruction::LoadF { dst: result, value: f });
-                                } else {
-                                    self.ctx.emit(Instruction::LoadI { dst: result, value: value as i64 });
-                                }
-                                return Ok(Some(result));
-                            }
-                        // Check if this is an associated constant from an implement block
-                        // (e.g., Fd.INVALID registered as "Fd::INVALID" with __const_val_N)
-                        {
-                            let qualified = format!("{}::{}", type_name, field);
-                            if let Some(func_info) = self.ctx.lookup_function(&qualified)
-                                && func_info.param_count == 0
-                                    && let Some(ref iname) = func_info.intrinsic_name
-                                        && let Some(val_str) = iname.strip_prefix("__const_val_") {
-                                            let value: i64 = val_str.parse().unwrap_or(0);
-                                            let result = self.ctx.alloc_temp();
-                                            self.ctx.emit(Instruction::LoadI { dst: result, value });
-                                            return Ok(Some(result));
-                                        }
-                        }
-
-                        // If not registered, emit a MakeVariant instruction with the qualified name
-                        // This handles dynamically created or imported variants
-                        let qualified_variant = format!("{}.{}", type_name, field);
-                        let result = self.ctx.alloc_temp();
-                        let variant_tag = self.intern_string(&qualified_variant);
-                        // We know the parent type name (it's `type_name`),
-                        // so route through the unified helper. When
-                        // type_name is a registered sum type, this lifts
-                        // the synthesised "qualified-name as tag" path
-                        // into the typed form too.
-                        self.emit_make_variant(result, variant_tag, 0, Some(type_name));
-                        return Ok(Some(result));
+            && let PathSegment::Name(ref type_ident) = path.segments[0]
+        {
+            let type_name = type_ident.name.as_str();
+            // Lowercase FFI-compat integer/float aliases (`i64`, `u32`,
+            // `f64`, …) are legitimate type names that carry associated
+            // constants like `MAX` / `MIN` / `BITS`. The `TypeName.field`
+            // disambiguation below only considers uppercase type names
+            // (to avoid mistaking variable.field for variant dispatch);
+            // accept lowercase names when they're primitive numeric types.
+            let base_is_type = type_name
+                .chars()
+                .next()
+                .map(|c| c.is_uppercase())
+                .unwrap_or(false)
+                || is_type_name(type_name);
+            if base_is_type
+                && field
+                    .chars()
+                    .next()
+                    .map(|c| c.is_uppercase())
+                    .unwrap_or(false)
+            {
+                // Try to look up the variant constructor as a registered function.
+                // Use qualified name (TypeName.Variant) to avoid collision with
+                // stdlib variants (e.g., "Empty" colliding with TryRecvError.Empty).
+                let qualified_variant = format!("{}.{}", type_name, field);
+                if let Some(fi) = self.ctx.lookup_function(&qualified_variant).cloned() {
+                    if let Some(tag) = fi.variant_tag {
+                        return self
+                            .compile_variant_constructor_with_tag(tag, &verum_common::List::new());
                     }
-
-                    // Handle compile-time type property access (e.g., Int32.bits, Int8.size)
-                    if is_type_name(type_name)
-                        && let Some(value) = resolve_type_property(type_name, field) {
-                            let result = self.ctx.alloc_temp();
-                            match value {
-                                TypePropertyValue::Int(v) => {
-                                    self.ctx.emit(Instruction::LoadI { dst: result, value: v });
-                                }
-                                TypePropertyValue::UInt(v) => {
-                                    // For large unsigned values like u64::MAX, store as i64 bit pattern
-                                    self.ctx.emit(Instruction::LoadI { dst: result, value: v as i64 });
-                                }
-                                TypePropertyValue::Str(s) => {
-                                    let const_id = self.ctx.add_const_string(&s);
-                                    self.ctx.emit(Instruction::LoadK { dst: result, const_id: const_id.0 });
-                                }
-                            }
-                            return Ok(Some(result));
-                        }
-
-                    // Layout property access on user-defined or generic-parameter types:
-                    // `MyStruct.size`, `T.alignment`, `Foo.stride`, `Bar.name`. The base
-                    // is a bare path (no <args>) so it bypassed the TypeExpr branch above.
-                    // We resolve from the registered field layout when available and
-                    // fall back to a single-slot layout (8 / 8) for unknown identifiers
-                    // — which is the correct shape for an unconstrained generic parameter
-                    // since every NaN-boxed Value is exactly 8 bytes.
-                    if matches!(field, "size" | "alignment" | "stride" | "name")
-                        && self.ctx.get_var_reg(type_name).is_err()
-                        && self.ctx.lookup_function(type_name).is_none()
-                        && let Some(value) = self.layout_property_for_named(type_name, field)
-                    {
-                        let result = self.ctx.alloc_temp();
-                        match value {
-                            TypePropertyValue::Int(v) => {
-                                self.ctx.emit(Instruction::LoadI { dst: result, value: v });
-                            }
-                            TypePropertyValue::UInt(v) => {
-                                self.ctx.emit(Instruction::LoadI { dst: result, value: v as i64 });
-                            }
-                            TypePropertyValue::Str(s) => {
-                                let const_id = self.ctx.add_const_string(&s);
-                                self.ctx.emit(Instruction::LoadK { dst: result, const_id: const_id.0 });
-                            }
-                        }
-                        return Ok(Some(result));
+                    return self.compile_variant_constructor(
+                        &qualified_variant,
+                        &verum_common::List::new(),
+                    );
+                }
+                // Fallback: try simple name for non-colliding variants
+                if self.ctx.lookup_function(field).is_some() {
+                    return self.compile_variant_constructor(field, &verum_common::List::new());
+                }
+                // Before treating as variant, check if this is a type static constant
+                // (e.g., Duration.ZERO, Int.MAX where field is uppercase)
+                if is_type_name(type_name)
+                    && let Some(value) = resolve_type_static_constant(type_name, field)
+                {
+                    let result = self.ctx.alloc_temp();
+                    let is_float_type =
+                        matches!(type_name, "Float" | "Float32" | "Float64" | "f32" | "f64");
+                    if is_float_type && field != "BITS" {
+                        let f = f64::from_bits(value as u64);
+                        self.ctx.emit(Instruction::LoadF {
+                            dst: result,
+                            value: f,
+                        });
+                    } else {
+                        self.ctx.emit(Instruction::LoadI {
+                            dst: result,
+                            value: value as i64,
+                        });
                     }
-
-                    // Handle type alias field access (e.g., u64.MAX -> Int::MAX)
-                    // Numeric type aliases have associated constants defined on the base type
-                    if let Some(base_type) = resolve_numeric_type_alias(type_name) {
-                        let aliased_qualified = format!("{}::{}", base_type, field);
-                        if let Some(func_info) =
-                            self.ctx.lookup_qualified_function(&aliased_qualified).cloned()
-                        {
-                            let dest = self.ctx.alloc_temp();
-                            if func_info.param_count == 0
-                                && !func_info.is_async
-                                && !func_info.is_generator
-                            {
-                                // It's a constant - call it to get value
-                                self.ctx.emit(Instruction::Call {
-                                    dst: dest,
-                                    func_id: func_info.id.0,
-                                    args: crate::instruction::RegRange::new(Reg(0), 0),
-                                });
-                            } else {
-                                // #110 — type-alias-resolved HOF reference.
-                                self.ctx.emit(Instruction::NewClosure {
-                                    dst: dest,
-                                    func_id: func_info.id.0,
-                                    captures: vec![],
-                                });
-                            }
-                            return Ok(Some(dest));
-                        }
-                        // Try simple lookup too
-                        let aliased_simple = format!("{}::{}", base_type, field);
-                        if let Some(func_info) =
-                            self.ctx.lookup_function(&aliased_simple).cloned()
-                        {
-                            let dest = self.ctx.alloc_temp();
-                            if func_info.param_count == 0
-                                && !func_info.is_async
-                                && !func_info.is_generator
-                            {
-                                self.ctx.emit(Instruction::Call {
-                                    dst: dest,
-                                    func_id: func_info.id.0,
-                                    args: crate::instruction::RegRange::new(Reg(0), 0),
-                                });
-                            } else {
-                                // #110 — simple-name HOF reference.
-                                self.ctx.emit(Instruction::NewClosure {
-                                    dst: dest,
-                                    func_id: func_info.id.0,
-                                    captures: vec![],
-                                });
-                            }
-                            return Ok(Some(dest));
-                        }
+                    return Ok(Some(result));
+                }
+                // Check if this is an associated constant from an implement block
+                // (e.g., Fd.INVALID registered as "Fd::INVALID" with __const_val_N)
+                {
+                    let qualified = format!("{}::{}", type_name, field);
+                    if let Some(func_info) = self.ctx.lookup_function(&qualified)
+                        && func_info.param_count == 0
+                        && let Some(ref iname) = func_info.intrinsic_name
+                        && let Some(val_str) = iname.strip_prefix("__const_val_")
+                    {
+                        let value: i64 = val_str.parse().unwrap_or(0);
+                        let result = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::LoadI { dst: result, value });
+                        return Ok(Some(result));
                     }
                 }
+
+                // If not registered, emit a MakeVariant instruction with the qualified name
+                // This handles dynamically created or imported variants
+                let qualified_variant = format!("{}.{}", type_name, field);
+                let result = self.ctx.alloc_temp();
+                let variant_tag = self.intern_string(&qualified_variant);
+                // We know the parent type name (it's `type_name`),
+                // so route through the unified helper. When
+                // type_name is a registered sum type, this lifts
+                // the synthesised "qualified-name as tag" path
+                // into the typed form too.
+                self.emit_make_variant(result, variant_tag, 0, Some(type_name));
+                return Ok(Some(result));
+            }
+
+            // Handle compile-time type property access (e.g., Int32.bits, Int8.size)
+            if is_type_name(type_name)
+                && let Some(value) = resolve_type_property(type_name, field)
+            {
+                let result = self.ctx.alloc_temp();
+                match value {
+                    TypePropertyValue::Int(v) => {
+                        self.ctx.emit(Instruction::LoadI {
+                            dst: result,
+                            value: v,
+                        });
+                    }
+                    TypePropertyValue::UInt(v) => {
+                        // For large unsigned values like u64::MAX, store as i64 bit pattern
+                        self.ctx.emit(Instruction::LoadI {
+                            dst: result,
+                            value: v as i64,
+                        });
+                    }
+                    TypePropertyValue::Str(s) => {
+                        let const_id = self.ctx.add_const_string(&s);
+                        self.ctx.emit(Instruction::LoadK {
+                            dst: result,
+                            const_id: const_id.0,
+                        });
+                    }
+                }
+                return Ok(Some(result));
+            }
+
+            // Layout property access on user-defined or generic-parameter types:
+            // `MyStruct.size`, `T.alignment`, `Foo.stride`, `Bar.name`. The base
+            // is a bare path (no <args>) so it bypassed the TypeExpr branch above.
+            // We resolve from the registered field layout when available and
+            // fall back to a single-slot layout (8 / 8) for unknown identifiers
+            // — which is the correct shape for an unconstrained generic parameter
+            // since every NaN-boxed Value is exactly 8 bytes.
+            if matches!(field, "size" | "alignment" | "stride" | "name")
+                && self.ctx.get_var_reg(type_name).is_err()
+                && self.ctx.lookup_function(type_name).is_none()
+                && let Some(value) = self.layout_property_for_named(type_name, field)
+            {
+                let result = self.ctx.alloc_temp();
+                match value {
+                    TypePropertyValue::Int(v) => {
+                        self.ctx.emit(Instruction::LoadI {
+                            dst: result,
+                            value: v,
+                        });
+                    }
+                    TypePropertyValue::UInt(v) => {
+                        self.ctx.emit(Instruction::LoadI {
+                            dst: result,
+                            value: v as i64,
+                        });
+                    }
+                    TypePropertyValue::Str(s) => {
+                        let const_id = self.ctx.add_const_string(&s);
+                        self.ctx.emit(Instruction::LoadK {
+                            dst: result,
+                            const_id: const_id.0,
+                        });
+                    }
+                }
+                return Ok(Some(result));
+            }
+
+            // Handle type alias field access (e.g., u64.MAX -> Int::MAX)
+            // Numeric type aliases have associated constants defined on the base type
+            if let Some(base_type) = resolve_numeric_type_alias(type_name) {
+                let aliased_qualified = format!("{}::{}", base_type, field);
+                if let Some(func_info) = self
+                    .ctx
+                    .lookup_qualified_function(&aliased_qualified)
+                    .cloned()
+                {
+                    let dest = self.ctx.alloc_temp();
+                    if func_info.param_count == 0 && !func_info.is_async && !func_info.is_generator
+                    {
+                        // It's a constant - call it to get value
+                        self.ctx.emit(Instruction::Call {
+                            dst: dest,
+                            func_id: func_info.id.0,
+                            args: crate::instruction::RegRange::new(Reg(0), 0),
+                        });
+                    } else {
+                        // #110 — type-alias-resolved HOF reference.
+                        self.ctx.emit(Instruction::NewClosure {
+                            dst: dest,
+                            func_id: func_info.id.0,
+                            captures: vec![],
+                        });
+                    }
+                    return Ok(Some(dest));
+                }
+                // Try simple lookup too
+                let aliased_simple = format!("{}::{}", base_type, field);
+                if let Some(func_info) = self.ctx.lookup_function(&aliased_simple).cloned() {
+                    let dest = self.ctx.alloc_temp();
+                    if func_info.param_count == 0 && !func_info.is_async && !func_info.is_generator
+                    {
+                        self.ctx.emit(Instruction::Call {
+                            dst: dest,
+                            func_id: func_info.id.0,
+                            args: crate::instruction::RegRange::new(Reg(0), 0),
+                        });
+                    } else {
+                        // #110 — simple-name HOF reference.
+                        self.ctx.emit(Instruction::NewClosure {
+                            dst: dest,
+                            func_id: func_info.id.0,
+                            captures: vec![],
+                        });
+                    }
+                    return Ok(Some(dest));
+                }
+            }
+        }
 
         // Determine base expression type for correct field index resolution
         let base_type = self.infer_expr_type_name(base);
 
         if std::env::var("VERUM_DEBUG_FIELDS").is_ok() {
             let fn_name = self.ctx.current_function.as_deref().unwrap_or("<unknown>");
-            tracing::debug!("[FIELD] fn '{}': field '{}' → base_type={:?}",
-                fn_name, field, base_type);
+            tracing::debug!(
+                "[FIELD] fn '{}': field '{}' → base_type={:?}",
+                fn_name,
+                field,
+                base_type
+            );
         }
         if std::env::var("VERUM_DEBUG_FIELDS").is_ok() && base_type.is_none() {
             let fn_name = self.ctx.current_function.as_deref().unwrap_or("<unknown>");
-            let base_desc = format!("{:?}", base.kind).chars().take(80).collect::<String>();
-            tracing::debug!("[FIELD-MISS] in fn '{}': field '{}' on base ({}) → type=None",
-                fn_name, field, base_desc);
+            let base_desc = format!("{:?}", base.kind)
+                .chars()
+                .take(80)
+                .collect::<String>();
+            tracing::debug!(
+                "[FIELD-MISS] in fn '{}': field '{}' on base ({}) → type=None",
+                fn_name,
+                field,
+                base_desc
+            );
         }
 
         // #110 — static method reference as HOF arg.
@@ -11255,14 +12127,18 @@ impl VbcCodegen {
             let resolved_base = self.resolve_type_alias(&base_name);
             let qualified_dot = format!("{}.{}", resolved_base, field);
             let qualified_alias = format!("{}.{}", base_name, field);
-            let func_info = self.ctx.lookup_function(&qualified_dot)
+            let func_info = self
+                .ctx
+                .lookup_function(&qualified_dot)
                 .or_else(|| self.ctx.lookup_function(&qualified_alias))
                 .cloned();
             if let Some(info) = func_info {
                 // Skip variant constructors (already handled elsewhere) and
                 // compile-time constants (handled by intrinsic_name path).
                 if info.variant_tag.is_none()
-                    && info.intrinsic_name.as_ref()
+                    && info
+                        .intrinsic_name
+                        .as_ref()
                         .is_none_or(|n| !n.starts_with("__const_"))
                 {
                     let dest = self.ctx.alloc_temp();
@@ -11285,21 +12161,28 @@ impl VbcCodegen {
 
         if std::env::var("VERUM_DEBUG_FA2").is_ok() {
             let fn_name = self.ctx.current_function.as_deref().unwrap_or("?");
-            tracing::debug!("[FA2] fn '{}': field '{}' base_type={:?} → idx={}", fn_name, field, base_type, field_idx);
+            tracing::debug!(
+                "[FA2] fn '{}': field '{}' base_type={:?} → idx={}",
+                fn_name,
+                field,
+                base_type,
+                field_idx
+            );
         }
 
         // Newtype field .0 access: the value IS the single field, emit Mov.
         // e.g. FileDesc(Int).0 → just copy the register (no heap indirection).
         if field_idx == 0
             && let Some(ref type_name) = base_type
-                && self.ctx.newtype_names.contains(type_name) {
-                    self.ctx.emit(Instruction::Mov {
-                        dst: result,
-                        src: base_reg,
-                    });
-                    self.ctx.free_temp(base_reg);
-                    return Ok(Some(result));
-                }
+            && self.ctx.newtype_names.contains(type_name)
+        {
+            self.ctx.emit(Instruction::Mov {
+                dst: result,
+                src: base_reg,
+            });
+            self.ctx.free_temp(base_reg);
+            return Ok(Some(result));
+        }
 
         self.ctx.emit(Instruction::GetF {
             dst: result,
@@ -11317,18 +12200,19 @@ impl VbcCodegen {
         // e.g. `let fd = FileDesc(42); fd.0` → just copy the register.
         if index == 0
             && let Some(type_name) = self.infer_expr_type_name(base)
-                && self.ctx.newtype_names.contains(&type_name) {
-                    let base_reg = self
-                        .compile_expr(base)?
-                        .ok_or_else(|| CodegenError::internal("tuple base has no value"))?;
-                    let result = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::Mov {
-                        dst: result,
-                        src: base_reg,
-                    });
-                    self.ctx.free_temp(base_reg);
-                    return Ok(Some(result));
-                }
+            && self.ctx.newtype_names.contains(&type_name)
+        {
+            let base_reg = self
+                .compile_expr(base)?
+                .ok_or_else(|| CodegenError::internal("tuple base has no value"))?;
+            let result = self.ctx.alloc_temp();
+            self.ctx.emit(Instruction::Mov {
+                dst: result,
+                src: base_reg,
+            });
+            self.ctx.free_temp(base_reg);
+            return Ok(Some(result));
+        }
 
         let base_reg = self
             .compile_expr(base)?
@@ -11359,7 +12243,12 @@ impl VbcCodegen {
         // that lowering here so the bare-list form also produces a
         // proper FatRef instead of silently returning a garbage element
         // value.
-        if let ExprKind::Range { start, end, inclusive } = &index.kind {
+        if let ExprKind::Range {
+            start,
+            end,
+            inclusive,
+        } = &index.kind
+        {
             let arr_reg = self
                 .compile_expr(base)?
                 .ok_or_else(|| CodegenError::internal("slice base has no value"))?;
@@ -11369,10 +12258,16 @@ impl VbcCodegen {
                 let s_reg = self
                     .compile_expr(s)?
                     .ok_or_else(|| CodegenError::internal("slice start has no value"))?;
-                self.ctx.emit(Instruction::Mov { dst: start_reg, src: s_reg });
+                self.ctx.emit(Instruction::Mov {
+                    dst: start_reg,
+                    src: s_reg,
+                });
                 self.ctx.free_temp(s_reg);
             } else {
-                self.ctx.emit(Instruction::LoadSmallI { dst: start_reg, value: 0 });
+                self.ctx.emit(Instruction::LoadSmallI {
+                    dst: start_reg,
+                    value: 0,
+                });
             }
 
             let end_reg = self.ctx.alloc_temp();
@@ -11380,11 +12275,17 @@ impl VbcCodegen {
                 let e_reg = self
                     .compile_expr(e)?
                     .ok_or_else(|| CodegenError::internal("slice end has no value"))?;
-                self.ctx.emit(Instruction::Mov { dst: end_reg, src: e_reg });
+                self.ctx.emit(Instruction::Mov {
+                    dst: end_reg,
+                    src: e_reg,
+                });
                 self.ctx.free_temp(e_reg);
                 if *inclusive {
                     let one_reg = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadSmallI { dst: one_reg, value: 1 });
+                    self.ctx.emit(Instruction::LoadSmallI {
+                        dst: one_reg,
+                        value: 1,
+                    });
                     self.ctx.emit(Instruction::BinaryI {
                         op: BinaryIntOp::Add,
                         dst: end_reg,
@@ -11465,11 +12366,7 @@ impl VbcCodegen {
     /// With the field's declared type provided as context,
     /// `find_function_by_suffix` can pick the variant whose
     /// `parent_type_name` matches, eliminating the ambiguity.
-    fn push_field_type_context(
-        &mut self,
-        type_name: &str,
-        field_name: &str,
-    ) -> Option<String> {
+    fn push_field_type_context(&mut self, type_name: &str, field_name: &str) -> Option<String> {
         let saved = self.ctx.current_return_type_name.clone();
         if let Some(ft) = self.field_type_name(type_name, field_name) {
             // Strip any generic args — variants register under the base name.
@@ -11495,15 +12392,20 @@ impl VbcCodegen {
         // Check if this is a record variant constructor (e.g., Branch { value: 1, left: x, right: y })
         let variant_name = format!("{}", path);
         let dot_name = variant_name.replace("::", ".");
-        let variant_tag = self.ctx.lookup_function(&variant_name)
+        let variant_tag = self
+            .ctx
+            .lookup_function(&variant_name)
             .and_then(|info| info.variant_tag)
             .or_else(|| {
-                self.ctx.lookup_function(&dot_name)
+                self.ctx
+                    .lookup_function(&dot_name)
                     .and_then(|info| info.variant_tag)
             })
             .or_else(|| {
                 // Try simple name (last segment)
-                variant_name.rsplit("::").next()
+                variant_name
+                    .rsplit("::")
+                    .next()
                     .and_then(|simple| self.ctx.lookup_function(simple))
                     .and_then(|info| info.variant_tag)
             })
@@ -11511,7 +12413,8 @@ impl VbcCodegen {
                 // Simple name not found (likely in collision set).
                 // Try to disambiguate using field count.
                 let simple = variant_name.rsplit("::").next().unwrap_or(&variant_name);
-                self.ctx.find_variant_by_suffix_and_args(simple, fields.len())
+                self.ctx
+                    .find_variant_by_suffix_and_args(simple, fields.len())
             });
 
         if let Some(tag) = variant_tag {
@@ -11539,8 +12442,8 @@ impl VbcCodegen {
             // types; the per-field logic mirrors the plain-record path below.
             let variant_type_name = format!("{}", path);
             for (i, field) in fields.iter().enumerate() {
-                let saved_field_type = self
-                    .push_field_type_context(&variant_type_name, &field.name.name);
+                let saved_field_type =
+                    self.push_field_type_context(&variant_type_name, &field.name.name);
 
                 let value_reg = if let Some(ref v) = field.value {
                     self.compile_expr(v)?
@@ -11583,14 +12486,16 @@ impl VbcCodegen {
             } else {
                 // Look up TypeId for proper Drop dispatch
                 let type_name = format!("{}", path);
-                let type_id = self.type_name_to_id
+                let type_id = self
+                    .type_name_to_id
                     .get(&type_name)
                     .map(|id| id.0)
                     .unwrap_or(0);
 
                 // Use declared field count from type layout if available,
                 // otherwise fall back to the number of fields in the literal.
-                let alloc_slots = self.type_field_count(&type_name)
+                let alloc_slots = self
+                    .type_field_count(&type_name)
                     .unwrap_or(fields.len() as u32);
 
                 self.ctx.emit(Instruction::New {
@@ -11611,8 +12516,7 @@ impl VbcCodegen {
                 // that bare variant names (e.g. `Closed` referring to
                 // `VfsErrorKind.Closed`) can be disambiguated against
                 // other types exporting the same variant.
-                let saved_field_type = self
-                    .push_field_type_context(&type_name, &field.name.name);
+                let saved_field_type = self.push_field_type_context(&type_name, &field.name.name);
 
                 let value_reg = if let Some(ref v) = field.value {
                     self.compile_expr(v)?
@@ -11712,7 +12616,7 @@ impl VbcCodegen {
         // enabling the interpreter to resolve `.head` → field_idx 0.
         self.ctx.emit(crate::instruction::Instruction::New {
             dst: result,
-            type_id: 0,  // TODO: resolve to actual coinductive type_id when available
+            type_id: 0, // TODO: resolve to actual coinductive type_id when available
             field_count: arms.len() as u32,
         });
 
@@ -11754,8 +12658,10 @@ impl VbcCodegen {
         let block_result = self.compile_block(block)?;
 
         if let Some(reg) = block_result {
-            self.ctx
-                .emit(Instruction::Mov { dst: result, src: reg });
+            self.ctx.emit(Instruction::Mov {
+                dst: result,
+                src: reg,
+            });
         } else {
             self.ctx.emit(Instruction::LoadUnit { dst: result });
         }
@@ -11822,17 +12728,23 @@ impl VbcCodegen {
         // The success variant is determined from the type's actual definition,
         // not from hardcoded names.
         let type_name = self.extract_expr_type_name(inner);
-        let is_maybe = type_name.as_deref().is_some_and(|n| n == "Maybe" || n.starts_with("Maybe<"));
+        let is_maybe = type_name
+            .as_deref()
+            .is_some_and(|n| n == "Maybe" || n.starts_with("Maybe<"));
 
         // Determine the success variant from the type's definition.
         // For Maybe: first variant with fields (Some). For Result: first variant with fields (Ok).
         let (_success_variant, success_tag) = if is_maybe {
-            let tag = self.ctx.lookup_function("Some")
+            let tag = self
+                .ctx
+                .lookup_function("Some")
                 .or_else(|| self.ctx.lookup_function("Maybe::Some"))
                 .and_then(|info| info.variant_tag);
             ("Some", tag)
         } else {
-            let tag = self.ctx.lookup_function("Ok")
+            let tag = self
+                .ctx
+                .lookup_function("Ok")
                 .or_else(|| self.ctx.lookup_function("Result::Ok"))
                 .and_then(|info| info.variant_tag);
             ("Ok", tag)
@@ -11865,7 +12777,9 @@ impl VbcCodegen {
                 value: inner_reg,
                 tag: 0, // extract first payload field
             });
-            self.ctx.emit(Instruction::Throw { error: error_payload });
+            self.ctx.emit(Instruction::Throw {
+                error: error_payload,
+            });
             self.ctx.free_temp(error_payload);
         } else {
             self.ctx.emit(Instruction::Ret { value: inner_reg });
@@ -11915,10 +12829,15 @@ impl VbcCodegen {
         self.ctx.emit(Instruction::TryEnd);
 
         // Success path: wrap result in Ok variant
-        let ok_tag = self.ctx.lookup_function("Ok")
+        let ok_tag = self
+            .ctx
+            .lookup_function("Ok")
             .and_then(|info| info.variant_tag)
             .unwrap_or_else(|| {
-                "Ok".as_bytes().iter().fold(0u32, |acc, &b| acc.wrapping_add(b as u32)) % 256
+                "Ok".as_bytes()
+                    .iter()
+                    .fold(0u32, |acc, &b| acc.wrapping_add(b as u32))
+                    % 256
             });
 
         self.emit_make_variant_for_function(result, ok_tag, 1, "Ok", None);
@@ -11937,12 +12856,19 @@ impl VbcCodegen {
         // Re-wrap it in Err() to produce a proper Result::Err variant.
         self.ctx.define_label(&handler_label);
         let exception_reg = self.ctx.alloc_temp();
-        self.ctx.emit(Instruction::GetException { dst: exception_reg });
+        self.ctx
+            .emit(Instruction::GetException { dst: exception_reg });
 
-        let err_tag = self.ctx.lookup_function("Err")
+        let err_tag = self
+            .ctx
+            .lookup_function("Err")
             .and_then(|info| info.variant_tag)
             .unwrap_or_else(|| {
-                "Err".as_bytes().iter().fold(0u32, |acc, &b| acc.wrapping_add(b as u32)) % 256
+                "Err"
+                    .as_bytes()
+                    .iter()
+                    .fold(0u32, |acc, &b| acc.wrapping_add(b as u32))
+                    % 256
             });
         self.emit_make_variant_for_function(result, err_tag, 1, "Err", None);
         self.ctx.emit(Instruction::SetVariantData {
@@ -11967,20 +12893,16 @@ impl VbcCodegen {
     /// - Int → Char with validation (CvtIC)
     /// - Char → Int (CvtCI)
     /// - Bool → Int (CvtBI)
-    fn compile_cast(
-        &mut self,
-        inner: &Expr,
-        ty: &verum_ast::Type,
-    ) -> CodegenResult<Option<Reg>> {
+    fn compile_cast(&mut self, inner: &Expr, ty: &verum_ast::Type) -> CodegenResult<Option<Reg>> {
         use verum_ast::ty::TypeKind;
-        
 
         // Check for &mut arr[idx] as *mut T pattern (byte array element address)
         // This pattern needs special handling because we need the ADDRESS, not the VALUE
         if let TypeKind::Pointer { .. } = &ty.kind
-            && let Some(result) = self.try_compile_byte_array_element_addr(inner)? {
-                return Ok(Some(result));
-            }
+            && let Some(result) = self.try_compile_byte_array_element_addr(inner)?
+        {
+            return Ok(Some(result));
+        }
 
         // Check for `&receiver.field as *const T` / `&mut receiver.field as *mut T`
         // pattern (struct field address — task #37 enabler for atomic stdlib).
@@ -11988,12 +12910,14 @@ impl VbcCodegen {
         // a passthrough, leaving the result as a register-encoded CBGR ref
         // bit-pattern that atomic_load_* misreads as a meaningless raw address.
         if let TypeKind::Pointer { .. } = &ty.kind
-            && let Some(result) = self.try_compile_struct_field_addr(inner)? {
-                return Ok(Some(result));
-            }
+            && let Some(result) = self.try_compile_struct_field_addr(inner)?
+        {
+            return Ok(Some(result));
+        }
 
         // Compile the source expression
-        let src_reg = self.compile_expr(inner)?
+        let src_reg = self
+            .compile_expr(inner)?
             .ok_or_else(|| CodegenError::internal("cast source has no value"))?;
 
         // Determine source type from expression
@@ -12006,10 +12930,9 @@ impl VbcCodegen {
                 if let Some(ident) = path.as_ident() {
                     match ident.name.as_str() {
                         "Float" | "Float64" | "f64" | "Float32" | "f32" => Some(TypeKind::Float),
-                        "Int" | "Int64" | "i64" | "Int32" | "i32"
-                        | "UInt8" | "u8" | "Byte" | "UInt16" | "u16"
-                        | "UInt32" | "u32" | "UInt64" | "u64"
-                        | "UInt128" | "u128" | "UIntSize" | "usize" => Some(TypeKind::Int),
+                        "Int" | "Int64" | "i64" | "Int32" | "i32" | "UInt8" | "u8" | "Byte"
+                        | "UInt16" | "u16" | "UInt32" | "u32" | "UInt64" | "u64" | "UInt128"
+                        | "u128" | "UIntSize" | "usize" => Some(TypeKind::Int),
                         "Bool" => Some(TypeKind::Bool),
                         "Char" => Some(TypeKind::Char),
                         _ => None,
@@ -12028,10 +12951,9 @@ impl VbcCodegen {
                 if let Some(ident) = path.as_ident() {
                     match ident.name.as_str() {
                         "Float" | "Float64" | "f64" | "Float32" | "f32" => TypeKind::Float,
-                        "Int" | "Int64" | "i64" | "Int32" | "i32"
-                        | "UInt8" | "u8" | "Byte" | "UInt16" | "u16"
-                        | "UInt32" | "u32" | "UInt64" | "u64"
-                        | "UInt128" | "u128" | "UIntSize" | "usize" => TypeKind::Int,
+                        "Int" | "Int64" | "i64" | "Int32" | "i32" | "UInt8" | "u8" | "Byte"
+                        | "UInt16" | "u16" | "UInt32" | "u32" | "UInt64" | "u64" | "UInt128"
+                        | "u128" | "UIntSize" | "usize" => TypeKind::Int,
                         "Bool" => TypeKind::Bool,
                         "Char" => TypeKind::Char,
                         _ => sk,
@@ -12088,7 +13010,10 @@ impl VbcCodegen {
             (Some(TypeKind::Int), TypeKind::Bool) | (None, TypeKind::Bool) => {
                 // Compare with 0 and negate: bool = (val != 0)
                 let zero_reg = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadSmallI { dst: zero_reg, value: 0 });
+                self.ctx.emit(Instruction::LoadSmallI {
+                    dst: zero_reg,
+                    value: 0,
+                });
                 self.ctx.emit(Instruction::CmpI {
                     op: CompareOp::Ne,
                     dst,
@@ -12102,7 +13027,10 @@ impl VbcCodegen {
             (Some(TypeKind::Bool), TypeKind::Float) => {
                 // First convert to int, then to float
                 let int_reg = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::CvtBI { dst: int_reg, src: src_reg });
+                self.ctx.emit(Instruction::CvtBI {
+                    dst: int_reg,
+                    src: src_reg,
+                });
                 self.ctx.emit(Instruction::CvtIF { dst, src: int_reg });
                 self.ctx.free_temp(int_reg);
             }
@@ -12111,7 +13039,10 @@ impl VbcCodegen {
             (Some(TypeKind::Float), TypeKind::Bool) => {
                 // Compare with 0.0
                 let zero_reg = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadF { dst: zero_reg, value: 0.0 });
+                self.ctx.emit(Instruction::LoadF {
+                    dst: zero_reg,
+                    value: 0.0,
+                });
                 self.ctx.emit(Instruction::CmpF {
                     op: CompareOp::Ne,
                     dst,
@@ -12122,7 +13053,9 @@ impl VbcCodegen {
             }
 
             // Same type or unknown source: pass through (runtime will handle)
-            (Some(src), target) if std::mem::discriminant(&src) == std::mem::discriminant(target) => {
+            (Some(src), target)
+                if std::mem::discriminant(&src) == std::mem::discriminant(target) =>
+            {
                 // Same type, no conversion needed
                 self.ctx.free_temp(dst);
                 return Ok(Some(src_reg));
@@ -12142,7 +13075,12 @@ impl VbcCodegen {
 
             // Array reference to slice reference: &[T; N] → &[T]
             // This creates a FatRef (slice) from the array pointer with length metadata
-            (_, TypeKind::Reference { inner: ref_inner, .. }) if matches!(ref_inner.kind, TypeKind::Slice(_)) => {
+            (
+                _,
+                TypeKind::Reference {
+                    inner: ref_inner, ..
+                },
+            ) if matches!(ref_inner.kind, TypeKind::Slice(_)) => {
                 // Try to get the array length from the source expression type
                 // Look for array types like [T; N] in the source
                 let len = self.try_get_array_length_from_source(inner);
@@ -12153,14 +13091,24 @@ impl VbcCodegen {
                 let len_reg = self.ctx.alloc_temp();
 
                 // Load start = 0
-                self.ctx.emit(Instruction::LoadSmallI { dst: start_reg, value: 0 });
+                self.ctx.emit(Instruction::LoadSmallI {
+                    dst: start_reg,
+                    value: 0,
+                });
 
                 // Load length (use known length or get from array at runtime)
                 if let Some(known_len) = len {
-                    self.ctx.emit(Instruction::LoadI { dst: len_reg, value: known_len as i64 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: len_reg,
+                        value: known_len as i64,
+                    });
                 } else {
                     // Get length at runtime from the array
-                    self.ctx.emit(Instruction::Len { dst: len_reg, arr: src_reg, type_hint: 0 });
+                    self.ctx.emit(Instruction::Len {
+                        dst: len_reg,
+                        arr: src_reg,
+                        type_hint: 0,
+                    });
                 }
 
                 // Emit RefSlice to create FatRef
@@ -12193,9 +13141,9 @@ impl VbcCodegen {
                 // panicking on a raw pointer receiver — the original
                 // #201 NPE site at `core/collections/list.vr` after
                 // `let ptr = raw as &unsafe T;`).
-                if matches!(target_kind,
-                    TypeKind::UnsafeReference { .. }
-                    | TypeKind::Pointer { .. }
+                if matches!(
+                    target_kind,
+                    TypeKind::UnsafeReference { .. } | TypeKind::Pointer { .. }
                 ) {
                     self.ctx.mark_raw_pointer(src_reg);
                 }
@@ -12237,8 +13185,14 @@ impl VbcCodegen {
         // `recv.field` to handle the parser-precedence corner where
         // `&recv.field as *const T` parses as `&(recv.field as *const T)`).
         let field_expr = match &expr.kind {
-            ExprKind::Unary { op: UnOp::Ref, expr: inner } => inner.as_ref(),
-            ExprKind::Unary { op: UnOp::RefMut, expr: inner } => inner.as_ref(),
+            ExprKind::Unary {
+                op: UnOp::Ref,
+                expr: inner,
+            } => inner.as_ref(),
+            ExprKind::Unary {
+                op: UnOp::RefMut,
+                expr: inner,
+            } => inner.as_ref(),
             ExprKind::Field { .. } => expr,
             _ => return Ok(None),
         };
@@ -12277,7 +13231,8 @@ impl VbcCodegen {
         let field_offset = field_offset as u16;
 
         // Compile the receiver to get a heap pointer Value.
-        let recv_reg = self.compile_expr(receiver)?
+        let recv_reg = self
+            .compile_expr(receiver)?
             .ok_or_else(|| CodegenError::internal("field-addr receiver has no value"))?;
 
         let dst = self.ctx.alloc_temp();
@@ -12328,8 +13283,14 @@ impl VbcCodegen {
         // Also handle bare arr[idx] pattern (for `arr[idx] as *const T` due to
         // parser precedence: `&arr[idx] as *const T` parses as `&(arr[idx] as *const T)`)
         let inner_index = match &expr.kind {
-            ExprKind::Unary { op: UnOp::Ref, expr: inner } => Some(inner.as_ref()),
-            ExprKind::Unary { op: UnOp::RefMut, expr: inner } => Some(inner.as_ref()),
+            ExprKind::Unary {
+                op: UnOp::Ref,
+                expr: inner,
+            } => Some(inner.as_ref()),
+            ExprKind::Unary {
+                op: UnOp::RefMut,
+                expr: inner,
+            } => Some(inner.as_ref()),
             ExprKind::Index { .. } => Some(expr),
             _ => None,
         };
@@ -12369,9 +13330,11 @@ impl VbcCodegen {
         // This is an array element address pattern!
         // Compile depending on element size
 
-        let arr_reg = self.compile_expr(base)?
+        let arr_reg = self
+            .compile_expr(base)?
             .ok_or_else(|| CodegenError::internal("array base has no value"))?;
-        let idx_reg = self.compile_expr(index)?
+        let idx_reg = self
+            .compile_expr(index)?
             .ok_or_else(|| CodegenError::internal("array index has no value"))?;
 
         let dst = self.ctx.alloc_temp();
@@ -12426,10 +13389,10 @@ impl VbcCodegen {
         body: &Expr,
         scrutinee_type: Option<&str>,
     ) -> Option<String> {
-        use verum_ast::expr::ExprKind;
-        use verum_ast::ty::PathSegment;
         use verum_ast::PatternKind;
         use verum_ast::VariantPatternData;
+        use verum_ast::expr::ExprKind;
+        use verum_ast::ty::PathSegment;
 
         let scrutinee_type = scrutinee_type?;
         // Body must be a single-binder reference (e.g. `p`).
@@ -12442,14 +13405,21 @@ impl VbcCodegen {
         };
         // Pattern must be `Variant(binder)` — a single-binder tuple variant.
         let (variant_name, position) = match &pattern.kind {
-            PatternKind::Variant { path, data: Some(VariantPatternData::Tuple(pats)) } => {
+            PatternKind::Variant {
+                path,
+                data: Some(VariantPatternData::Tuple(pats)),
+            } => {
                 let mut found_pos = None;
                 for (i, p) in pats.iter().enumerate() {
-                    if let PatternKind::Ident { name, subpattern, .. } = &p.kind
+                    if let PatternKind::Ident {
+                        name, subpattern, ..
+                    } = &p.kind
                         && subpattern.is_none()
                         && name.name.as_str() == binder.as_str()
                     {
-                        if found_pos.is_some() { return None; }
+                        if found_pos.is_some() {
+                            return None;
+                        }
                         found_pos = Some(i);
                     }
                 }
@@ -12461,21 +13431,27 @@ impl VbcCodegen {
         // scrutinee type, mirroring the discipline used by
         // `compile_pattern_bind`'s tuple arm.
         let inner_types = self.extract_inner_types(scrutinee_type);
-        let info = self.ctx.lookup_function(&variant_name)
+        let info = self
+            .ctx
+            .lookup_function(&variant_name)
             .or_else(|| {
                 let base = crate::codegen::VbcCodegen::strip_generic_args(scrutinee_type);
-                self.ctx.lookup_function(&format!("{}::{}", base, variant_name))
+                self.ctx
+                    .lookup_function(&format!("{}::{}", base, variant_name))
             })
             .or_else(|| {
                 // Simple-name lookup may have been purged by collision
                 // detection — fall back to qualified by scrutinee base.
                 let base = crate::codegen::VbcCodegen::strip_generic_args(scrutinee_type);
-                self.ctx.lookup_function(&format!("{}.{}", base, variant_name))
+                self.ctx
+                    .lookup_function(&format!("{}.{}", base, variant_name))
             })?;
         let is_generic_param = |s: &str| -> bool {
             s.len() <= 2 && s.chars().all(|c| c.is_uppercase() || c.is_numeric())
         };
-        let declared = info.variant_payload_types.as_ref()
+        let declared = info
+            .variant_payload_types
+            .as_ref()
             .and_then(|pt| pt.get(position).cloned())
             .filter(|t| !is_generic_param(t));
         if let Some(t) = declared {
@@ -12504,26 +13480,28 @@ impl VbcCodegen {
                     match &path.segments[0] {
                         PathSegment::Name(ident) => {
                             // Check variable_type_names for tracked variables
-                            if let Some(type_name) = self.ctx.variable_type_names.get(&*ident.name) {
+                            if let Some(type_name) = self.ctx.variable_type_names.get(&*ident.name)
+                            {
                                 return Some(type_name.clone());
                             }
                             // For uppercase names, check if this is a variant constructor
                             // and return the parent type name instead (e.g., Nothing → Maybe)
                             if ident.name.chars().next().is_some_and(|c| c.is_uppercase()) {
                                 if let Some(func_info) = self.ctx.lookup_function(&ident.name)
-                                    && let Some(ref parent_type) = func_info.parent_type_name {
-                                        return Some(parent_type.clone());
-                                    }
+                                    && let Some(ref parent_type) = func_info.parent_type_name
+                                {
+                                    return Some(parent_type.clone());
+                                }
                                 // Simple lookup failed (collision set) — try qualified search
-                                if let Some(parent_type) = self.ctx.find_variant_parent_type_by_args(&ident.name, 0) {
+                                if let Some(parent_type) =
+                                    self.ctx.find_variant_parent_type_by_args(&ident.name, 0)
+                                {
                                     return Some(parent_type);
                                 }
                             }
                             None
                         }
-                        PathSegment::SelfValue => {
-                            self.ctx.variable_type_names.get("self").cloned()
-                        }
+                        PathSegment::SelfValue => self.ctx.variable_type_names.get("self").cloned(),
                         _ => None,
                     }
                 } else {
@@ -12537,12 +13515,16 @@ impl VbcCodegen {
                     // Check if this is a variant constructor — return parent type name
                     // so variable_type_names stores "State" not "Done"
                     if let Some(func_info) = self.ctx.lookup_function(&name)
-                        && let Some(ref parent_type) = func_info.parent_type_name {
-                            return Some(parent_type.clone());
-                        }
+                        && let Some(ref parent_type) = func_info.parent_type_name
+                    {
+                        return Some(parent_type.clone());
+                    }
                     // Simple lookup failed (name may be in collision set).
                     // Use field count to disambiguate and find parent type.
-                    if let Some(parent_type) = self.ctx.find_variant_parent_type_by_args(&name, fields.len()) {
+                    if let Some(parent_type) = self
+                        .ctx
+                        .find_variant_parent_type_by_args(&name, fields.len())
+                    {
                         return Some(parent_type);
                     }
                     Some(name)
@@ -12555,23 +13537,28 @@ impl VbcCodegen {
                 // First check if receiver is an uppercase type name (associated constant)
                 if let ExprKind::Path(path) = &base.kind
                     && path.segments.len() == 1
-                        && let PathSegment::Name(ident) = &path.segments[0] {
-                            let name = &ident.name;
-                            if name.chars().next().is_some_and(|c| c.is_uppercase()) {
-                                return Some(name.to_string());
-                            }
-                        }
+                    && let PathSegment::Name(ident) = &path.segments[0]
+                {
+                    let name = &ident.name;
+                    if name.chars().next().is_some_and(|c| c.is_uppercase()) {
+                        return Some(name.to_string());
+                    }
+                }
                 // Then try to resolve the field's declared type
                 if let Some(base_type) = self.extract_expr_type_name(base) {
                     let field_name = field.name.to_string();
                     // Try exact match first
-                    if let Some(ft) = self.type_field_type_names.get(&(base_type.clone(), field_name.clone())) {
+                    if let Some(ft) = self
+                        .type_field_type_names
+                        .get(&(base_type.clone(), field_name.clone()))
+                    {
                         return Some(ft.clone());
                     }
                     // Try with generic params stripped
                     let stripped = VbcCodegen::strip_generic_args(&base_type);
                     if stripped != base_type {
-                        return self.type_field_type_names
+                        return self
+                            .type_field_type_names
                             .get(&(stripped.to_string(), field_name))
                             .cloned();
                     }
@@ -12587,22 +13574,24 @@ impl VbcCodegen {
                 let wrap_if_heap = |elem: &Expr, elem_type: String| -> String {
                     if let ExprKind::Call { func, args, .. } = &elem.kind
                         && args.len() == 1
-                            && let ExprKind::Path(path) = &func.kind
-                                && path.segments.len() == 1
-                                    && let PathSegment::Name(ident) = &path.segments[0]
-                                        && self.is_allocating_wrapper(ident.name.as_str()) {
-                                            return format!("{}<{}>", ident.name, elem_type);
-                                        }
+                        && let ExprKind::Path(path) = &func.kind
+                        && path.segments.len() == 1
+                        && let PathSegment::Name(ident) = &path.segments[0]
+                        && self.is_allocating_wrapper(ident.name.as_str())
+                    {
+                        return format!("{}<{}>", ident.name, elem_type);
+                    }
                     elem_type
                 };
 
                 match array_expr {
                     ArrayExpr::List(elements) => {
                         if let Some(first_elem) = elements.first()
-                            && let Some(elem_type) = self.extract_expr_type_name(first_elem) {
-                                let elem_type = wrap_if_heap(first_elem, elem_type);
-                                return Some(format!("List<{}>", elem_type));
-                            }
+                            && let Some(elem_type) = self.extract_expr_type_name(first_elem)
+                        {
+                            let elem_type = wrap_if_heap(first_elem, elem_type);
+                            return Some(format!("List<{}>", elem_type));
+                        }
                     }
                     ArrayExpr::Repeat { value, .. } => {
                         if let Some(elem_type) = self.extract_expr_type_name(value) {
@@ -12621,10 +13610,11 @@ impl VbcCodegen {
                 // For Deref on Heap<T>/Shared<T>, unwrap to inner type T
                 if matches!(op, verum_ast::expr::UnOp::Deref)
                     && let Some(ref t) = inner_type
-                        && let Some(inner_t) = Self::extract_element_type(t)
-                            && (t.starts_with("Heap<") || t.starts_with("Shared<")) {
-                                return Some(inner_t);
-                            }
+                    && let Some(inner_t) = Self::extract_element_type(t)
+                    && (t.starts_with("Heap<") || t.starts_with("Shared<"))
+                {
+                    return Some(inner_t);
+                }
                 inner_type
             }
             // Binary operations with operator overloading: a + b returns same type as a
@@ -12669,87 +13659,107 @@ impl VbcCodegen {
                 }
             }
             // Static method call: OSError.new(...) or instance method call returning Maybe
-            ExprKind::MethodCall { receiver, method, args, .. } => {
+            ExprKind::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } => {
                 // First, check if this is a static method call on a type
                 if let ExprKind::Path(path) = &receiver.kind
                     && path.segments.len() == 1
-                        && let PathSegment::Name(ident) = &path.segments[0] {
-                            let name = &ident.name;
-                            if name.chars().next().is_some_and(|c| c.is_uppercase()) {
-                                // Heap.new(x) / Shared.new(x): return the inner type, not "Heap"/"Shared"
-                                // This ensures field access on Heap<T> resolves T's field positions
-                                if self.is_allocating_wrapper(name.as_str()) && method.name.as_str() == "new"
-                                    && let Some(first_arg) = args.first()
-                                        && let Some(inner_type) = self.extract_expr_type_name(first_arg) {
-                                            return Some(inner_type);
-                                        }
-                                // Look up the qualified static method to get its return type
-                                let qualified_method = format!("{}.{}", name, method.name);
-                                if let Some(func_info) = self.ctx.lookup_function(&qualified_method)
-                                    && let Some(ref ret_type_name) = func_info.return_type_name {
-                                        return Some(ret_type_name.clone());
-                                    }
-                                // Check if this is a known static method that returns Maybe<T>
-                                const MAYBE_RETURNING_STATIC_METHODS: &[&str] = &[
-                                    "from_digit",     // Char.from_digit returns Maybe<Char>
-                                    "from_u32",       // Char.from_u32 returns Maybe<Char>
-                                    "try_from",       // Various types
-                                    "from_str",       // Parse methods
-                                    "parse",          // Parse methods
-                                ];
-                                if MAYBE_RETURNING_STATIC_METHODS.contains(&&*method.name) {
-                                    return Some(format!("Maybe<{}>", name));
-                                }
-                                // Fallback to the receiver type if no return type found
-                                return Some(name.to_string());
-                            }
+                    && let PathSegment::Name(ident) = &path.segments[0]
+                {
+                    let name = &ident.name;
+                    if name.chars().next().is_some_and(|c| c.is_uppercase()) {
+                        // Heap.new(x) / Shared.new(x): return the inner type, not "Heap"/"Shared"
+                        // This ensures field access on Heap<T> resolves T's field positions
+                        if self.is_allocating_wrapper(name.as_str())
+                            && method.name.as_str() == "new"
+                            && let Some(first_arg) = args.first()
+                            && let Some(inner_type) = self.extract_expr_type_name(first_arg)
+                        {
+                            return Some(inner_type);
                         }
+                        // Look up the qualified static method to get its return type
+                        let qualified_method = format!("{}.{}", name, method.name);
+                        if let Some(func_info) = self.ctx.lookup_function(&qualified_method)
+                            && let Some(ref ret_type_name) = func_info.return_type_name
+                        {
+                            return Some(ret_type_name.clone());
+                        }
+                        // Check if this is a known static method that returns Maybe<T>
+                        const MAYBE_RETURNING_STATIC_METHODS: &[&str] = &[
+                            "from_digit", // Char.from_digit returns Maybe<Char>
+                            "from_u32",   // Char.from_u32 returns Maybe<Char>
+                            "try_from",   // Various types
+                            "from_str",   // Parse methods
+                            "parse",      // Parse methods
+                        ];
+                        if MAYBE_RETURNING_STATIC_METHODS.contains(&&*method.name) {
+                            return Some(format!("Maybe<{}>", name));
+                        }
+                        // Fallback to the receiver type if no return type found
+                        return Some(name.to_string());
+                    }
+                }
 
                 // Try to look up the method's return type for instance method calls.
                 // If the receiver is a variable with a known type, construct the qualified
                 // method name (e.g., "ValidFd.as_fd") and check for return_type_name.
                 if let ExprKind::Path(path) = &receiver.kind
-                    && path.segments.len() == 1 {
-                        // Handle both named variables and `self` keyword
-                        let receiver_type = match &path.segments[0] {
-                            PathSegment::Name(var_ident) => {
-                                self.ctx.variable_type_names.get(&*var_ident.name).cloned()
+                    && path.segments.len() == 1
+                {
+                    // Handle both named variables and `self` keyword
+                    let receiver_type = match &path.segments[0] {
+                        PathSegment::Name(var_ident) => {
+                            self.ctx.variable_type_names.get(&*var_ident.name).cloned()
+                        }
+                        PathSegment::SelfValue => self.ctx.variable_type_names.get("self").cloned(),
+                        _ => None,
+                    };
+                    if let Some(ref receiver_type) = receiver_type {
+                        // Unwrapping methods: extract inner type from generic wrapper
+                        // e.g., Maybe<Node>.unwrap() → Node, Result<Int, E>.unwrap() → Int
+                        let base_type = VbcCodegen::strip_generic_args(receiver_type);
+                        if matches!(
+                            &*method.name,
+                            "unwrap"
+                                | "expect"
+                                | "unwrap_or"
+                                | "unwrap_or_else"
+                                | "unwrap_or_default"
+                        ) {
+                            let inner_types = self.extract_inner_types(receiver_type);
+                            if let Some(first_inner) = inner_types.first() {
+                                return Some(first_inner.clone());
                             }
-                            PathSegment::SelfValue => {
-                                self.ctx.variable_type_names.get("self").cloned()
+                        }
+                        if method.name.as_str() == "unwrap_err" {
+                            let inner_types = self.extract_inner_types(receiver_type);
+                            if let Some(err_type) = inner_types.get(1) {
+                                return Some(err_type.clone());
                             }
-                            _ => None,
-                        };
-                        if let Some(ref receiver_type) = receiver_type {
-                            // Unwrapping methods: extract inner type from generic wrapper
-                            // e.g., Maybe<Node>.unwrap() → Node, Result<Int, E>.unwrap() → Int
-                            let base_type = VbcCodegen::strip_generic_args(receiver_type);
-                            if matches!(&*method.name, "unwrap" | "expect" | "unwrap_or" | "unwrap_or_else" | "unwrap_or_default") {
-                                let inner_types = self.extract_inner_types(receiver_type);
-                                if let Some(first_inner) = inner_types.first() {
-                                    return Some(first_inner.clone());
-                                }
+                        }
+                        let qualified_method = format!("{}.{}", base_type, method.name);
+                        if let Some(func_info) = self.ctx.lookup_function(&qualified_method)
+                            && let Some(ref ret_type_name) = func_info.return_type_name
+                        {
+                            // Resolve generic return types (e.g., "V" → "Node" from Map<Int, Node>)
+                            if ret_type_name.len() <= 2
+                                && ret_type_name.chars().all(|c| c.is_ascii_uppercase())
+                                && let Some(resolved) = self.resolve_generic_return_type(
+                                    receiver_type,
+                                    base_type,
+                                    ret_type_name,
+                                )
+                            {
+                                return Some(resolved);
                             }
-                            if method.name.as_str() == "unwrap_err" {
-                                let inner_types = self.extract_inner_types(receiver_type);
-                                if let Some(err_type) = inner_types.get(1) {
-                                    return Some(err_type.clone());
-                                }
-                            }
-                            let qualified_method = format!("{}.{}", base_type, method.name);
-                            if let Some(func_info) = self.ctx.lookup_function(&qualified_method)
-                                && let Some(ref ret_type_name) = func_info.return_type_name {
-                                    // Resolve generic return types (e.g., "V" → "Node" from Map<Int, Node>)
-                                    if ret_type_name.len() <= 2 && ret_type_name.chars().all(|c| c.is_ascii_uppercase())
-                                        && let Some(resolved) = self.resolve_generic_return_type(
-                                            receiver_type, base_type, ret_type_name
-                                        ) {
-                                            return Some(resolved);
-                                        }
-                                    return Some(ret_type_name.clone());
-                                }
+                            return Some(ret_type_name.clone());
                         }
                     }
+                }
 
                 // General receiver type inference for non-Path receivers
                 // (e.g., self.entries.offset(idx), field.method(), chained calls)
@@ -12759,16 +13769,18 @@ impl VbcCodegen {
                         let base_type = VbcCodegen::strip_generic_args(rt);
                         let qualified_method = format!("{}.{}", base_type, method.name);
                         if let Some(func_info) = self.ctx.lookup_function(&qualified_method)
-                            && let Some(ref ret_type_name) = func_info.return_type_name {
-                                // Resolve generic return types for non-Path receivers too
-                                if ret_type_name.len() <= 2 && ret_type_name.chars().all(|c| c.is_ascii_uppercase())
-                                    && let Some(resolved) = self.resolve_generic_return_type(
-                                        rt, base_type, ret_type_name
-                                    ) {
-                                        return Some(resolved);
-                                    }
-                                return Some(ret_type_name.clone());
+                            && let Some(ref ret_type_name) = func_info.return_type_name
+                        {
+                            // Resolve generic return types for non-Path receivers too
+                            if ret_type_name.len() <= 2
+                                && ret_type_name.chars().all(|c| c.is_ascii_uppercase())
+                                && let Some(resolved) =
+                                    self.resolve_generic_return_type(rt, base_type, ret_type_name)
+                            {
+                                return Some(resolved);
                             }
+                            return Some(ret_type_name.clone());
+                        }
                         // Pointer methods like offset/add/sub return the same type as receiver
                         if matches!(&*method.name, "offset" | "add" | "sub") {
                             return Some(rt.clone());
@@ -12789,23 +13801,69 @@ impl VbcCodegen {
                 let method_name = &*method.name;
                 const MAYBE_RETURNING_METHODS: &[&str] = &[
                     // Result methods returning Maybe
-                    "ok", "err",
+                    "ok",
+                    "err",
                     // Maybe methods returning Maybe (for chaining)
-                    "map", "and_then", "or_else", "as_ref", "as_mut", "take", "replace", "filter",
-                    "and", "or", "xor", "zip", "zip_with", "flatten",
+                    "map",
+                    "and_then",
+                    "or_else",
+                    "as_ref",
+                    "as_mut",
+                    "take",
+                    "replace",
+                    "filter",
+                    "and",
+                    "or",
+                    "xor",
+                    "zip",
+                    "zip_with",
+                    "flatten",
                     // Iterator methods returning Maybe
-                    "next", "first", "last", "nth", "find", "find_map",
-                    "min", "max", "min_by", "max_by", "min_by_key", "max_by_key",
-                    "reduce", "try_reduce", "try_fold",
+                    "next",
+                    "first",
+                    "last",
+                    "nth",
+                    "find",
+                    "find_map",
+                    "min",
+                    "max",
+                    "min_by",
+                    "max_by",
+                    "min_by_key",
+                    "max_by_key",
+                    "reduce",
+                    "try_reduce",
+                    "try_fold",
                     // Collection methods returning Maybe
-                    "get", "get_mut", "front", "back", "pop", "pop_front", "pop_back",
+                    "get",
+                    "get_mut",
+                    "front",
+                    "back",
+                    "pop",
+                    "pop_front",
+                    "pop_back",
                     // Checked arithmetic returning Maybe
-                    "checked_add", "checked_sub", "checked_mul", "checked_div",
-                    "checked_rem", "checked_neg", "checked_abs",
+                    "checked_add",
+                    "checked_sub",
+                    "checked_mul",
+                    "checked_div",
+                    "checked_rem",
+                    "checked_neg",
+                    "checked_abs",
                     // Data type methods returning Maybe
-                    "as_bool", "as_int", "as_float", "as_text",
-                    "as_array", "as_array_mut", "as_object", "as_object_mut",
-                    "at", "at_mut", "remove", "path", "to_number",
+                    "as_bool",
+                    "as_int",
+                    "as_float",
+                    "as_text",
+                    "as_array",
+                    "as_array_mut",
+                    "as_object",
+                    "as_object_mut",
+                    "at",
+                    "at_mut",
+                    "remove",
+                    "path",
+                    "to_number",
                 ];
                 if MAYBE_RETURNING_METHODS.contains(&method_name) {
                     return Some("Maybe".to_string());
@@ -12816,62 +13874,74 @@ impl VbcCodegen {
             ExprKind::Call { func, args, .. } => {
                 if let ExprKind::Path(path) = &func.kind {
                     if path.segments.len() == 1
-                        && let PathSegment::Name(ident) = &path.segments[0] {
-                            let name = &ident.name;
-                            // Look up the function to check return type
-                            if let Some(func_info) = self.ctx.lookup_function(name) {
-                                // For variant constructors (Some, Ok, Err), try to infer
-                                // generic args from constructor arguments BEFORE falling back
-                                // to bare return_type_name. This way Some(node) → "Maybe<Node>"
-                                // instead of just "Maybe".
-                                if func_info.variant_tag.is_some()
-                                    && let Some(ref parent_type) = func_info.parent_type_name {
-                                        if !args.is_empty() {
-                                            let arg_types: Vec<String> = args.iter()
-                                                .filter_map(|arg| self.extract_expr_type_name(arg))
-                                                .collect();
-                                            if !arg_types.is_empty() {
-                                                return Some(format!("{}<{}>", parent_type, arg_types.join(", ")));
-                                            }
-                                        }
-                                        // No args or can't infer — return bare parent type
-                                        return Some(parent_type.clone());
+                        && let PathSegment::Name(ident) = &path.segments[0]
+                    {
+                        let name = &ident.name;
+                        // Look up the function to check return type
+                        if let Some(func_info) = self.ctx.lookup_function(name) {
+                            // For variant constructors (Some, Ok, Err), try to infer
+                            // generic args from constructor arguments BEFORE falling back
+                            // to bare return_type_name. This way Some(node) → "Maybe<Node>"
+                            // instead of just "Maybe".
+                            if func_info.variant_tag.is_some()
+                                && let Some(ref parent_type) = func_info.parent_type_name
+                            {
+                                if !args.is_empty() {
+                                    let arg_types: Vec<String> = args
+                                        .iter()
+                                        .filter_map(|arg| self.extract_expr_type_name(arg))
+                                        .collect();
+                                    if !arg_types.is_empty() {
+                                        return Some(format!(
+                                            "{}<{}>",
+                                            parent_type,
+                                            arg_types.join(", ")
+                                        ));
                                     }
-                                // Non-variant function: return full type name including generics
-                                if let Some(ref ret_type) = func_info.return_type_name {
-                                    return Some(ret_type.clone());
                                 }
+                                // No args or can't infer — return bare parent type
+                                return Some(parent_type.clone());
                             }
-                            // Heap(x) / Shared(x): return inner type, not "Heap"/"Shared"
-                            // This ensures field access and method calls on Heap-wrapped
-                            // structs resolve T's field positions and methods.
-                            if self.is_allocating_wrapper(name.as_str()) && args.len() == 1
-                                && let Some(inner_type) = self.extract_expr_type_name(&args[0]) {
-                                    return Some(inner_type);
-                                }
-                            // If uppercase and not found as function, it may be a variant
-                            // constructor in the collision set. Try to find the parent type
-                            // via qualified name search so method dispatch resolves correctly.
-                            if name.chars().next().is_some_and(|c| c.is_uppercase()) {
-                                // Search for any "TypeName.VariantName" entry matching this name
-                                let suffix = format!(".{}", name);
-                                for (fn_name, fn_info) in &self.ctx.functions {
-                                    if fn_name.ends_with(&suffix)
-                                        && fn_info.variant_tag.is_some()
-                                        && fn_info.param_count == args.len()
-                                        && let Some(ref parent_type) = fn_info.parent_type_name {
-                                            return Some(parent_type.clone());
-                                        }
-                                }
-                            }
-                            if name.chars().next().is_some_and(|c| c.is_uppercase()) {
-                                return Some(name.to_string());
+                            // Non-variant function: return full type name including generics
+                            if let Some(ref ret_type) = func_info.return_type_name {
+                                return Some(ret_type.clone());
                             }
                         }
+                        // Heap(x) / Shared(x): return inner type, not "Heap"/"Shared"
+                        // This ensures field access and method calls on Heap-wrapped
+                        // structs resolve T's field positions and methods.
+                        if self.is_allocating_wrapper(name.as_str())
+                            && args.len() == 1
+                            && let Some(inner_type) = self.extract_expr_type_name(&args[0])
+                        {
+                            return Some(inner_type);
+                        }
+                        // If uppercase and not found as function, it may be a variant
+                        // constructor in the collision set. Try to find the parent type
+                        // via qualified name search so method dispatch resolves correctly.
+                        if name.chars().next().is_some_and(|c| c.is_uppercase()) {
+                            // Search for any "TypeName.VariantName" entry matching this name
+                            let suffix = format!(".{}", name);
+                            for (fn_name, fn_info) in &self.ctx.functions {
+                                if fn_name.ends_with(&suffix)
+                                    && fn_info.variant_tag.is_some()
+                                    && fn_info.param_count == args.len()
+                                    && let Some(ref parent_type) = fn_info.parent_type_name
+                                {
+                                    return Some(parent_type.clone());
+                                }
+                            }
+                        }
+                        if name.chars().next().is_some_and(|c| c.is_uppercase()) {
+                            return Some(name.to_string());
+                        }
+                    }
                     // Handle qualified paths like module.function()
                     if path.segments.len() > 1 {
                         // Build qualified name from path segments
-                        let qualified_name: String = path.segments.iter()
+                        let qualified_name: String = path
+                            .segments
+                            .iter()
                             .filter_map(|seg| {
                                 if let PathSegment::Name(ident) = seg {
                                     Some(ident.name.to_string())
@@ -12883,9 +13953,10 @@ impl VbcCodegen {
                             .join(".");
 
                         if let Some(func_info) = self.ctx.lookup_function(&qualified_name)
-                            && let Some(ref ret_type) = func_info.return_type_name {
-                                return Some(ret_type.clone());
-                            }
+                            && let Some(ref ret_type) = func_info.return_type_name
+                        {
+                            return Some(ret_type.clone());
+                        }
                     }
                 }
                 None
@@ -12901,9 +13972,7 @@ impl VbcCodegen {
                 Self::extract_element_type(&inner_type)
             }
             // If/else expression: infer type from then branch
-            ExprKind::If { then_branch, .. } => {
-                self.extract_type_from_block(then_branch)
-            }
+            ExprKind::If { then_branch, .. } => self.extract_type_from_block(then_branch),
             // Match expression: infer type from first arm body with a known
             // type. Pattern-introduced bindings (e.g. `Ok(p) => p`) are not
             // yet in `variable_type_names` when we run from the let-RHS
@@ -12915,7 +13984,10 @@ impl VbcCodegen {
             // variable inherits no type and downstream `.field` accesses fall
             // through `resolve_field_index`'s "scan all types, pick most
             // fields" tiebreaker, which silently picks the wrong layout.
-            ExprKind::Match { expr: scrutinee, arms } => {
+            ExprKind::Match {
+                expr: scrutinee,
+                arms,
+            } => {
                 let scrutinee_type = self.extract_expr_type_name(scrutinee);
                 for arm in arms.iter() {
                     if let Some(t) = self.extract_expr_type_name(&arm.body) {
@@ -12924,7 +13996,9 @@ impl VbcCodegen {
                     // Body has no directly-derivable type — try to derive
                     // from the pattern binding using the scrutinee type.
                     if let Some(t) = self.extract_arm_body_type_via_pattern(
-                        &arm.pattern, &arm.body, scrutinee_type.as_deref(),
+                        &arm.pattern,
+                        &arm.body,
+                        scrutinee_type.as_deref(),
                     ) {
                         return Some(t);
                     }
@@ -12935,8 +14009,9 @@ impl VbcCodegen {
             ExprKind::Literal(lit) => {
                 use verum_ast::literal::LiteralKind;
                 match &lit.kind {
-                    LiteralKind::Text(_) | LiteralKind::ByteString(_)
-                        | LiteralKind::InterpolatedString(_) => Some("Text".to_string()),
+                    LiteralKind::Text(_)
+                    | LiteralKind::ByteString(_)
+                    | LiteralKind::InterpolatedString(_) => Some("Text".to_string()),
                     LiteralKind::Float(_) => Some("Float".to_string()),
                     LiteralKind::Bool(_) => Some("Bool".to_string()),
                     LiteralKind::Char(_) | LiteralKind::ByteChar(_) => Some("Char".to_string()),
@@ -12957,9 +14032,10 @@ impl VbcCodegen {
         }
         // Fall back to last statement
         if let Some(last_stmt) = block.stmts.last()
-            && let verum_ast::StmtKind::Expr { expr, .. } = &last_stmt.kind {
-                return self.extract_expr_type_name(expr);
-            }
+            && let verum_ast::StmtKind::Expr { expr, .. } = &last_stmt.kind
+        {
+            return self.extract_expr_type_name(expr);
+        }
         None
     }
 
@@ -12981,9 +14057,7 @@ impl VbcCodegen {
                         PathSegment::Name(ident) => {
                             self.ctx.variable_type_names.get(&*ident.name).cloned()
                         }
-                        PathSegment::SelfValue => {
-                            self.ctx.variable_type_names.get("self").cloned()
-                        }
+                        PathSegment::SelfValue => self.ctx.variable_type_names.get("self").cloned(),
                         _ => None,
                     }
                 } else {
@@ -13013,21 +14087,21 @@ impl VbcCodegen {
             // Bool / Char / Text are never unsigned-intish, so they
             // fall through to `None` (no suffix → no narrower type).
             ExprKind::Literal(lit) => {
-                use verum_ast::literal::{LiteralKind, IntSuffix};
+                use verum_ast::literal::{IntSuffix, LiteralKind};
                 match &lit.kind {
                     LiteralKind::Int(int_lit) => {
                         match int_lit.suffix.as_ref() {
-                            Some(IntSuffix::I8)    => Some("Int8".to_string()),
-                            Some(IntSuffix::I16)   => Some("Int16".to_string()),
-                            Some(IntSuffix::I32)   => Some("Int32".to_string()),
-                            Some(IntSuffix::I64)   => Some("Int64".to_string()),
-                            Some(IntSuffix::I128)  => Some("Int128".to_string()),
+                            Some(IntSuffix::I8) => Some("Int8".to_string()),
+                            Some(IntSuffix::I16) => Some("Int16".to_string()),
+                            Some(IntSuffix::I32) => Some("Int32".to_string()),
+                            Some(IntSuffix::I64) => Some("Int64".to_string()),
+                            Some(IntSuffix::I128) => Some("Int128".to_string()),
                             Some(IntSuffix::Isize) => Some("ISize".to_string()),
-                            Some(IntSuffix::U8)    => Some("UInt8".to_string()),
-                            Some(IntSuffix::U16)   => Some("UInt16".to_string()),
-                            Some(IntSuffix::U32)   => Some("UInt32".to_string()),
-                            Some(IntSuffix::U64)   => Some("UInt64".to_string()),
-                            Some(IntSuffix::U128)  => Some("UInt128".to_string()),
+                            Some(IntSuffix::U8) => Some("UInt8".to_string()),
+                            Some(IntSuffix::U16) => Some("UInt16".to_string()),
+                            Some(IntSuffix::U32) => Some("UInt32".to_string()),
+                            Some(IntSuffix::U64) => Some("UInt64".to_string()),
+                            Some(IntSuffix::U128) => Some("UInt128".to_string()),
                             Some(IntSuffix::Usize) => Some("USize".to_string()),
                             // Custom unit suffix (e.g. `5_km`, `100_ms`) —
                             // not an integer-precision tag; let downstream
@@ -13048,7 +14122,10 @@ impl VbcCodegen {
                 let base_type = self.infer_expr_type_name(base)?;
                 let field_name = field.name.to_string();
                 // Try exact match first
-                if let Some(ft) = self.type_field_type_names.get(&(base_type.clone(), field_name.clone())) {
+                if let Some(ft) = self
+                    .type_field_type_names
+                    .get(&(base_type.clone(), field_name.clone()))
+                {
                     return Some(ft.clone());
                 }
                 // Try with generic params stripped (e.g., "Map<K, V>" → "Map")
@@ -13079,9 +14156,10 @@ impl VbcCodegen {
                     //  declares `unwrap`, not the `Err` constructor).
                     if let Some(info) = self.ctx.lookup_function(&func_name) {
                         if info.variant_tag.is_some()
-                            && let Some(parent) = &info.parent_type_name {
-                                return Some(parent.clone());
-                            }
+                            && let Some(parent) = &info.parent_type_name
+                        {
+                            return Some(parent.clone());
+                        }
                         if let Some(rt) = &info.return_type_name {
                             return Some(rt.clone());
                         }
@@ -13091,66 +14169,80 @@ impl VbcCodegen {
                     //  several types (e.g. user-defined + stdlib),
                     //  `find_variant_parent_type_by_args` resolves
                     //  uniquely by name + arity.
-                    if let Some(parent) = self.ctx
+                    if let Some(parent) = self
+                        .ctx
                         .find_variant_parent_type_by_args(&func_name, args.len())
                     {
                         return Some(parent);
                     }
                     None
-                }
-                else {
+                } else {
                     None
                 }
             }
             // Method call: look up return type
-            ExprKind::MethodCall { receiver, method, args, .. } => {
+            ExprKind::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } => {
                 // Heap.new(x) / Shared.new(x): return the inner type for field access
                 if let ExprKind::Path(ref path) = receiver.kind
                     && path.segments.len() == 1
-                        && let PathSegment::Name(ref ident) = path.segments[0]
-                            && self.is_allocating_wrapper(ident.name.as_str()) && method.name.as_str() == "new"
-                                && let Some(first_arg) = args.first()
-                                    && let Some(inner_type) = self.infer_expr_type_name(first_arg) {
-                                        return Some(inner_type);
-                                    }
+                    && let PathSegment::Name(ref ident) = path.segments[0]
+                    && self.is_allocating_wrapper(ident.name.as_str())
+                    && method.name.as_str() == "new"
+                    && let Some(first_arg) = args.first()
+                    && let Some(inner_type) = self.infer_expr_type_name(first_arg)
+                {
+                    return Some(inner_type);
+                }
                 // Try to get receiver type; if it's a static call like TypeName.method(),
                 // the receiver is the type name itself (not in variable_type_names).
-                let receiver_type = self.infer_expr_type_name(receiver)
-                    .or_else(|| {
-                        // For static calls like MyRange.new() where receiver is a Path("MyRange")
-                        if let ExprKind::Path(ref path) = receiver.kind
-                            && path.segments.len() == 1
-                                && let PathSegment::Name(ref ident) = path.segments[0] {
-                                    let name = ident.name.to_string();
-                                    // Check if it's a known type by looking up TypeName.method in functions
-                                    let qualified = format!("{}.{}", name, method.name);
-                                    if self.ctx.functions.contains_key(&qualified) {
-                                        return Some(name);
-                                    }
-                                }
-                        None
-                    })?;
+                let receiver_type = self.infer_expr_type_name(receiver).or_else(|| {
+                    // For static calls like MyRange.new() where receiver is a Path("MyRange")
+                    if let ExprKind::Path(ref path) = receiver.kind
+                        && path.segments.len() == 1
+                        && let PathSegment::Name(ref ident) = path.segments[0]
+                    {
+                        let name = ident.name.to_string();
+                        // Check if it's a known type by looking up TypeName.method in functions
+                        let qualified = format!("{}.{}", name, method.name);
+                        if self.ctx.functions.contains_key(&qualified) {
+                            return Some(name);
+                        }
+                    }
+                    None
+                })?;
                 // Try exact match first
                 let method_name = format!("{}.{}", receiver_type, method.name);
-                if let Some(ret) = self.ctx.lookup_function(&method_name)
-                    .and_then(|info| info.return_type_name.clone()) {
+                if let Some(ret) = self
+                    .ctx
+                    .lookup_function(&method_name)
+                    .and_then(|info| info.return_type_name.clone())
+                {
                     return Some(ret);
                 }
                 // Try with generic params stripped (e.g., "Slot<K, V>" → "Slot")
                 let base_type = VbcCodegen::strip_generic_args(&receiver_type);
                 if base_type != receiver_type {
                     let method_name = format!("{}.{}", base_type, method.name);
-                    if let Some(ret) = self.ctx.lookup_function(&method_name)
-                        .and_then(|info| info.return_type_name.clone()) {
+                    if let Some(ret) = self
+                        .ctx
+                        .lookup_function(&method_name)
+                        .and_then(|info| info.return_type_name.clone())
+                    {
                         // Resolve generic return types from receiver's type args.
                         // E.g., Map<Int, Node>.get() returns "V" → resolve to "Node"
                         // by matching V to the Map's second type parameter.
-                        if ret.len() <= 2 && ret.chars().all(|c| c.is_ascii_uppercase())
-                            && let Some(resolved) = self.resolve_generic_return_type(
-                                &receiver_type, base_type, &ret
-                            ) {
-                                return Some(resolved);
-                            }
+                        if ret.len() <= 2
+                            && ret.chars().all(|c| c.is_ascii_uppercase())
+                            && let Some(resolved) =
+                                self.resolve_generic_return_type(&receiver_type, base_type, &ret)
+                        {
+                            return Some(resolved);
+                        }
                         return Some(ret);
                     }
                 }
@@ -13176,9 +14268,10 @@ impl VbcCodegen {
                 if matches!(op, verum_ast::expr::UnOp::Deref)
                     && let Some(ref t) = inner_type
                     && (t.starts_with("Heap<") || t.starts_with("Shared<"))
-                    && let Some(inner_t) = Self::extract_element_type(t) {
-                        return Some(inner_t);
-                    }
+                    && let Some(inner_t) = Self::extract_element_type(t)
+                {
+                    return Some(inner_t);
+                }
                 inner_type
             }
             _ => None,
@@ -13194,7 +14287,8 @@ impl VbcCodegen {
     /// Returns 0 if no custom Eq dispatch is needed (fall back to structural comparison).
     fn resolve_eq_protocol_id(&mut self, left: &Expr, right: &Expr) -> u32 {
         // Try left operand first, then right
-        let type_name = self.infer_expr_type_name(left)
+        let type_name = self
+            .infer_expr_type_name(left)
             .or_else(|| self.infer_expr_type_name(right));
 
         if let Some(ref name) = type_name {
@@ -13211,8 +14305,8 @@ impl VbcCodegen {
     /// Tries to extract the array length from a source expression.
     /// Handles cases like `&data` where `data` is an array literal or variable.
     fn try_get_array_length_from_source(&self, expr: &Expr) -> Option<usize> {
-        use verum_ast::expr::ExprKind;
         use verum_ast::expr::ArrayExpr;
+        use verum_ast::expr::ExprKind;
 
         match &expr.kind {
             // Array literal: [1, 2, 3, 4, 5] - get the number of elements
@@ -13234,13 +14328,12 @@ impl VbcCodegen {
                 }
             }
             // Reference expression: &data - recurse to get data's length
-            ExprKind::Unary { op: verum_ast::expr::UnOp::Ref, expr: inner } => {
-                self.try_get_array_length_from_source(inner)
-            }
+            ExprKind::Unary {
+                op: verum_ast::expr::UnOp::Ref,
+                expr: inner,
+            } => self.try_get_array_length_from_source(inner),
             // Cast expression: check inner
-            ExprKind::Cast { expr: inner, .. } => {
-                self.try_get_array_length_from_source(inner)
-            }
+            ExprKind::Cast { expr: inner, .. } => self.try_get_array_length_from_source(inner),
             // Variable reference or other: can't determine statically
             _ => None,
         }
@@ -13253,10 +14346,10 @@ impl VbcCodegen {
     /// This method is now an instance method so it can access the context
     /// for variable type lookups when expressions reference variables.
     pub fn infer_expr_type_kind(&self, expr: &Expr) -> Option<verum_ast::ty::TypeKind> {
-        use verum_ast::expr::ExprKind;
-        use verum_ast::ty::TypeKind;
-        use verum_ast::literal::LiteralKind;
         use crate::codegen::context::VarTypeKind;
+        use verum_ast::expr::ExprKind;
+        use verum_ast::literal::LiteralKind;
+        use verum_ast::ty::TypeKind;
 
         match &expr.kind {
             ExprKind::Literal(lit) => match &lit.kind {
@@ -13302,7 +14395,9 @@ impl VbcCodegen {
             }
             ExprKind::Paren(inner) => self.infer_expr_type_kind(inner),
             ExprKind::Unary { op: _, expr: inner } => self.infer_expr_type_kind(inner),
-            ExprKind::Binary { op, left, right, .. } => {
+            ExprKind::Binary {
+                op, left, right, ..
+            } => {
                 // For arithmetic ops, infer from operands
                 use verum_ast::expr::BinOp;
                 match op {
@@ -13310,22 +14405,34 @@ impl VbcCodegen {
                         let left_kind = self.infer_expr_type_kind(left);
                         let right_kind = self.infer_expr_type_kind(right);
                         // If either is Float, result is Float
-                        if matches!(left_kind, Some(TypeKind::Float)) ||
-                           matches!(right_kind, Some(TypeKind::Float)) {
+                        if matches!(left_kind, Some(TypeKind::Float))
+                            || matches!(right_kind, Some(TypeKind::Float))
+                        {
                             Some(TypeKind::Float)
-                        } else if matches!(left_kind, Some(TypeKind::Int)) ||
-                                  matches!(right_kind, Some(TypeKind::Int)) {
+                        } else if matches!(left_kind, Some(TypeKind::Int))
+                            || matches!(right_kind, Some(TypeKind::Int))
+                        {
                             Some(TypeKind::Int)
                         } else {
                             left_kind.or(right_kind)
                         }
                     }
-                    BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge |
-                    BinOp::And | BinOp::Or => Some(TypeKind::Bool),
+                    BinOp::Eq
+                    | BinOp::Ne
+                    | BinOp::Lt
+                    | BinOp::Le
+                    | BinOp::Gt
+                    | BinOp::Ge
+                    | BinOp::And
+                    | BinOp::Or => Some(TypeKind::Bool),
                     _ => None,
                 }
             }
-            ExprKind::If { then_branch, else_branch, .. } => {
+            ExprKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
                 // Infer from branches
                 if let Some(expr) = &then_branch.expr {
                     return self.infer_expr_type_kind(expr);
@@ -13341,11 +14448,14 @@ impl VbcCodegen {
                     TypeKind::Path(path) => {
                         if let Some(ident) = path.as_ident() {
                             match ident.name.as_str() {
-                                "Float" | "Float64" | "f64" | "Float32" | "f32" => Some(TypeKind::Float),
-                                "Int" | "Int64" | "i64" | "Int32" | "i32"
-                                | "UInt8" | "u8" | "Byte" | "UInt16" | "u16"
-                                | "UInt32" | "u32" | "UInt64" | "u64"
-                                | "UInt128" | "u128" | "UIntSize" | "usize" => Some(TypeKind::Int),
+                                "Float" | "Float64" | "f64" | "Float32" | "f32" => {
+                                    Some(TypeKind::Float)
+                                }
+                                "Int" | "Int64" | "i64" | "Int32" | "i32" | "UInt8" | "u8"
+                                | "Byte" | "UInt16" | "u16" | "UInt32" | "u32" | "UInt64"
+                                | "u64" | "UInt128" | "u128" | "UIntSize" | "usize" => {
+                                    Some(TypeKind::Int)
+                                }
                                 "Bool" => Some(TypeKind::Bool),
                                 "Char" => Some(TypeKind::Char),
                                 _ => Some(ty.kind.clone()),
@@ -13364,76 +14474,101 @@ impl VbcCodegen {
                 if let ExprKind::Path(path) = &func.kind {
                     use verum_ast::ty::PathSegment;
                     if path.segments.len() == 1
-                        && let PathSegment::Name(ident) = &path.segments[0] {
-                            let func_name = ident.name.to_string();
+                        && let PathSegment::Name(ident) = &path.segments[0]
+                    {
+                        let func_name = ident.name.to_string();
 
-                            // Check FFI functions first (they have typed signatures)
-                            if let Some(symbol_id) = self.get_ffi_symbol_id(&func_name)
-                                && let Some(symbol) = self.get_ffi_symbol(symbol_id) {
-                                    // Convert CType return type to TypeKind
-                                    return match symbol.signature.return_type {
-                                        crate::module::CType::Void => Some(TypeKind::Unit),
-                                        crate::module::CType::I8
-                                        | crate::module::CType::I16
-                                        | crate::module::CType::I32
-                                        | crate::module::CType::I64
-                                        | crate::module::CType::U8
-                                        | crate::module::CType::U16
-                                        | crate::module::CType::U32
-                                        | crate::module::CType::U64
-                                        | crate::module::CType::Size
-                                        | crate::module::CType::Ssize => Some(TypeKind::Int),
-                                        crate::module::CType::F32
-                                        | crate::module::CType::F64 => Some(TypeKind::Float),
-                                        crate::module::CType::Bool => Some(TypeKind::Bool),
-                                        crate::module::CType::CStr => Some(TypeKind::Text),
-                                        _ => None, // Pointers, structs, etc.
-                                    };
+                        // Check FFI functions first (they have typed signatures)
+                        if let Some(symbol_id) = self.get_ffi_symbol_id(&func_name)
+                            && let Some(symbol) = self.get_ffi_symbol(symbol_id)
+                        {
+                            // Convert CType return type to TypeKind
+                            return match symbol.signature.return_type {
+                                crate::module::CType::Void => Some(TypeKind::Unit),
+                                crate::module::CType::I8
+                                | crate::module::CType::I16
+                                | crate::module::CType::I32
+                                | crate::module::CType::I64
+                                | crate::module::CType::U8
+                                | crate::module::CType::U16
+                                | crate::module::CType::U32
+                                | crate::module::CType::U64
+                                | crate::module::CType::Size
+                                | crate::module::CType::Ssize => Some(TypeKind::Int),
+                                crate::module::CType::F32 | crate::module::CType::F64 => {
+                                    Some(TypeKind::Float)
                                 }
-
-                            // Handle polymorphic intrinsics that return the same type as their input
-                            // These include abs, neg, signum which work on both Int and Float
-                            if matches!(func_name.as_str(), "abs" | "neg" | "signum") {
-                                // Infer return type from first argument
-                                if let Some(first_arg) = args.first() {
-                                    return self.infer_expr_type_kind(first_arg);
-                                }
-                            }
-
-                            // Check if it's an intrinsic function
-                            if let Some(intrinsic_info) = crate::intrinsics::lookup_intrinsic(&func_name) {
-                                // Infer return type from intrinsic name suffix
-                                // _f64 or _f32 suffix indicates float return type
-                                let name = intrinsic_info.intrinsic.name;
-                                if name.ends_with("_f64") || name.ends_with("_f32")
-                                    || name.starts_with("sqrt") || name.starts_with("sin")
-                                    || name.starts_with("cos") || name.starts_with("tan")
-                                    || name.starts_with("exp") || name.starts_with("log")
-                                    || name.starts_with("pow") || name.starts_with("fabs")
-                                    || name.starts_with("floor") || name.starts_with("ceil")
-                                    || name.starts_with("round") || name.starts_with("trunc")
-                                    || name.starts_with("cbrt") || name.starts_with("hypot")
-                                    || name.starts_with("fma") || name.starts_with("copysign")
-                                    || name.starts_with("minnum") || name.starts_with("maxnum")
-                                    || name.starts_with("sinh") || name.starts_with("cosh")
-                                    || name.starts_with("tanh") || name.starts_with("asinh")
-                                    || name.starts_with("acosh") || name.starts_with("atanh")
-                                    || name.starts_with("asin") || name.starts_with("acos")
-                                    || name.starts_with("atan")
-                                    || name == "f64_infinity" || name == "f64_neg_infinity"
-                                    || name == "f64_nan" || name == "f64_epsilon"
-                                    || name == "f32_infinity" || name == "f32_neg_infinity"
-                                    || name == "f32_nan" || name == "f32_epsilon" {
-                                    return Some(TypeKind::Float);
-                                }
-                            }
-
-                            // Look up regular Verum functions by return type name
-                            if let Some(func_info) = self.ctx.lookup_function(&func_name)
-                                && let Some(ref ret_name) = func_info.return_type_name {
-                                    return self.type_name_to_type_kind(ret_name);
-                                }
+                                crate::module::CType::Bool => Some(TypeKind::Bool),
+                                crate::module::CType::CStr => Some(TypeKind::Text),
+                                _ => None, // Pointers, structs, etc.
+                            };
                         }
+
+                        // Handle polymorphic intrinsics that return the same type as their input
+                        // These include abs, neg, signum which work on both Int and Float
+                        if matches!(func_name.as_str(), "abs" | "neg" | "signum") {
+                            // Infer return type from first argument
+                            if let Some(first_arg) = args.first() {
+                                return self.infer_expr_type_kind(first_arg);
+                            }
+                        }
+
+                        // Check if it's an intrinsic function
+                        if let Some(intrinsic_info) =
+                            crate::intrinsics::lookup_intrinsic(&func_name)
+                        {
+                            // Infer return type from intrinsic name suffix
+                            // _f64 or _f32 suffix indicates float return type
+                            let name = intrinsic_info.intrinsic.name;
+                            if name.ends_with("_f64")
+                                || name.ends_with("_f32")
+                                || name.starts_with("sqrt")
+                                || name.starts_with("sin")
+                                || name.starts_with("cos")
+                                || name.starts_with("tan")
+                                || name.starts_with("exp")
+                                || name.starts_with("log")
+                                || name.starts_with("pow")
+                                || name.starts_with("fabs")
+                                || name.starts_with("floor")
+                                || name.starts_with("ceil")
+                                || name.starts_with("round")
+                                || name.starts_with("trunc")
+                                || name.starts_with("cbrt")
+                                || name.starts_with("hypot")
+                                || name.starts_with("fma")
+                                || name.starts_with("copysign")
+                                || name.starts_with("minnum")
+                                || name.starts_with("maxnum")
+                                || name.starts_with("sinh")
+                                || name.starts_with("cosh")
+                                || name.starts_with("tanh")
+                                || name.starts_with("asinh")
+                                || name.starts_with("acosh")
+                                || name.starts_with("atanh")
+                                || name.starts_with("asin")
+                                || name.starts_with("acos")
+                                || name.starts_with("atan")
+                                || name == "f64_infinity"
+                                || name == "f64_neg_infinity"
+                                || name == "f64_nan"
+                                || name == "f64_epsilon"
+                                || name == "f32_infinity"
+                                || name == "f32_neg_infinity"
+                                || name == "f32_nan"
+                                || name == "f32_epsilon"
+                            {
+                                return Some(TypeKind::Float);
+                            }
+                        }
+
+                        // Look up regular Verum functions by return type name
+                        if let Some(func_info) = self.ctx.lookup_function(&func_name)
+                            && let Some(ref ret_name) = func_info.return_type_name
+                        {
+                            return self.type_name_to_type_kind(ret_name);
+                        }
+                    }
                 }
                 None
             }
@@ -13441,9 +14576,10 @@ impl VbcCodegen {
             // Field access — look up the field type from the struct definition
             ExprKind::Field { expr: base, field } => {
                 if let Some(base_type) = self.infer_expr_type_name(base)
-                    && let Some(field_type) = self.field_type_name(&base_type, &field.name) {
-                        return self.type_name_to_type_kind(field_type);
-                    }
+                    && let Some(field_type) = self.field_type_name(&base_type, &field.name)
+                {
+                    return self.type_name_to_type_kind(field_type);
+                }
                 None
             }
 
@@ -13451,9 +14587,10 @@ impl VbcCodegen {
             ExprKind::TupleIndex { expr: base, index } => {
                 if *index == 0
                     && let Some(base_type) = self.infer_expr_type_name(base)
-                        && let Some(inner) = self.ctx.newtype_inner_type.get(&base_type) {
-                            return self.type_name_to_type_kind(inner);
-                        }
+                    && let Some(inner) = self.ctx.newtype_inner_type.get(&base_type)
+                {
+                    return self.type_name_to_type_kind(inner);
+                }
                 None
             }
 
@@ -13466,9 +14603,8 @@ impl VbcCodegen {
     fn type_name_to_type_kind(&self, name: &str) -> Option<verum_ast::ty::TypeKind> {
         use verum_ast::ty::TypeKind;
         match name {
-            "Int" | "Int64" | "Int32" | "Int16" | "Int8"
-            | "UInt64" | "UInt32" | "UInt16" | "UInt8"
-            | "ISize" | "USize" | "Byte" => Some(TypeKind::Int),
+            "Int" | "Int64" | "Int32" | "Int16" | "Int8" | "UInt64" | "UInt32" | "UInt16"
+            | "UInt8" | "ISize" | "USize" | "Byte" => Some(TypeKind::Int),
             "Float" | "Float64" | "Float32" => Some(TypeKind::Float),
             "Bool" => Some(TypeKind::Bool),
             "Text" => Some(TypeKind::Text),
@@ -13480,17 +14616,18 @@ impl VbcCodegen {
     /// Checks whether an expression has an unsigned integer type (UInt8/Byte, UInt64, etc.).
     /// Used to select unsigned comparison instructions (CmpU) instead of signed (CmpI).
     pub fn infer_expr_is_unsigned(&self, expr: &Expr) -> bool {
-        use verum_ast::expr::ExprKind;
         use crate::codegen::context::VarTypeKind;
+        use verum_ast::expr::ExprKind;
 
         match &expr.kind {
             ExprKind::Path(path) => {
                 use verum_ast::ty::PathSegment;
                 if path.segments.len() == 1
-                    && let PathSegment::Name(ident) = &path.segments[0] {
-                        let var_type = self.ctx.get_variable_type(&ident.name);
-                        return matches!(var_type, VarTypeKind::UInt64 | VarTypeKind::Byte);
-                    }
+                    && let PathSegment::Name(ident) = &path.segments[0]
+                {
+                    let var_type = self.ctx.get_variable_type(&ident.name);
+                    return matches!(var_type, VarTypeKind::UInt64 | VarTypeKind::Byte);
+                }
                 false
             }
             ExprKind::Paren(inner) => self.infer_expr_is_unsigned(inner),
@@ -13546,11 +14683,9 @@ impl VbcCodegen {
         // Set inclusive flag (index 2)
         let inclusive_reg = self.ctx.alloc_temp();
         if inclusive {
-            self.ctx
-                .emit(Instruction::LoadTrue { dst: inclusive_reg });
+            self.ctx.emit(Instruction::LoadTrue { dst: inclusive_reg });
         } else {
-            self.ctx
-                .emit(Instruction::LoadFalse { dst: inclusive_reg });
+            self.ctx.emit(Instruction::LoadFalse { dst: inclusive_reg });
         }
         let field_idx = 2;
         self.ctx.emit(Instruction::SetF {
@@ -13654,30 +14789,33 @@ impl VbcCodegen {
 
         // Step 3b: Extract parameter types from AST for proper type tracking
         // This ensures Text/List/Map parameters in closures get correct TypeRef
-        let param_type_names: Vec<Option<String>> = params.iter().map(|p| {
-            p.ty.as_ref().map(|t| {
-                // Extract the type name for register tracking (Text, List, Map, etc.)
-                match &t.kind {
-                    // Primitive types have their own TypeKind variants
-                    verum_ast::TypeKind::Text => "Text".to_string(),
-                    verum_ast::TypeKind::Int => "Int".to_string(),
-                    verum_ast::TypeKind::Float => "Float".to_string(),
-                    verum_ast::TypeKind::Bool => "Bool".to_string(),
-                    // Named types (List, Map, Set, etc.) use Path
-                    verum_ast::TypeKind::Path(path) => {
-                        if let Some(seg) = path.segments.last() {
-                            match seg {
-                                verum_ast::PathSegment::Name(ident) => ident.name.to_string(),
-                                _ => String::new(),
+        let param_type_names: Vec<Option<String>> = params
+            .iter()
+            .map(|p| {
+                p.ty.as_ref().map(|t| {
+                    // Extract the type name for register tracking (Text, List, Map, etc.)
+                    match &t.kind {
+                        // Primitive types have their own TypeKind variants
+                        verum_ast::TypeKind::Text => "Text".to_string(),
+                        verum_ast::TypeKind::Int => "Int".to_string(),
+                        verum_ast::TypeKind::Float => "Float".to_string(),
+                        verum_ast::TypeKind::Bool => "Bool".to_string(),
+                        // Named types (List, Map, Set, etc.) use Path
+                        verum_ast::TypeKind::Path(path) => {
+                            if let Some(seg) = path.segments.last() {
+                                match seg {
+                                    verum_ast::PathSegment::Name(ident) => ident.name.to_string(),
+                                    _ => String::new(),
+                                }
+                            } else {
+                                String::new()
                             }
-                        } else {
-                            String::new()
                         }
+                        _ => String::new(),
                     }
-                    _ => String::new(),
-                }
+                })
             })
-        }).collect();
+            .collect();
 
         // Step 4: Register and compile the closure body as a new function
         // The closure function has captures as first params, then user params
@@ -13702,7 +14840,11 @@ impl VbcCodegen {
     }
 
     /// Collects all variables bound by a pattern into the provided Vec.
-    fn collect_pattern_bound_vars(&self, pattern: &verum_ast::Pattern, bound_vars: &mut Vec<String>) {
+    fn collect_pattern_bound_vars(
+        &self,
+        pattern: &verum_ast::Pattern,
+        bound_vars: &mut Vec<String>,
+    ) {
         use verum_ast::PatternKind;
         match &pattern.kind {
             PatternKind::Ident { name, .. } => {
@@ -13716,7 +14858,9 @@ impl VbcCodegen {
             PatternKind::Paren(inner) => {
                 self.collect_pattern_bound_vars(inner, bound_vars);
             }
-            PatternKind::Variant { data: Some(data), .. } => {
+            PatternKind::Variant {
+                data: Some(data), ..
+            } => {
                 use verum_ast::VariantPatternData;
                 match data {
                     VariantPatternData::Tuple(pats) => {
@@ -13802,12 +14946,10 @@ impl VbcCodegen {
         let param_names: Vec<String> = all_params.iter().map(|(n, _)| n.clone()).collect();
 
         // Convert AST return type to TypeRef for the function descriptor.
-        let closure_return_type_ref = return_type_ast
-            .map(|ty| self.ast_type_to_type_ref(ty));
+        let closure_return_type_ref = return_type_ast.map(|ty| self.ast_type_to_type_ref(ty));
 
         // Compute the return type name string for type tracking.
-        let closure_return_type_name = return_type_ast
-            .map(|ty| self.type_to_simple_name(ty));
+        let closure_return_type_name = return_type_ast.map(|ty| self.type_to_simple_name(ty));
 
         // Register the closure function
         let info = super::FunctionInfo {
@@ -13820,7 +14962,12 @@ impl VbcCodegen {
             contexts: Vec::new(),
             return_type: closure_return_type_ref.clone(),
             yield_type: None,
-            intrinsic_name: None, variant_tag: None, parent_type_name: None, variant_payload_types: None, is_partial_pattern: false, takes_self_mut_ref: false,
+            intrinsic_name: None,
+            variant_tag: None,
+            parent_type_name: None,
+            variant_payload_types: None,
+            is_partial_pattern: false,
+            takes_self_mut_ref: false,
             return_type_name: closure_return_type_name,
             return_type_inner: None,
         };
@@ -14026,7 +15173,6 @@ impl VbcCodegen {
         self.ctx.tier_context.get_tier(expr_id)
     }
 
-
     /// Promote a register-resident value to a non-recyclable slot before
     /// emitting a CBGR reference to it.
     ///
@@ -14082,7 +15228,10 @@ impl VbcCodegen {
             return inner_reg;
         }
         let stable = self.ctx.registers.alloc_fresh();
-        self.ctx.emit(Instruction::Mov { dst: stable, src: inner_reg });
+        self.ctx.emit(Instruction::Mov {
+            dst: stable,
+            src: inner_reg,
+        });
         stable
     }
 
@@ -14258,7 +15407,7 @@ impl VbcCodegen {
         let inner_type = self.infer_expr_type_name(base).and_then(|t| {
             // Strip Maybe<...> wrapper to get inner type name
             if t.starts_with("Maybe<") && t.ends_with('>') {
-                Some(t[6..t.len()-1].to_string())
+                Some(t[6..t.len() - 1].to_string())
             } else {
                 None
             }
@@ -14292,11 +15441,7 @@ impl VbcCodegen {
     ///
 
     /// Equivalent to g(f(x)) but reads left-to-right.
-    fn compile_pipeline(
-        &mut self,
-        left: &Expr,
-        right: &Expr,
-    ) -> CodegenResult<Option<Reg>> {
+    fn compile_pipeline(&mut self, left: &Expr, right: &Expr) -> CodegenResult<Option<Reg>> {
         // Evaluate left (the argument)
         let arg_reg = self
             .compile_expr(left)?
@@ -14320,10 +15465,12 @@ impl VbcCodegen {
                     .ctx
                     .lookup_function(&func_name)
                     .map(|f| f.id)
-                    .ok_or_else(|| CodegenError::with_span(
-                        CodegenErrorKind::UndefinedFunction(func_name),
-                        right.span,
-                    ))?;
+                    .ok_or_else(|| {
+                        CodegenError::with_span(
+                            CodegenErrorKind::UndefinedFunction(func_name),
+                            right.span,
+                        )
+                    })?;
 
                 // Set up argument in contiguous register for Call
                 let dest = self.ctx.alloc_temp();
@@ -14361,11 +15508,7 @@ impl VbcCodegen {
     ///
 
     /// Returns a if a is not None, otherwise returns b.
-    fn compile_null_coalesce(
-        &mut self,
-        left: &Expr,
-        right: &Expr,
-    ) -> CodegenResult<Option<Reg>> {
+    fn compile_null_coalesce(&mut self, left: &Expr, right: &Expr) -> CodegenResult<Option<Reg>> {
         let dest = self.ctx.alloc_temp();
         let end_label = self.ctx.new_label("coalesce_end");
 
@@ -14384,8 +15527,10 @@ impl VbcCodegen {
         // If Some (tag != 0), extract value and skip right
         let is_some = self.ctx.alloc_temp();
         let zero_reg = self.ctx.alloc_temp();
-        self.ctx
-            .emit(Instruction::LoadI { dst: zero_reg, value: 0 });
+        self.ctx.emit(Instruction::LoadI {
+            dst: zero_reg,
+            value: 0,
+        });
         self.ctx.emit(Instruction::CmpI {
             op: CompareOp::Ne,
             dst: is_some,
@@ -14414,8 +15559,10 @@ impl VbcCodegen {
             .compile_expr(right)?
             .ok_or_else(|| CodegenError::internal("coalesce right has no value"))?;
 
-        self.ctx
-            .emit(Instruction::Mov { dst: dest, src: right_reg });
+        self.ctx.emit(Instruction::Mov {
+            dst: dest,
+            src: right_reg,
+        });
         self.ctx.free_temp(right_reg);
 
         self.ctx.define_label(&end_label);
@@ -14454,8 +15601,10 @@ impl VbcCodegen {
 
         // Negate if needed
         if negated {
-            self.ctx
-                .emit(Instruction::Not { dst: result, src: result });
+            self.ctx.emit(Instruction::Not {
+                dst: result,
+                src: result,
+            });
         }
 
         self.ctx.free_temp(scrutinee_reg);
@@ -14507,8 +15656,10 @@ impl VbcCodegen {
         // Compile try block
         let try_result = self.compile_expr(try_block)?;
         if let Some(try_reg) = try_result {
-            self.ctx
-                .emit(Instruction::Mov { dst: dest, src: try_reg });
+            self.ctx.emit(Instruction::Mov {
+                dst: dest,
+                src: try_reg,
+            });
             self.ctx.free_temp(try_reg);
         }
 
@@ -14558,8 +15709,10 @@ impl VbcCodegen {
                     // Compile arm body
                     let arm_result = self.compile_expr(&arm.body)?;
                     if let Some(arm_reg) = arm_result {
-                        self.ctx
-                            .emit(Instruction::Mov { dst: dest, src: arm_reg });
+                        self.ctx.emit(Instruction::Mov {
+                            dst: dest,
+                            src: arm_reg,
+                        });
                         self.ctx.free_temp(arm_reg);
                     }
 
@@ -14578,7 +15731,9 @@ impl VbcCodegen {
                 }
 
                 // If no arm matched, re-throw the exception
-                self.ctx.emit(Instruction::Throw { error: exception_reg });
+                self.ctx.emit(Instruction::Throw {
+                    error: exception_reg,
+                });
             }
             RecoverBody::Closure { param, body, .. } => {
                 // Closure syntax: recover |e| expr
@@ -14598,8 +15753,10 @@ impl VbcCodegen {
                 // Compile body
                 let body_result = self.compile_expr(body)?;
                 if let Some(body_reg) = body_result {
-                    self.ctx
-                        .emit(Instruction::Mov { dst: dest, src: body_reg });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: dest,
+                        src: body_reg,
+                    });
                     self.ctx.free_temp(body_reg);
                 }
 
@@ -14633,8 +15790,10 @@ impl VbcCodegen {
         // Compile try block
         let try_result = self.compile_expr(try_block)?;
         if let Some(try_reg) = try_result {
-            self.ctx
-                .emit(Instruction::Mov { dst: dest, src: try_reg });
+            self.ctx.emit(Instruction::Mov {
+                dst: dest,
+                src: try_reg,
+            });
             self.ctx.free_temp(try_reg);
         }
 
@@ -14690,7 +15849,8 @@ impl VbcCodegen {
 
     /// Grammar: inject_expr = 'inject' , type_path ;
     fn compile_inject(&mut self, type_path: &verum_ast::ty::Path) -> CodegenResult<Option<Reg>> {
-        let type_name = type_path.as_ident()
+        let type_name = type_path
+            .as_ident()
             .map(|i| i.name.to_string())
             .unwrap_or_else(|| format!("{:?}", type_path));
 
@@ -14707,17 +15867,16 @@ impl VbcCodegen {
         // Transient fallback: if CtxGet returned nil AND a constructor exists,
         // call the constructor to create a fresh instance with auto-resolved deps.
         let constructor_name = format!("{}.new", type_name);
-        let constructor_info = self.ctx.lookup_function(&constructor_name)
-            .map(|fi| {
-                // Prefer param_type_names for DI resolution (type-based lookup).
-                // Fall back to param_names if type names not available.
-                let names = if fi.param_type_names.is_empty() {
-                    fi.param_names.clone()
-                } else {
-                    fi.param_type_names.clone()
-                };
-                (fi.id, fi.param_count, names)
-            });
+        let constructor_info = self.ctx.lookup_function(&constructor_name).map(|fi| {
+            // Prefer param_type_names for DI resolution (type-based lookup).
+            // Fall back to param_names if type names not available.
+            let names = if fi.param_type_names.is_empty() {
+                fi.param_names.clone()
+            } else {
+                fi.param_type_names.clone()
+            };
+            (fi.id, fi.param_count, names)
+        });
         if let Some((func_id, param_count, param_names)) = constructor_info {
             let skip_label = self.ctx.new_label("inject_ok");
 
@@ -14731,9 +15890,11 @@ impl VbcCodegen {
             });
 
             // If not nil, skip constructor call
-            self.ctx.emit_forward_jump(&skip_label, |offset| {
-                Instruction::JmpIf { cond: check, offset }
-            });
+            self.ctx
+                .emit_forward_jump(&skip_label, |offset| Instruction::JmpIf {
+                    cond: check,
+                    offset,
+                });
 
             // Nil → call constructor with auto-resolved dependencies.
             let fresh = self.ctx.alloc_temp();
@@ -14742,14 +15903,21 @@ impl VbcCodegen {
                 self.ctx.emit(Instruction::Call {
                     dst: fresh,
                     func_id: func_id.0,
-                    args: crate::instruction::RegRange { start: Reg(0), count: 0 },
+                    args: crate::instruction::RegRange {
+                        start: Reg(0),
+                        count: 0,
+                    },
                 });
             } else {
                 // Auto-resolve: each constructor param is injected via CtxGet.
                 // E.g., @inject fn new(db: DatabasePool, log: Logger) → CtxGet each.
                 let args_start = self.ctx.alloc_temp();
                 for i in 0..param_count {
-                    let dep_reg = if i == 0 { args_start } else { self.ctx.alloc_temp() };
+                    let dep_reg = if i == 0 {
+                        args_start
+                    } else {
+                        self.ctx.alloc_temp()
+                    };
                     let dep_name = if i < param_names.len() {
                         param_names[i].clone()
                     } else {
@@ -14770,7 +15938,10 @@ impl VbcCodegen {
                     },
                 });
             }
-            self.ctx.emit(Instruction::Mov { dst: result, src: fresh });
+            self.ctx.emit(Instruction::Mov {
+                dst: result,
+                src: fresh,
+            });
             self.ctx.free_temp(fresh);
 
             self.ctx.define_label(&skip_label);
@@ -14790,65 +15961,74 @@ impl VbcCodegen {
         // If the spawned expression is a function call, emit a proper Spawn
         // instruction with the function ID and arguments. Otherwise, fall back
         // to compiling the expression inline (eager evaluation).
-        if let ExprKind::Call { func: callee, args, .. } = &expr.kind
-            && let ExprKind::Path(ref path) = callee.kind {
-                // Extract function name from path segments (same as compile_call)
-                let func_name: String = if path.segments.len() == 1 {
-                    match &path.segments[0] {
-                        PathSegment::Name(ident) => ident.name.to_string(),
-                        _ => String::new(),
+        if let ExprKind::Call {
+            func: callee, args, ..
+        } = &expr.kind
+            && let ExprKind::Path(ref path) = callee.kind
+        {
+            // Extract function name from path segments (same as compile_call)
+            let func_name: String = if path.segments.len() == 1 {
+                match &path.segments[0] {
+                    PathSegment::Name(ident) => ident.name.to_string(),
+                    _ => String::new(),
+                }
+            } else {
+                path.segments
+                    .iter()
+                    .filter_map(|s| match s {
+                        PathSegment::Name(ident) => Some(ident.name.as_str()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("::")
+            };
+            if !func_name.is_empty()
+                && let Some(func) = self.ctx.lookup_function(&func_name)
+            {
+                let func_id = func.id.0;
+
+                // Phase 1: Compile all argument expressions
+                let mut arg_results: Vec<Reg> = Vec::with_capacity(args.len());
+                for arg in args.iter() {
+                    let reg = self
+                        .compile_expr(arg)?
+                        .ok_or_else(|| CodegenError::internal("spawn arg has no value"))?;
+                    arg_results.push(reg);
+                }
+
+                // Phase 2: Allocate consecutive fresh registers
+                let args_start = if !args.is_empty() {
+                    let first = self.ctx.registers.alloc_fresh();
+                    for _ in 1..args.len() {
+                        self.ctx.registers.alloc_fresh();
                     }
+
+                    // Phase 3: Move results into consecutive registers
+                    for (i, &src) in arg_results.iter().enumerate() {
+                        let dst = Reg(first.0 + i as u16);
+                        if src != dst {
+                            self.ctx.emit(Instruction::Mov { dst, src });
+                            self.ctx.free_temp(src);
+                        }
+                    }
+                    first
                 } else {
-                    path.segments.iter()
-                        .filter_map(|s| match s {
-                            PathSegment::Name(ident) => Some(ident.name.as_str()),
-                            _ => None,
-                        })
-                        .collect::<Vec<_>>()
-                        .join("::")
+                    Reg(0)
                 };
-                if !func_name.is_empty()
-                && let Some(func) = self.ctx.lookup_function(&func_name) {
-                    let func_id = func.id.0;
 
-                    // Phase 1: Compile all argument expressions
-                    let mut arg_results: Vec<Reg> = Vec::with_capacity(args.len());
-                    for arg in args.iter() {
-                        let reg = self.compile_expr(arg)?
-                            .ok_or_else(|| CodegenError::internal("spawn arg has no value"))?;
-                        arg_results.push(reg);
-                    }
+                let dst = self.ctx.alloc_temp();
+                self.ctx.emit(Instruction::Spawn {
+                    dst,
+                    func_id,
+                    args: RegRange {
+                        start: args_start,
+                        count: args.len() as u8,
+                    },
+                });
 
-                    // Phase 2: Allocate consecutive fresh registers
-                    let args_start = if !args.is_empty() {
-                        let first = self.ctx.registers.alloc_fresh();
-                        for _ in 1..args.len() {
-                            self.ctx.registers.alloc_fresh();
-                        }
-
-                        // Phase 3: Move results into consecutive registers
-                        for (i, &src) in arg_results.iter().enumerate() {
-                            let dst = Reg(first.0 + i as u16);
-                            if src != dst {
-                                self.ctx.emit(Instruction::Mov { dst, src });
-                                self.ctx.free_temp(src);
-                            }
-                        }
-                        first
-                    } else {
-                        Reg(0)
-                    };
-
-                    let dst = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::Spawn {
-                        dst,
-                        func_id,
-                        args: RegRange { start: args_start, count: args.len() as u8 },
-                    });
-
-                    return Ok(Some(dst));
-                } // end !func_name.is_empty()
-            }
+                return Ok(Some(dst));
+            } // end !func_name.is_empty()
+        }
 
         // Non-call expression (block, closure, etc.) — wrap in a synthetic function
         // and spawn it as a real thread with captured variables as arguments.
@@ -14862,9 +16042,7 @@ impl VbcCodegen {
             if let Some(info) = self.ctx.lookup_var(var_name) {
                 capture_regs.push(info.reg);
                 capture_names.push((var_name.clone(), info.is_mutable));
-                capture_type_names.push(
-                    self.ctx.variable_type_names.get(var_name).cloned()
-                );
+                capture_type_names.push(self.ctx.variable_type_names.get(var_name).cloned());
             }
         }
 
@@ -14890,8 +16068,11 @@ impl VbcCodegen {
             contexts: Vec::new(),
             return_type: None,
             yield_type: None,
-            intrinsic_name: None, variant_tag: None, parent_type_name: None,
-            variant_payload_types: None, is_partial_pattern: false,
+            intrinsic_name: None,
+            variant_tag: None,
+            parent_type_name: None,
+            variant_payload_types: None,
+            is_partial_pattern: false,
             takes_self_mut_ref: false,
             return_type_name: None,
             return_type_inner: None,
@@ -14906,21 +16087,27 @@ impl VbcCodegen {
         let saved_return_type = self.ctx.return_type.clone();
         let saved_closure_ctx = self.ctx.save_closure_context();
 
-        self.ctx.begin_function(&spawn_func_name, &capture_names, None);
+        self.ctx
+            .begin_function(&spawn_func_name, &capture_names, None);
         // Inject captured variable type names for VBC codegen (method dispatch, etc.)
         // EXCEPT for types handled by built-in opcodes — those use compiled .vr methods
         // with &self ABI that doesn't match raw i64 spawn parameters. For these types, we only
         // set the TypeRef in the ParamDescriptor so LLVM lowering marks the correct register types.
         for (i, (name, _)) in capture_names.iter().enumerate() {
             if let Some(Some(type_name)) = capture_type_names.get(i) {
-                let base = if let Some(pos) = type_name.find('<') { &type_name[..pos] } else { type_name.as_str() };
+                let base = if let Some(pos) = type_name.find('<') {
+                    &type_name[..pos]
+                } else {
+                    type_name.as_str()
+                };
                 match base {
-                    "List" | "Map" | "Set" | "Deque" | "Channel"
-                    | "Text" | "String" => {
+                    "List" | "Map" | "Set" | "Deque" | "Channel" | "Text" | "String" => {
                         // Skip — let built-in opcodes handle these via LLVM register tracking
                     }
                     _ => {
-                        self.ctx.variable_type_names.insert(name.clone(), type_name.clone());
+                        self.ctx
+                            .variable_type_names
+                            .insert(name.clone(), type_name.clone());
                     }
                 }
             }
@@ -14953,48 +16140,38 @@ impl VbcCodegen {
             let type_name = capture_type_names.get(i).and_then(|t| t.as_deref());
             let base_type = type_name.map(|t| {
                 // Strip generic args: "List<Int>" → "List", "Map<K,V>" → "Map"
-                if let Some(pos) = t.find('<') { &t[..pos] } else { t }
+                if let Some(pos) = t.find('<') {
+                    &t[..pos]
+                } else {
+                    t
+                }
             });
             let type_ref = match base_type {
                 Some("Text") | Some("String") => {
                     crate::types::TypeRef::Concrete(crate::types::TypeId::TEXT)
                 }
-                Some("List") => {
-                    crate::types::TypeRef::Instantiated {
-                        base: crate::types::TypeId::LIST,
-                        args: vec![crate::types::TypeRef::Concrete(crate::types::TypeId::INT)],
-                    }
-                }
-                Some("Float") => {
-                    crate::types::TypeRef::Concrete(crate::types::TypeId::FLOAT)
-                }
-                Some("Bool") => {
-                    crate::types::TypeRef::Concrete(crate::types::TypeId::BOOL)
-                }
-                Some("Map") => {
-                    crate::types::TypeRef::Instantiated {
-                        base: crate::types::TypeId::MAP,
-                        args: vec![
-                            crate::types::TypeRef::Concrete(crate::types::TypeId::INT),
-                            crate::types::TypeRef::Concrete(crate::types::TypeId::INT),
-                        ],
-                    }
-                }
-                Some("Channel") => {
-                    crate::types::TypeRef::Concrete(crate::types::TypeId::CHANNEL)
-                }
-                Some("Set") => {
-                    crate::types::TypeRef::Instantiated {
-                        base: crate::types::TypeId::SET,
-                        args: vec![crate::types::TypeRef::Concrete(crate::types::TypeId::INT)],
-                    }
-                }
-                Some("Deque") => {
-                    crate::types::TypeRef::Instantiated {
-                        base: crate::types::TypeId::DEQUE,
-                        args: vec![crate::types::TypeRef::Concrete(crate::types::TypeId::INT)],
-                    }
-                }
+                Some("List") => crate::types::TypeRef::Instantiated {
+                    base: crate::types::TypeId::LIST,
+                    args: vec![crate::types::TypeRef::Concrete(crate::types::TypeId::INT)],
+                },
+                Some("Float") => crate::types::TypeRef::Concrete(crate::types::TypeId::FLOAT),
+                Some("Bool") => crate::types::TypeRef::Concrete(crate::types::TypeId::BOOL),
+                Some("Map") => crate::types::TypeRef::Instantiated {
+                    base: crate::types::TypeId::MAP,
+                    args: vec![
+                        crate::types::TypeRef::Concrete(crate::types::TypeId::INT),
+                        crate::types::TypeRef::Concrete(crate::types::TypeId::INT),
+                    ],
+                },
+                Some("Channel") => crate::types::TypeRef::Concrete(crate::types::TypeId::CHANNEL),
+                Some("Set") => crate::types::TypeRef::Instantiated {
+                    base: crate::types::TypeId::SET,
+                    args: vec![crate::types::TypeRef::Concrete(crate::types::TypeId::INT)],
+                },
+                Some("Deque") => crate::types::TypeRef::Instantiated {
+                    base: crate::types::TypeId::DEQUE,
+                    args: vec![crate::types::TypeRef::Concrete(crate::types::TypeId::INT)],
+                },
                 _ => crate::types::TypeRef::Concrete(crate::types::TypeId::INT),
             };
             descriptor.params.push(crate::module::ParamDescriptor {
@@ -15029,7 +16206,10 @@ impl VbcCodegen {
         self.ctx.emit(Instruction::Spawn {
             dst,
             func_id,
-            args: RegRange { start: args_start, count: capture_regs.len() as u8 },
+            args: RegRange {
+                start: args_start,
+                count: capture_regs.len() as u8,
+            },
         });
         Ok(Some(dst))
     }
@@ -15127,8 +16307,10 @@ impl VbcCodegen {
             // Compile arm body
             let arm_result = self.compile_expr(&arm.body)?;
             if let Some(arm_reg) = arm_result {
-                self.ctx
-                    .emit(Instruction::Mov { dst: dest, src: arm_reg });
+                self.ctx.emit(Instruction::Mov {
+                    dst: dest,
+                    src: arm_reg,
+                });
                 self.ctx.free_temp(arm_reg);
             }
 
@@ -15192,12 +16374,15 @@ impl VbcCodegen {
         // === Setup nursery context ===
         // Allocate nursery handle that tracks spawned tasks
         let nursery_handle = self.ctx.alloc_temp();
-        self.ctx.emit(Instruction::NurseryInit { dst: nursery_handle });
+        self.ctx.emit(Instruction::NurseryInit {
+            dst: nursery_handle,
+        });
 
         // Configure nursery options
         // 1. Timeout
         if let verum_common::Maybe::Some(ref timeout_expr) = options.timeout {
-            let timeout_reg = self.compile_expr(timeout_expr)?
+            let timeout_reg = self
+                .compile_expr(timeout_expr)?
                 .ok_or_else(|| CodegenError::internal("nursery timeout has no value"))?;
             self.ctx.emit(Instruction::NurserySetTimeout {
                 nursery: nursery_handle,
@@ -15208,7 +16393,8 @@ impl VbcCodegen {
 
         // 2. Max tasks limit
         if let verum_common::Maybe::Some(ref max_tasks_expr) = options.max_tasks {
-            let max_tasks_reg = self.compile_expr(max_tasks_expr)?
+            let max_tasks_reg = self
+                .compile_expr(max_tasks_expr)?
                 .ok_or_else(|| CodegenError::internal("nursery max_tasks has no value"))?;
             self.ctx.emit(Instruction::NurserySetMaxTasks {
                 nursery: nursery_handle,
@@ -15238,7 +16424,9 @@ impl VbcCodegen {
         self.ctx.enter_scope();
 
         // Push nursery handle onto context so spawn expressions can find it
-        self.ctx.emit(Instruction::NurseryEnter { nursery: nursery_handle });
+        self.ctx.emit(Instruction::NurseryEnter {
+            nursery: nursery_handle,
+        });
 
         // === Compile body ===
         // The body contains spawn expressions that will register tasks with the nursery
@@ -15253,22 +16441,27 @@ impl VbcCodegen {
         });
 
         // Check if all tasks succeeded
-        self.ctx.emit_forward_jump(&recover_label, |offset| Instruction::JmpNot {
-            cond: all_ok,
-            offset,
-        });
+        self.ctx
+            .emit_forward_jump(&recover_label, |offset| Instruction::JmpNot {
+                cond: all_ok,
+                offset,
+            });
         self.ctx.free_temp(all_ok);
 
         // All tasks succeeded - store result
         if let Some(result_reg) = body_result {
-            self.ctx.emit(Instruction::Mov { dst: dest, src: result_reg });
+            self.ctx.emit(Instruction::Mov {
+                dst: dest,
+                src: result_reg,
+            });
             self.ctx.free_temp(result_reg);
         } else {
             self.ctx.emit(Instruction::LoadUnit { dst: dest });
         }
 
         // Jump to cleanup
-        self.ctx.emit_forward_jump(&cleanup_label, |offset| Instruction::Jmp { offset });
+        self.ctx
+            .emit_forward_jump(&cleanup_label, |offset| Instruction::Jmp { offset });
 
         // === Cancel handler ===
         self.ctx.define_label(&cancel_label);
@@ -15276,7 +16469,8 @@ impl VbcCodegen {
             let _ = self.compile_block(cancel_block)?;
         }
         // After cancel, go to cleanup
-        self.ctx.emit_forward_jump(&cleanup_label, |offset| Instruction::Jmp { offset });
+        self.ctx
+            .emit_forward_jump(&cleanup_label, |offset| Instruction::Jmp { offset });
 
         // === Recover handler ===
         self.ctx.define_label(&recover_label);
@@ -15300,10 +16494,11 @@ impl VbcCodegen {
                         // Try to match pattern
                         let matched = self.ctx.alloc_temp();
                         self.compile_pattern_test(&arm.pattern, error_reg, matched)?;
-                        self.ctx.emit_forward_jump(&next_arm, |offset| Instruction::JmpNot {
-                            cond: matched,
-                            offset,
-                        });
+                        self.ctx
+                            .emit_forward_jump(&next_arm, |offset| Instruction::JmpNot {
+                                cond: matched,
+                                offset,
+                            });
                         self.ctx.free_temp(matched);
 
                         // Bind pattern variables
@@ -15311,19 +16506,24 @@ impl VbcCodegen {
 
                         // Check guard if present
                         if let verum_common::Maybe::Some(ref guard) = arm.guard {
-                            let guard_result = self.compile_expr(guard)?
+                            let guard_result = self
+                                .compile_expr(guard)?
                                 .ok_or_else(|| CodegenError::internal("guard has no value"))?;
-                            self.ctx.emit_forward_jump(&next_arm, |offset| Instruction::JmpNot {
-                                cond: guard_result,
-                                offset,
-                            });
+                            self.ctx
+                                .emit_forward_jump(&next_arm, |offset| Instruction::JmpNot {
+                                    cond: guard_result,
+                                    offset,
+                                });
                             self.ctx.free_temp(guard_result);
                         }
 
                         // Execute arm body
                         let arm_result = self.compile_expr(&arm.body)?;
                         if let Some(arm_reg) = arm_result {
-                            self.ctx.emit(Instruction::Mov { dst: dest, src: arm_reg });
+                            self.ctx.emit(Instruction::Mov {
+                                dst: dest,
+                                src: arm_reg,
+                            });
                             self.ctx.free_temp(arm_reg);
                         }
 
@@ -15334,7 +16534,8 @@ impl VbcCodegen {
                             }
                         }
 
-                        self.ctx.emit_forward_jump(&recover_end, |offset| Instruction::Jmp { offset });
+                        self.ctx
+                            .emit_forward_jump(&recover_end, |offset| Instruction::Jmp { offset });
                         self.ctx.define_label(&next_arm);
                     }
 
@@ -15350,7 +16551,10 @@ impl VbcCodegen {
                     // Execute closure body
                     let closure_result = self.compile_expr(body)?;
                     if let Some(result_reg) = closure_result {
-                        self.ctx.emit(Instruction::Mov { dst: dest, src: result_reg });
+                        self.ctx.emit(Instruction::Mov {
+                            dst: dest,
+                            src: result_reg,
+                        });
                         self.ctx.free_temp(result_reg);
                     }
 
@@ -15379,7 +16583,9 @@ impl VbcCodegen {
         self.ctx.define_label(&cleanup_label);
 
         // Exit nursery scope
-        self.ctx.emit(Instruction::NurseryExit { nursery: nursery_handle });
+        self.ctx.emit(Instruction::NurseryExit {
+            nursery: nursery_handle,
+        });
 
         // Run deferred statements
         let (_, defers) = self.ctx.exit_scope(false);
@@ -15412,7 +16618,9 @@ impl VbcCodegen {
         self.ctx.emit(Instruction::LoadUnit { dst: dest });
 
         // Create loop context
-        let source_label = label.map(|s| s.to_string()).unwrap_or_else(|| "for_await".to_string());
+        let source_label = label
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "for_await".to_string());
         let break_label = self.ctx.new_label("for_await_end");
         self.ctx.push_loop(source_label, break_label.clone());
         let continue_label = self.ctx.new_label("for_await_continue");
@@ -15630,7 +16838,9 @@ impl VbcCodegen {
 
         // Serialize tokens using the token_stream module
         let serialized = crate::token_stream::serialize_tokens(&lexer_tokens, span.as_ref())
-            .map_err(|e| CodegenError::internal(format!("Failed to serialize TokenStream: {}", e)))?;
+            .map_err(|e| {
+                CodegenError::internal(format!("Failed to serialize TokenStream: {}", e))
+            })?;
 
         // Store serialized bytes in constant pool
         let const_id = self.ctx.add_const_bytes(serialized);
@@ -15675,7 +16885,11 @@ impl VbcCodegen {
                         span: tok.span,
                     });
                 }
-                TokenTree::Group { delimiter, tokens, span } => {
+                TokenTree::Group {
+                    delimiter,
+                    tokens,
+                    span,
+                } => {
                     // Emit opening delimiter
                     let (open_kind, close_kind) = match delimiter {
                         MacroDelimiter::Paren => (
@@ -15695,7 +16909,11 @@ impl VbcCodegen {
                     // Opening delimiter at start of span
                     output.push(verum_lexer::Token {
                         kind: open_kind,
-                        span: verum_common::span::Span::new(span.start, span.start + 1, span.file_id),
+                        span: verum_common::span::Span::new(
+                            span.start,
+                            span.start + 1,
+                            span.file_id,
+                        ),
                     });
 
                     // Recurse into group contents
@@ -15718,7 +16936,7 @@ impl VbcCodegen {
         text: &verum_common::Text,
     ) -> verum_lexer::TokenKind {
         use verum_ast::expr::TokenTreeKind;
-        use verum_lexer::{TokenKind, IntegerLiteral, FloatLiteral};
+        use verum_lexer::{FloatLiteral, IntegerLiteral, TokenKind};
 
         match kind {
             TokenTreeKind::Ident => {
@@ -15768,7 +16986,9 @@ impl VbcCodegen {
                 }
             }
             TokenTreeKind::Punct => self.text_to_punct(text.as_str()),
-            TokenTreeKind::Keyword => self.text_to_keyword(text.as_str()).unwrap_or(TokenKind::Ident(text.clone())),
+            TokenTreeKind::Keyword => self
+                .text_to_keyword(text.as_str())
+                .unwrap_or(TokenKind::Ident(text.clone())),
             TokenTreeKind::Eof => TokenKind::Eof,
         }
     }
@@ -15894,11 +17114,7 @@ impl VbcCodegen {
     /// Staged meta-compilation: stage escapes (`$expr` inside `quote { }`) evaluate
     /// the inner expression at the enclosing stage level and splice the result into
     /// the generated token stream. Enables inserting computed values into generated code.
-    fn compile_stage_escape(
-        &mut self,
-        _stage: u32,
-        expr: &Expr,
-    ) -> CodegenResult<Option<Reg>> {
+    fn compile_stage_escape(&mut self, _stage: u32, expr: &Expr) -> CodegenResult<Option<Reg>> {
         // Stage escape expressions are processed during staged compilation.
         // During normal VBC codegen, we simply compile the inner expression.
         // The stage context is handled by the meta pipeline.
@@ -16027,61 +17243,127 @@ impl VbcCodegen {
             }
             "catch" => {
                 // @catch(fn() { ... }) -- try/catch returning Result<T, E>
-                if args.is_empty() { return Err(CodegenError::internal("@catch requires 1 argument")); }
+                if args.is_empty() {
+                    return Err(CodegenError::internal("@catch requires 1 argument"));
+                }
                 let hl = self.ctx.new_label("catch_h");
                 let el = self.ctx.new_label("catch_e");
-                self.ctx.emit_forward_jump(&hl, |o| Instruction::TryBegin { handler_offset: o });
+                self.ctx
+                    .emit_forward_jump(&hl, |o| Instruction::TryBegin { handler_offset: o });
                 self.ctx.try_recover_depth += 1;
                 let a = &args[0];
-                let ar = self.compile_expr(a)?.unwrap_or_else(|| { let r = self.ctx.alloc_temp(); self.ctx.emit(Instruction::LoadNil { dst: r }); r });
+                let ar = self.compile_expr(a)?.unwrap_or_else(|| {
+                    let r = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadNil { dst: r });
+                    r
+                });
                 let ir = if matches!(a.kind, ExprKind::Closure { .. }) {
                     let cr = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::CallClosure { dst: cr, closure: ar, args: crate::instruction::RegRange::new(Reg(0), 0) });
-                    self.ctx.free_temp(ar); cr
-                } else { ar };
+                    self.ctx.emit(Instruction::CallClosure {
+                        dst: cr,
+                        closure: ar,
+                        args: crate::instruction::RegRange::new(Reg(0), 0),
+                    });
+                    self.ctx.free_temp(ar);
+                    cr
+                } else {
+                    ar
+                };
                 self.ctx.try_recover_depth -= 1;
                 self.ctx.emit(Instruction::TryEnd);
-                let okt = self.ctx.lookup_function("Ok").and_then(|i| i.variant_tag)
-                    .or_else(|| self.ctx.lookup_function("Result::Ok").and_then(|i| i.variant_tag))
-                    .ok_or_else(|| CodegenError::internal("variant 'Ok' not defined: Result type must be in scope for @catch"))?;
+                let okt = self
+                    .ctx
+                    .lookup_function("Ok")
+                    .and_then(|i| i.variant_tag)
+                    .or_else(|| {
+                        self.ctx
+                            .lookup_function("Result::Ok")
+                            .and_then(|i| i.variant_tag)
+                    })
+                    .ok_or_else(|| {
+                        CodegenError::internal(
+                            "variant 'Ok' not defined: Result type must be in scope for @catch",
+                        )
+                    })?;
                 self.emit_make_variant_for_function(dest, okt, 1, "Ok", Some("Result::Ok"));
-                self.ctx.emit(Instruction::SetVariantData { variant: dest, field: 0, value: ir });
+                self.ctx.emit(Instruction::SetVariantData {
+                    variant: dest,
+                    field: 0,
+                    value: ir,
+                });
                 self.ctx.free_temp(ir);
-                self.ctx.emit_forward_jump(&el, |o| Instruction::Jmp { offset: o });
+                self.ctx
+                    .emit_forward_jump(&el, |o| Instruction::Jmp { offset: o });
                 self.ctx.define_label(&hl);
                 let ex = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::GetException { dst: ex });
-                let ert = self.ctx.lookup_function("Err").and_then(|i| i.variant_tag)
-                    .or_else(|| self.ctx.lookup_function("Result::Err").and_then(|i| i.variant_tag))
-                    .ok_or_else(|| CodegenError::internal("variant 'Err' not defined: Result type must be in scope for @catch"))?;
+                let ert = self
+                    .ctx
+                    .lookup_function("Err")
+                    .and_then(|i| i.variant_tag)
+                    .or_else(|| {
+                        self.ctx
+                            .lookup_function("Result::Err")
+                            .and_then(|i| i.variant_tag)
+                    })
+                    .ok_or_else(|| {
+                        CodegenError::internal(
+                            "variant 'Err' not defined: Result type must be in scope for @catch",
+                        )
+                    })?;
                 self.emit_make_variant_for_function(dest, ert, 1, "Err", Some("Result::Err"));
-                self.ctx.emit(Instruction::SetVariantData { variant: dest, field: 0, value: ex });
+                self.ctx.emit(Instruction::SetVariantData {
+                    variant: dest,
+                    field: 0,
+                    value: ex,
+                });
                 self.ctx.free_temp(ex);
                 self.ctx.define_label(&el);
             }
             "catch_cbgr_violation" => {
                 // @catch_cbgr_violation(fn() { ... }) -- same as @catch for CBGR panics
-                if args.is_empty() { return Err(CodegenError::internal("@catch_cbgr_violation requires 1 argument")); }
+                if args.is_empty() {
+                    return Err(CodegenError::internal(
+                        "@catch_cbgr_violation requires 1 argument",
+                    ));
+                }
                 let hl = self.ctx.new_label("cbgr_h");
                 let el = self.ctx.new_label("cbgr_e");
-                self.ctx.emit_forward_jump(&hl, |o| Instruction::TryBegin { handler_offset: o });
+                self.ctx
+                    .emit_forward_jump(&hl, |o| Instruction::TryBegin { handler_offset: o });
                 self.ctx.try_recover_depth += 1;
                 let a = &args[0];
-                let ar = self.compile_expr(a)?.unwrap_or_else(|| { let r = self.ctx.alloc_temp(); self.ctx.emit(Instruction::LoadNil { dst: r }); r });
+                let ar = self.compile_expr(a)?.unwrap_or_else(|| {
+                    let r = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadNil { dst: r });
+                    r
+                });
                 let ir = if matches!(a.kind, ExprKind::Closure { .. }) {
                     let cr = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::CallClosure { dst: cr, closure: ar, args: crate::instruction::RegRange::new(Reg(0), 0) });
-                    self.ctx.free_temp(ar); cr
-                } else { ar };
+                    self.ctx.emit(Instruction::CallClosure {
+                        dst: cr,
+                        closure: ar,
+                        args: crate::instruction::RegRange::new(Reg(0), 0),
+                    });
+                    self.ctx.free_temp(ar);
+                    cr
+                } else {
+                    ar
+                };
                 self.ctx.try_recover_depth -= 1;
                 self.ctx.emit(Instruction::TryEnd);
                 let okt = self.ctx.lookup_function("Ok").and_then(|i| i.variant_tag)
                     .or_else(|| self.ctx.lookup_function("Result::Ok").and_then(|i| i.variant_tag))
                     .ok_or_else(|| CodegenError::internal("variant 'Ok' not defined: Result type must be in scope for @catch_cbgr_violation"))?;
                 self.emit_make_variant_for_function(dest, okt, 1, "Ok", Some("Result::Ok"));
-                self.ctx.emit(Instruction::SetVariantData { variant: dest, field: 0, value: ir });
+                self.ctx.emit(Instruction::SetVariantData {
+                    variant: dest,
+                    field: 0,
+                    value: ir,
+                });
                 self.ctx.free_temp(ir);
-                self.ctx.emit_forward_jump(&el, |o| Instruction::Jmp { offset: o });
+                self.ctx
+                    .emit_forward_jump(&el, |o| Instruction::Jmp { offset: o });
                 self.ctx.define_label(&hl);
                 let ex = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::GetException { dst: ex });
@@ -16089,41 +17371,84 @@ impl VbcCodegen {
                     .or_else(|| self.ctx.lookup_function("Result::Err").and_then(|i| i.variant_tag))
                     .ok_or_else(|| CodegenError::internal("variant 'Err' not defined: Result type must be in scope for @catch_cbgr_violation"))?;
                 self.emit_make_variant_for_function(dest, ert, 1, "Err", Some("Result::Err"));
-                self.ctx.emit(Instruction::SetVariantData { variant: dest, field: 0, value: ex });
+                self.ctx.emit(Instruction::SetVariantData {
+                    variant: dest,
+                    field: 0,
+                    value: ex,
+                });
                 self.ctx.free_temp(ex);
                 self.ctx.define_label(&el);
             }
             "block_on" => {
                 // @block_on(async { ... }) -- run async synchronously at Tier 0
-                if args.is_empty() { return Err(CodegenError::internal("@block_on requires 1 argument")); }
-                let ir = self.compile_expr(&args[0])?.unwrap_or_else(|| { let r = self.ctx.alloc_temp(); self.ctx.emit(Instruction::LoadNil { dst: r }); r });
+                if args.is_empty() {
+                    return Err(CodegenError::internal("@block_on requires 1 argument"));
+                }
+                let ir = self.compile_expr(&args[0])?.unwrap_or_else(|| {
+                    let r = self.ctx.alloc_temp();
+                    self.ctx.emit(Instruction::LoadNil { dst: r });
+                    r
+                });
                 self.ctx.emit(Instruction::Mov { dst: dest, src: ir });
                 self.ctx.free_temp(ir);
             }
             "timeout" => {
                 if !args.is_empty() {
-                    let ir = self.compile_expr(&args[0])?.unwrap_or_else(|| { let r = self.ctx.alloc_temp(); self.ctx.emit(Instruction::LoadNil { dst: r }); r });
+                    let ir = self.compile_expr(&args[0])?.unwrap_or_else(|| {
+                        let r = self.ctx.alloc_temp();
+                        self.ctx.emit(Instruction::LoadNil { dst: r });
+                        r
+                    });
                     self.ctx.emit(Instruction::Mov { dst: dest, src: ir });
                     self.ctx.free_temp(ir);
-                } else { self.ctx.emit(Instruction::LoadNil { dst: dest }); }
+                } else {
+                    self.ctx.emit(Instruction::LoadNil { dst: dest });
+                }
             }
             "forget" => {
-                if !args.is_empty() && let Some(r) = self.compile_expr(&args[0])? { self.ctx.free_temp(r); }
+                if !args.is_empty()
+                    && let Some(r) = self.compile_expr(&args[0])?
+                {
+                    self.ctx.free_temp(r);
+                }
                 self.ctx.emit(Instruction::LoadNil { dst: dest });
             }
             "ref_eq" => {
-                if args.len() < 2 { return Err(CodegenError::internal("@ref_eq requires 2 arguments")); }
-                let a = self.compile_expr(&args[0])?.ok_or_else(|| CodegenError::internal("@ref_eq arg has no value"))?;
-                let b = self.compile_expr(&args[1])?.ok_or_else(|| CodegenError::internal("@ref_eq arg has no value"))?;
-                self.ctx.emit(Instruction::CmpI { op: CompareOp::Eq, dst: dest, a, b });
-                self.ctx.free_temp(a); self.ctx.free_temp(b);
+                if args.len() < 2 {
+                    return Err(CodegenError::internal("@ref_eq requires 2 arguments"));
+                }
+                let a = self
+                    .compile_expr(&args[0])?
+                    .ok_or_else(|| CodegenError::internal("@ref_eq arg has no value"))?;
+                let b = self
+                    .compile_expr(&args[1])?
+                    .ok_or_else(|| CodegenError::internal("@ref_eq arg has no value"))?;
+                self.ctx.emit(Instruction::CmpI {
+                    op: CompareOp::Eq,
+                    dst: dest,
+                    a,
+                    b,
+                });
+                self.ctx.free_temp(a);
+                self.ctx.free_temp(b);
             }
             "get_generation" | "get_stored_generation" => {
                 if !args.is_empty() {
                     if let Some(r) = self.compile_expr(&args[0])? {
-                        self.ctx.emit(Instruction::Mov { dst: dest, src: r }); self.ctx.free_temp(r);
-                    } else { self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 }); }
-                } else { self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 }); }
+                        self.ctx.emit(Instruction::Mov { dst: dest, src: r });
+                        self.ctx.free_temp(r);
+                    } else {
+                        self.ctx.emit(Instruction::LoadI {
+                            dst: dest,
+                            value: 0,
+                        });
+                    }
+                } else {
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
+                }
             }
             _ => {
                 // Unknown meta function - emit warning and nil
@@ -16363,15 +17688,13 @@ impl VbcCodegen {
                 // *new* category gets tagged, the registry
                 // pin will direct attention here.
                 _ => {
-                    return Err(CodegenError::new(CodegenErrorKind::Internal(
-                        format!(
-                            "intrinsic `{}` carries RequiresPermission but \
+                    return Err(CodegenError::new(CodegenErrorKind::Internal(format!(
+                        "intrinsic `{}` carries RequiresPermission but \
                              category {:?} is not yet wired to a permission \
                              scope (#12 / P3.2 follow-up — extend the match \
                              in emit_intrinsic_instructions)",
-                            intrinsic.name, intrinsic.category
-                        ),
-                    )));
+                        intrinsic.name, intrinsic.category
+                    ))));
                 }
             };
             self.ctx.emit(Instruction::PermissionAssert {
@@ -16448,7 +17771,12 @@ impl VbcCodegen {
     }
 
     /// Emits a direct opcode instruction for intrinsics.
-    fn emit_intrinsic_direct_opcode(&mut self, opcode: crate::instruction::Opcode, args: &[Reg], dest: Reg) {
+    fn emit_intrinsic_direct_opcode(
+        &mut self,
+        opcode: crate::instruction::Opcode,
+        args: &[Reg],
+        dest: Reg,
+    ) {
         use crate::instruction::Opcode;
 
         match opcode {
@@ -16797,7 +18125,13 @@ impl VbcCodegen {
     }
 
     /// Emits an opcode with mode for intrinsics (e.g., atomic operations with ordering).
-    fn emit_intrinsic_opcode_with_mode(&mut self, opcode: crate::instruction::Opcode, mode: u8, args: &[Reg], dest: Reg) {
+    fn emit_intrinsic_opcode_with_mode(
+        &mut self,
+        opcode: crate::instruction::Opcode,
+        mode: u8,
+        args: &[Reg],
+        dest: Reg,
+    ) {
         use crate::instruction::Opcode;
 
         match opcode {
@@ -16835,7 +18169,13 @@ impl VbcCodegen {
     }
 
     /// Emits an opcode with size for intrinsics (e.g., atomic operations with different sizes).
-    fn emit_intrinsic_opcode_with_size(&mut self, opcode: crate::instruction::Opcode, size: u8, args: &[Reg], dest: Reg) {
+    fn emit_intrinsic_opcode_with_size(
+        &mut self,
+        opcode: crate::instruction::Opcode,
+        size: u8,
+        args: &[Reg],
+        dest: Reg,
+    ) {
         use crate::instruction::Opcode;
 
         match opcode {
@@ -16900,46 +18240,55 @@ impl VbcCodegen {
                 // Format: dst:reg, src:reg, size:reg
                 if args.len() >= 3 {
                     let mut operands = Vec::<u8>::new();
-                    Self::write_reg(&mut operands, args[0].0);  // dst
-                    Self::write_reg(&mut operands, args[1].0);  // src
-                    Self::write_reg(&mut operands, args[2].0);  // size
+                    Self::write_reg(&mut operands, args[0].0); // dst
+                    Self::write_reg(&mut operands, args[1].0); // src
+                    Self::write_reg(&mut operands, args[2].0); // size
                     self.ctx.emit(Instruction::FfiExtended {
                         sub_op: 0x43, // CMemcpy
                         operands,
                     });
                 }
                 // Return dst pointer as result
-                self.ctx.emit(Instruction::Mov { dst: dest, src: args[0] });
+                self.ctx.emit(Instruction::Mov {
+                    dst: dest,
+                    src: args[0],
+                });
             }
             InlineSequenceId::Memmove => {
                 // Format: dst:reg, src:reg, size:reg
                 if args.len() >= 3 {
                     let mut operands = Vec::<u8>::new();
-                    Self::write_reg(&mut operands, args[0].0);  // dst
-                    Self::write_reg(&mut operands, args[1].0);  // src
-                    Self::write_reg(&mut operands, args[2].0);  // size
+                    Self::write_reg(&mut operands, args[0].0); // dst
+                    Self::write_reg(&mut operands, args[1].0); // src
+                    Self::write_reg(&mut operands, args[2].0); // size
                     self.ctx.emit(Instruction::FfiExtended {
                         sub_op: 0x45, // CMemmove
                         operands,
                     });
                 }
                 // Return dst pointer as result
-                self.ctx.emit(Instruction::Mov { dst: dest, src: args[0] });
+                self.ctx.emit(Instruction::Mov {
+                    dst: dest,
+                    src: args[0],
+                });
             }
             InlineSequenceId::Memset => {
                 // Format: dst:reg, value:reg, size:reg
                 if args.len() >= 3 {
                     let mut operands = Vec::<u8>::new();
-                    Self::write_reg(&mut operands, args[0].0);  // dst
-                    Self::write_reg(&mut operands, args[1].0);  // value (byte)
-                    Self::write_reg(&mut operands, args[2].0);  // size
+                    Self::write_reg(&mut operands, args[0].0); // dst
+                    Self::write_reg(&mut operands, args[1].0); // value (byte)
+                    Self::write_reg(&mut operands, args[2].0); // size
                     self.ctx.emit(Instruction::FfiExtended {
                         sub_op: 0x44, // CMemset
                         operands,
                     });
                 }
                 // Return dst pointer as result
-                self.ctx.emit(Instruction::Mov { dst: dest, src: args[0] });
+                self.ctx.emit(Instruction::Mov {
+                    dst: dest,
+                    src: args[0],
+                });
             }
             InlineSequenceId::SecureZero => {
                 // Format: dst:reg, size:reg
@@ -16953,8 +18302,8 @@ impl VbcCodegen {
                 // Action #2.
                 if args.len() >= 2 {
                     let mut operands = Vec::<u8>::new();
-                    Self::write_reg(&mut operands, args[0].0);  // dst
-                    Self::write_reg(&mut operands, args[1].0);  // size
+                    Self::write_reg(&mut operands, args[0].0); // dst
+                    Self::write_reg(&mut operands, args[1].0); // size
                     self.ctx.emit(Instruction::FfiExtended {
                         sub_op: 0xA3, // CSecureZero
                         operands,
@@ -16969,10 +18318,10 @@ impl VbcCodegen {
                 // Returns: i64 comparison result
                 if args.len() >= 3 {
                     let mut operands = Vec::<u8>::new();
-                    Self::write_reg(&mut operands, dest.0);     // dst (result)
-                    Self::write_reg(&mut operands, args[0].0);  // ptr1
-                    Self::write_reg(&mut operands, args[1].0);  // ptr2
-                    Self::write_reg(&mut operands, args[2].0);  // size
+                    Self::write_reg(&mut operands, dest.0); // dst (result)
+                    Self::write_reg(&mut operands, args[0].0); // ptr1
+                    Self::write_reg(&mut operands, args[1].0); // ptr2
+                    Self::write_reg(&mut operands, args[2].0); // size
                     self.ctx.emit(Instruction::FfiExtended {
                         sub_op: 0x46, // CMemcmp
                         operands,
@@ -17006,16 +18355,19 @@ impl VbcCodegen {
                         operands,
                     });
                 } else {
-                    self.ctx.emit(Instruction::Mov { dst: dest, src: args[0] });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: dest,
+                        src: args[0],
+                    });
                 }
             }
 
             // Checked arithmetic - returns Maybe<T> via ArithExtended sub-opcodes
             // Uses ArithExtended (0xBD) with ArithSubOpcode::Checked* values
-            InlineSequenceId::CheckedAdd |
-            InlineSequenceId::CheckedSub |
-            InlineSequenceId::CheckedMul |
-            InlineSequenceId::CheckedDiv => {
+            InlineSequenceId::CheckedAdd
+            | InlineSequenceId::CheckedSub
+            | InlineSequenceId::CheckedMul
+            | InlineSequenceId::CheckedDiv => {
                 if args.len() >= 2 {
                     let sub_op = match seq_id {
                         InlineSequenceId::CheckedAdd => ArithSubOpcode::CheckedAddI as u8,
@@ -17025,13 +18377,11 @@ impl VbcCodegen {
                         _ => ArithSubOpcode::CheckedAddI as u8,
                     };
                     let mut operands = Vec::<u8>::new();
-                    Self::write_reg(&mut operands, dest.0);    // dst
+                    Self::write_reg(&mut operands, dest.0); // dst
                     Self::write_reg(&mut operands, args[0].0); // a
                     Self::write_reg(&mut operands, args[1].0); // b
-                    self.ctx.emit(Instruction::ArithExtended {
-                        sub_op,
-                        operands,
-                    });
+                    self.ctx
+                        .emit(Instruction::ArithExtended { sub_op, operands });
                 } else {
                     self.ctx.emit(Instruction::LoadNil { dst: dest });
                 }
@@ -17039,9 +18389,9 @@ impl VbcCodegen {
 
             // Overflowing arithmetic - returns (result, overflow) tuple
             // Uses ArithExtended (0xBD) with proper ArithSubOpcode values
-            InlineSequenceId::OverflowingAdd |
-            InlineSequenceId::OverflowingSub |
-            InlineSequenceId::OverflowingMul => {
+            InlineSequenceId::OverflowingAdd
+            | InlineSequenceId::OverflowingSub
+            | InlineSequenceId::OverflowingMul => {
                 if args.len() >= 2 {
                     let sub_op = match seq_id {
                         InlineSequenceId::OverflowingAdd => ArithSubOpcode::OverflowingAddI as u8,
@@ -17050,13 +18400,11 @@ impl VbcCodegen {
                         _ => ArithSubOpcode::OverflowingAddI as u8,
                     };
                     let mut operands = Vec::<u8>::new();
-                    Self::write_reg(&mut operands, dest.0);    // dst
+                    Self::write_reg(&mut operands, dest.0); // dst
                     Self::write_reg(&mut operands, args[0].0); // a
                     Self::write_reg(&mut operands, args[1].0); // b
-                    self.ctx.emit(Instruction::ArithExtended {
-                        sub_op,
-                        operands,
-                    });
+                    self.ctx
+                        .emit(Instruction::ArithExtended { sub_op, operands });
                 } else {
                     self.ctx.emit(Instruction::LoadNil { dst: dest });
                 }
@@ -17081,48 +18429,76 @@ impl VbcCodegen {
             // declared width. Single-attempt CAS pattern is functionally
             // correct for single-threaded execution; multi-threaded
             // contention would need a real CAS-loop (separate follow-up).
-            InlineSequenceId::AtomicFetchAdd |
-            InlineSequenceId::AtomicFetchSub |
-            InlineSequenceId::AtomicFetchAnd |
-            InlineSequenceId::AtomicFetchOr |
-            InlineSequenceId::AtomicFetchXor => {
+            InlineSequenceId::AtomicFetchAdd
+            | InlineSequenceId::AtomicFetchSub
+            | InlineSequenceId::AtomicFetchAnd
+            | InlineSequenceId::AtomicFetchOr
+            | InlineSequenceId::AtomicFetchXor => {
                 if args.len() >= 2 {
                     let ptr = args[0];
                     let val = args[1];
                     let old_val = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::AtomicLoad {
-                        dst: old_val, ptr, ordering: 4, size: byte_width,
+                        dst: old_val,
+                        ptr,
+                        ordering: 4,
+                        size: byte_width,
                     });
                     let new_val = self.ctx.alloc_temp();
                     match seq_id {
                         InlineSequenceId::AtomicFetchAdd => self.ctx.emit(Instruction::BinaryI {
-                            op: BinaryIntOp::Add, dst: new_val, a: old_val, b: val,
+                            op: BinaryIntOp::Add,
+                            dst: new_val,
+                            a: old_val,
+                            b: val,
                         }),
                         InlineSequenceId::AtomicFetchSub => self.ctx.emit(Instruction::BinaryI {
-                            op: BinaryIntOp::Sub, dst: new_val, a: old_val, b: val,
+                            op: BinaryIntOp::Sub,
+                            dst: new_val,
+                            a: old_val,
+                            b: val,
                         }),
                         InlineSequenceId::AtomicFetchAnd => self.ctx.emit(Instruction::Bitwise {
-                            op: BitwiseOp::And, dst: new_val, a: old_val, b: val,
+                            op: BitwiseOp::And,
+                            dst: new_val,
+                            a: old_val,
+                            b: val,
                         }),
                         InlineSequenceId::AtomicFetchOr => self.ctx.emit(Instruction::Bitwise {
-                            op: BitwiseOp::Or, dst: new_val, a: old_val, b: val,
+                            op: BitwiseOp::Or,
+                            dst: new_val,
+                            a: old_val,
+                            b: val,
                         }),
                         InlineSequenceId::AtomicFetchXor => self.ctx.emit(Instruction::Bitwise {
-                            op: BitwiseOp::Xor, dst: new_val, a: old_val, b: val,
+                            op: BitwiseOp::Xor,
+                            dst: new_val,
+                            a: old_val,
+                            b: val,
                         }),
                         _ => unreachable!(),
                     }
                     let cas_result = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::AtomicCas {
-                        dst: cas_result, ptr, expected: old_val, desired: new_val,
-                        ordering: 4, size: byte_width,
+                        dst: cas_result,
+                        ptr,
+                        expected: old_val,
+                        desired: new_val,
+                        ordering: 4,
+                        size: byte_width,
                     });
-                    self.ctx.emit(Instruction::Mov { dst: dest, src: old_val });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: dest,
+                        src: old_val,
+                    });
                     self.ctx.free_temp(cas_result);
                     self.ctx.free_temp(new_val);
                     self.ctx.free_temp(old_val);
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
 
@@ -17172,9 +18548,9 @@ impl VbcCodegen {
             }
 
             // Spinlock and futex - library calls
-            InlineSequenceId::SpinlockLock |
-            InlineSequenceId::FutexWait |
-            InlineSequenceId::FutexWake => {
+            InlineSequenceId::SpinlockLock
+            | InlineSequenceId::FutexWait
+            | InlineSequenceId::FutexWake => {
                 let func_name = match seq_id {
                     InlineSequenceId::SpinlockLock => "verum_spinlock_lock",
                     InlineSequenceId::FutexWait => "verum_futex_wait",
@@ -17196,16 +18572,16 @@ impl VbcCodegen {
             }
 
             // Math functions - library calls
-            InlineSequenceId::SinF64 |
-            InlineSequenceId::CosF64 |
-            InlineSequenceId::TanF64 |
-            InlineSequenceId::AsinF64 |
-            InlineSequenceId::AcosF64 |
-            InlineSequenceId::AtanF64 |
-            InlineSequenceId::Atan2F64 |
-            InlineSequenceId::ExpF64 |
-            InlineSequenceId::LogF64 |
-            InlineSequenceId::Log10F64 => {
+            InlineSequenceId::SinF64
+            | InlineSequenceId::CosF64
+            | InlineSequenceId::TanF64
+            | InlineSequenceId::AsinF64
+            | InlineSequenceId::AcosF64
+            | InlineSequenceId::AtanF64
+            | InlineSequenceId::Atan2F64
+            | InlineSequenceId::ExpF64
+            | InlineSequenceId::LogF64
+            | InlineSequenceId::Log10F64 => {
                 let func_name = match seq_id {
                     InlineSequenceId::SinF64 => "verum_sin",
                     InlineSequenceId::CosF64 => "verum_cos",
@@ -17242,7 +18618,10 @@ impl VbcCodegen {
                     operands,
                 });
                 let divisor = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadI { dst: divisor, value: 1_000_000_000 });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: divisor,
+                    value: 1_000_000_000,
+                });
                 self.ctx.emit(Instruction::BinaryI {
                     op: BinaryIntOp::Div,
                     dst: dest,
@@ -17311,33 +18690,36 @@ impl VbcCodegen {
 
             InlineSequenceId::Zeroed => {
                 // Return zeroed value
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: 0,
+                });
             }
 
             // Extended math functions - library calls
-            InlineSequenceId::CbrtF64 |
-            InlineSequenceId::Expm1F64 |
-            InlineSequenceId::Exp2F64 |
-            InlineSequenceId::Log1pF64 |
-            InlineSequenceId::Log2F64 |
-            InlineSequenceId::PowiF64 |
-            InlineSequenceId::TruncF64 |
-            InlineSequenceId::MinnumF64 |
-            InlineSequenceId::MaxnumF64 |
-            InlineSequenceId::FmaF64 |
-            InlineSequenceId::CopysignF64 |
-            InlineSequenceId::HypotF64 |
-            InlineSequenceId::SinhF64 |
-            InlineSequenceId::CoshF64 |
-            InlineSequenceId::TanhF64 |
-            InlineSequenceId::AsinhF64 |
-            InlineSequenceId::AcoshF64 |
-            InlineSequenceId::AtanhF64 |
-            InlineSequenceId::PowF64 |
-            InlineSequenceId::AbsF64 |
-            InlineSequenceId::FloorF64 |
-            InlineSequenceId::CeilF64 |
-            InlineSequenceId::RoundF64 => {
+            InlineSequenceId::CbrtF64
+            | InlineSequenceId::Expm1F64
+            | InlineSequenceId::Exp2F64
+            | InlineSequenceId::Log1pF64
+            | InlineSequenceId::Log2F64
+            | InlineSequenceId::PowiF64
+            | InlineSequenceId::TruncF64
+            | InlineSequenceId::MinnumF64
+            | InlineSequenceId::MaxnumF64
+            | InlineSequenceId::FmaF64
+            | InlineSequenceId::CopysignF64
+            | InlineSequenceId::HypotF64
+            | InlineSequenceId::SinhF64
+            | InlineSequenceId::CoshF64
+            | InlineSequenceId::TanhF64
+            | InlineSequenceId::AsinhF64
+            | InlineSequenceId::AcoshF64
+            | InlineSequenceId::AtanhF64
+            | InlineSequenceId::PowF64
+            | InlineSequenceId::AbsF64
+            | InlineSequenceId::FloorF64
+            | InlineSequenceId::CeilF64
+            | InlineSequenceId::RoundF64 => {
                 let func_name = match seq_id {
                     InlineSequenceId::CbrtF64 => "verum_cbrt",
                     InlineSequenceId::Expm1F64 => "verum_expm1",
@@ -17381,12 +18763,12 @@ impl VbcCodegen {
                     src,
                 });
             }
-            InlineSequenceId::Sext |
-            InlineSequenceId::Zext |
-            InlineSequenceId::Fpext |
-            InlineSequenceId::Fptrunc |
-            InlineSequenceId::IntTrunc |
-            InlineSequenceId::Bitcast => {
+            InlineSequenceId::Sext
+            | InlineSequenceId::Zext
+            | InlineSequenceId::Fpext
+            | InlineSequenceId::Fptrunc
+            | InlineSequenceId::IntTrunc
+            | InlineSequenceId::Bitcast => {
                 // For NaN-boxed interpreter, these are mostly no-ops (all values are 64-bit)
                 // Just copy the source to dest
                 let src = if !args.is_empty() { args[0] } else { dest };
@@ -17396,10 +18778,10 @@ impl VbcCodegen {
             }
 
             // Float bit reinterpretation — NOT no-ops in NaN-boxed representation
-            InlineSequenceId::F32ToBits |
-            InlineSequenceId::F32FromBits |
-            InlineSequenceId::F64ToBits |
-            InlineSequenceId::F64FromBits => {
+            InlineSequenceId::F32ToBits
+            | InlineSequenceId::F32FromBits
+            | InlineSequenceId::F64ToBits
+            | InlineSequenceId::F64FromBits => {
                 use crate::instruction::ArithSubOpcode;
                 let sub_op = match seq_id {
                     InlineSequenceId::F32ToBits => ArithSubOpcode::F32ToBits,
@@ -17436,13 +18818,22 @@ impl VbcCodegen {
                 let shift_reg = self.ctx.alloc_temp();
                 let byte_reg = self.ctx.alloc_temp();
                 let mask_reg = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadI { dst: mask_reg, value: 0xFF });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: mask_reg,
+                    value: 0xFF,
+                });
                 for i in 0..width {
                     if i == 0 {
-                        self.ctx.emit(Instruction::Mov { dst: shift_reg, src });
+                        self.ctx.emit(Instruction::Mov {
+                            dst: shift_reg,
+                            src,
+                        });
                     } else {
                         let shift_amt = self.ctx.alloc_temp();
-                        self.ctx.emit(Instruction::LoadI { dst: shift_amt, value: (i * 8) as i64 });
+                        self.ctx.emit(Instruction::LoadI {
+                            dst: shift_amt,
+                            value: (i * 8) as i64,
+                        });
                         self.ctx.emit(Instruction::Bitwise {
                             op: BitwiseOp::Shr,
                             dst: shift_reg,
@@ -17457,7 +18848,10 @@ impl VbcCodegen {
                         a: shift_reg,
                         b: mask_reg,
                     });
-                    self.ctx.emit(Instruction::ListPush { list: dest, val: byte_reg });
+                    self.ctx.emit(Instruction::ListPush {
+                        list: dest,
+                        val: byte_reg,
+                    });
                 }
                 self.ctx.free_temp(mask_reg);
                 self.ctx.free_temp(byte_reg);
@@ -17472,13 +18866,22 @@ impl VbcCodegen {
                 let shift_reg = self.ctx.alloc_temp();
                 let byte_reg = self.ctx.alloc_temp();
                 let mask_reg = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadI { dst: mask_reg, value: 0xFF });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: mask_reg,
+                    value: 0xFF,
+                });
                 for i in (0..width).rev() {
                     if i == 0 {
-                        self.ctx.emit(Instruction::Mov { dst: shift_reg, src });
+                        self.ctx.emit(Instruction::Mov {
+                            dst: shift_reg,
+                            src,
+                        });
                     } else {
                         let shift_amt = self.ctx.alloc_temp();
-                        self.ctx.emit(Instruction::LoadI { dst: shift_amt, value: (i * 8) as i64 });
+                        self.ctx.emit(Instruction::LoadI {
+                            dst: shift_amt,
+                            value: (i * 8) as i64,
+                        });
                         self.ctx.emit(Instruction::Bitwise {
                             op: BitwiseOp::Shr,
                             dst: shift_reg,
@@ -17493,7 +18896,10 @@ impl VbcCodegen {
                         a: shift_reg,
                         b: mask_reg,
                     });
-                    self.ctx.emit(Instruction::ListPush { list: dest, val: byte_reg });
+                    self.ctx.emit(Instruction::ListPush {
+                        list: dest,
+                        val: byte_reg,
+                    });
                 }
                 self.ctx.free_temp(mask_reg);
                 self.ctx.free_temp(byte_reg);
@@ -17504,14 +18910,24 @@ impl VbcCodegen {
             InlineSequenceId::FromLeBytes => {
                 let width = byte_width as usize;
                 let src = if !args.is_empty() { args[0] } else { dest };
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: 0,
+                });
                 let byte_reg = self.ctx.alloc_temp();
                 let shifted_reg = self.ctx.alloc_temp();
                 let idx_reg = self.ctx.alloc_temp();
                 let shift_amt = self.ctx.alloc_temp();
                 for i in 0..width {
-                    self.ctx.emit(Instruction::LoadI { dst: idx_reg, value: i as i64 });
-                    self.ctx.emit(Instruction::GetE { dst: byte_reg, arr: src, idx: idx_reg });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: idx_reg,
+                        value: i as i64,
+                    });
+                    self.ctx.emit(Instruction::GetE {
+                        dst: byte_reg,
+                        arr: src,
+                        idx: idx_reg,
+                    });
                     if i == 0 {
                         self.ctx.emit(Instruction::Bitwise {
                             op: BitwiseOp::Or,
@@ -17520,7 +18936,10 @@ impl VbcCodegen {
                             b: byte_reg,
                         });
                     } else {
-                        self.ctx.emit(Instruction::LoadI { dst: shift_amt, value: (i * 8) as i64 });
+                        self.ctx.emit(Instruction::LoadI {
+                            dst: shift_amt,
+                            value: (i * 8) as i64,
+                        });
                         self.ctx.emit(Instruction::Bitwise {
                             op: BitwiseOp::Shl,
                             dst: shifted_reg,
@@ -17545,14 +18964,24 @@ impl VbcCodegen {
             InlineSequenceId::FromBeBytes => {
                 let width = byte_width as usize;
                 let src = if !args.is_empty() { args[0] } else { dest };
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: 0,
+                });
                 let byte_reg = self.ctx.alloc_temp();
                 let shifted_reg = self.ctx.alloc_temp();
                 let idx_reg = self.ctx.alloc_temp();
                 let shift_amt = self.ctx.alloc_temp();
                 for i in 0..width {
-                    self.ctx.emit(Instruction::LoadI { dst: idx_reg, value: i as i64 });
-                    self.ctx.emit(Instruction::GetE { dst: byte_reg, arr: src, idx: idx_reg });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: idx_reg,
+                        value: i as i64,
+                    });
+                    self.ctx.emit(Instruction::GetE {
+                        dst: byte_reg,
+                        arr: src,
+                        idx: idx_reg,
+                    });
                     let shift_bits = (width - 1 - i) * 8;
                     if shift_bits == 0 {
                         self.ctx.emit(Instruction::Bitwise {
@@ -17562,7 +18991,10 @@ impl VbcCodegen {
                             b: byte_reg,
                         });
                     } else {
-                        self.ctx.emit(Instruction::LoadI { dst: shift_amt, value: shift_bits as i64 });
+                        self.ctx.emit(Instruction::LoadI {
+                            dst: shift_amt,
+                            value: shift_bits as i64,
+                        });
                         self.ctx.emit(Instruction::Bitwise {
                             op: BitwiseOp::Shl,
                             dst: shifted_reg,
@@ -17584,16 +19016,16 @@ impl VbcCodegen {
             }
 
             // Char operations
-            InlineSequenceId::CharIsAlphabetic |
-            InlineSequenceId::CharIsNumeric |
-            InlineSequenceId::CharIsWhitespace |
-            InlineSequenceId::CharIsControl |
-            InlineSequenceId::CharIsUppercase |
-            InlineSequenceId::CharIsLowercase |
-            InlineSequenceId::CharToUppercase |
-            InlineSequenceId::CharToLowercase |
-            InlineSequenceId::CharEncodeUtf8 |
-            InlineSequenceId::CharEscapeDebug => {
+            InlineSequenceId::CharIsAlphabetic
+            | InlineSequenceId::CharIsNumeric
+            | InlineSequenceId::CharIsWhitespace
+            | InlineSequenceId::CharIsControl
+            | InlineSequenceId::CharIsUppercase
+            | InlineSequenceId::CharIsLowercase
+            | InlineSequenceId::CharToUppercase
+            | InlineSequenceId::CharToLowercase
+            | InlineSequenceId::CharEncodeUtf8
+            | InlineSequenceId::CharEscapeDebug => {
                 let func_name = match seq_id {
                     InlineSequenceId::CharIsAlphabetic => "verum_char_is_alphabetic",
                     InlineSequenceId::CharIsNumeric => "verum_char_is_numeric",
@@ -17611,12 +19043,12 @@ impl VbcCodegen {
             }
 
             // Float32 basic operations - use C math library via FFI
-            InlineSequenceId::SqrtF32 |
-            InlineSequenceId::FloorF32 |
-            InlineSequenceId::CeilF32 |
-            InlineSequenceId::RoundF32 |
-            InlineSequenceId::TruncF32 |
-            InlineSequenceId::AbsF32 => {
+            InlineSequenceId::SqrtF32
+            | InlineSequenceId::FloorF32
+            | InlineSequenceId::CeilF32
+            | InlineSequenceId::RoundF32
+            | InlineSequenceId::TruncF32
+            | InlineSequenceId::AbsF32 => {
                 let func_name = match seq_id {
                     InlineSequenceId::SqrtF32 => "verum_sqrtf",
                     InlineSequenceId::FloorF32 => "verum_floorf",
@@ -17630,13 +19062,13 @@ impl VbcCodegen {
             }
 
             // Float32 trigonometric functions
-            InlineSequenceId::SinF32 |
-            InlineSequenceId::CosF32 |
-            InlineSequenceId::TanF32 |
-            InlineSequenceId::AsinF32 |
-            InlineSequenceId::AcosF32 |
-            InlineSequenceId::AtanF32 |
-            InlineSequenceId::Atan2F32 => {
+            InlineSequenceId::SinF32
+            | InlineSequenceId::CosF32
+            | InlineSequenceId::TanF32
+            | InlineSequenceId::AsinF32
+            | InlineSequenceId::AcosF32
+            | InlineSequenceId::AtanF32
+            | InlineSequenceId::Atan2F32 => {
                 let func_name = match seq_id {
                     InlineSequenceId::SinF32 => "verum_sinf",
                     InlineSequenceId::CosF32 => "verum_cosf",
@@ -17651,12 +19083,12 @@ impl VbcCodegen {
             }
 
             // Float32 hyperbolic functions
-            InlineSequenceId::SinhF32 |
-            InlineSequenceId::CoshF32 |
-            InlineSequenceId::TanhF32 |
-            InlineSequenceId::AsinhF32 |
-            InlineSequenceId::AcoshF32 |
-            InlineSequenceId::AtanhF32 => {
+            InlineSequenceId::SinhF32
+            | InlineSequenceId::CoshF32
+            | InlineSequenceId::TanhF32
+            | InlineSequenceId::AsinhF32
+            | InlineSequenceId::AcoshF32
+            | InlineSequenceId::AtanhF32 => {
                 let func_name = match seq_id {
                     InlineSequenceId::SinhF32 => "verum_sinhf",
                     InlineSequenceId::CoshF32 => "verum_coshf",
@@ -17670,13 +19102,13 @@ impl VbcCodegen {
             }
 
             // Float32 exponential and logarithmic functions
-            InlineSequenceId::ExpF32 |
-            InlineSequenceId::Exp2F32 |
-            InlineSequenceId::Expm1F32 |
-            InlineSequenceId::LogF32 |
-            InlineSequenceId::Log2F32 |
-            InlineSequenceId::Log10F32 |
-            InlineSequenceId::Log1pF32 => {
+            InlineSequenceId::ExpF32
+            | InlineSequenceId::Exp2F32
+            | InlineSequenceId::Expm1F32
+            | InlineSequenceId::LogF32
+            | InlineSequenceId::Log2F32
+            | InlineSequenceId::Log10F32
+            | InlineSequenceId::Log1pF32 => {
                 let func_name = match seq_id {
                     InlineSequenceId::ExpF32 => "verum_expf",
                     InlineSequenceId::Exp2F32 => "verum_exp2f",
@@ -17691,13 +19123,13 @@ impl VbcCodegen {
             }
 
             // Float32 power and special functions
-            InlineSequenceId::CbrtF32 |
-            InlineSequenceId::HypotF32 |
-            InlineSequenceId::FmaF32 |
-            InlineSequenceId::CopysignF32 |
-            InlineSequenceId::PowiF32 |
-            InlineSequenceId::MinnumF32 |
-            InlineSequenceId::MaxnumF32 => {
+            InlineSequenceId::CbrtF32
+            | InlineSequenceId::HypotF32
+            | InlineSequenceId::FmaF32
+            | InlineSequenceId::CopysignF32
+            | InlineSequenceId::PowiF32
+            | InlineSequenceId::MinnumF32
+            | InlineSequenceId::MaxnumF32 => {
                 let func_name = match seq_id {
                     InlineSequenceId::CbrtF32 => "verum_cbrtf",
                     InlineSequenceId::HypotF32 => "verum_hypotf",
@@ -17712,8 +19144,7 @@ impl VbcCodegen {
             }
 
             // Arithmetic variants
-            InlineSequenceId::SaturatingAdd |
-            InlineSequenceId::SaturatingSub => {
+            InlineSequenceId::SaturatingAdd | InlineSequenceId::SaturatingSub => {
                 let func_name = match seq_id {
                     InlineSequenceId::SaturatingAdd => "verum_saturating_add",
                     InlineSequenceId::SaturatingSub => "verum_saturating_sub",
@@ -17723,9 +19154,7 @@ impl VbcCodegen {
             }
 
             // Float special checks
-            InlineSequenceId::IsNan |
-            InlineSequenceId::IsInf |
-            InlineSequenceId::IsFinite => {
+            InlineSequenceId::IsNan | InlineSequenceId::IsInf | InlineSequenceId::IsFinite => {
                 let func_name = match seq_id {
                     InlineSequenceId::IsNan => "verum_is_nan",
                     InlineSequenceId::IsInf => "verum_is_inf",
@@ -17746,9 +19175,15 @@ impl VbcCodegen {
                     });
                     // Length is in dest + 1, move it to dest
                     let len_reg = Reg::new(dest.0 + 1);
-                    self.ctx.emit(Instruction::Mov { dst: dest, src: len_reg });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: dest,
+                        src: len_reg,
+                    });
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
 
@@ -17766,8 +19201,7 @@ impl VbcCodegen {
                 }
             }
 
-            InlineSequenceId::SliceGet |
-            InlineSequenceId::SliceGetUnchecked => {
+            InlineSequenceId::SliceGet | InlineSequenceId::SliceGetUnchecked => {
                 // Access element at index
                 self.emit_intrinsic_library_call("verum_slice_get", args, dest)?;
             }
@@ -17859,18 +19293,31 @@ impl VbcCodegen {
                     let new_val = args[1];
                     let old_val = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::AtomicLoad {
-                        dst: old_val, ptr, ordering: 4, size: byte_width,
+                        dst: old_val,
+                        ptr,
+                        ordering: 4,
+                        size: byte_width,
                     });
                     let cas_result = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::AtomicCas {
-                        dst: cas_result, ptr, expected: old_val, desired: new_val,
-                        ordering: 4, size: byte_width,
+                        dst: cas_result,
+                        ptr,
+                        expected: old_val,
+                        desired: new_val,
+                        ordering: 4,
+                        size: byte_width,
                     });
-                    self.ctx.emit(Instruction::Mov { dst: dest, src: old_val });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: dest,
+                        src: old_val,
+                    });
                     self.ctx.free_temp(cas_result);
                     self.ctx.free_temp(old_val);
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
 
@@ -18081,11 +19528,17 @@ impl VbcCodegen {
             // Mask operations
             InlineSequenceId::SimdMaskAll => {
                 // All lanes active: return all-ones mask
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: -1 }); // All bits set
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: -1,
+                }); // All bits set
             }
             InlineSequenceId::SimdMaskNone => {
                 // No lanes active: return zero mask
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: 0,
+                });
             }
             InlineSequenceId::SimdMaskCount => {
                 // Count active bits (popcount on mask)
@@ -18175,23 +19628,23 @@ impl VbcCodegen {
             }
 
             // Existing tensor operations from SSM/FFT section (handled by TensorExtended)
-            InlineSequenceId::SsmScan |
-            InlineSequenceId::MatrixExp |
-            InlineSequenceId::MatrixInverse |
-            InlineSequenceId::ComplexPow |
-            InlineSequenceId::ComplexMul |
-            InlineSequenceId::Rfft |
-            InlineSequenceId::Irfft |
-            InlineSequenceId::Uniform |
-            InlineSequenceId::IsTraining |
-            InlineSequenceId::Bincount |
-            InlineSequenceId::GatherNd |
-            InlineSequenceId::ArangeUsize |
-            InlineSequenceId::TensorRepeat |
-            InlineSequenceId::TensorTanh |
-            InlineSequenceId::TensorSum |
-            InlineSequenceId::TensorFromArray |
-            InlineSequenceId::RandomFloat01 => {
+            InlineSequenceId::SsmScan
+            | InlineSequenceId::MatrixExp
+            | InlineSequenceId::MatrixInverse
+            | InlineSequenceId::ComplexPow
+            | InlineSequenceId::ComplexMul
+            | InlineSequenceId::Rfft
+            | InlineSequenceId::Irfft
+            | InlineSequenceId::Uniform
+            | InlineSequenceId::IsTraining
+            | InlineSequenceId::Bincount
+            | InlineSequenceId::GatherNd
+            | InlineSequenceId::ArangeUsize
+            | InlineSequenceId::TensorRepeat
+            | InlineSequenceId::TensorTanh
+            | InlineSequenceId::TensorSum
+            | InlineSequenceId::TensorFromArray
+            | InlineSequenceId::RandomFloat01 => {
                 // These are primarily handled via TensorExtendedOpcode in the registry.
                 // For fallback, emit a library call.
                 let name = match seq_id {
@@ -18356,11 +19809,19 @@ impl VbcCodegen {
             }
             InlineSequenceId::RegexReplace => {
                 use crate::instruction::TensorExtSubOpcode;
-                self.emit_intrinsic_tensor_ext_extended(TensorExtSubOpcode::RegexReplace, args, dest);
+                self.emit_intrinsic_tensor_ext_extended(
+                    TensorExtSubOpcode::RegexReplace,
+                    args,
+                    dest,
+                );
             }
             InlineSequenceId::RegexCaptures => {
                 use crate::instruction::TensorExtSubOpcode;
-                self.emit_intrinsic_tensor_ext_extended(TensorExtSubOpcode::RegexCaptures, args, dest);
+                self.emit_intrinsic_tensor_ext_extended(
+                    TensorExtSubOpcode::RegexCaptures,
+                    args,
+                    dest,
+                );
             }
 
             // #12 / P3.2 — wire-level bridge to PermissionRouter.
@@ -18400,7 +19861,6 @@ impl VbcCodegen {
             // =================================================================
             // These are typically compile-time evaluated, but for interpreter
             // we emit runtime calls or constant loads
-
             InlineSequenceId::SizeOf => {
                 // In interpreter mode, we need the type info at runtime
                 // For compile-time evaluated cases, the compiler injects a constant
@@ -18416,13 +19876,21 @@ impl VbcCodegen {
                 // TypeName is a compile-time operation that returns the name of a type.
                 // Try to resolve from: (1) generic type params, (2) current function's
                 // parent type name, (3) fall back to "unknown".
-                let type_name = if let Some(param) = self.ctx.generic_type_params.iter().next().filter(|_| self.ctx.generic_type_params.len() == 1) {
+                let type_name = if let Some(param) = self
+                    .ctx
+                    .generic_type_params
+                    .iter()
+                    .next()
+                    .filter(|_| self.ctx.generic_type_params.len() == 1)
+                {
                     // Single generic param — likely the TypeName<T> target
                     param.clone()
                 } else {
                     // Look up the current function's associated type info
                     let fn_type_name = self.ctx.current_function.as_ref().and_then(|fname| {
-                        self.ctx.lookup_function(fname).and_then(|fi| fi.parent_type_name.clone())
+                        self.ctx
+                            .lookup_function(fname)
+                            .and_then(|fi| fi.parent_type_name.clone())
                     });
                     fn_type_name.unwrap_or_else(|| "unknown".to_string())
                 };
@@ -18436,31 +19904,73 @@ impl VbcCodegen {
                 // NeedsDrop checks whether a type requires drop glue.
                 // Primitive types (Int, Float, Bool, Char, Unit) never need drop.
                 // User-defined types conservatively need drop unless proven otherwise.
-                let needs_drop = if let Some(ty) = self.ctx.generic_type_params.iter().next().filter(|_| self.ctx.generic_type_params.len() == 1).cloned() {
-                    !matches!(ty.as_str(), "Int" | "Float" | "Bool" | "Char" | "Unit"
-                        | "Int8" | "Int16" | "Int32" | "Int64"
-                        | "UInt8" | "UInt16" | "UInt32" | "UInt64"
-                        | "Float32" | "Float64")
+                let needs_drop = if let Some(ty) = self
+                    .ctx
+                    .generic_type_params
+                    .iter()
+                    .next()
+                    .filter(|_| self.ctx.generic_type_params.len() == 1)
+                    .cloned()
+                {
+                    !matches!(
+                        ty.as_str(),
+                        "Int"
+                            | "Float"
+                            | "Bool"
+                            | "Char"
+                            | "Unit"
+                            | "Int8"
+                            | "Int16"
+                            | "Int32"
+                            | "Int64"
+                            | "UInt8"
+                            | "UInt16"
+                            | "UInt32"
+                            | "UInt64"
+                            | "Float32"
+                            | "Float64"
+                    )
                 } else {
                     // Look up the current function's parent type and check for Drop impl
                     let parent = self.ctx.current_function.as_ref().and_then(|fname| {
-                        self.ctx.lookup_function(fname).and_then(|fi| fi.parent_type_name.clone())
+                        self.ctx
+                            .lookup_function(fname)
+                            .and_then(|fi| fi.parent_type_name.clone())
                     });
                     if let Some(ref parent_name) = parent {
                         if let Some(type_id) = self.type_name_to_id.get(parent_name) {
-                            self.types.iter().any(|td| td.id == *type_id && td.drop_fn.is_some())
+                            self.types
+                                .iter()
+                                .any(|td| td.id == *type_id && td.drop_fn.is_some())
                         } else {
-                            !matches!(parent_name.as_str(), "Int" | "Float" | "Bool" | "Char" | "Unit"
-                                | "Int8" | "Int16" | "Int32" | "Int64"
-                                | "UInt8" | "UInt16" | "UInt32" | "UInt64"
-                                | "Float32" | "Float64")
+                            !matches!(
+                                parent_name.as_str(),
+                                "Int"
+                                    | "Float"
+                                    | "Bool"
+                                    | "Char"
+                                    | "Unit"
+                                    | "Int8"
+                                    | "Int16"
+                                    | "Int32"
+                                    | "Int64"
+                                    | "UInt8"
+                                    | "UInt16"
+                                    | "UInt32"
+                                    | "UInt64"
+                                    | "Float32"
+                                    | "Float64"
+                            )
                         }
                     } else {
                         // Conservative default: assume drop is needed for unknown types
                         true
                     }
                 };
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: if needs_drop { 1 } else { 0 } });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: if needs_drop { 1 } else { 0 },
+                });
             }
             InlineSequenceId::PowF32 => {
                 // pow_f32(base, exp) - use MathExtended with PowF32 sub-opcode
@@ -18492,7 +20002,10 @@ impl VbcCodegen {
             InlineSequenceId::PtrToRef => {
                 // ptr_to_ref is identity in interpreter (pointer IS the ref)
                 if !args.is_empty() {
-                    self.ctx.emit(Instruction::Mov { dst: dest, src: args[0] });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: dest,
+                        src: args[0],
+                    });
                 } else {
                     self.ctx.emit(Instruction::LoadNil { dst: dest });
                 }
@@ -18501,102 +20014,173 @@ impl VbcCodegen {
             // ==================================================================
             // Duration intrinsics (pure arithmetic on UInt64 nanoseconds)
             // ==================================================================
-
             InlineSequenceId::DurationFromNanos => {
                 // Duration(nanos) - identity, Duration IS nanoseconds
                 if !args.is_empty() {
-                    self.ctx.emit(Instruction::Mov { dst: dest, src: args[0] });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: dest,
+                        src: args[0],
+                    });
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
             InlineSequenceId::DurationFromMicros => {
                 // Duration(micros * 1000)
                 if !args.is_empty() {
                     let factor = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadI { dst: factor, value: 1_000 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: factor,
+                        value: 1_000,
+                    });
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Mul, dst: dest, a: args[0], b: factor,
+                        op: BinaryIntOp::Mul,
+                        dst: dest,
+                        a: args[0],
+                        b: factor,
                     });
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
             InlineSequenceId::DurationFromMillis => {
                 // Duration(millis * 1_000_000)
                 if !args.is_empty() {
                     let factor = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadI { dst: factor, value: 1_000_000 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: factor,
+                        value: 1_000_000,
+                    });
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Mul, dst: dest, a: args[0], b: factor,
+                        op: BinaryIntOp::Mul,
+                        dst: dest,
+                        a: args[0],
+                        b: factor,
                     });
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
             InlineSequenceId::DurationFromSecs => {
                 // Duration(secs * 1_000_000_000)
                 if !args.is_empty() {
                     let factor = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadI { dst: factor, value: 1_000_000_000 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: factor,
+                        value: 1_000_000_000,
+                    });
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Mul, dst: dest, a: args[0], b: factor,
+                        op: BinaryIntOp::Mul,
+                        dst: dest,
+                        a: args[0],
+                        b: factor,
                     });
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
             InlineSequenceId::DurationAsNanos => {
                 // self.0 - identity
                 if !args.is_empty() {
-                    self.ctx.emit(Instruction::Mov { dst: dest, src: args[0] });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: dest,
+                        src: args[0],
+                    });
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
             InlineSequenceId::DurationAsMicros => {
                 // self.0 / 1_000
                 if !args.is_empty() {
                     let divisor = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadI { dst: divisor, value: 1_000 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: divisor,
+                        value: 1_000,
+                    });
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Div, dst: dest, a: args[0], b: divisor,
+                        op: BinaryIntOp::Div,
+                        dst: dest,
+                        a: args[0],
+                        b: divisor,
                     });
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
             InlineSequenceId::DurationAsMillis => {
                 // self.0 / 1_000_000
                 if !args.is_empty() {
                     let divisor = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadI { dst: divisor, value: 1_000_000 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: divisor,
+                        value: 1_000_000,
+                    });
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Div, dst: dest, a: args[0], b: divisor,
+                        op: BinaryIntOp::Div,
+                        dst: dest,
+                        a: args[0],
+                        b: divisor,
                     });
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
             InlineSequenceId::DurationAsSecs => {
                 // self.0 / 1_000_000_000
                 if !args.is_empty() {
                     let divisor = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadI { dst: divisor, value: 1_000_000_000 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: divisor,
+                        value: 1_000_000_000,
+                    });
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Div, dst: dest, a: args[0], b: divisor,
+                        op: BinaryIntOp::Div,
+                        dst: dest,
+                        a: args[0],
+                        b: divisor,
                     });
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
             InlineSequenceId::DurationIsZero => {
                 // self.0 == 0
                 if !args.is_empty() {
                     let zero = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadI { dst: zero, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: zero,
+                        value: 0,
+                    });
                     self.ctx.emit(Instruction::CmpI {
-                        op: CompareOp::Eq, dst: dest, a: args[0], b: zero,
+                        op: CompareOp::Eq,
+                        dst: dest,
+                        a: args[0],
+                        b: zero,
                     });
                 } else {
                     self.ctx.emit(Instruction::LoadTrue { dst: dest });
@@ -18606,10 +20190,16 @@ impl VbcCodegen {
                 // self.0 + other.0
                 if args.len() >= 2 {
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Add, dst: dest, a: args[0], b: args[1],
+                        op: BinaryIntOp::Add,
+                        dst: dest,
+                        a: args[0],
+                        b: args[1],
                     });
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
             InlineSequenceId::DurationSaturatingAdd => {
@@ -18618,24 +20208,42 @@ impl VbcCodegen {
                     // Compute a + b (wrapping)
                     let sum = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Add, dst: sum, a: args[0], b: args[1],
+                        op: BinaryIntOp::Add,
+                        dst: sum,
+                        a: args[0],
+                        b: args[1],
                     });
                     // Unsigned overflow check: if sum <u a, overflow occurred
                     let overflow = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::CmpU {
-                        sub_op: CmpSubOpcode::LtU, dst: overflow, a: sum, b: args[0],
+                        sub_op: CmpSubOpcode::LtU,
+                        dst: overflow,
+                        a: sum,
+                        b: args[0],
                     });
                     // If overflow, dest = u64::MAX; else dest = sum
                     //  I+2: JmpNot { offset: 3 } → I+5 (Mov, no overflow)
                     //  I+3: LoadI (overflow case)
                     //  I+4: Jmp { offset: 2 } → I+6 (past Mov)
                     //  I+5: Mov (no overflow case)
-                    self.ctx.emit(Instruction::JmpNot { cond: overflow, offset: 3 });
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: u64::MAX as i64 });
+                    self.ctx.emit(Instruction::JmpNot {
+                        cond: overflow,
+                        offset: 3,
+                    });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: u64::MAX as i64,
+                    });
                     self.ctx.emit(Instruction::Jmp { offset: 2 });
-                    self.ctx.emit(Instruction::Mov { dst: dest, src: sum });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: dest,
+                        src: sum,
+                    });
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
             InlineSequenceId::DurationSaturatingSub => {
@@ -18644,43 +20252,69 @@ impl VbcCodegen {
                     // Compute a - b
                     let diff = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Sub, dst: diff, a: args[0], b: args[1],
+                        op: BinaryIntOp::Sub,
+                        dst: diff,
+                        a: args[0],
+                        b: args[1],
                     });
                     // Unsigned check: if a >=u b, no underflow
                     let cmp_result = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::CmpU {
-                        sub_op: CmpSubOpcode::GeU, dst: cmp_result, a: args[0], b: args[1],
+                        sub_op: CmpSubOpcode::GeU,
+                        dst: cmp_result,
+                        a: args[0],
+                        b: args[1],
                     });
                     // If a >= b, use diff; else use 0
                     //  I+2: JmpNot { offset: 3 } → I+5 (LoadI, underflow)
                     //  I+3: Mov (no underflow case)
                     //  I+4: Jmp { offset: 2 } → I+6 (past LoadI)
                     //  I+5: LoadI (underflow case)
-                    self.ctx.emit(Instruction::JmpNot { cond: cmp_result, offset: 3 });
-                    self.ctx.emit(Instruction::Mov { dst: dest, src: diff });
+                    self.ctx.emit(Instruction::JmpNot {
+                        cond: cmp_result,
+                        offset: 3,
+                    });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: dest,
+                        src: diff,
+                    });
                     self.ctx.emit(Instruction::Jmp { offset: 2 });
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
             InlineSequenceId::DurationSubsecNanos => {
                 // self.0 % 1_000_000_000
                 if !args.is_empty() {
                     let modulus = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadI { dst: modulus, value: 1_000_000_000 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: modulus,
+                        value: 1_000_000_000,
+                    });
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Mod, dst: dest, a: args[0], b: modulus,
+                        op: BinaryIntOp::Mod,
+                        dst: dest,
+                        a: args[0],
+                        b: modulus,
                     });
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
 
             // ==================================================================
             // Instant intrinsics (nanoseconds in VBC interpreter)
             // ==================================================================
-
             InlineSequenceId::InstantNow => {
                 // FfiExtended TimeMonotonicNanos -> dest (stores nanoseconds)
                 let mut operands = Vec::<u8>::new();
@@ -18701,27 +20335,38 @@ impl VbcCodegen {
                         operands,
                     });
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Sub, dst: dest, a: now, b: args[0],
+                        op: BinaryIntOp::Sub,
+                        dst: dest,
+                        a: now,
+                        b: args[0],
                     });
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
             InlineSequenceId::InstantDurationSince => {
                 // self.0 - earlier.0 (returns Duration as nanos)
                 if args.len() >= 2 {
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Sub, dst: dest, a: args[0], b: args[1],
+                        op: BinaryIntOp::Sub,
+                        dst: dest,
+                        a: args[0],
+                        b: args[1],
                     });
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
 
             // ==================================================================
             // System time intrinsics (FfiExtended + arithmetic)
             // ==================================================================
-
             InlineSequenceId::TimeMonotonicMicros => {
                 // monotonic_nanos() / 1_000
                 let nanos = self.ctx.alloc_temp();
@@ -18732,9 +20377,15 @@ impl VbcCodegen {
                     operands,
                 });
                 let divisor = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadI { dst: divisor, value: 1_000 });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: divisor,
+                    value: 1_000,
+                });
                 self.ctx.emit(Instruction::BinaryI {
-                    op: BinaryIntOp::Div, dst: dest, a: nanos, b: divisor,
+                    op: BinaryIntOp::Div,
+                    dst: dest,
+                    a: nanos,
+                    b: divisor,
                 });
             }
             InlineSequenceId::TimeMonotonicMillis => {
@@ -18747,9 +20398,15 @@ impl VbcCodegen {
                     operands,
                 });
                 let divisor = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadI { dst: divisor, value: 1_000_000 });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: divisor,
+                    value: 1_000_000,
+                });
                 self.ctx.emit(Instruction::BinaryI {
-                    op: BinaryIntOp::Div, dst: dest, a: nanos, b: divisor,
+                    op: BinaryIntOp::Div,
+                    dst: dest,
+                    a: nanos,
+                    b: divisor,
                 });
             }
             InlineSequenceId::TimeUnixTimestamp => {
@@ -18762,24 +20419,35 @@ impl VbcCodegen {
                     operands,
                 });
                 let divisor = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadI { dst: divisor, value: 1_000_000_000 });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: divisor,
+                    value: 1_000_000_000,
+                });
                 self.ctx.emit(Instruction::BinaryI {
-                    op: BinaryIntOp::Div, dst: dest, a: nanos, b: divisor,
+                    op: BinaryIntOp::Div,
+                    dst: dest,
+                    a: nanos,
+                    b: divisor,
                 });
             }
 
             // ==================================================================
             // Sleep intrinsics (convert to nanos, then FfiExtended TimeSleepNanos)
             // ==================================================================
-
             InlineSequenceId::TimeSleepMs => {
                 // sleep_ms(ms): convert ms to nanos, then sleep
                 if !args.is_empty() {
                     let nanos = self.ctx.alloc_temp();
                     let factor = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadI { dst: factor, value: 1_000_000 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: factor,
+                        value: 1_000_000,
+                    });
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Mul, dst: nanos, a: args[0], b: factor,
+                        op: BinaryIntOp::Mul,
+                        dst: nanos,
+                        a: args[0],
+                        b: factor,
                     });
                     let mut operands = Vec::<u8>::new();
                     Self::write_reg(&mut operands, nanos.0);
@@ -18788,16 +20456,25 @@ impl VbcCodegen {
                         operands,
                     });
                 }
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: 0,
+                });
             }
             InlineSequenceId::TimeSleepUs => {
                 // sleep_us(us): convert us to nanos, then sleep
                 if !args.is_empty() {
                     let nanos = self.ctx.alloc_temp();
                     let factor = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadI { dst: factor, value: 1_000 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: factor,
+                        value: 1_000,
+                    });
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Mul, dst: nanos, a: args[0], b: factor,
+                        op: BinaryIntOp::Mul,
+                        dst: nanos,
+                        a: args[0],
+                        b: factor,
                     });
                     let mut operands = Vec::<u8>::new();
                     Self::write_reg(&mut operands, nanos.0);
@@ -18806,7 +20483,10 @@ impl VbcCodegen {
                         operands,
                     });
                 }
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: 0,
+                });
             }
             InlineSequenceId::TimeSleepDuration => {
                 // sleep(duration): duration IS nanos, just sleep
@@ -18827,14 +20507,17 @@ impl VbcCodegen {
             // Use resolve_field_index with type-specific positions to match
             // how record constructors emit field indices.
             // ==================================================================
-
             InlineSequenceId::StopwatchNew => {
                 // Create a new running Stopwatch: {start: now, running: true, accumulated: 0}
                 let fi_start = self.resolve_field_index(Some("Stopwatch"), "start");
                 let fi_running = self.resolve_field_index(Some("Stopwatch"), "running");
                 let fi_accumulated = self.resolve_field_index(Some("Stopwatch"), "accumulated");
                 let alloc_slots = self.type_field_count("Stopwatch").unwrap_or(3);
-                self.ctx.emit(Instruction::New { dst: dest, type_id: 0, field_count: alloc_slots });
+                self.ctx.emit(Instruction::New {
+                    dst: dest,
+                    type_id: 0,
+                    field_count: alloc_slots,
+                });
                 // Get current monotonic time for start
                 let now = self.ctx.alloc_temp();
                 let mut operands = Vec::<u8>::new();
@@ -18843,13 +20526,28 @@ impl VbcCodegen {
                     sub_op: 0x70, // TimeMonotonicNanos
                     operands,
                 });
-                self.ctx.emit(Instruction::SetF { obj: dest, field_idx: fi_start, value: now });
+                self.ctx.emit(Instruction::SetF {
+                    obj: dest,
+                    field_idx: fi_start,
+                    value: now,
+                });
                 let running = self.ctx.alloc_temp();
                 self.ctx.emit(Instruction::LoadTrue { dst: running });
-                self.ctx.emit(Instruction::SetF { obj: dest, field_idx: fi_running, value: running });
+                self.ctx.emit(Instruction::SetF {
+                    obj: dest,
+                    field_idx: fi_running,
+                    value: running,
+                });
                 let zero = self.ctx.alloc_temp();
-                self.ctx.emit(Instruction::LoadI { dst: zero, value: 0 });
-                self.ctx.emit(Instruction::SetF { obj: dest, field_idx: fi_accumulated, value: zero });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: zero,
+                    value: 0,
+                });
+                self.ctx.emit(Instruction::SetF {
+                    obj: dest,
+                    field_idx: fi_accumulated,
+                    value: zero,
+                });
             }
             InlineSequenceId::StopwatchElapsed => {
                 // elapsed(&self) -> Duration:
@@ -18861,12 +20559,28 @@ impl VbcCodegen {
                     let running = self.ctx.alloc_temp();
                     let acc = self.ctx.alloc_temp();
                     let start = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::GetF { dst: running, obj: args[0], field_idx: fi_running });
-                    self.ctx.emit(Instruction::GetF { dst: acc, obj: args[0], field_idx: fi_accumulated });
-                    self.ctx.emit(Instruction::GetF { dst: start, obj: args[0], field_idx: fi_start });
+                    self.ctx.emit(Instruction::GetF {
+                        dst: running,
+                        obj: args[0],
+                        field_idx: fi_running,
+                    });
+                    self.ctx.emit(Instruction::GetF {
+                        dst: acc,
+                        obj: args[0],
+                        field_idx: fi_accumulated,
+                    });
+                    self.ctx.emit(Instruction::GetF {
+                        dst: start,
+                        obj: args[0],
+                        field_idx: fi_start,
+                    });
                     let not_running_label = self.ctx.new_label("sw_elapsed_not_running");
                     let end_label = self.ctx.new_label("sw_elapsed_end");
-                    self.ctx.emit_forward_jump(&not_running_label, |offset| Instruction::JmpNot { cond: running, offset });
+                    self.ctx
+                        .emit_forward_jump(&not_running_label, |offset| Instruction::JmpNot {
+                            cond: running,
+                            offset,
+                        });
                     // Running path: now - start + accumulated
                     let now = self.ctx.alloc_temp();
                     let mut operands = Vec::<u8>::new();
@@ -18877,18 +20591,31 @@ impl VbcCodegen {
                     });
                     let diff = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Sub, dst: diff, a: now, b: start,
+                        op: BinaryIntOp::Sub,
+                        dst: diff,
+                        a: now,
+                        b: start,
                     });
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Add, dst: dest, a: acc, b: diff,
+                        op: BinaryIntOp::Add,
+                        dst: dest,
+                        a: acc,
+                        b: diff,
                     });
-                    self.ctx.emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
+                    self.ctx
+                        .emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
                     // Not running path: just accumulated
                     self.ctx.define_label(&not_running_label);
-                    self.ctx.emit(Instruction::Mov { dst: dest, src: acc });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: dest,
+                        src: acc,
+                    });
                     self.ctx.define_label(&end_label);
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
             InlineSequenceId::StopwatchStop => {
@@ -18898,9 +20625,17 @@ impl VbcCodegen {
                 let fi_accumulated = self.resolve_field_index(Some("Stopwatch"), "accumulated");
                 if !args.is_empty() {
                     let running = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::GetF { dst: running, obj: args[0], field_idx: fi_running });
+                    self.ctx.emit(Instruction::GetF {
+                        dst: running,
+                        obj: args[0],
+                        field_idx: fi_running,
+                    });
                     let end_label = self.ctx.new_label("sw_stop_end");
-                    self.ctx.emit_forward_jump(&end_label, |offset| Instruction::JmpNot { cond: running, offset });
+                    self.ctx
+                        .emit_forward_jump(&end_label, |offset| Instruction::JmpNot {
+                            cond: running,
+                            offset,
+                        });
                     // Running: accumulate + set false
                     let now = self.ctx.alloc_temp();
                     let mut operands = Vec::<u8>::new();
@@ -18910,24 +20645,49 @@ impl VbcCodegen {
                         operands,
                     });
                     let start = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::GetF { dst: start, obj: args[0], field_idx: fi_start });
+                    self.ctx.emit(Instruction::GetF {
+                        dst: start,
+                        obj: args[0],
+                        field_idx: fi_start,
+                    });
                     let diff = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Sub, dst: diff, a: now, b: start,
+                        op: BinaryIntOp::Sub,
+                        dst: diff,
+                        a: now,
+                        b: start,
                     });
                     let acc = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::GetF { dst: acc, obj: args[0], field_idx: fi_accumulated });
+                    self.ctx.emit(Instruction::GetF {
+                        dst: acc,
+                        obj: args[0],
+                        field_idx: fi_accumulated,
+                    });
                     let new_acc = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Add, dst: new_acc, a: acc, b: diff,
+                        op: BinaryIntOp::Add,
+                        dst: new_acc,
+                        a: acc,
+                        b: diff,
                     });
-                    self.ctx.emit(Instruction::SetF { obj: args[0], field_idx: fi_accumulated, value: new_acc });
+                    self.ctx.emit(Instruction::SetF {
+                        obj: args[0],
+                        field_idx: fi_accumulated,
+                        value: new_acc,
+                    });
                     let false_val = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::LoadFalse { dst: false_val });
-                    self.ctx.emit(Instruction::SetF { obj: args[0], field_idx: fi_running, value: false_val });
+                    self.ctx.emit(Instruction::SetF {
+                        obj: args[0],
+                        field_idx: fi_running,
+                        value: false_val,
+                    });
                     self.ctx.define_label(&end_label);
                 }
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: 0,
+                });
             }
             InlineSequenceId::StopwatchStart => {
                 // start(&mut self): if not running, record start time and set running=true
@@ -18935,9 +20695,17 @@ impl VbcCodegen {
                 let fi_running = self.resolve_field_index(Some("Stopwatch"), "running");
                 if !args.is_empty() {
                     let running = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::GetF { dst: running, obj: args[0], field_idx: fi_running });
+                    self.ctx.emit(Instruction::GetF {
+                        dst: running,
+                        obj: args[0],
+                        field_idx: fi_running,
+                    });
                     let end_label = self.ctx.new_label("sw_start_end");
-                    self.ctx.emit_forward_jump(&end_label, |offset| Instruction::JmpIf { cond: running, offset });
+                    self.ctx
+                        .emit_forward_jump(&end_label, |offset| Instruction::JmpIf {
+                            cond: running,
+                            offset,
+                        });
                     // Not running: set start to now, set running=true
                     let now = self.ctx.alloc_temp();
                     let mut operands = Vec::<u8>::new();
@@ -18946,13 +20714,24 @@ impl VbcCodegen {
                         sub_op: 0x70, // TimeMonotonicNanos
                         operands,
                     });
-                    self.ctx.emit(Instruction::SetF { obj: args[0], field_idx: fi_start, value: now });
+                    self.ctx.emit(Instruction::SetF {
+                        obj: args[0],
+                        field_idx: fi_start,
+                        value: now,
+                    });
                     let true_val = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::LoadTrue { dst: true_val });
-                    self.ctx.emit(Instruction::SetF { obj: args[0], field_idx: fi_running, value: true_val });
+                    self.ctx.emit(Instruction::SetF {
+                        obj: args[0],
+                        field_idx: fi_running,
+                        value: true_val,
+                    });
                     self.ctx.define_label(&end_label);
                 }
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: 0,
+                });
             }
             InlineSequenceId::StopwatchReset => {
                 // reset(&mut self): set all fields to zero/false
@@ -18961,22 +20740,42 @@ impl VbcCodegen {
                 let fi_accumulated = self.resolve_field_index(Some("Stopwatch"), "accumulated");
                 if !args.is_empty() {
                     let zero = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadI { dst: zero, value: 0 });
-                    self.ctx.emit(Instruction::SetF { obj: args[0], field_idx: fi_start, value: zero });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: zero,
+                        value: 0,
+                    });
+                    self.ctx.emit(Instruction::SetF {
+                        obj: args[0],
+                        field_idx: fi_start,
+                        value: zero,
+                    });
                     let false_val = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::LoadFalse { dst: false_val });
-                    self.ctx.emit(Instruction::SetF { obj: args[0], field_idx: fi_running, value: false_val });
+                    self.ctx.emit(Instruction::SetF {
+                        obj: args[0],
+                        field_idx: fi_running,
+                        value: false_val,
+                    });
                     let zero2 = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::LoadI { dst: zero2, value: 0 });
-                    self.ctx.emit(Instruction::SetF { obj: args[0], field_idx: fi_accumulated, value: zero2 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: zero2,
+                        value: 0,
+                    });
+                    self.ctx.emit(Instruction::SetF {
+                        obj: args[0],
+                        field_idx: fi_accumulated,
+                        value: zero2,
+                    });
                 }
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: 0,
+                });
             }
 
             // ==================================================================
             // PerfCounter intrinsics (nanoseconds in VBC interpreter)
             // ==================================================================
-
             InlineSequenceId::PerfCounterNow => {
                 // PerfCounter::now() -> nanoseconds
                 let mut operands = Vec::<u8>::new();
@@ -18991,18 +20790,30 @@ impl VbcCodegen {
                 // self.0 - earlier.0
                 if args.len() >= 2 {
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Sub, dst: dest, a: args[0], b: args[1],
+                        op: BinaryIntOp::Sub,
+                        dst: dest,
+                        a: args[0],
+                        b: args[1],
                     });
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
             InlineSequenceId::PerfCounterAsNanos => {
                 // as_nanos(&self) -> UInt64 (identity in VBC interpreter)
                 if !args.is_empty() {
-                    self.ctx.emit(Instruction::Mov { dst: dest, src: args[0] });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: dest,
+                        src: args[0],
+                    });
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
 
@@ -19010,15 +20821,19 @@ impl VbcCodegen {
             // DeadlineTimer intrinsics (record: {deadline: UInt64, has_deadline: Bool})
             // Use resolve_field_index with type-specific positions.
             // ==================================================================
-
             InlineSequenceId::DeadlineTimerFromDuration => {
                 // from_duration(duration) -> DeadlineTimer
                 // deadline = now + duration.as_nanos(), has_deadline = true
                 let fi_deadline = self.resolve_field_index(Some("DeadlineTimer"), "deadline");
-                let fi_has_deadline = self.resolve_field_index(Some("DeadlineTimer"), "has_deadline");
+                let fi_has_deadline =
+                    self.resolve_field_index(Some("DeadlineTimer"), "has_deadline");
                 if !args.is_empty() {
                     let alloc_slots = self.type_field_count("DeadlineTimer").unwrap_or(2);
-                    self.ctx.emit(Instruction::New { dst: dest, type_id: 0, field_count: alloc_slots });
+                    self.ctx.emit(Instruction::New {
+                        dst: dest,
+                        type_id: 0,
+                        field_count: alloc_slots,
+                    });
                     let now = self.ctx.alloc_temp();
                     let mut operands = Vec::<u8>::new();
                     Self::write_reg(&mut operands, now.0);
@@ -19028,12 +20843,23 @@ impl VbcCodegen {
                     });
                     let deadline = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Add, dst: deadline, a: now, b: args[0],
+                        op: BinaryIntOp::Add,
+                        dst: deadline,
+                        a: now,
+                        b: args[0],
                     });
-                    self.ctx.emit(Instruction::SetF { obj: dest, field_idx: fi_deadline, value: deadline });
+                    self.ctx.emit(Instruction::SetF {
+                        obj: dest,
+                        field_idx: fi_deadline,
+                        value: deadline,
+                    });
                     let true_val = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::LoadTrue { dst: true_val });
-                    self.ctx.emit(Instruction::SetF { obj: dest, field_idx: fi_has_deadline, value: true_val });
+                    self.ctx.emit(Instruction::SetF {
+                        obj: dest,
+                        field_idx: fi_has_deadline,
+                        value: true_val,
+                    });
                 } else {
                     self.ctx.emit(Instruction::LoadNil { dst: dest });
                 }
@@ -19042,13 +20868,22 @@ impl VbcCodegen {
                 // is_expired(&self) -> Bool
                 // if !has_deadline: false, else: now >= deadline
                 let fi_deadline = self.resolve_field_index(Some("DeadlineTimer"), "deadline");
-                let fi_has_deadline = self.resolve_field_index(Some("DeadlineTimer"), "has_deadline");
+                let fi_has_deadline =
+                    self.resolve_field_index(Some("DeadlineTimer"), "has_deadline");
                 if !args.is_empty() {
                     let has_deadline = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::GetF { dst: has_deadline, obj: args[0], field_idx: fi_has_deadline });
+                    self.ctx.emit(Instruction::GetF {
+                        dst: has_deadline,
+                        obj: args[0],
+                        field_idx: fi_has_deadline,
+                    });
                     let no_deadline_label = self.ctx.new_label("dt_expired_no_dl");
                     let end_label = self.ctx.new_label("dt_expired_end");
-                    self.ctx.emit_forward_jump(&no_deadline_label, |offset| Instruction::JmpNot { cond: has_deadline, offset });
+                    self.ctx
+                        .emit_forward_jump(&no_deadline_label, |offset| Instruction::JmpNot {
+                            cond: has_deadline,
+                            offset,
+                        });
                     // Has deadline: check now >= deadline
                     let now = self.ctx.alloc_temp();
                     let mut operands = Vec::<u8>::new();
@@ -19058,11 +20893,19 @@ impl VbcCodegen {
                         operands,
                     });
                     let deadline = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::GetF { dst: deadline, obj: args[0], field_idx: fi_deadline });
-                    self.ctx.emit(Instruction::CmpI {
-                        op: CompareOp::Ge, dst: dest, a: now, b: deadline,
+                    self.ctx.emit(Instruction::GetF {
+                        dst: deadline,
+                        obj: args[0],
+                        field_idx: fi_deadline,
                     });
-                    self.ctx.emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
+                    self.ctx.emit(Instruction::CmpI {
+                        op: CompareOp::Ge,
+                        dst: dest,
+                        a: now,
+                        b: deadline,
+                    });
+                    self.ctx
+                        .emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
                     // No deadline: return false
                     self.ctx.define_label(&no_deadline_label);
                     self.ctx.emit(Instruction::LoadFalse { dst: dest });
@@ -19075,13 +20918,22 @@ impl VbcCodegen {
                 // remaining(&self) -> Duration
                 // if !has_deadline: Duration(0), else: max(deadline - now, 0)
                 let fi_deadline = self.resolve_field_index(Some("DeadlineTimer"), "deadline");
-                let fi_has_deadline = self.resolve_field_index(Some("DeadlineTimer"), "has_deadline");
+                let fi_has_deadline =
+                    self.resolve_field_index(Some("DeadlineTimer"), "has_deadline");
                 if !args.is_empty() {
                     let has_deadline = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::GetF { dst: has_deadline, obj: args[0], field_idx: fi_has_deadline });
+                    self.ctx.emit(Instruction::GetF {
+                        dst: has_deadline,
+                        obj: args[0],
+                        field_idx: fi_has_deadline,
+                    });
                     let zero_label = self.ctx.new_label("dt_remaining_zero");
                     let end_label = self.ctx.new_label("dt_remaining_end");
-                    self.ctx.emit_forward_jump(&zero_label, |offset| Instruction::JmpNot { cond: has_deadline, offset });
+                    self.ctx
+                        .emit_forward_jump(&zero_label, |offset| Instruction::JmpNot {
+                            cond: has_deadline,
+                            offset,
+                        });
                     // Has deadline: compute max(deadline - now, 0)
                     let now = self.ctx.alloc_temp();
                     let mut operands = Vec::<u8>::new();
@@ -19091,24 +20943,45 @@ impl VbcCodegen {
                         operands,
                     });
                     let deadline = self.ctx.alloc_temp();
-                    self.ctx.emit(Instruction::GetF { dst: deadline, obj: args[0], field_idx: fi_deadline });
+                    self.ctx.emit(Instruction::GetF {
+                        dst: deadline,
+                        obj: args[0],
+                        field_idx: fi_deadline,
+                    });
                     // Check if deadline > now
                     let cmp = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::CmpI {
-                        op: CompareOp::Gt, dst: cmp, a: deadline, b: now,
+                        op: CompareOp::Gt,
+                        dst: cmp,
+                        a: deadline,
+                        b: now,
                     });
-                    self.ctx.emit_forward_jump(&zero_label, |offset| Instruction::JmpNot { cond: cmp, offset });
+                    self.ctx
+                        .emit_forward_jump(&zero_label, |offset| Instruction::JmpNot {
+                            cond: cmp,
+                            offset,
+                        });
                     // deadline > now: return deadline - now
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Sub, dst: dest, a: deadline, b: now,
+                        op: BinaryIntOp::Sub,
+                        dst: dest,
+                        a: deadline,
+                        b: now,
                     });
-                    self.ctx.emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
+                    self.ctx
+                        .emit_forward_jump(&end_label, |offset| Instruction::Jmp { offset });
                     // deadline <= now or no deadline: return 0
                     self.ctx.define_label(&zero_label);
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                     self.ctx.define_label(&end_label);
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
 
@@ -19512,24 +21385,32 @@ impl VbcCodegen {
     }
 
     /// Emits a compile-time constant for intrinsics.
-    fn emit_intrinsic_compile_time_constant(
-        &mut self,
-        name: &str,
-        dest: Reg,
-    ) -> CodegenResult<()> {
+    fn emit_intrinsic_compile_time_constant(&mut self, name: &str, dest: Reg) -> CodegenResult<()> {
         match name {
             "size_of" | "align_of" => {
                 // These should be resolved at compile time
                 // Emit a placeholder for now
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: 8 });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: 8,
+                });
             }
             "type_name" | "type_id" => {
                 // Type information - resolve from context if possible
-                let type_name = if let Some(param) = self.ctx.generic_type_params.iter().next().filter(|_| self.ctx.generic_type_params.len() == 1).cloned() {
+                let type_name = if let Some(param) = self
+                    .ctx
+                    .generic_type_params
+                    .iter()
+                    .next()
+                    .filter(|_| self.ctx.generic_type_params.len() == 1)
+                    .cloned()
+                {
                     param
                 } else {
                     let fn_type_name = self.ctx.current_function.as_ref().and_then(|fname| {
-                        self.ctx.lookup_function(fname).and_then(|fi| fi.parent_type_name.clone())
+                        self.ctx
+                            .lookup_function(fname)
+                            .and_then(|fi| fi.parent_type_name.clone())
                     });
                     fn_type_name.unwrap_or_else(|| "unknown".to_string())
                 };
@@ -19554,7 +21435,10 @@ impl VbcCodegen {
                 let os_code: i64 = 3;
                 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
                 let os_code: i64 = 0;
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: os_code });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: os_code,
+                });
             }
             "target_arch" => {
                 // Arch codes: 0=unknown, 1=x86_64, 2=aarch64, 3=riscv64, 4=wasm32
@@ -19564,14 +21448,20 @@ impl VbcCodegen {
                 let arch_code: i64 = 2;
                 #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
                 let arch_code: i64 = 0;
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: arch_code });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: arch_code,
+                });
             }
             "num_cpus" => {
                 // Return actual CPU count at compile time
                 let cpus = std::thread::available_parallelism()
                     .map(|n| n.get() as i64)
                     .unwrap_or(1);
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: cpus });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: cpus,
+                });
             }
             "is_interpreted" => {
                 // VBC interpreter → always true
@@ -19579,7 +21469,10 @@ impl VbcCodegen {
             }
             "get_tier" => {
                 // VBC interpreter → tier 0
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: 0,
+                });
             }
             "tier_promote" => {
                 // No-op in interpreter, load nil
@@ -19587,22 +21480,40 @@ impl VbcCodegen {
             }
             // Float constants
             "f64_infinity" => {
-                self.ctx.emit(Instruction::LoadF { dst: dest, value: f64::INFINITY });
+                self.ctx.emit(Instruction::LoadF {
+                    dst: dest,
+                    value: f64::INFINITY,
+                });
             }
             "f64_neg_infinity" => {
-                self.ctx.emit(Instruction::LoadF { dst: dest, value: f64::NEG_INFINITY });
+                self.ctx.emit(Instruction::LoadF {
+                    dst: dest,
+                    value: f64::NEG_INFINITY,
+                });
             }
             "f64_nan" => {
-                self.ctx.emit(Instruction::LoadF { dst: dest, value: f64::NAN });
+                self.ctx.emit(Instruction::LoadF {
+                    dst: dest,
+                    value: f64::NAN,
+                });
             }
             "f32_infinity" => {
-                self.ctx.emit(Instruction::LoadF { dst: dest, value: f32::INFINITY as f64 });
+                self.ctx.emit(Instruction::LoadF {
+                    dst: dest,
+                    value: f32::INFINITY as f64,
+                });
             }
             "f32_neg_infinity" => {
-                self.ctx.emit(Instruction::LoadF { dst: dest, value: f32::NEG_INFINITY as f64 });
+                self.ctx.emit(Instruction::LoadF {
+                    dst: dest,
+                    value: f32::NEG_INFINITY as f64,
+                });
             }
             "f32_nan" => {
-                self.ctx.emit(Instruction::LoadF { dst: dest, value: f64::NAN });
+                self.ctx.emit(Instruction::LoadF {
+                    dst: dest,
+                    value: f64::NAN,
+                });
             }
             _ => {
                 self.ctx.emit(Instruction::LoadNil { dst: dest });
@@ -19742,8 +21653,8 @@ impl VbcCodegen {
                 // Default to 64-bit signed (matches Int which is the most common case).
                 if args.len() >= 2 {
                     let mut operands = encode_regs_to_bytes(dest, &[args[0], args[1]]);
-                    operands.push(64);  // width: 64-bit
-                    operands.push(1);   // signed: true
+                    operands.push(64); // width: 64-bit
+                    operands.push(1); // signed: true
                     self.ctx.emit(Instruction::ArithExtended {
                         sub_op: sub_op as u8,
                         operands,
@@ -19762,8 +21673,8 @@ impl VbcCodegen {
                 // Default to 64-bit signed for generic wrapping operations
                 if args.len() >= 2 {
                     let mut operands = encode_regs_to_bytes(dest, &[args[0], args[1]]);
-                    operands.push(64);  // width: 64-bit
-                    operands.push(1);   // signed: true
+                    operands.push(64); // width: 64-bit
+                    operands.push(1); // signed: true
                     self.ctx.emit(Instruction::ArithExtended {
                         sub_op: sub_op as u8,
                         operands,
@@ -19771,8 +21682,8 @@ impl VbcCodegen {
                 } else if !args.is_empty() {
                     // Unary operation (WrappingNeg)
                     let mut operands = encode_regs_to_bytes(dest, &[args[0]]);
-                    operands.push(64);  // width: 64-bit
-                    operands.push(1);   // signed: true
+                    operands.push(64); // width: 64-bit
+                    operands.push(1); // signed: true
                     self.ctx.emit(Instruction::ArithExtended {
                         sub_op: sub_op as u8,
                         operands,
@@ -19818,7 +21729,13 @@ impl VbcCodegen {
         use crate::instruction::ArithSubOpcode;
 
         // Encode operands: [dst:1-2b] [arg0:1-2b] [arg1?:1-2b] [width:1b] [signed?:1b]
-        fn encode_wrapping_operands(dest: Reg, args: &[Reg], width: u8, needs_signed: bool, signed: bool) -> Vec<u8> {
+        fn encode_wrapping_operands(
+            dest: Reg,
+            args: &[Reg],
+            width: u8,
+            needs_signed: bool,
+            signed: bool,
+        ) -> Vec<u8> {
             let mut bytes = Vec::with_capacity(8);
             // Encode destination register
             if dest.is_short() {
@@ -19851,28 +21768,39 @@ impl VbcCodegen {
             | ArithSubOpcode::WrappingSub
             | ArithSubOpcode::WrappingMul
             | ArithSubOpcode::WrappingShl
-                if args.len() >= 2 => {
-                    self.ctx.emit(Instruction::ArithExtended {
-                        sub_op: sub_op as u8,
-                        operands: encode_wrapping_operands(dest, &[args[0], args[1]], width, true, signed),
-                    });
-                }
+                if args.len() >= 2 =>
+            {
+                self.ctx.emit(Instruction::ArithExtended {
+                    sub_op: sub_op as u8,
+                    operands: encode_wrapping_operands(
+                        dest,
+                        &[args[0], args[1]],
+                        width,
+                        true,
+                        signed,
+                    ),
+                });
+            }
             // Wrapping shift right needs signedness for arithmetic vs logical
-            ArithSubOpcode::WrappingShr
-                if args.len() >= 2 => {
-                    self.ctx.emit(Instruction::ArithExtended {
-                        sub_op: sub_op as u8,
-                        operands: encode_wrapping_operands(dest, &[args[0], args[1]], width, true, signed),
-                    });
-                }
+            ArithSubOpcode::WrappingShr if args.len() >= 2 => {
+                self.ctx.emit(Instruction::ArithExtended {
+                    sub_op: sub_op as u8,
+                    operands: encode_wrapping_operands(
+                        dest,
+                        &[args[0], args[1]],
+                        width,
+                        true,
+                        signed,
+                    ),
+                });
+            }
             // Unary wrapping operation (neg)
-            ArithSubOpcode::WrappingNeg
-                if !args.is_empty() => {
-                    self.ctx.emit(Instruction::ArithExtended {
-                        sub_op: sub_op as u8,
-                        operands: encode_wrapping_operands(dest, &[args[0]], width, true, signed),
-                    });
-                }
+            ArithSubOpcode::WrappingNeg if !args.is_empty() => {
+                self.ctx.emit(Instruction::ArithExtended {
+                    sub_op: sub_op as u8,
+                    operands: encode_wrapping_operands(dest, &[args[0]], width, true, signed),
+                });
+            }
             // Other sub-opcodes should not reach here
             _ => {
                 self.ctx.emit(Instruction::LoadNil { dst: dest });
@@ -19925,12 +21853,13 @@ impl VbcCodegen {
             ArithSubOpcode::SaturatingAdd
             | ArithSubOpcode::SaturatingSub
             | ArithSubOpcode::SaturatingMul
-                if args.len() >= 2 => {
-                    self.ctx.emit(Instruction::ArithExtended {
-                        sub_op: sub_op as u8,
-                        operands: encode_saturating_operands(dest, &[args[0], args[1]], width, signed),
-                    });
-                }
+                if args.len() >= 2 =>
+            {
+                self.ctx.emit(Instruction::ArithExtended {
+                    sub_op: sub_op as u8,
+                    operands: encode_saturating_operands(dest, &[args[0], args[1]], width, signed),
+                });
+            }
             // Other sub-opcodes should not reach here
             _ => {
                 self.ctx.emit(Instruction::LoadNil { dst: dest });
@@ -20023,11 +21952,7 @@ impl VbcCodegen {
         dest: Reg,
     ) {
         // Encode operands: [ext_sub_op:1b] [dst:1-2b] [args...]
-        fn encode_tensor_ext_operands(
-            ext_sub_op: u8,
-            dest: Reg,
-            args: &[Reg],
-        ) -> Vec<u8> {
+        fn encode_tensor_ext_operands(ext_sub_op: u8, dest: Reg, args: &[Reg]) -> Vec<u8> {
             let mut bytes = Vec::with_capacity(args.len() * 2 + 3);
             // Encode TensorExtSubOpcode value
             bytes.push(ext_sub_op);
@@ -20151,8 +22076,8 @@ impl VbcCodegen {
         dest: Reg,
     ) -> CodegenResult<()> {
         use crate::instruction::{
-            ArithSubOpcode, CbgrSubOpcode, CharSubOpcode, LogSubOpcode,
-            MathSubOpcode, SimdSubOpcode, TextSubOpcode,
+            ArithSubOpcode, CbgrSubOpcode, CharSubOpcode, LogSubOpcode, MathSubOpcode,
+            SimdSubOpcode, TextSubOpcode,
         };
 
         // Helper to encode operands: [dst:1-2b] [args...]
@@ -20495,12 +22420,10 @@ impl VbcCodegen {
                     operands: encode_operands(dest, args),
                 })
             }
-            "verum_is_finite" | "verum_is_finite_f64" => {
-                self.ctx.emit(Instruction::MathExtended {
-                    sub_op: MathSubOpcode::IsFiniteF64 as u8,
-                    operands: encode_operands(dest, args),
-                })
-            }
+            "verum_is_finite" | "verum_is_finite_f64" => self.ctx.emit(Instruction::MathExtended {
+                sub_op: MathSubOpcode::IsFiniteF64 as u8,
+                operands: encode_operands(dest, args),
+            }),
             "verum_is_finite_f32" => self.ctx.emit(Instruction::MathExtended {
                 sub_op: MathSubOpcode::IsFiniteF32 as u8,
                 operands: encode_operands(dest, args),
@@ -20517,54 +22440,38 @@ impl VbcCodegen {
             }
 
             // Float Rounding Operations → MathExtended (0x29)
-            "verum_floor" | "verum_floor_f64" => {
-                self.ctx.emit(Instruction::MathExtended {
-                    sub_op: MathSubOpcode::FloorF64 as u8,
-                    operands: encode_operands(dest, args),
-                })
-            }
-            "verum_floorf" | "verum_floor_f32" => {
-                self.ctx.emit(Instruction::MathExtended {
-                    sub_op: MathSubOpcode::FloorF32 as u8,
-                    operands: encode_operands(dest, args),
-                })
-            }
-            "verum_ceil" | "verum_ceil_f64" => {
-                self.ctx.emit(Instruction::MathExtended {
-                    sub_op: MathSubOpcode::CeilF64 as u8,
-                    operands: encode_operands(dest, args),
-                })
-            }
-            "verum_ceilf" | "verum_ceil_f32" => {
-                self.ctx.emit(Instruction::MathExtended {
-                    sub_op: MathSubOpcode::CeilF32 as u8,
-                    operands: encode_operands(dest, args),
-                })
-            }
-            "verum_round" | "verum_round_f64" => {
-                self.ctx.emit(Instruction::MathExtended {
-                    sub_op: MathSubOpcode::RoundF64 as u8,
-                    operands: encode_operands(dest, args),
-                })
-            }
-            "verum_roundf" | "verum_round_f32" => {
-                self.ctx.emit(Instruction::MathExtended {
-                    sub_op: MathSubOpcode::RoundF32 as u8,
-                    operands: encode_operands(dest, args),
-                })
-            }
-            "verum_trunc" | "verum_trunc_f64" => {
-                self.ctx.emit(Instruction::MathExtended {
-                    sub_op: MathSubOpcode::TruncF64 as u8,
-                    operands: encode_operands(dest, args),
-                })
-            }
-            "verum_truncf" | "verum_trunc_f32" => {
-                self.ctx.emit(Instruction::MathExtended {
-                    sub_op: MathSubOpcode::TruncF32 as u8,
-                    operands: encode_operands(dest, args),
-                })
-            }
+            "verum_floor" | "verum_floor_f64" => self.ctx.emit(Instruction::MathExtended {
+                sub_op: MathSubOpcode::FloorF64 as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_floorf" | "verum_floor_f32" => self.ctx.emit(Instruction::MathExtended {
+                sub_op: MathSubOpcode::FloorF32 as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_ceil" | "verum_ceil_f64" => self.ctx.emit(Instruction::MathExtended {
+                sub_op: MathSubOpcode::CeilF64 as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_ceilf" | "verum_ceil_f32" => self.ctx.emit(Instruction::MathExtended {
+                sub_op: MathSubOpcode::CeilF32 as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_round" | "verum_round_f64" => self.ctx.emit(Instruction::MathExtended {
+                sub_op: MathSubOpcode::RoundF64 as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_roundf" | "verum_round_f32" => self.ctx.emit(Instruction::MathExtended {
+                sub_op: MathSubOpcode::RoundF32 as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_trunc" | "verum_trunc_f64" => self.ctx.emit(Instruction::MathExtended {
+                sub_op: MathSubOpcode::TruncF64 as u8,
+                operands: encode_operands(dest, args),
+            }),
+            "verum_truncf" | "verum_trunc_f32" => self.ctx.emit(Instruction::MathExtended {
+                sub_op: MathSubOpcode::TruncF32 as u8,
+                operands: encode_operands(dest, args),
+            }),
 
             // Time Operations → FfiExtended with TimeMonotonicNanos sub-op
             "verum_rdtsc" | "verum_monotonic_nanos" => {
@@ -20585,21 +22492,37 @@ impl VbcCodegen {
                     let delta = args[1];
                     let old_val = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::AtomicLoad {
-                        dst: old_val, ptr, ordering: 4, size: 8,
+                        dst: old_val,
+                        ptr,
+                        ordering: 4,
+                        size: 8,
                     });
                     let new_val = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Add, dst: new_val, a: old_val, b: delta,
+                        op: BinaryIntOp::Add,
+                        dst: new_val,
+                        a: old_val,
+                        b: delta,
                     });
                     self.ctx.emit(Instruction::AtomicCas {
-                        dst: dest, ptr, expected: old_val, desired: new_val,
-                        ordering: 4, size: 8,
+                        dst: dest,
+                        ptr,
+                        expected: old_val,
+                        desired: new_val,
+                        ordering: 4,
+                        size: 8,
                     });
-                    self.ctx.emit(Instruction::Mov { dst: dest, src: old_val });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: dest,
+                        src: old_val,
+                    });
                     self.ctx.free_temp(new_val);
                     self.ctx.free_temp(old_val);
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
 
@@ -20610,21 +22533,37 @@ impl VbcCodegen {
                     let delta = args[1];
                     let old_val = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::AtomicLoad {
-                        dst: old_val, ptr, ordering: 4, size: 8,
+                        dst: old_val,
+                        ptr,
+                        ordering: 4,
+                        size: 8,
                     });
                     let new_val = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::BinaryI {
-                        op: BinaryIntOp::Sub, dst: new_val, a: old_val, b: delta,
+                        op: BinaryIntOp::Sub,
+                        dst: new_val,
+                        a: old_val,
+                        b: delta,
                     });
                     self.ctx.emit(Instruction::AtomicCas {
-                        dst: dest, ptr, expected: old_val, desired: new_val,
-                        ordering: 4, size: 8,
+                        dst: dest,
+                        ptr,
+                        expected: old_val,
+                        desired: new_val,
+                        ordering: 4,
+                        size: 8,
                     });
-                    self.ctx.emit(Instruction::Mov { dst: dest, src: old_val });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: dest,
+                        src: old_val,
+                    });
                     self.ctx.free_temp(new_val);
                     self.ctx.free_temp(old_val);
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
 
@@ -20635,21 +22574,37 @@ impl VbcCodegen {
                     let mask = args[1];
                     let old_val = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::AtomicLoad {
-                        dst: old_val, ptr, ordering: 4, size: 8,
+                        dst: old_val,
+                        ptr,
+                        ordering: 4,
+                        size: 8,
                     });
                     let new_val = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::Bitwise {
-                        op: BitwiseOp::And, dst: new_val, a: old_val, b: mask,
+                        op: BitwiseOp::And,
+                        dst: new_val,
+                        a: old_val,
+                        b: mask,
                     });
                     self.ctx.emit(Instruction::AtomicCas {
-                        dst: dest, ptr, expected: old_val, desired: new_val,
-                        ordering: 4, size: 8,
+                        dst: dest,
+                        ptr,
+                        expected: old_val,
+                        desired: new_val,
+                        ordering: 4,
+                        size: 8,
                     });
-                    self.ctx.emit(Instruction::Mov { dst: dest, src: old_val });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: dest,
+                        src: old_val,
+                    });
                     self.ctx.free_temp(new_val);
                     self.ctx.free_temp(old_val);
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
 
@@ -20660,21 +22615,37 @@ impl VbcCodegen {
                     let mask = args[1];
                     let old_val = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::AtomicLoad {
-                        dst: old_val, ptr, ordering: 4, size: 8,
+                        dst: old_val,
+                        ptr,
+                        ordering: 4,
+                        size: 8,
                     });
                     let new_val = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::Bitwise {
-                        op: BitwiseOp::Or, dst: new_val, a: old_val, b: mask,
+                        op: BitwiseOp::Or,
+                        dst: new_val,
+                        a: old_val,
+                        b: mask,
                     });
                     self.ctx.emit(Instruction::AtomicCas {
-                        dst: dest, ptr, expected: old_val, desired: new_val,
-                        ordering: 4, size: 8,
+                        dst: dest,
+                        ptr,
+                        expected: old_val,
+                        desired: new_val,
+                        ordering: 4,
+                        size: 8,
                     });
-                    self.ctx.emit(Instruction::Mov { dst: dest, src: old_val });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: dest,
+                        src: old_val,
+                    });
                     self.ctx.free_temp(new_val);
                     self.ctx.free_temp(old_val);
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
 
@@ -20685,21 +22656,37 @@ impl VbcCodegen {
                     let mask = args[1];
                     let old_val = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::AtomicLoad {
-                        dst: old_val, ptr, ordering: 4, size: 8,
+                        dst: old_val,
+                        ptr,
+                        ordering: 4,
+                        size: 8,
                     });
                     let new_val = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::Bitwise {
-                        op: BitwiseOp::Xor, dst: new_val, a: old_val, b: mask,
+                        op: BitwiseOp::Xor,
+                        dst: new_val,
+                        a: old_val,
+                        b: mask,
                     });
                     self.ctx.emit(Instruction::AtomicCas {
-                        dst: dest, ptr, expected: old_val, desired: new_val,
-                        ordering: 4, size: 8,
+                        dst: dest,
+                        ptr,
+                        expected: old_val,
+                        desired: new_val,
+                        ordering: 4,
+                        size: 8,
                     });
-                    self.ctx.emit(Instruction::Mov { dst: dest, src: old_val });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: dest,
+                        src: old_val,
+                    });
                     self.ctx.free_temp(new_val);
                     self.ctx.free_temp(old_val);
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
 
@@ -20785,18 +22772,24 @@ impl VbcCodegen {
                 operands: encode_operands(dest, args),
             }),
             // Unsigned checked arithmetic (u64)
-            "checked_add_u64" | "verum_checked_add_u64" => self.ctx.emit(Instruction::ArithExtended {
-                sub_op: ArithSubOpcode::CheckedAddU as u8,
-                operands: encode_operands(dest, args),
-            }),
-            "checked_sub_u64" | "verum_checked_sub_u64" => self.ctx.emit(Instruction::ArithExtended {
-                sub_op: ArithSubOpcode::CheckedSubU as u8,
-                operands: encode_operands(dest, args),
-            }),
-            "checked_mul_u64" | "verum_checked_mul_u64" => self.ctx.emit(Instruction::ArithExtended {
-                sub_op: ArithSubOpcode::CheckedMulU as u8,
-                operands: encode_operands(dest, args),
-            }),
+            "checked_add_u64" | "verum_checked_add_u64" => {
+                self.ctx.emit(Instruction::ArithExtended {
+                    sub_op: ArithSubOpcode::CheckedAddU as u8,
+                    operands: encode_operands(dest, args),
+                })
+            }
+            "checked_sub_u64" | "verum_checked_sub_u64" => {
+                self.ctx.emit(Instruction::ArithExtended {
+                    sub_op: ArithSubOpcode::CheckedSubU as u8,
+                    operands: encode_operands(dest, args),
+                })
+            }
+            "checked_mul_u64" | "verum_checked_mul_u64" => {
+                self.ctx.emit(Instruction::ArithExtended {
+                    sub_op: ArithSubOpcode::CheckedMulU as u8,
+                    operands: encode_operands(dest, args),
+                })
+            }
             "verum_overflowing_add_i8"
             | "verum_overflowing_add_i16"
             | "verum_overflowing_add_i32"
@@ -20845,22 +22838,38 @@ impl VbcCodegen {
                     let new_desired = args[1];
                     let old_val = self.ctx.alloc_temp();
                     self.ctx.emit(Instruction::AtomicLoad {
-                        dst: old_val, ptr, ordering: 4, size: 8,
+                        dst: old_val,
+                        ptr,
+                        ordering: 4,
+                        size: 8,
                     });
                     self.ctx.emit(Instruction::AtomicCas {
-                        dst: dest, ptr, expected: old_val, desired: new_desired,
-                        ordering: 4, size: 8,
+                        dst: dest,
+                        ptr,
+                        expected: old_val,
+                        desired: new_desired,
+                        ordering: 4,
+                        size: 8,
                     });
-                    self.ctx.emit(Instruction::Mov { dst: dest, src: old_val });
+                    self.ctx.emit(Instruction::Mov {
+                        dst: dest,
+                        src: old_val,
+                    });
                     self.ctx.free_temp(old_val);
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
 
             // Global allocator — emit placeholder (implementation pending)
             "verum_global_allocator" => {
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: 0,
+                });
             }
 
             // Logging Operations → LogExtended (0xBE)
@@ -20911,8 +22920,10 @@ impl VbcCodegen {
                 let src = args.first().copied().unwrap_or(dest);
                 self.ctx.emit(Instruction::GradStop { dst: dest, src });
             }
-            "verum_grad_zero_tangent" | "verum_grad_custom"
-            | "verum_grad_recompute" | "verum_grad_zero" => {
+            "verum_grad_zero_tangent"
+            | "verum_grad_custom"
+            | "verum_grad_recompute"
+            | "verum_grad_zero" => {
                 // These are handled as MlExtended sub-opcodes by the interpreter.
                 // Emit as Raw MlExtended opcode with sub-opcode + register operands.
                 use crate::instruction::{MlSubOpcode, Opcode};
@@ -20956,7 +22967,10 @@ impl VbcCodegen {
             // Reflection Operations → MetaReflect (0xBB)
             "verum_size_of" | "verum_align_of" | "verum_type_id" => {
                 // These are compile-time operations - emit placeholder
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: 0,
+                });
             }
 
             // Tensor utility operations (emit as TensorExtended with 0xFF marker)
@@ -21032,15 +23046,15 @@ impl VbcCodegen {
             // Unknown intrinsic — emit a runtime panic so the error is visible
             _ => {
                 #[cfg(debug_assertions)]
-                tracing::warn!(
-                    "Unknown intrinsic '{}' - emitting runtime panic",
-                    func_name
-                );
+                tracing::warn!("Unknown intrinsic '{}' - emitting runtime panic", func_name);
                 let msg = format!("unimplemented intrinsic: {}", func_name);
                 let message_id = self.intern_string(&msg);
                 self.ctx.emit(Instruction::Panic { message_id });
                 // Load a fallback value after the panic (unreachable, but keeps register valid)
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: 0,
+                });
             }
         }
 
@@ -21053,10 +23067,15 @@ impl VbcCodegen {
         path: &verum_ast::ty::Path,
         args: &verum_ast::MacroArgs,
     ) -> CodegenResult<Option<Reg>> {
-        let macro_name = path.segments.iter().map(|s| match s {
-            verum_ast::ty::PathSegment::Name(id) => id.name.as_str(),
-            _ => "",
-        }).collect::<Vec<_>>().join(".");
+        let macro_name = path
+            .segments
+            .iter()
+            .map(|s| match s {
+                verum_ast::ty::PathSegment::Name(id) => id.name.as_str(),
+                _ => "",
+            })
+            .collect::<Vec<_>>()
+            .join(".");
 
         match macro_name.as_str() {
             "list_with_capacity" => {
@@ -21096,7 +23115,8 @@ impl VbcCodegen {
             _ => {
                 // Unknown macro — emit panic
                 let dest = self.ctx.alloc_temp();
-                let message_id = self.intern_string(&format!("macro not expanded: @{}", macro_name));
+                let message_id =
+                    self.intern_string(&format!("macro not expanded: @{}", macro_name));
                 self.ctx.emit(Instruction::Panic { message_id });
                 Ok(Some(dest))
             }
@@ -21139,9 +23159,7 @@ impl VbcCodegen {
         let result = self.compile_expr(body)?;
 
         // Pop context
-        self.ctx.emit(Instruction::PopContext {
-            name: name_id,
-        });
+        self.ctx.emit(Instruction::PopContext { name: name_id });
 
         self.ctx.free_temp(handler_reg);
 
@@ -21189,7 +23207,10 @@ impl VbcCodegen {
     ) -> CodegenResult<Option<Reg>> {
         // Create result list
         let result = self.ctx.alloc_temp();
-        self.ctx.emit(Instruction::MakeList { dst: result, len: 0 });
+        self.ctx.emit(Instruction::MakeList {
+            dst: result,
+            len: 0,
+        });
 
         // Recursively compile clauses
         self.compile_comprehension_clauses(expr, clauses, 0, result)?;
@@ -21338,7 +23359,10 @@ impl VbcCodegen {
         // Early return for empty clauses - create empty iterator
         if clauses.is_empty() {
             let result = self.ctx.alloc_temp();
-            self.ctx.emit(Instruction::MakeList { dst: result, len: 0 });
+            self.ctx.emit(Instruction::MakeList {
+                dst: result,
+                len: 0,
+            });
             // Create iterator from empty list
             let iter_result = self.ctx.alloc_temp();
             self.ctx.emit(Instruction::Iter {
@@ -21597,11 +23621,8 @@ impl VbcCodegen {
         }
 
         // Step 2: Create generator function
-        let gen_func_id = self.compile_stream_generator_body(
-            &capture_names,
-            output_expr,
-            clauses,
-        )?;
+        let gen_func_id =
+            self.compile_stream_generator_body(&capture_names, output_expr, clauses)?;
 
         // Step 3: Emit NewClosure to create the generator closure
         let closure_reg = self.ctx.alloc_temp();
@@ -21675,7 +23696,12 @@ impl VbcCodegen {
                     _ => TypeRef::Concrete(TypeId::UNIT), // fallback
                 }
             }),
-            intrinsic_name: None, variant_tag: None, parent_type_name: None, variant_payload_types: None, is_partial_pattern: false, takes_self_mut_ref: false,
+            intrinsic_name: None,
+            variant_tag: None,
+            parent_type_name: None,
+            variant_payload_types: None,
+            is_partial_pattern: false,
+            takes_self_mut_ref: false,
             return_type_name: None, // Generator return types are inferred
             return_type_inner: None,
         };
@@ -21693,7 +23719,8 @@ impl VbcCodegen {
         self.ctx.suspend_point_count = 0;
 
         // Build captures with mutability info (captures are immutable)
-        let captures_with_mut: Vec<(String, bool)> = captures.iter().map(|c| (c.clone(), false)).collect();
+        let captures_with_mut: Vec<(String, bool)> =
+            captures.iter().map(|c| (c.clone(), false)).collect();
 
         // Begin generator function compilation
         self.ctx.begin_function(&gen_name, &captures_with_mut, None);
@@ -21896,8 +23923,10 @@ impl VbcCodegen {
     ) -> CodegenResult<Option<Reg>> {
         // Create result map
         let result = self.ctx.alloc_temp();
-        self.ctx
-            .emit(Instruction::MakeMap { dst: result, capacity: 0 });
+        self.ctx.emit(Instruction::MakeMap {
+            dst: result,
+            capacity: 0,
+        });
 
         // Recursively compile clauses
         self.compile_map_comprehension_clauses(key_expr, value_expr, clauses, 0, result)?;
@@ -21977,7 +24006,13 @@ impl VbcCodegen {
                 self.ctx.free_temp(item);
 
                 // Compile remaining clauses
-                self.compile_map_comprehension_clauses(key_expr, value_expr, clauses, index + 1, result)?;
+                self.compile_map_comprehension_clauses(
+                    key_expr,
+                    value_expr,
+                    clauses,
+                    index + 1,
+                    result,
+                )?;
 
                 // Loop back
                 self.ctx.emit(Instruction::Jmp {
@@ -22004,7 +24039,13 @@ impl VbcCodegen {
                 self.ctx.free_temp(cond_reg);
 
                 // Condition true - process remaining clauses
-                self.compile_map_comprehension_clauses(key_expr, value_expr, clauses, index + 1, result)?;
+                self.compile_map_comprehension_clauses(
+                    key_expr,
+                    value_expr,
+                    clauses,
+                    index + 1,
+                    result,
+                )?;
 
                 self.ctx.define_label(&skip_label);
             }
@@ -22016,7 +24057,13 @@ impl VbcCodegen {
                 self.compile_pattern_bind(pattern, value_reg)?;
                 self.ctx.free_temp(value_reg);
 
-                self.compile_map_comprehension_clauses(key_expr, value_expr, clauses, index + 1, result)?;
+                self.compile_map_comprehension_clauses(
+                    key_expr,
+                    value_expr,
+                    clauses,
+                    index + 1,
+                    result,
+                )?;
             }
         }
 
@@ -22034,8 +24081,10 @@ impl VbcCodegen {
     ) -> CodegenResult<Option<Reg>> {
         // Create result set
         let result = self.ctx.alloc_temp();
-        self.ctx
-            .emit(Instruction::MakeSet { dst: result, capacity: 0 });
+        self.ctx.emit(Instruction::MakeSet {
+            dst: result,
+            capacity: 0,
+        });
 
         // Recursively compile clauses
         self.compile_set_comprehension_clauses(expr, clauses, 0, result)?;
@@ -22058,10 +24107,7 @@ impl VbcCodegen {
             let elem = self
                 .compile_expr(expr)?
                 .ok_or_else(|| CodegenError::internal("set comprehension expr has no value"))?;
-            self.ctx.emit(Instruction::SetInsert {
-                set: result,
-                elem,
-            });
+            self.ctx.emit(Instruction::SetInsert { set: result, elem });
             self.ctx.free_temp(elem);
             return Ok(());
         }
@@ -22172,7 +24218,9 @@ impl VbcCodegen {
         use verum_ast::PatternKind;
 
         match &pattern.kind {
-            PatternKind::Ident { name, subpattern, .. } => {
+            PatternKind::Ident {
+                name, subpattern, ..
+            } => {
                 vars.push(name.name.to_string());
                 // Also collect from subpattern if present (e.g., x @ Some(y))
                 if let Some(sub) = subpattern {
@@ -22189,7 +24237,11 @@ impl VbcCodegen {
                     self.collect_pattern_variables(elem, vars);
                 }
             }
-            PatternKind::Slice { before, rest, after } => {
+            PatternKind::Slice {
+                before,
+                rest,
+                after,
+            } => {
                 for elem in before.iter() {
                     self.collect_pattern_variables(elem, vars);
                 }
@@ -22267,11 +24319,14 @@ impl VbcCodegen {
                 self.collect_pattern_variables(inner, vars);
             }
             // Patterns that don't bind variables (Stream binds via head_patterns which are processed)
-            PatternKind::Wildcard |
-            PatternKind::Rest |
-            PatternKind::Literal(_) |
-            PatternKind::Range { .. } => {}
-            PatternKind::Stream { head_patterns, rest } => {
+            PatternKind::Wildcard
+            | PatternKind::Rest
+            | PatternKind::Literal(_)
+            | PatternKind::Range { .. } => {}
+            PatternKind::Stream {
+                head_patterns,
+                rest,
+            } => {
                 // Stream patterns bind variables from head patterns and optionally the rest
                 for pat in head_patterns.iter() {
                     self.collect_pattern_variables(pat, vars);
@@ -22397,7 +24452,6 @@ impl VbcCodegen {
         let reg = self.compile_interpolated_string(&handler, &parts_list, &exprs_list)?;
         Ok(Some(reg))
     }
-
 
     /// Compiles interpolated string: f"Hello {name}"
     fn compile_interpolated_string(
@@ -22615,7 +24669,10 @@ impl VbcCodegen {
         // - Unsafe thin (&unsafe T): 8 bytes (pointer only)
         // - Unsafe fat (&unsafe [T]): 16 bytes (ptr=8 + len=8)
         if let Some(ref_size) = self.resolve_ref_type_size(ty, property) {
-            self.ctx.emit(Instruction::LoadI { dst: dest, value: ref_size });
+            self.ctx.emit(Instruction::LoadI {
+                dst: dest,
+                value: ref_size,
+            });
             return Ok(Some(dest));
         }
 
@@ -22643,48 +24700,113 @@ impl VbcCodegen {
             _ => 64, // default
         };
 
-        let is_signed = matches!(type_name.as_str(),
-            "Int" | "Int8" | "Int16" | "Int32" | "Int64" | "Int128" | "IntSize"
-            | "i8" | "i16" | "i32" | "i64" | "i128" | "isize");
-        let is_float = matches!(type_name.as_str(),
-            "Float" | "Float32" | "Float64" | "f32" | "f64");
+        let is_signed = matches!(
+            type_name.as_str(),
+            "Int"
+                | "Int8"
+                | "Int16"
+                | "Int32"
+                | "Int64"
+                | "Int128"
+                | "IntSize"
+                | "i8"
+                | "i16"
+                | "i32"
+                | "i64"
+                | "i128"
+                | "isize"
+        );
+        let is_float = matches!(
+            type_name.as_str(),
+            "Float" | "Float32" | "Float64" | "f32" | "f64"
+        );
 
         match property {
             TypeProperty::Size => {
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: bits / 8 });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: bits / 8,
+                });
             }
             TypeProperty::Alignment => {
                 let size = bits / 8;
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: size.min(16) });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: size.min(16),
+                });
             }
             TypeProperty::Stride => {
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: bits / 8 });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: bits / 8,
+                });
             }
             TypeProperty::Min => {
                 if is_float {
-                    let f = if bits == 32 { f32::MIN as f64 } else { f64::MIN };
-                    self.ctx.emit(Instruction::LoadF { dst: dest, value: f });
+                    let f = if bits == 32 {
+                        f32::MIN as f64
+                    } else {
+                        f64::MIN
+                    };
+                    self.ctx.emit(Instruction::LoadF {
+                        dst: dest,
+                        value: f,
+                    });
                 } else if is_signed {
-                    let min_val = if bits == 64 { i64::MIN } else { -(1i64 << (bits - 1)) };
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: min_val });
+                    let min_val = if bits == 64 {
+                        i64::MIN
+                    } else {
+                        -(1i64 << (bits - 1))
+                    };
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: min_val,
+                    });
                 } else {
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: 0 });
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: 0,
+                    });
                 }
             }
             TypeProperty::Max => {
                 if is_float {
-                    let f = if bits == 32 { f32::MAX as f64 } else { f64::MAX };
-                    self.ctx.emit(Instruction::LoadF { dst: dest, value: f });
+                    let f = if bits == 32 {
+                        f32::MAX as f64
+                    } else {
+                        f64::MAX
+                    };
+                    self.ctx.emit(Instruction::LoadF {
+                        dst: dest,
+                        value: f,
+                    });
                 } else if is_signed {
-                    let max_val = if bits == 64 { i64::MAX } else { (1i64 << (bits - 1)) - 1 };
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: max_val });
+                    let max_val = if bits == 64 {
+                        i64::MAX
+                    } else {
+                        (1i64 << (bits - 1)) - 1
+                    };
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: max_val,
+                    });
                 } else {
-                    let max_val = if bits == 64 { u64::MAX as i64 } else { (1i64 << bits) - 1 };
-                    self.ctx.emit(Instruction::LoadI { dst: dest, value: max_val });
+                    let max_val = if bits == 64 {
+                        u64::MAX as i64
+                    } else {
+                        (1i64 << bits) - 1
+                    };
+                    self.ctx.emit(Instruction::LoadI {
+                        dst: dest,
+                        value: max_val,
+                    });
                 }
             }
             TypeProperty::Bits => {
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: bits });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: bits,
+                });
             }
             TypeProperty::Name => {
                 let const_id = self.ctx.add_const_string(&type_name);
@@ -22698,7 +24820,10 @@ impl VbcCodegen {
                 let mut hasher = std::collections::hash_map::DefaultHasher::new();
                 type_name.hash(&mut hasher);
                 let type_id = hasher.finish() as i64;
-                self.ctx.emit(Instruction::LoadI { dst: dest, value: type_id });
+                self.ctx.emit(Instruction::LoadI {
+                    dst: dest,
+                    value: type_id,
+                });
             }
         }
 
@@ -22737,8 +24862,8 @@ impl VbcCodegen {
         ty: &verum_ast::ty::Type,
         property: &verum_ast::TypeProperty,
     ) -> Option<i64> {
-        use verum_ast::ty::TypeKind;
         use verum_ast::TypeProperty;
+        use verum_ast::ty::TypeKind;
 
         // Only handle Size and Alignment for reference types
         if !matches!(property, TypeProperty::Size | TypeProperty::Alignment) {
@@ -22797,9 +24922,10 @@ impl VbcCodegen {
     /// where every field occupies 8 bytes.
     fn compute_field_offset(&self, type_name: &str, field_name: &str) -> i64 {
         if let Some(fields) = self.type_field_layouts.get(type_name)
-            && let Some(index) = fields.iter().position(|f| f == field_name) {
-                return (index as i64) * 8;
-            }
+            && let Some(index) = fields.iter().position(|f| f == field_name)
+        {
+            return (index as i64) * 8;
+        }
         // Field or type not found — return 0 as a conservative fallback.
         // This can happen for types not yet registered (e.g., generic
         // instantiations or externally-defined types).
@@ -22927,7 +25053,6 @@ impl VbcCodegen {
     }
 }
 
-
 // ============================================================================
 // Free Variable Analysis
 // ============================================================================
@@ -23044,7 +25169,11 @@ impl FreeVarAnalyzer {
             }
 
             // If expression
-            ExprKind::If { condition, then_branch, else_branch } => {
+            ExprKind::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
                 self.visit_condition(condition);
                 self.visit_block(then_branch);
                 if let Some(else_expr) = else_branch {
@@ -23076,12 +25205,19 @@ impl FreeVarAnalyzer {
             ExprKind::Loop { body, .. } => {
                 self.visit_block(body);
             }
-            ExprKind::While { condition, body, .. } => {
+            ExprKind::While {
+                condition, body, ..
+            } => {
                 // While.condition is just an Expr, not IfCondition
                 self.visit_expr(condition);
                 self.visit_block(body);
             }
-            ExprKind::For { pattern, iter, body, .. } => {
+            ExprKind::For {
+                pattern,
+                iter,
+                body,
+                ..
+            } => {
                 self.visit_expr(iter);
                 // Pattern bindings are local to the for body
                 let pattern_bindings = self.extract_pattern_bindings(pattern);
@@ -23136,7 +25272,11 @@ impl FreeVarAnalyzer {
             }
 
             // Record construction
-            ExprKind::Record { path: _, fields, base } => {
+            ExprKind::Record {
+                path: _,
+                fields,
+                base,
+            } => {
                 use verum_common::Maybe;
                 for field in fields.iter() {
                     if let Maybe::Some(ref value) = field.value {
@@ -23161,7 +25301,9 @@ impl FreeVarAnalyzer {
                 self.visit_expr(expr);
             }
             ExprKind::Return(None) => {}
-            ExprKind::Break { value: Some(expr), .. } => {
+            ExprKind::Break {
+                value: Some(expr), ..
+            } => {
                 self.visit_expr(expr);
             }
             ExprKind::Break { value: None, .. } => {}
@@ -23255,7 +25397,11 @@ impl FreeVarAnalyzer {
 
         use verum_common::Maybe;
         match &stmt.kind {
-            StmtKind::Let { pattern, ty: _, value } => {
+            StmtKind::Let {
+                pattern,
+                ty: _,
+                value,
+            } => {
                 // Visit initializer first (before binding is in scope)
                 if let Maybe::Some(init_expr) = value {
                     self.visit_expr(init_expr);
@@ -23303,7 +25449,11 @@ impl FreeVarAnalyzer {
         bindings
     }
 
-    fn extract_pattern_bindings_inner(&self, pattern: &verum_ast::Pattern, bindings: &mut Vec<String>) {
+    fn extract_pattern_bindings_inner(
+        &self,
+        pattern: &verum_ast::Pattern,
+        bindings: &mut Vec<String>,
+    ) {
         use verum_ast::PatternKind;
 
         match &pattern.kind {
@@ -23360,11 +25510,18 @@ impl FreeVarAnalyzer {
             PatternKind::Paren(inner) => {
                 self.extract_pattern_bindings_inner(inner, bindings);
             }
-            PatternKind::Wildcard | PatternKind::Literal(_) | PatternKind::Rest |
-            PatternKind::Range { .. } | PatternKind::Reference { .. } | PatternKind::View { .. } => {
+            PatternKind::Wildcard
+            | PatternKind::Literal(_)
+            | PatternKind::Rest
+            | PatternKind::Range { .. }
+            | PatternKind::Reference { .. }
+            | PatternKind::View { .. } => {
                 // These don't bind variables (Reference does, but recursively via inner)
             }
-            PatternKind::Stream { head_patterns, rest } => {
+            PatternKind::Stream {
+                head_patterns,
+                rest,
+            } => {
                 // Stream patterns bind variables from head patterns and optionally the rest
                 for p in head_patterns.iter() {
                     self.extract_pattern_bindings_inner(p, bindings);
@@ -23404,9 +25561,7 @@ impl FreeVarAnalyzer {
 /// code derefs an `&Float32`, the upper 4 bytes leak — but that is
 /// an extremely rare FFI shape (most C `float` returns come back via
 /// register, not pointer).
-fn typed_primitive_pointee_deref(
-    t: &str,
-) -> Option<(crate::instruction::FfiSubOpcode, u8)> {
+fn typed_primitive_pointee_deref(t: &str) -> Option<(crate::instruction::FfiSubOpcode, u8)> {
     use crate::instruction::FfiSubOpcode;
     let t = t.trim();
     // Strip the reference prefix. The order matters: longer prefixes
@@ -23446,7 +25601,6 @@ fn typed_primitive_pointee_deref(
         _ => None,
     }
 }
-
 
 #[cfg(test)]
 mod tests {

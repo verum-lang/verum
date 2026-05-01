@@ -706,7 +706,10 @@ fn test_smt_subsumption_equality_implies_ge() {
 
     let result = checker.check_subsumption(&eq5_type, &ge0_type);
     assert!(result.is_ok());
-    assert!(result.unwrap(), "Int{{== 5}} should be subtype of Int{{>= 0}}");
+    assert!(
+        result.unwrap(),
+        "Int{{== 5}} should be subtype of Int{{>= 0}}"
+    );
 }
 
 #[test]
@@ -730,11 +733,17 @@ fn test_smt_subsumption_le_directions() {
 
     let result = checker.check_subsumption(&lt5_type, &lt10_type);
     assert!(result.is_ok());
-    assert!(result.unwrap(), "Int{{< 5}} should be subtype of Int{{< 10}}");
+    assert!(
+        result.unwrap(),
+        "Int{{< 5}} should be subtype of Int{{< 10}}"
+    );
 
     let result = checker.check_subsumption(&lt10_type, &lt5_type);
     assert!(result.is_ok());
-    assert!(!result.unwrap(), "Int{{< 10}} should NOT be subtype of Int{{< 5}}");
+    assert!(
+        !result.unwrap(),
+        "Int{{< 10}} should NOT be subtype of Int{{< 5}}"
+    );
 }
 
 // ============================================================================
@@ -799,7 +808,10 @@ fn test_refinement_type_base_mismatch_subsumption() {
 
     let result = checker.check_subsumption(&int_refined, &float_refined);
     assert!(result.is_ok());
-    assert!(!result.unwrap(), "Different base types should not be subtypes");
+    assert!(
+        !result.unwrap(),
+        "Different base types should not be subtypes"
+    );
 }
 
 #[test]

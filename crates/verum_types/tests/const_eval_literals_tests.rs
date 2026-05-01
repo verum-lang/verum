@@ -376,7 +376,10 @@ fn test_eval_float_array() {
 
     use verum_ast::expr::ArrayExpr;
     let elements = vec![float_lit(1.1), float_lit(2.2), float_lit(3.3)];
-    let expr = Expr::new(ExprKind::Array(ArrayExpr::List(elements.into())), Span::dummy());
+    let expr = Expr::new(
+        ExprKind::Array(ArrayExpr::List(elements.into())),
+        Span::dummy(),
+    );
 
     let result = eval.eval(&expr).unwrap();
 
@@ -397,7 +400,10 @@ fn test_eval_text_array() {
 
     use verum_ast::expr::ArrayExpr;
     let elements = vec![text_lit("hello"), text_lit("world"), text_lit("!")];
-    let expr = Expr::new(ExprKind::Array(ArrayExpr::List(elements.into())), Span::dummy());
+    let expr = Expr::new(
+        ExprKind::Array(ArrayExpr::List(elements.into())),
+        Span::dummy(),
+    );
 
     let result = eval.eval(&expr).unwrap();
 
@@ -418,7 +424,10 @@ fn test_eval_char_array() {
 
     use verum_ast::expr::ArrayExpr;
     let elements = vec![char_lit('a'), char_lit('b'), char_lit('c')];
-    let expr = Expr::new(ExprKind::Array(ArrayExpr::List(elements.into())), Span::dummy());
+    let expr = Expr::new(
+        ExprKind::Array(ArrayExpr::List(elements.into())),
+        Span::dummy(),
+    );
 
     let result = eval.eval(&expr).unwrap();
 

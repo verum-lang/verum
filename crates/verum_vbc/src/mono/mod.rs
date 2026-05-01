@@ -45,38 +45,33 @@
 //! newly monomorphized functions into a final fully-specialized VBC module. This enables
 //! zero-overhead generics in AOT and optimized interpreter execution.
 
-mod graph;
-mod substitution;
-mod specializer;
-mod optimizer;
 mod cache;
-mod resolver;
+mod graph;
 mod merger;
+mod optimizer;
 mod phase;
+mod resolver;
+mod specializer;
+mod substitution;
 
+pub use cache::MonomorphizationCache;
 pub use graph::{
-    InstantiationGraph, InstantiationKey, InstantiationRequest,
-    CallSite, SourceLocation,
+    CallSite, InstantiationGraph, InstantiationKey, InstantiationRequest, SourceLocation,
+};
+pub use merger::{FunctionMapping, IncrementalMerger, MergeError, MergeStats, ModuleMerger};
+pub use optimizer::{OptimizationStats, SpecializationOptimizer};
+pub use phase::{
+    MonoPhaseConfig, MonoPhaseError, MonoPhaseResult, MonomorphizationPhase, monomorphize,
+    monomorphize_minimal, monomorphize_with_core,
+};
+pub use resolver::{
+    CacheMetadata, MonomorphizationResolver, ResolvedSpecialization, ResolverError, ResolverStats,
+    Version,
+};
+pub use specializer::{
+    BytecodeSpecializer, SpecializationError, SpecializedFunction, SpecializerStats, TypeLayout,
 };
 pub use substitution::TypeSubstitution;
-pub use specializer::{
-    BytecodeSpecializer, SpecializedFunction, SpecializationError,
-    SpecializerStats, TypeLayout,
-};
-pub use optimizer::{SpecializationOptimizer, OptimizationStats};
-pub use cache::MonomorphizationCache;
-pub use resolver::{
-    MonomorphizationResolver, ResolvedSpecialization, ResolverStats,
-    CacheMetadata, Version, ResolverError,
-};
-pub use merger::{
-    ModuleMerger, IncrementalMerger, FunctionMapping,
-    MergeError, MergeStats,
-};
-pub use phase::{
-    MonomorphizationPhase, MonoPhaseConfig, MonoPhaseResult, MonoPhaseError,
-    monomorphize, monomorphize_with_core, monomorphize_minimal,
-};
 
 /// Metrics for monomorphization.
 #[derive(Debug, Clone, Default)]

@@ -310,9 +310,7 @@ impl ExportTable {
             // flatten into the parent module's namespace, so this
             // is a name-space collision, not a ModuleId bug.
             let same_module = existing.source_module == item.source_module;
-            if same_module
-                && existing.kind == ExportKind::Type
-                && item.kind == ExportKind::Function
+            if same_module && existing.kind == ExportKind::Type && item.kind == ExportKind::Function
             {
                 return Err(ModuleError::Other {
                     message: Text::from(format!(
@@ -323,9 +321,7 @@ impl ExportTable {
                     span: Some(item.span),
                 });
             }
-            if same_module
-                && existing.kind == ExportKind::Function
-                && item.kind == ExportKind::Type
+            if same_module && existing.kind == ExportKind::Function && item.kind == ExportKind::Type
             {
                 return Err(ModuleError::Other {
                     message: Text::from(format!(
@@ -664,15 +660,14 @@ pub fn extract_exports_from_module(
                                     !fields.is_empty()
                                 }
                             };
-                            let already_type_in_this_module = match export_table
-                                .get(&Text::from(variant.name.name.as_str()))
-                            {
-                                Maybe::Some(existing) => {
-                                    existing.kind == ExportKind::Type
-                                        && existing.source_module == module_id
-                                }
-                                Maybe::None => false,
-                            };
+                            let already_type_in_this_module =
+                                match export_table.get(&Text::from(variant.name.name.as_str())) {
+                                    Maybe::Some(existing) => {
+                                        existing.kind == ExportKind::Type
+                                            && existing.source_module == module_id
+                                    }
+                                    Maybe::None => false,
+                                };
                             if !has_payload && already_type_in_this_module {
                                 // Type-union reference, not a fresh constructor. Skip.
                                 continue;
@@ -1023,9 +1018,7 @@ fn add_reexports_from_link(
 
 /// Extracts exports from module AST items based on visibility modifiers.
 /// Re-exports (public import) flatten module hierarchy for public API.
-pub fn resolve_glob_reexports(
-    module_registry: &mut crate::ModuleRegistry,
-) -> ModuleResult<usize> {
+pub fn resolve_glob_reexports(module_registry: &mut crate::ModuleRegistry) -> ModuleResult<usize> {
     /// Maximum re-export chain depth. Hard cap protects against
     /// pathological cycles slipping past the upstream cycle guard.
     /// Sixteen is two orders of magnitude above any realistic
@@ -1068,7 +1061,8 @@ fn resolve_glob_reexports_one_pass(
 
     // First, collect all glob re-exports we need to resolve
     // (module_id, source_path_str)
-    let mut glob_reexports: verum_common::List<(crate::path::ModuleId, Text)> = verum_common::List::new();
+    let mut glob_reexports: verum_common::List<(crate::path::ModuleId, Text)> =
+        verum_common::List::new();
 
     for (_id, module_info_shared) in module_registry.all_modules() {
         // Deref Shared to get ModuleInfo
@@ -1077,7 +1071,8 @@ fn resolve_glob_reexports_one_pass(
             if let ItemKind::Mount(mount_decl) = &item.kind {
                 if mount_decl.visibility == AstVisibility::Public {
                     // Find glob links in this tree
-                    let mut globs: verum_common::List<(crate::path::ModuleId, Text, Span)> = verum_common::List::new();
+                    let mut globs: verum_common::List<(crate::path::ModuleId, Text, Span)> =
+                        verum_common::List::new();
                     collect_glob_links(
                         &mount_decl.tree,
                         module_info.id,
@@ -1093,11 +1088,14 @@ fn resolve_glob_reexports_one_pass(
     }
 
     // Now resolve each glob import - collect source exports first
-    let mut updates: verum_common::List<(crate::path::ModuleId, ExportTable)> = verum_common::List::new();
+    let mut updates: verum_common::List<(crate::path::ModuleId, ExportTable)> =
+        verum_common::List::new();
 
     for (module_id, source_path_str) in &glob_reexports {
         // Get the source module's exports
-        if let Maybe::Some(source_info_shared) = module_registry.get_by_path(source_path_str.as_str()) {
+        if let Maybe::Some(source_info_shared) =
+            module_registry.get_by_path(source_path_str.as_str())
+        {
             let source_info: &crate::ModuleInfo = &source_info_shared;
             let source_exports = &source_info.exports;
             let export_count = source_exports.len();
@@ -1147,8 +1145,12 @@ pub fn resolve_specific_reexport_kinds(
     let mut total_updated = 0;
 
     // Collect updates: (target_module_id, item_name, correct_kind, source_module_id)
-    let mut updates: verum_common::List<(crate::path::ModuleId, Text, ExportKind, crate::path::ModuleId)> =
-        verum_common::List::new();
+    let mut updates: verum_common::List<(
+        crate::path::ModuleId,
+        Text,
+        ExportKind,
+        crate::path::ModuleId,
+    )> = verum_common::List::new();
 
     // First pass: collect all specific item re-exports and their correct kinds
     for (_id, module_info_shared) in module_registry.all_modules() {
@@ -1185,15 +1187,22 @@ pub fn resolve_specific_reexport_kinds(
                     let mut updated_export = existing_export.clone();
                     updated_export.kind = correct_kind;
                     updated_export.source_module = source_module;
-                    updated.exports.exports.insert(item_name.clone(), updated_export);
+                    updated
+                        .exports
+                        .exports
+                        .insert(item_name.clone(), updated_export);
                     total_updated += 1;
                 }
             }
 
             // Update the module in registry
             let path_str = updated.path.to_string();
-            module_registry.modules.insert(target_id, verum_common::Shared::new(updated));
-            module_registry.path_to_id.insert(Text::from(path_str.as_str()), target_id);
+            module_registry
+                .modules
+                .insert(target_id, verum_common::Shared::new(updated));
+            module_registry
+                .path_to_id
+                .insert(Text::from(path_str.as_str()), target_id);
         }
     }
 
@@ -1206,7 +1215,12 @@ fn collect_specific_links_for_kind_resolution(
     target_module_id: crate::path::ModuleId,
     current_module_path: &crate::path::ModulePath,
     module_registry: &crate::ModuleRegistry,
-    result: &mut verum_common::List<(crate::path::ModuleId, Text, ExportKind, crate::path::ModuleId)>,
+    result: &mut verum_common::List<(
+        crate::path::ModuleId,
+        Text,
+        ExportKind,
+        crate::path::ModuleId,
+    )>,
 ) {
     use verum_ast::decl::MountTreeKind;
     use verum_ast::ty::PathSegment;
@@ -1221,14 +1235,25 @@ fn collect_specific_links_for_kind_resolution(
 
                     // Get the module path (all segments except the last)
                     let module_path = verum_ast::ty::Path {
-                        segments: path.segments.iter().take(path.segments.len() - 1).cloned().collect(),
+                        segments: path
+                            .segments
+                            .iter()
+                            .take(path.segments.len() - 1)
+                            .cloned()
+                            .collect(),
                         span: path.span,
                     };
 
-                    if let Some(resolved_module_path) = resolve_link_path(&module_path, current_module_path) {
+                    if let Some(resolved_module_path) =
+                        resolve_link_path(&module_path, current_module_path)
+                    {
                         // Look up the source module's exports
-                        if let verum_common::Maybe::Some(source_info) = module_registry.get_by_path(resolved_module_path.as_str()) {
-                            if let Some(source_export) = source_info.exports.get(&Text::from(item_name)) {
+                        if let verum_common::Maybe::Some(source_info) =
+                            module_registry.get_by_path(resolved_module_path.as_str())
+                        {
+                            if let Some(source_export) =
+                                source_info.exports.get(&Text::from(item_name))
+                            {
                                 result.push((
                                     target_module_id,
                                     Text::from(item_name),
@@ -1245,17 +1270,23 @@ fn collect_specific_links_for_kind_resolution(
             // Nested links: `pub link .package.{Package, PackageVersion}`
             if let Some(resolved_module_path) = resolve_link_path(prefix, current_module_path) {
                 // Look up the source module
-                if let verum_common::Maybe::Some(source_info) = module_registry.get_by_path(resolved_module_path.as_str()) {
+                if let verum_common::Maybe::Some(source_info) =
+                    module_registry.get_by_path(resolved_module_path.as_str())
+                {
                     // Process each item in the nested link
                     for subtree in trees {
                         match &subtree.kind {
                             MountTreeKind::Path(item_path) => {
                                 // Each path is an item name (possibly with renaming, but we care about the first segment)
-                                if let Some(PathSegment::Name(item_ident)) = item_path.segments.first() {
+                                if let Some(PathSegment::Name(item_ident)) =
+                                    item_path.segments.first()
+                                {
                                     let item_name = item_ident.name.as_str();
 
                                     // Look up in source module's exports
-                                    if let Some(source_export) = source_info.exports.get(&Text::from(item_name)) {
+                                    if let Some(source_export) =
+                                        source_info.exports.get(&Text::from(item_name))
+                                    {
                                         result.push((
                                             target_module_id,
                                             Text::from(item_name),
@@ -1340,7 +1371,9 @@ fn resolve_link_path(
     use verum_ast::ty::PathSegment;
 
     // Get name segments (filter out special markers)
-    let name_segments: verum_common::List<&str> = path.segments.iter()
+    let name_segments: verum_common::List<&str> = path
+        .segments
+        .iter()
         .filter_map(|seg| match seg {
             PathSegment::Name(ident) => Some(ident.name.as_str()),
             PathSegment::Super => None, // Handle specially
@@ -1351,14 +1384,22 @@ fn resolve_link_path(
         .collect();
 
     // Check if path starts with `super`
-    let has_super = path.segments.first().is_some_and(|seg| matches!(seg, PathSegment::Super));
+    let has_super = path
+        .segments
+        .first()
+        .is_some_and(|seg| matches!(seg, PathSegment::Super));
 
     // Check if path starts with leading dot (relative import)
-    let has_relative = path.segments.first().is_some_and(|seg| matches!(seg, PathSegment::Relative));
+    let has_relative = path
+        .segments
+        .first()
+        .is_some_and(|seg| matches!(seg, PathSegment::Relative));
 
     if has_super {
         // Count number of `super` prefixes
-        let super_count = path.segments.iter()
+        let super_count = path
+            .segments
+            .iter()
             .take_while(|seg| matches!(seg, PathSegment::Super))
             .count();
 
@@ -1371,7 +1412,9 @@ fn resolve_link_path(
         }
 
         // Append remaining segments
-        let remaining: verum_common::List<&str> = path.segments.iter()
+        let remaining: verum_common::List<&str> = path
+            .segments
+            .iter()
             .skip(super_count)
             .filter_map(|seg| match seg {
                 PathSegment::Name(ident) => Some(ident.name.as_str()),

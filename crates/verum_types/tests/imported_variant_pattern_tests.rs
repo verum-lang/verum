@@ -99,11 +99,14 @@ fn test_match_imported_maybe_some() {
     let pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::new(segments.into(), span),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("value".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("value".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -146,11 +149,14 @@ fn test_match_imported_maybe_complete() {
     let some_pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::single(Ident::new("Some".to_string(), span)),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("x".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("x".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -224,11 +230,14 @@ fn test_match_imported_result_ok() {
     let pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::new(segments.into(), span),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("value".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("value".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -266,11 +275,14 @@ fn test_match_imported_result_err() {
     let pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::new(segments.into(), span),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("error".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("error".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -313,11 +325,14 @@ fn test_match_imported_result_complete() {
     let ok_pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::single(Ident::new("Ok".to_string(), span)),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("n".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("n".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -338,11 +353,14 @@ fn test_match_imported_result_complete() {
     let err_pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::single(Ident::new("Err".to_string(), span)),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("msg".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("msg".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -395,11 +413,14 @@ fn test_match_nested_imported_variants_ok_some() {
     let nested_pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::single(Ident::new("Some".to_string(), span)),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("x".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("x".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -497,11 +518,14 @@ fn test_match_nested_imported_variants_complete() {
     let some_nested = Pattern::new(
         PatternKind::Variant {
             path: Path::single(Ident::new("Some".to_string(), span)),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("value".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("value".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -544,11 +568,14 @@ fn test_match_nested_imported_variants_complete() {
     let err_pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::single(Ident::new("Err".to_string(), span)),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("msg".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("msg".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -660,11 +687,14 @@ fn test_match_imported_variant_mixed_simple_paths() {
     let success = Pattern::new(
         PatternKind::Variant {
             path: Path::single(Ident::new("Success".to_string(), span)),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("value".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("value".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -674,11 +704,14 @@ fn test_match_imported_variant_mixed_simple_paths() {
     let failure = Pattern::new(
         PatternKind::Variant {
             path: Path::single(Ident::new("Failure".to_string(), span)),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("error".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("error".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -748,11 +781,14 @@ fn test_match_imported_variant_wrong_payload_type() {
     let pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::new(segments.into(), span),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("x".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("x".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -834,11 +870,14 @@ fn test_match_deep_module_path_variant() {
     let pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::new(segments.into(), span),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("x".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("x".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -875,11 +914,14 @@ fn test_match_absolute_vs_relative_paths() {
     let abs_pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::new(abs_segments.into(), span),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("x".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("x".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );
@@ -896,11 +938,14 @@ fn test_match_absolute_vs_relative_paths() {
     let rel_pattern = Pattern::new(
         PatternKind::Variant {
             path: Path::new(rel_segments.into(), span),
-            data: Some(VariantPatternData::Tuple(vec![Pattern::ident(
-                Ident::new("y".to_string(), span),
-                false,
-                span,
-            )].into())),
+            data: Some(VariantPatternData::Tuple(
+                vec![Pattern::ident(
+                    Ident::new("y".to_string(), span),
+                    false,
+                    span,
+                )]
+                .into(),
+            )),
         },
         span,
     );

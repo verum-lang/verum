@@ -452,7 +452,10 @@ fn hash_pattern(pattern: &PatternColumn, hasher: &mut impl Hasher) {
             mutable.hash(hasher);
             hash_pattern(inner, hasher);
         }
-        PatternColumn::Stream { head_patterns, tail } => {
+        PatternColumn::Stream {
+            head_patterns,
+            tail,
+        } => {
             for pattern in head_patterns.iter() {
                 hash_pattern(pattern, hasher);
             }
@@ -466,7 +469,11 @@ fn hash_pattern(pattern: &PatternColumn, hasher: &mut impl Hasher) {
                 hash_pattern(binding_pattern, hasher);
             }
         }
-        PatternColumn::Active { name, bindings, is_total } => {
+        PatternColumn::Active {
+            name,
+            bindings,
+            is_total,
+        } => {
             name.hash(hasher);
             is_total.hash(hasher);
             for binding in bindings.iter() {

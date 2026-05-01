@@ -34,8 +34,8 @@ use z3::{
     ast::{Array, Bool, Int},
 };
 
-use verum_common::{List, Maybe, Text};
 use verum_common::ToText;
+use verum_common::{List, Maybe, Text};
 
 // ==================== Core Types ====================
 

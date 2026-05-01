@@ -5,9 +5,7 @@
 
 use crate::error::{CliError, Result};
 use std::path::PathBuf;
-use verum_verification::foreign_import::{
-    importer_for, ForeignSystem, ForeignTheorem,
-};
+use verum_verification::foreign_import::{ForeignSystem, ForeignTheorem, importer_for};
 
 fn parse_system(s: &str) -> Result<ForeignSystem> {
     ForeignSystem::from_name(s).ok_or_else(|| {
@@ -29,12 +27,7 @@ fn validate_format(s: &str) -> Result<()> {
 }
 
 /// Parse a foreign source file and emit the requested output.
-pub fn run_import(
-    from: &str,
-    file: &PathBuf,
-    out: Option<&PathBuf>,
-    format: &str,
-) -> Result<()> {
+pub fn run_import(from: &str, file: &PathBuf, out: Option<&PathBuf>, format: &str) -> Result<()> {
     let system = parse_system(from)?;
     validate_format(format)?;
 
@@ -58,11 +51,7 @@ pub fn run_import(
     match out {
         Some(path) => {
             std::fs::write(path, &rendered).map_err(|e| {
-                CliError::VerificationFailed(format!(
-                    "write {}: {}",
-                    path.display(),
-                    e
-                ))
+                CliError::VerificationFailed(format!("write {}: {}", path.display(), e))
             })?;
         }
         None => print!("{}", rendered),
@@ -70,11 +59,7 @@ pub fn run_import(
     Ok(())
 }
 
-fn render_skeleton(
-    theorems: &[ForeignTheorem],
-    system: ForeignSystem,
-    file: &PathBuf,
-) -> String {
+fn render_skeleton(theorems: &[ForeignTheorem], system: ForeignSystem, file: &PathBuf) -> String {
     let mut s = String::new();
     s.push_str(&format!(
         "// Auto-imported from {} source: {}\n",
@@ -93,17 +78,10 @@ fn render_skeleton(
     s
 }
 
-fn render_json(
-    theorems: &[ForeignTheorem],
-    system: ForeignSystem,
-    file: &PathBuf,
-) -> String {
+fn render_json(theorems: &[ForeignTheorem], system: ForeignSystem, file: &PathBuf) -> String {
     let mut out = String::from("{\n");
     out.push_str("  \"schema_version\": 1,\n");
-    out.push_str(&format!(
-        "  \"system\": \"{}\",\n",
-        system.name()
-    ));
+    out.push_str(&format!("  \"system\": \"{}\",\n", system.name()));
     out.push_str(&format!(
         "  \"source\": \"{}\",\n",
         json_escape(&file.display().to_string())
@@ -131,11 +109,7 @@ fn render_json(
     out
 }
 
-fn render_summary(
-    theorems: &[ForeignTheorem],
-    system: ForeignSystem,
-    file: &PathBuf,
-) -> String {
+fn render_summary(theorems: &[ForeignTheorem], system: ForeignSystem, file: &PathBuf) -> String {
     let mut s = String::new();
     s.push_str(&format!(
         "Imported {} declaration(s) from {} source `{}`:\n\n",

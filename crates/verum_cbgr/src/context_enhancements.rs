@@ -1744,8 +1744,8 @@ mod tests {
         // installs the dependent components (depth_policy +
         // compressor) — before the wire-up, the booleans on the
         // config were inert and the dependent slots stayed `None`.
-        let analyzer = ContextSensitiveAnalyzer::new()
-            .with_config(EnhancedContextConfig::all_enabled());
+        let analyzer =
+            ContextSensitiveAnalyzer::new().with_config(EnhancedContextConfig::all_enabled());
         assert!(analyzer.flow_sensitive_enabled());
         assert!(analyzer.adaptive_depth_enabled());
         assert!(analyzer.compression_enabled());
@@ -1761,8 +1761,7 @@ mod tests {
         assert_eq!(analyzer.max_depth(), 10);
 
         // Default config installs nothing.
-        let bare = ContextSensitiveAnalyzer::new()
-            .with_config(EnhancedContextConfig::default());
+        let bare = ContextSensitiveAnalyzer::new().with_config(EnhancedContextConfig::default());
         assert!(!bare.flow_sensitive_enabled());
         assert!(!bare.adaptive_depth_enabled());
         assert!(!bare.compression_enabled());

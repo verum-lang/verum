@@ -396,7 +396,9 @@ fn add_source_organization_actions(actions: &mut List<CodeActionOrCommand>, uri:
         command: Some(Command {
             title: "Organize imports".to_string(),
             command: "verum.organizeImports".to_string(),
-            arguments: Some(vec![serde_json::to_value(uri.to_string()).unwrap_or_default()]),
+            arguments: Some(vec![
+                serde_json::to_value(uri.to_string()).unwrap_or_default(),
+            ]),
         }),
         is_preferred: None,
         disabled: None,
@@ -412,7 +414,9 @@ fn add_source_organization_actions(actions: &mut List<CodeActionOrCommand>, uri:
         command: Some(Command {
             title: "Fix all".to_string(),
             command: "verum.fixAll".to_string(),
-            arguments: Some(vec![serde_json::to_value(uri.to_string()).unwrap_or_default()]),
+            arguments: Some(vec![
+                serde_json::to_value(uri.to_string()).unwrap_or_default(),
+            ]),
         }),
         is_preferred: None,
         disabled: None,
@@ -704,7 +708,9 @@ fn analyze_extracted_code(
                 if func.span.start <= start_offset && start_offset <= func.span.end {
                     // Collect function parameters as potential free variables
                     for param in &func.params {
-                        if let verum_ast::FunctionParamKind::Regular { ty, pattern, .. } = &param.kind {
+                        if let verum_ast::FunctionParamKind::Regular { ty, pattern, .. } =
+                            &param.kind
+                        {
                             let param_name = extract_pattern_name(pattern);
                             // Check if this parameter is used in the extracted code
                             if extracted_code.contains(&param_name) {

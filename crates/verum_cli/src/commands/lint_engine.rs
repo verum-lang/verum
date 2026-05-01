@@ -42,9 +42,9 @@
 use std::path::Path;
 
 use verum_ast::{
+    Attribute, ExprKind, FunctionDecl, Item, ItemKind, Literal, LiteralKind, Module, Type,
+    TypeKind,
     visitor::{self, Visitor},
-    Attribute, ExprKind, FunctionDecl, Item, ItemKind, Literal, LiteralKind, Module,
-    Type, TypeKind,
 };
 
 use super::lint::{LintCategory, LintConfig, LintIssue, LintLevel};
@@ -124,10 +124,9 @@ pub fn passes() -> &'static [&'static (dyn LintPass + 'static)] {
     // The cast widens the trait-object bound; both `LintPass` and
     // `LintPass + Sync` resolve identically at the call site.
     unsafe {
-        std::mem::transmute::<
-            &[&(dyn LintPass + Sync + 'static)],
-            &[&(dyn LintPass + 'static)],
-        >(PASSES)
+        std::mem::transmute::<&[&(dyn LintPass + Sync + 'static)], &[&(dyn LintPass + 'static)]>(
+            PASSES,
+        )
     }
 }
 
@@ -253,12 +252,18 @@ pub fn span_to_line_col(source: &str, byte_offset: u32) -> (usize, usize) {
 struct RedundantRefinementPass;
 
 impl LintPass for RedundantRefinementPass {
-    fn name(&self) -> &'static str { "redundant-refinement" }
+    fn name(&self) -> &'static str {
+        "redundant-refinement"
+    }
     fn description(&self) -> &'static str {
         "Refinement predicate evaluates to a tautology — base type would do"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Hint }
-    fn category(&self) -> LintCategory { LintCategory::Verification }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Hint
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Verification
+    }
 
     fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
         struct V<'s, 'p> {
@@ -288,7 +293,11 @@ impl LintPass for RedundantRefinementPass {
                 visitor::walk_type(self, ty);
             }
         }
-        let mut v = V { source: ctx.source, file: ctx.file, issues: Vec::new() };
+        let mut v = V {
+            source: ctx.source,
+            file: ctx.file,
+            issues: Vec::new(),
+        };
         for item in &ctx.module.items {
             v.visit_item(item);
         }
@@ -300,7 +309,10 @@ impl LintPass for RedundantRefinementPass {
 /// integer comparison like `it >= i64::MIN`.
 fn is_trivial_refinement(e: &verum_ast::Expr) -> bool {
     match &e.kind {
-        ExprKind::Literal(Literal { kind: LiteralKind::Bool(true), .. }) => true,
+        ExprKind::Literal(Literal {
+            kind: LiteralKind::Bool(true),
+            ..
+        }) => true,
         _ => false,
     }
 }
@@ -325,12 +337,18 @@ fn is_trivial_refinement(e: &verum_ast::Expr) -> bool {
 struct EmptyRefinementBoundPass;
 
 impl LintPass for EmptyRefinementBoundPass {
-    fn name(&self) -> &'static str { "empty-refinement-bound" }
+    fn name(&self) -> &'static str {
+        "empty-refinement-bound"
+    }
     fn description(&self) -> &'static str {
         "Refinement bound has no inhabitants (e.g. `it > 100 && it < 50`)"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Error }
-    fn category(&self) -> LintCategory { LintCategory::Verification }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Error
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Verification
+    }
 
     fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
         struct V<'s, 'p> {
@@ -364,7 +382,11 @@ impl LintPass for EmptyRefinementBoundPass {
                 visitor::walk_type(self, ty);
             }
         }
-        let mut v = V { source: ctx.source, file: ctx.file, issues: Vec::new() };
+        let mut v = V {
+            source: ctx.source,
+            file: ctx.file,
+            issues: Vec::new(),
+        };
         for item in &ctx.module.items {
             v.visit_item(item);
         }
@@ -396,7 +418,10 @@ fn collect_int_bounds(e: &verum_ast::Expr) -> Option<(i64, i64)> {
                 LiteralKind::Int(il) => Some(il.value as i64),
                 _ => None,
             },
-            ExprKind::Unary { op: UnOp::Neg, expr: inner } => {
+            ExprKind::Unary {
+                op: UnOp::Neg,
+                expr: inner,
+            } => {
                 if let ExprKind::Literal(lit) = &inner.kind {
                     if let LiteralKind::Int(il) = &lit.kind {
                         return Some(-(il.value as i64));
@@ -409,9 +434,11 @@ fn collect_int_bounds(e: &verum_ast::Expr) -> Option<(i64, i64)> {
     }
     fn walk(e: &verum_ast::Expr, lo: &mut i64, hi: &mut i64) -> bool {
         match &e.kind {
-            ExprKind::Binary { op: BinOp::And, left, right } => {
-                walk(left, lo, hi) && walk(right, lo, hi)
-            }
+            ExprKind::Binary {
+                op: BinOp::And,
+                left,
+                right,
+            } => walk(left, lo, hi) && walk(right, lo, hi),
             ExprKind::Binary { op, left, right } => {
                 let (it_left, value) = match (is_it_ref(left), lit_i64(right)) {
                     (true, Some(v)) => (true, v),
@@ -421,15 +448,34 @@ fn collect_int_bounds(e: &verum_ast::Expr) -> Option<(i64, i64)> {
                     },
                 };
                 match (op, it_left) {
-                    (BinOp::Lt, true) => { *hi = (*hi).min(value.saturating_sub(1)); }
-                    (BinOp::Le, true) => { *hi = (*hi).min(value); }
-                    (BinOp::Gt, true) => { *lo = (*lo).max(value.saturating_add(1)); }
-                    (BinOp::Ge, true) => { *lo = (*lo).max(value); }
-                    (BinOp::Eq, _) => { *lo = value; *hi = value; }
-                    (BinOp::Lt, false) => { *lo = (*lo).max(value.saturating_add(1)); }
-                    (BinOp::Le, false) => { *lo = (*lo).max(value); }
-                    (BinOp::Gt, false) => { *hi = (*hi).min(value.saturating_sub(1)); }
-                    (BinOp::Ge, false) => { *hi = (*hi).min(value); }
+                    (BinOp::Lt, true) => {
+                        *hi = (*hi).min(value.saturating_sub(1));
+                    }
+                    (BinOp::Le, true) => {
+                        *hi = (*hi).min(value);
+                    }
+                    (BinOp::Gt, true) => {
+                        *lo = (*lo).max(value.saturating_add(1));
+                    }
+                    (BinOp::Ge, true) => {
+                        *lo = (*lo).max(value);
+                    }
+                    (BinOp::Eq, _) => {
+                        *lo = value;
+                        *hi = value;
+                    }
+                    (BinOp::Lt, false) => {
+                        *lo = (*lo).max(value.saturating_add(1));
+                    }
+                    (BinOp::Le, false) => {
+                        *lo = (*lo).max(value);
+                    }
+                    (BinOp::Gt, false) => {
+                        *hi = (*hi).min(value.saturating_sub(1));
+                    }
+                    (BinOp::Ge, false) => {
+                        *hi = (*hi).min(value);
+                    }
                     _ => {}
                 }
                 true
@@ -586,19 +632,21 @@ impl Casing {
                 .all(|c| c == '-' || c.is_ascii_lowercase() || c.is_ascii_digit()),
             Self::PascalCase => {
                 let first = ident.chars().next().unwrap();
-                first.is_ascii_uppercase()
-                    && ident.chars().all(|c| c.is_ascii_alphanumeric())
+                first.is_ascii_uppercase() && ident.chars().all(|c| c.is_ascii_alphanumeric())
             }
             Self::CamelCase => {
                 let first = ident.chars().next().unwrap();
-                first.is_ascii_lowercase()
-                    && ident.chars().all(|c| c.is_ascii_alphanumeric())
+                first.is_ascii_lowercase() && ident.chars().all(|c| c.is_ascii_alphanumeric())
             }
             Self::ScreamingSnakeCase => ident
                 .chars()
                 .all(|c| c == '_' || c.is_ascii_uppercase() || c.is_ascii_digit()),
-            Self::Lowercase => ident.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()),
-            Self::Uppercase => ident.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()),
+            Self::Lowercase => ident
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()),
+            Self::Uppercase => ident
+                .chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit()),
         }
     }
 
@@ -618,12 +666,18 @@ impl Casing {
 struct NamingConventionPass;
 
 impl LintPass for NamingConventionPass {
-    fn name(&self) -> &'static str { "naming-convention" }
+    fn name(&self) -> &'static str {
+        "naming-convention"
+    }
     fn description(&self) -> &'static str {
         "Identifier doesn't match the project's [lint.naming] convention"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Warning }
-    fn category(&self) -> LintCategory { LintCategory::Style }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Warning
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Style
+    }
 
     fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
         // Read config; fall back to defaults if absent.
@@ -655,7 +709,8 @@ impl LintPass for NamingConventionPass {
                             column: col,
                             message: format!(
                                 "fn `{}` doesn't match {} convention",
-                                name, fn_casing.description()
+                                name,
+                                fn_casing.description()
                             ),
                             suggestion: None,
                             fixable: false,
@@ -677,7 +732,8 @@ impl LintPass for NamingConventionPass {
                             column: col,
                             message: format!(
                                 "type `{}` doesn't match {} convention",
-                                name, type_casing.description()
+                                name,
+                                type_casing.description()
                             ),
                             suggestion: None,
                             fixable: false,
@@ -699,7 +755,8 @@ impl LintPass for NamingConventionPass {
                             column: col,
                             message: format!(
                                 "const `{}` doesn't match {} convention",
-                                name, const_casing.description()
+                                name,
+                                const_casing.description()
                             ),
                             suggestion: None,
                             fixable: false,
@@ -991,13 +1048,19 @@ fn is_public_fn(func: &FunctionDecl) -> bool {
 struct UnrefinedPublicIntPass;
 
 impl LintPass for UnrefinedPublicIntPass {
-    fn name(&self) -> &'static str { "unrefined-public-int" }
+    fn name(&self) -> &'static str {
+        "unrefined-public-int"
+    }
     fn description(&self) -> &'static str {
         "Public fn parameter or return is Int/Text without a refinement — \
          tighten the type to express valid usage at the type level"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Warning }
-    fn category(&self) -> LintCategory { LintCategory::Verification }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Warning
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Verification
+    }
 
     fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
         let policy = refinement_policy(ctx);
@@ -1080,13 +1143,19 @@ fn check_unrefined_int_or_text(ty: &Type, policy: &RefinementPolicyConfig) -> Op
 struct VerifyImpliedByRefinementPass;
 
 impl LintPass for VerifyImpliedByRefinementPass {
-    fn name(&self) -> &'static str { "verify-implied-by-refinement" }
+    fn name(&self) -> &'static str {
+        "verify-implied-by-refinement"
+    }
     fn description(&self) -> &'static str {
         "Function uses refinement types but lacks @verify — \
          the type-level obligation will only be checked at runtime"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Warning }
-    fn category(&self) -> LintCategory { LintCategory::Verification }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Warning
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Verification
+    }
 
     fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
         let policy = refinement_policy(ctx);
@@ -1110,8 +1179,11 @@ impl LintPass for VerifyImpliedByRefinementPass {
                     false
                 }
             });
-            let has_refined_return =
-                func.return_type.as_ref().map(|t| is_refined(t)).unwrap_or(false);
+            let has_refined_return = func
+                .return_type
+                .as_ref()
+                .map(|t| is_refined(t))
+                .unwrap_or(false);
             if has_refined_param || has_refined_return {
                 let (line, col) = span_to_line_col(ctx.source, item.span.start);
                 issues.push(LintIssue {
@@ -1151,20 +1223,28 @@ struct VerificationPolicyConfig {
 
 impl Default for VerificationPolicyConfig {
     fn default() -> Self {
-        Self { public_must_have_verify: false }
+        Self {
+            public_must_have_verify: false,
+        }
     }
 }
 
 struct PublicMustHaveVerifyPass;
 
 impl LintPass for PublicMustHaveVerifyPass {
-    fn name(&self) -> &'static str { "public-must-have-verify" }
+    fn name(&self) -> &'static str {
+        "public-must-have-verify"
+    }
     fn description(&self) -> &'static str {
         "Public function lacks @verify(...) — declare its verification \
          strategy explicitly (runtime | static | formal | …)"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Hint }
-    fn category(&self) -> LintCategory { LintCategory::Verification }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Hint
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Verification
+    }
 
     fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
         let policy: VerificationPolicyConfig = ctx
@@ -1327,13 +1407,19 @@ fn resolve_context_rule<'a>(
 struct ForbiddenContextPass;
 
 impl LintPass for ForbiddenContextPass {
-    fn name(&self) -> &'static str { "forbidden-context" }
+    fn name(&self) -> &'static str {
+        "forbidden-context"
+    }
     fn description(&self) -> &'static str {
         "Function uses a context (`using [X]`) that the project's \
          [lint.context_policy.modules] forbids in this module path"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Error }
-    fn category(&self) -> LintCategory { LintCategory::Safety }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Error
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Safety
+    }
 
     fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
         let cfg: ContextPolicyConfig = match ctx
@@ -1503,13 +1589,19 @@ fn mount_root_path(mount: &verum_ast::MountDecl) -> Option<String> {
 struct ArchitectureViolationPass;
 
 impl LintPass for ArchitectureViolationPass {
-    fn name(&self) -> &'static str { "architecture-violation" }
+    fn name(&self) -> &'static str {
+        "architecture-violation"
+    }
     fn description(&self) -> &'static str {
         "`mount` crosses a layer boundary or matches an explicit ban — \
          the project's [lint.architecture] forbids this import"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Error }
-    fn category(&self) -> LintCategory { LintCategory::Style }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Error
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Style
+    }
 
     fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
         let cfg: ArchitectureConfig = match ctx
@@ -1737,14 +1829,20 @@ fn load_cbgr_profile(path: &str) -> Option<CbgrProfile> {
 struct CbgrBudgetExceededPass;
 
 impl LintPass for CbgrBudgetExceededPass {
-    fn name(&self) -> &'static str { "cbgr-budget-exceeded" }
+    fn name(&self) -> &'static str {
+        "cbgr-budget-exceeded"
+    }
     fn description(&self) -> &'static str {
         "Managed CBGR reference (`&` / `&mut`) used in a module whose \
          [lint.cbgr_budgets].max_check_ns budget is below the static \
          per-deref cost — promote to `&checked` (0ns) or `&unsafe`"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Warning }
-    fn category(&self) -> LintCategory { LintCategory::Performance }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Warning
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Performance
+    }
 
     fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
         let cfg: CbgrBudgetsConfig = match ctx
@@ -1894,12 +1992,18 @@ fn style_policy(ctx: &LintCtx<'_>) -> Option<StylePolicyConfig> {
 struct MaxLineLengthPass;
 
 impl LintPass for MaxLineLengthPass {
-    fn name(&self) -> &'static str { "max-line-length" }
+    fn name(&self) -> &'static str {
+        "max-line-length"
+    }
     fn description(&self) -> &'static str {
         "Source line exceeds [lint.style].max_line_length characters"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Hint }
-    fn category(&self) -> LintCategory { LintCategory::Style }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Hint
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Style
+    }
 
     fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
         let cfg = match style_policy(ctx) {
@@ -1938,12 +2042,18 @@ impl LintPass for MaxLineLengthPass {
 struct MaxFnLinesPass;
 
 impl LintPass for MaxFnLinesPass {
-    fn name(&self) -> &'static str { "max-fn-lines" }
+    fn name(&self) -> &'static str {
+        "max-fn-lines"
+    }
     fn description(&self) -> &'static str {
         "Function body exceeds [lint.style].max_fn_lines"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Hint }
-    fn category(&self) -> LintCategory { LintCategory::Style }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Hint
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Style
+    }
 
     fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
         let cfg = match style_policy(ctx) {
@@ -1987,12 +2097,18 @@ impl LintPass for MaxFnLinesPass {
 struct MaxFnParamsPass;
 
 impl LintPass for MaxFnParamsPass {
-    fn name(&self) -> &'static str { "max-fn-params" }
+    fn name(&self) -> &'static str {
+        "max-fn-params"
+    }
     fn description(&self) -> &'static str {
         "Function takes more parameters than [lint.style].max_fn_params"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Hint }
-    fn category(&self) -> LintCategory { LintCategory::Style }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Hint
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Style
+    }
 
     fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
         let cfg = match style_policy(ctx) {
@@ -2035,12 +2151,18 @@ impl LintPass for MaxFnParamsPass {
 struct MaxMatchArmsPass;
 
 impl LintPass for MaxMatchArmsPass {
-    fn name(&self) -> &'static str { "max-match-arms" }
+    fn name(&self) -> &'static str {
+        "max-match-arms"
+    }
     fn description(&self) -> &'static str {
         "match expression has more arms than [lint.style].max_match_arms"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Hint }
-    fn category(&self) -> LintCategory { LintCategory::Style }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Hint
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Style
+    }
 
     fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
         let cfg = match style_policy(ctx) {
@@ -2114,13 +2236,19 @@ struct DocumentationPolicyConfig {
 struct PublicMustHaveDocPass;
 
 impl LintPass for PublicMustHaveDocPass {
-    fn name(&self) -> &'static str { "public-must-have-doc" }
+    fn name(&self) -> &'static str {
+        "public-must-have-doc"
+    }
     fn description(&self) -> &'static str {
         "Public item lacks a doc comment (`///`) — \
          add one or set [lint.documentation].public_must_have_doc = false"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Hint }
-    fn category(&self) -> LintCategory { LintCategory::Style }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Hint
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Style
+    }
 
     fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
         let cfg: DocumentationPolicyConfig = ctx
@@ -2181,10 +2309,7 @@ impl LintPass for PublicMustHaveDocPass {
                     file: ctx.file.to_path_buf(),
                     line: item_line,
                     column: 1,
-                    message: format!(
-                        "public {} `{}` lacks a `///` doc comment",
-                        kind_label, name
-                    ),
+                    message: format!("public {} `{}` lacks a `///` doc comment", kind_label, name),
                     suggestion: None,
                     fixable: false,
                 });
@@ -2263,13 +2388,19 @@ fn fn_uses_unsafe_block(func: &FunctionDecl) -> bool {
 struct UnsafeWithoutCapabilityPass;
 
 impl LintPass for UnsafeWithoutCapabilityPass {
-    fn name(&self) -> &'static str { "unsafe-without-capability" }
+    fn name(&self) -> &'static str {
+        "unsafe-without-capability"
+    }
     fn description(&self) -> &'static str {
         "Function uses `unsafe { … }` but lacks @cap(...) — declare \
          the capability explicitly so the trust boundary is auditable"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Warning }
-    fn category(&self) -> LintCategory { LintCategory::Safety }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Warning
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Safety
+    }
 
     fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
         let policy = capability_policy(ctx);
@@ -2311,13 +2442,19 @@ impl LintPass for UnsafeWithoutCapabilityPass {
 struct FfiWithoutCapabilityPass;
 
 impl LintPass for FfiWithoutCapabilityPass {
-    fn name(&self) -> &'static str { "ffi-without-capability" }
+    fn name(&self) -> &'static str {
+        "ffi-without-capability"
+    }
     fn description(&self) -> &'static str {
         "FFI item (`@ffi` / `@extern`) lacks @cap(...) — declare \
          the foreign-boundary capability explicitly"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Warning }
-    fn category(&self) -> LintCategory { LintCategory::Safety }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Warning
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Safety
+    }
 
     fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
         let policy = capability_policy(ctx);
@@ -2406,8 +2543,12 @@ impl LintPass for CustomAstRulesPass {
     fn description(&self) -> &'static str {
         "User-authored AST-pattern rule from [[lint.custom]] (Phase D)"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Warning }
-    fn category(&self) -> LintCategory { LintCategory::Style }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Warning
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Style
+    }
 
     fn check(&self, ctx: &LintCtx<'_>) -> Vec<LintIssue> {
         let cfg = match ctx.config {
@@ -2429,9 +2570,7 @@ impl LintPass for CustomAstRulesPass {
         let rules: Vec<&super::lint::CustomLintRule> = rules
             .into_iter()
             .filter(|r| {
-                if !r.paths.is_empty()
-                    && !r.paths.iter().any(|p| path_str.contains(p))
-                {
+                if !r.paths.is_empty() && !r.paths.iter().any(|p| path_str.contains(p)) {
                     return false;
                 }
                 if r.exclude.iter().any(|p| path_str.contains(p)) {
@@ -2663,12 +2802,18 @@ fn module_name_for_path(path: &Path) -> Option<String> {
 struct CircularImportPass;
 
 impl CrossFilePass for CircularImportPass {
-    fn name(&self) -> &'static str { "circular-import" }
+    fn name(&self) -> &'static str {
+        "circular-import"
+    }
     fn description(&self) -> &'static str {
         "Module graph contains a cycle — module A mounts B, B (transitively) mounts A"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Error }
-    fn category(&self) -> LintCategory { LintCategory::Style }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Error
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Style
+    }
 
     fn check_corpus(&self, ctx: &CorpusCtx<'_>) -> Vec<LintIssue> {
         // Build graph: mod-name → list of mounted mod-names that
@@ -2696,8 +2841,7 @@ impl CrossFilePass for CircularImportPass {
         // the active path. Report each cycle once at the first
         // node visited along it.
         let mut issues = Vec::new();
-        let mut visited: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
         for start in graph.keys() {
             if visited.contains(start) {
                 continue;
@@ -2705,7 +2849,15 @@ impl CrossFilePass for CircularImportPass {
             let mut path: Vec<String> = vec![start.clone()];
             let mut path_set: std::collections::HashSet<String> =
                 [start.clone()].into_iter().collect();
-            cycle_dfs(start, &graph, &mut path, &mut path_set, &mut visited, &name_of, &mut issues);
+            cycle_dfs(
+                start,
+                &graph,
+                &mut path,
+                &mut path_set,
+                &mut visited,
+                &name_of,
+                &mut issues,
+            );
         }
         issues
     }
@@ -2770,17 +2922,22 @@ fn cycle_dfs(
 struct OrphanModulePass;
 
 impl CrossFilePass for OrphanModulePass {
-    fn name(&self) -> &'static str { "orphan-module" }
+    fn name(&self) -> &'static str {
+        "orphan-module"
+    }
     fn description(&self) -> &'static str {
         "File under src/ that no other corpus file mounts (excluding main.vr / lib.vr entry points)"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Hint }
-    fn category(&self) -> LintCategory { LintCategory::Style }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Hint
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Style
+    }
 
     fn check_corpus(&self, ctx: &CorpusCtx<'_>) -> Vec<LintIssue> {
         // Collect every mount target across the corpus.
-        let mut mounted: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut mounted: std::collections::HashSet<String> = std::collections::HashSet::new();
         for f in ctx.files {
             for m in collect_mount_paths(&f.module) {
                 mounted.insert(m);
@@ -2828,12 +2985,9 @@ impl CrossFilePass for OrphanModulePass {
                 file: f.path.clone(),
                 line: 1,
                 column: 1,
-                message: format!(
-                    "module `{name}` is not mounted by any other file in the corpus"
-                ),
+                message: format!("module `{name}` is not mounted by any other file in the corpus"),
                 suggestion: Some(
-                    "either delete the file or add a `mount` statement that brings it in"
-                        .into(),
+                    "either delete the file or add a `mount` statement that brings it in".into(),
                 ),
                 fixable: false,
             });
@@ -2859,12 +3013,18 @@ struct UnusedPublicConfig {
 struct UnusedPublicPass;
 
 impl CrossFilePass for UnusedPublicPass {
-    fn name(&self) -> &'static str { "unused-public" }
+    fn name(&self) -> &'static str {
+        "unused-public"
+    }
     fn description(&self) -> &'static str {
         "Public symbol whose name does not appear in any other file in the corpus (heuristic — opt-in via [lint.policy].unused_public_enabled)"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Hint }
-    fn category(&self) -> LintCategory { LintCategory::Style }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Hint
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Style
+    }
 
     fn check_corpus(&self, ctx: &CorpusCtx<'_>) -> Vec<LintIssue> {
         let cfg: UnusedPublicConfig = ctx
@@ -2880,9 +3040,11 @@ impl CrossFilePass for UnusedPublicPass {
         for f in ctx.files {
             for item in &f.module.items {
                 let (name, span_start, is_pub) = match &item.kind {
-                    ItemKind::Function(func) => {
-                        (func.name.as_str().to_string(), item.span.start, is_public_fn(func))
-                    }
+                    ItemKind::Function(func) => (
+                        func.name.as_str().to_string(),
+                        item.span.start,
+                        is_public_fn(func),
+                    ),
                     ItemKind::Type(t) => (
                         t.name.as_str().to_string(),
                         item.span.start,
@@ -2981,21 +3143,29 @@ fn is_ident_byte(b: u8) -> bool {
 struct UnusedPrivatePass;
 
 impl CrossFilePass for UnusedPrivatePass {
-    fn name(&self) -> &'static str { "unused-private" }
+    fn name(&self) -> &'static str {
+        "unused-private"
+    }
     fn description(&self) -> &'static str {
         "Non-public symbol with no callers in its own file — dead code that the type-checker doesn't catch because the visibility is fine"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Hint }
-    fn category(&self) -> LintCategory { LintCategory::Style }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Hint
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Style
+    }
 
     fn check_corpus(&self, ctx: &CorpusCtx<'_>) -> Vec<LintIssue> {
         let mut issues = Vec::new();
         for f in ctx.files {
             for item in &f.module.items {
                 let (name, span_start, is_pub) = match &item.kind {
-                    ItemKind::Function(func) => {
-                        (func.name.as_str().to_string(), item.span.start, is_public_fn(func))
-                    }
+                    ItemKind::Function(func) => (
+                        func.name.as_str().to_string(),
+                        item.span.start,
+                        is_public_fn(func),
+                    ),
                     ItemKind::Type(t) => (
                         t.name.as_str().to_string(),
                         item.span.start,
@@ -3064,12 +3234,18 @@ impl CrossFilePass for UnusedPrivatePass {
 struct DeadModulePass;
 
 impl CrossFilePass for DeadModulePass {
-    fn name(&self) -> &'static str { "dead-module" }
+    fn name(&self) -> &'static str {
+        "dead-module"
+    }
     fn description(&self) -> &'static str {
         "File not reached from any entry point (main.vr / lib.vr / mod.vr) along the mount graph"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Hint }
-    fn category(&self) -> LintCategory { LintCategory::Style }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Hint
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Style
+    }
 
     fn check_corpus(&self, ctx: &CorpusCtx<'_>) -> Vec<LintIssue> {
         // Build name → file map. Then BFS from every entry point,
@@ -3083,8 +3259,7 @@ impl CrossFilePass for DeadModulePass {
         }
         // Entry points: any file whose stem is main/lib/mod.
         let mut frontier: Vec<String> = Vec::new();
-        let mut reachable: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut reachable: std::collections::HashSet<String> = std::collections::HashSet::new();
         for f in ctx.files {
             let stem = f
                 .path
@@ -3164,12 +3339,18 @@ struct InconsistentPublicDocConfig {
 struct InconsistentPublicDocPass;
 
 impl CrossFilePass for InconsistentPublicDocPass {
-    fn name(&self) -> &'static str { "inconsistent-public-doc" }
+    fn name(&self) -> &'static str {
+        "inconsistent-public-doc"
+    }
     fn description(&self) -> &'static str {
         "Module exports K public symbols, M of them documented; fires when 0 < M < K. Opt-in via [lint.rules.inconsistent-public-doc].enabled"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Hint }
-    fn category(&self) -> LintCategory { LintCategory::Style }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Hint
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Style
+    }
 
     fn check_corpus(&self, ctx: &CorpusCtx<'_>) -> Vec<LintIssue> {
         let cfg: InconsistentPublicDocConfig = ctx
@@ -3255,12 +3436,18 @@ impl CrossFilePass for InconsistentPublicDocPass {
 struct MountCycleViaStdlibPass;
 
 impl CrossFilePass for MountCycleViaStdlibPass {
-    fn name(&self) -> &'static str { "mount-cycle-via-stdlib" }
+    fn name(&self) -> &'static str {
+        "mount-cycle-via-stdlib"
+    }
     fn description(&self) -> &'static str {
         "Module graph contains a back-edge through a stdlib path — cycle hidden by re-export. Refactor to break the round trip"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Warning }
-    fn category(&self) -> LintCategory { LintCategory::Style }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Warning
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Style
+    }
 
     fn check_corpus(&self, ctx: &CorpusCtx<'_>) -> Vec<LintIssue> {
         // Heuristic only — we don't have stdlib module sources in
@@ -3318,21 +3505,29 @@ impl CrossFilePass for MountCycleViaStdlibPass {
 struct PubExportsUnsafePass;
 
 impl CrossFilePass for PubExportsUnsafePass {
-    fn name(&self) -> &'static str { "pub-exports-unsafe" }
+    fn name(&self) -> &'static str {
+        "pub-exports-unsafe"
+    }
     fn description(&self) -> &'static str {
         "Public symbol's signature mentions `&unsafe` or `unsafe fn` — unsafe surface leaked across the project boundary"
     }
-    fn default_level(&self) -> LintLevel { LintLevel::Warning }
-    fn category(&self) -> LintCategory { LintCategory::Safety }
+    fn default_level(&self) -> LintLevel {
+        LintLevel::Warning
+    }
+    fn category(&self) -> LintCategory {
+        LintCategory::Safety
+    }
 
     fn check_corpus(&self, ctx: &CorpusCtx<'_>) -> Vec<LintIssue> {
         let mut issues = Vec::new();
         for f in ctx.files {
             for item in &f.module.items {
                 let (is_pub, name, span_start) = match &item.kind {
-                    ItemKind::Function(func) => {
-                        (is_public_fn(func), func.name.as_str().to_string(), item.span.start)
-                    }
+                    ItemKind::Function(func) => (
+                        is_public_fn(func),
+                        func.name.as_str().to_string(),
+                        item.span.start,
+                    ),
                     _ => continue,
                 };
                 if !is_pub {
@@ -3388,8 +3583,8 @@ mod tests {
     use super::*;
 
     fn parse_module(source: &str) -> verum_ast::Module {
-        use verum_lexer::Lexer;
         use verum_fast_parser::VerumParser;
+        use verum_lexer::Lexer;
         let fid = verum_ast::FileId::new(0);
         let lexer = Lexer::new(source, fid);
         let parser = VerumParser::new();
@@ -3401,7 +3596,12 @@ mod tests {
         let src = "type Always is Int{ true };\n";
         let module = parse_module(src);
         let path = std::path::PathBuf::from("test.vr");
-        let ctx = LintCtx { file: &path, source: src, module: &module, config: None };
+        let ctx = LintCtx {
+            file: &path,
+            source: src,
+            module: &module,
+            config: None,
+        };
         let issues = RedundantRefinementPass.check(&ctx);
         assert_eq!(issues.len(), 1, "expected one issue, got {:?}", issues);
         assert_eq!(issues[0].rule, "redundant-refinement");
@@ -3412,7 +3612,12 @@ mod tests {
         let src = "type Pos is Int{ it > 0 };\n";
         let module = parse_module(src);
         let path = std::path::PathBuf::from("test.vr");
-        let ctx = LintCtx { file: &path, source: src, module: &module, config: None };
+        let ctx = LintCtx {
+            file: &path,
+            source: src,
+            module: &module,
+            config: None,
+        };
         assert!(RedundantRefinementPass.check(&ctx).is_empty());
     }
 
@@ -3421,7 +3626,12 @@ mod tests {
         let src = "type Empty is Int{ it > 100 && it < 50 };\n";
         let module = parse_module(src);
         let path = std::path::PathBuf::from("test.vr");
-        let ctx = LintCtx { file: &path, source: src, module: &module, config: None };
+        let ctx = LintCtx {
+            file: &path,
+            source: src,
+            module: &module,
+            config: None,
+        };
         let issues = EmptyRefinementBoundPass.check(&ctx);
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].rule, "empty-refinement-bound");

@@ -54,10 +54,7 @@ fn normalize_simple_beta_redex_reduces() {
         domain: Heap::new(nat_ind()),
         body: Heap::new(CoreTerm::Var(Text::from("x"))),
     };
-    let app = CoreTerm::App(
-        Heap::new(id_lam),
-        Heap::new(CoreTerm::Var(Text::from("y"))),
-    );
+    let app = CoreTerm::App(Heap::new(id_lam), Heap::new(CoreTerm::Var(Text::from("y"))));
     let normalized = normalize(&app);
     assert_eq!(normalized, CoreTerm::Var(Text::from("y")));
 }
@@ -70,19 +67,13 @@ fn normalize_nested_beta_redex_reduces_to_fixed_point() {
         domain: Heap::new(nat_ind()),
         body: Heap::new(CoreTerm::Var(Text::from("x"))),
     };
-    let inner_app = CoreTerm::App(
-        Heap::new(inner),
-        Heap::new(CoreTerm::Var(Text::from("z"))),
-    );
+    let inner_app = CoreTerm::App(Heap::new(inner), Heap::new(CoreTerm::Var(Text::from("z"))));
     let outer = CoreTerm::Lam {
         binder: Text::from("x"),
         domain: Heap::new(nat_ind()),
         body: Heap::new(inner_app),
     };
-    let app = CoreTerm::App(
-        Heap::new(outer),
-        Heap::new(CoreTerm::Var(Text::from("w"))),
-    );
+    let app = CoreTerm::App(Heap::new(outer), Heap::new(CoreTerm::Var(Text::from("w"))));
     let normalized = normalize(&app);
     assert_eq!(normalized, CoreTerm::Var(Text::from("w")));
 }
@@ -108,10 +99,7 @@ fn normalize_recurses_into_pi_codomain() {
         domain: Heap::new(nat_ind()),
         body: Heap::new(CoreTerm::Var(Text::from("x"))),
     };
-    let app = CoreTerm::App(
-        Heap::new(id_lam),
-        Heap::new(CoreTerm::Var(Text::from("y"))),
-    );
+    let app = CoreTerm::App(Heap::new(id_lam), Heap::new(CoreTerm::Var(Text::from("y"))));
     let pi = CoreTerm::Pi {
         binder: Text::from("_"),
         domain: Heap::new(nat_ind()),
@@ -204,10 +192,7 @@ fn definitional_eq_handles_beta_equivalent_terms() {
         domain: Heap::new(nat_ind()),
         body: Heap::new(CoreTerm::Var(Text::from("x"))),
     };
-    let app = CoreTerm::App(
-        Heap::new(id_lam),
-        Heap::new(CoreTerm::Var(Text::from("y"))),
-    );
+    let app = CoreTerm::App(Heap::new(id_lam), Heap::new(CoreTerm::Var(Text::from("y"))));
     let bare = CoreTerm::Var(Text::from("y"));
     assert!(definitional_eq(&app, &bare));
     assert!(definitional_eq(&bare, &app)); // symmetric
@@ -266,19 +251,14 @@ fn v8_pathty_accepts_beta_equivalent_carrier() {
         domain: Heap::new(CoreTerm::Universe(UniverseLevel::Concrete(0))),
         body: Heap::new(CoreTerm::Var(Text::from("T"))),
     };
-    let beta_carrier =
-        CoreTerm::App(Heap::new(id_type_lam), Heap::new(nat_ind()));
+    let beta_carrier = CoreTerm::App(Heap::new(id_type_lam), Heap::new(nat_ind()));
     let path = CoreTerm::PathTy {
         carrier: Heap::new(beta_carrier),
         lhs: Heap::new(n.clone()),
         rhs: Heap::new(n),
     };
     let res = infer(&ctx, &path, &reg);
-    assert!(
-        res.is_ok(),
-        "V8 β-aware match accepts: {:?}",
-        res,
-    );
+    assert!(res.is_ok(), "V8 β-aware match accepts: {:?}", res,);
 }
 
 // =============================================================================

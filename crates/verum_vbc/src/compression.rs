@@ -76,7 +76,10 @@ impl CompressionOptions {
 /// Returns `None` if compression is disabled or if the data is smaller than
 /// the minimum threshold. Returns `Some((compressed_data, algorithm))` on success.
 #[cfg(feature = "compression")]
-pub fn compress(data: &[u8], options: &CompressionOptions) -> VbcResult<Option<(Vec<u8>, CompressionAlgorithm)>> {
+pub fn compress(
+    data: &[u8],
+    options: &CompressionOptions,
+) -> VbcResult<Option<(Vec<u8>, CompressionAlgorithm)>> {
     // Skip compression for small data or when disabled
     if options.algorithm == CompressionAlgorithm::None || data.len() < options.min_size {
         return Ok(None);
@@ -84,13 +87,9 @@ pub fn compress(data: &[u8], options: &CompressionOptions) -> VbcResult<Option<(
 
     let compressed = match options.algorithm {
         CompressionAlgorithm::None => return Ok(None),
-        CompressionAlgorithm::Zstd => {
-            zstd::encode_all(data, options.level)
-                .map_err(|e| VbcError::Compression(format!("zstd compress: {}", e)))?
-        }
-        CompressionAlgorithm::Lz4 => {
-            lz4_flex::compress_prepend_size(data)
-        }
+        CompressionAlgorithm::Zstd => zstd::encode_all(data, options.level)
+            .map_err(|e| VbcError::Compression(format!("zstd compress: {}", e)))?,
+        CompressionAlgorithm::Lz4 => lz4_flex::compress_prepend_size(data),
     };
 
     // Only use compression if it actually reduces size
@@ -103,7 +102,10 @@ pub fn compress(data: &[u8], options: &CompressionOptions) -> VbcResult<Option<(
 
 /// Compress data (stub when compression feature is disabled).
 #[cfg(not(feature = "compression"))]
-pub fn compress(_data: &[u8], _options: &CompressionOptions) -> VbcResult<Option<(Vec<u8>, CompressionAlgorithm)>> {
+pub fn compress(
+    _data: &[u8],
+    _options: &CompressionOptions,
+) -> VbcResult<Option<(Vec<u8>, CompressionAlgorithm)>> {
     Ok(None)
 }
 
@@ -115,7 +117,11 @@ pub fn compress(_data: &[u8], _options: &CompressionOptions) -> VbcResult<Option
 /// * `algorithm` - The algorithm used for compression
 /// * `uncompressed_size` - Expected size of decompressed data (for validation)
 #[cfg(feature = "compression")]
-pub fn decompress(data: &[u8], algorithm: CompressionAlgorithm, uncompressed_size: u32) -> VbcResult<Vec<u8>> {
+pub fn decompress(
+    data: &[u8],
+    algorithm: CompressionAlgorithm,
+    uncompressed_size: u32,
+) -> VbcResult<Vec<u8>> {
     match algorithm {
         CompressionAlgorithm::None => Ok(data.to_vec()),
         CompressionAlgorithm::Zstd => {
@@ -152,11 +158,15 @@ pub fn decompress(data: &[u8], algorithm: CompressionAlgorithm, uncompressed_siz
 
 /// Decompress data (stub when compression feature is disabled).
 #[cfg(not(feature = "compression"))]
-pub fn decompress(data: &[u8], algorithm: CompressionAlgorithm, _uncompressed_size: u32) -> VbcResult<Vec<u8>> {
+pub fn decompress(
+    data: &[u8],
+    algorithm: CompressionAlgorithm,
+    _uncompressed_size: u32,
+) -> VbcResult<Vec<u8>> {
     match algorithm {
         CompressionAlgorithm::None => Ok(data.to_vec()),
         _ => Err(VbcError::Decompression(
-            "compression feature not enabled".to_string()
+            "compression feature not enabled".to_string(),
         )),
     }
 }
@@ -234,7 +244,8 @@ mod tests {
         // The important thing is it doesn't panic
         if let Some((compressed, _)) = result {
             // If it did compress, verify roundtrip
-            let decompressed = decompress(&compressed, CompressionAlgorithm::Zstd, data.len() as u32).unwrap();
+            let decompressed =
+                decompress(&compressed, CompressionAlgorithm::Zstd, data.len() as u32).unwrap();
             assert_eq!(decompressed, data);
         }
     }

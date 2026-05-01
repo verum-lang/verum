@@ -20,9 +20,9 @@
 
 use verum_ast::{Expr, ExprKind, FileId, Item, ItemKind};
 use verum_common::List;
-use verum_lexer::Lexer;
-use verum_fast_parser::{ParseError, VerumParser};
 use verum_common::Text;
+use verum_fast_parser::{ParseError, VerumParser};
+use verum_lexer::Lexer;
 
 /// Helper to parse a module from source.
 fn parse(source: &str) -> Result<List<Item>, List<ParseError>> {

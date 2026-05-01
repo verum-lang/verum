@@ -199,10 +199,7 @@ impl Span {
     /// shouldn't loop in well-formed compiler output, but
     /// defence-in-depth keeps a malformed invariant from hanging
     /// the diagnostic renderer.
-    pub fn resolve_to_user_source<F>(
-        self,
-        resolver: F,
-    ) -> ResolvedSpan
+    pub fn resolve_to_user_source<F>(self, resolver: F) -> ResolvedSpan
     where
         F: Fn(FileId) -> Option<SyntheticOrigin>,
     {
@@ -471,12 +468,7 @@ impl SourceFile {
     /// `SyntheticOrigin` back-pointer at the parent span so the
     /// diagnostic renderer can resolve errors to user-visible
     /// locations via `Span::resolve_to_user_source`. Closes #274.
-    pub fn synthetic(
-        id: FileId,
-        name: String,
-        source: String,
-        origin: SyntheticOrigin,
-    ) -> Self {
+    pub fn synthetic(id: FileId, name: String, source: String, origin: SyntheticOrigin) -> Self {
         let line_starts = Self::compute_line_starts(&source);
         Self {
             id,
@@ -747,8 +739,7 @@ mod source_map_tests {
             "fn eq(...) { ... }".into(),
             origin,
         );
-        let stored = sf.synthetic_origin
-            .expect("synthetic_origin must be Some");
+        let stored = sf.synthetic_origin.expect("synthetic_origin must be Some");
         assert_eq!(stored.parent_file, FileId::new(7));
         assert_eq!(stored.call_site_span, parent_span);
         assert_eq!(stored.kind, SyntheticKind::DeriveExpansion);
@@ -759,8 +750,10 @@ mod source_map_tests {
         // Pin: regular SourceFile::new produces a None origin so
         // user-source files don't accidentally appear synthetic.
         let sf = SourceFile::new(FileId::new(1), "main.vr".into(), "".into());
-        assert!(sf.synthetic_origin.is_none(),
-            "user-source SourceFile must have None origin");
+        assert!(
+            sf.synthetic_origin.is_none(),
+            "user-source SourceFile must have None origin"
+        );
         let mut sf2 = SourceFile::new(FileId::new(2), "main.vr".into(), "".into());
         sf2.path = Some(std::path::PathBuf::from("/tmp/main.vr"));
         assert!(sf2.synthetic_origin.is_none());
@@ -774,8 +767,10 @@ mod source_map_tests {
         let resolver = |_: FileId| None;
         let result = user_span.resolve_to_user_source(resolver);
         assert_eq!(result.user_span, user_span);
-        assert!(result.expansion_chain.is_empty(),
-            "user-source span must produce empty expansion_chain");
+        assert!(
+            result.expansion_chain.is_empty(),
+            "user-source span must produce empty expansion_chain"
+        );
     }
 
     #[test]
@@ -787,20 +782,24 @@ mod source_map_tests {
         let user_span = Span::new(100, 200, user_file);
 
         let mut chain: HashMap<FileId, SyntheticOrigin> = HashMap::new();
-        chain.insert(synth_file, SyntheticOrigin {
-            parent_file: user_file,
-            call_site_span: user_span,
-            kind: SyntheticKind::MacroExpansion,
-        });
+        chain.insert(
+            synth_file,
+            SyntheticOrigin {
+                parent_file: user_file,
+                call_site_span: user_span,
+                kind: SyntheticKind::MacroExpansion,
+            },
+        );
 
         let synth_span = Span::new(0, 50, synth_file);
         let resolver = |fid: FileId| chain.get(&fid).copied();
         let result = synth_span.resolve_to_user_source(resolver);
 
-        assert_eq!(result.user_span, user_span,
-            "single-layer resolution must return call_site_span");
-        assert_eq!(result.expansion_chain,
-            vec![SyntheticKind::MacroExpansion]);
+        assert_eq!(
+            result.user_span, user_span,
+            "single-layer resolution must return call_site_span"
+        );
+        assert_eq!(result.expansion_chain, vec![SyntheticKind::MacroExpansion]);
     }
 
     #[test]
@@ -818,27 +817,38 @@ mod source_map_tests {
         let derive_call_in_macro = Span::new(0, 30, macro_file);
 
         let mut chain: HashMap<FileId, SyntheticOrigin> = HashMap::new();
-        chain.insert(macro_file, SyntheticOrigin {
-            parent_file: user_file,
-            call_site_span: macro_call_in_user,
-            kind: SyntheticKind::MacroExpansion,
-        });
-        chain.insert(derive_file, SyntheticOrigin {
-            parent_file: macro_file,
-            call_site_span: derive_call_in_macro,
-            kind: SyntheticKind::DeriveExpansion,
-        });
+        chain.insert(
+            macro_file,
+            SyntheticOrigin {
+                parent_file: user_file,
+                call_site_span: macro_call_in_user,
+                kind: SyntheticKind::MacroExpansion,
+            },
+        );
+        chain.insert(
+            derive_file,
+            SyntheticOrigin {
+                parent_file: macro_file,
+                call_site_span: derive_call_in_macro,
+                kind: SyntheticKind::DeriveExpansion,
+            },
+        );
 
         // Span inside the derive output:
         let leaf_span = Span::new(0, 5, derive_file);
         let resolver = |fid: FileId| chain.get(&fid).copied();
         let result = leaf_span.resolve_to_user_source(resolver);
 
-        assert_eq!(result.user_span, macro_call_in_user,
-            "two-layer resolution must reach user source");
+        assert_eq!(
+            result.user_span, macro_call_in_user,
+            "two-layer resolution must reach user source"
+        );
         assert_eq!(
             result.expansion_chain,
-            vec![SyntheticKind::DeriveExpansion, SyntheticKind::MacroExpansion],
+            vec![
+                SyntheticKind::DeriveExpansion,
+                SyntheticKind::MacroExpansion
+            ],
             "chain must be ordered leaf-to-root"
         );
     }
@@ -852,16 +862,22 @@ mod source_map_tests {
         let file_b = FileId::new(20);
         let mut chain: HashMap<FileId, SyntheticOrigin> = HashMap::new();
         // A → B → A cycle.
-        chain.insert(file_a, SyntheticOrigin {
-            parent_file: file_b,
-            call_site_span: Span::new(0, 5, file_b),
-            kind: SyntheticKind::Other,
-        });
-        chain.insert(file_b, SyntheticOrigin {
-            parent_file: file_a,
-            call_site_span: Span::new(0, 5, file_a),
-            kind: SyntheticKind::Other,
-        });
+        chain.insert(
+            file_a,
+            SyntheticOrigin {
+                parent_file: file_b,
+                call_site_span: Span::new(0, 5, file_b),
+                kind: SyntheticKind::Other,
+            },
+        );
+        chain.insert(
+            file_b,
+            SyntheticOrigin {
+                parent_file: file_a,
+                call_site_span: Span::new(0, 5, file_a),
+                kind: SyntheticKind::Other,
+            },
+        );
 
         let leaf = Span::new(0, 5, file_a);
         let resolver = |fid: FileId| chain.get(&fid).copied();
@@ -882,7 +898,10 @@ mod source_map_tests {
         assert_eq!(SyntheticKind::MacroExpansion.label(), "macro expansion");
         assert_eq!(SyntheticKind::DeriveExpansion.label(), "@derive expansion");
         assert_eq!(SyntheticKind::Monomorphization.label(), "monomorphization");
-        assert_eq!(SyntheticKind::DelegateBody.label(), "@delegate body synthesis");
+        assert_eq!(
+            SyntheticKind::DelegateBody.label(),
+            "@delegate body synthesis"
+        );
         assert_eq!(SyntheticKind::Other.label(), "synthetic expansion");
     }
 }

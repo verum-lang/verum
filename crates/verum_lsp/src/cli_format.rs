@@ -70,7 +70,9 @@ pub async fn format_via_cli(
         if let Some(h) = &hint {
             cmd.arg("--stdin-filename").arg(h);
         }
-        cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
         let mut child = cmd.spawn().ok()?;
         if let Some(stdin) = child.stdin.as_mut() {
             stdin.write_all(buffer.as_bytes()).ok()?;
@@ -97,7 +99,10 @@ pub fn diff_to_text_edits(original: &str, formatted: &str) -> List<TextEdit> {
     let mut edits = List::new();
     edits.push(TextEdit {
         range: Range {
-            start: Position { line: 0, character: 0 },
+            start: Position {
+                line: 0,
+                character: 0,
+            },
             end: Position {
                 line: u32::MAX,
                 character: u32::MAX,

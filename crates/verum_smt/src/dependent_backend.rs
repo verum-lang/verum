@@ -90,12 +90,11 @@ impl SmtDependentTypeChecker {
                 // Convert counterexample if available
                 let ce = if let Some(ce_smt) = counterexample {
                     // Extract first variable assignment as a simple counterexample
-                    let (var_name, value) =
-                        if let Some((k, v)) = ce_smt.assignments.iter().next() {
-                            (k.clone(), format!("{}", v).into())
-                        } else {
-                            ("value".into(), "unknown".into())
-                        };
+                    let (var_name, value) = if let Some((k, v)) = ce_smt.assignments.iter().next() {
+                        (k.clone(), format!("{}", v).into())
+                    } else {
+                        ("value".into(), "unknown".into())
+                    };
 
                     Maybe::Some(verum_types::refinement::CounterExample {
                         var_name,

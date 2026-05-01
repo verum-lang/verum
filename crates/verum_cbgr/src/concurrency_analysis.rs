@@ -882,7 +882,11 @@ impl ConcurrencyAnalyzer {
                     }
 
                     // Check for common lock
-                    let common_locks: Set<_> = a1.locks_held.intersection(&a2.locks_held).copied().collect();
+                    let common_locks: Set<_> = a1
+                        .locks_held
+                        .intersection(&a2.locks_held)
+                        .copied()
+                        .collect();
                     if !common_locks.is_empty() {
                         continue;
                     }
@@ -1049,12 +1053,8 @@ mod tests {
 
     #[test]
     fn test_memory_access_creation() {
-        let access = MemoryAccess::new(
-            LocationId(1),
-            AccessKind::Write,
-            ThreadId::MAIN,
-            BlockId(0),
-        );
+        let access =
+            MemoryAccess::new(LocationId(1), AccessKind::Write, ThreadId::MAIN, BlockId(0));
 
         assert!(access.is_write());
         assert!(!access.is_read());
@@ -1080,18 +1080,8 @@ mod tests {
 
     #[test]
     fn test_data_race_warning_creation() {
-        let access1 = MemoryAccess::new(
-            LocationId(1),
-            AccessKind::Write,
-            ThreadId(1),
-            BlockId(0),
-        );
-        let access2 = MemoryAccess::new(
-            LocationId(1),
-            AccessKind::Read,
-            ThreadId(2),
-            BlockId(1),
-        );
+        let access1 = MemoryAccess::new(LocationId(1), AccessKind::Write, ThreadId(1), BlockId(0));
+        let access2 = MemoryAccess::new(LocationId(1), AccessKind::Read, ThreadId(2), BlockId(1));
 
         let warning = DataRaceWarning::new(access1, access2);
         assert_eq!(warning.location, LocationId(1));
@@ -1189,18 +1179,24 @@ mod tests {
         // Each block has one definition (one access).
         let mut entry_block = BasicBlock::empty(entry);
         entry_block.successors.insert(mid);
-        entry_block.definitions.push(crate::analysis::DefSite::new(entry, RefId(10), true));
+        entry_block
+            .definitions
+            .push(crate::analysis::DefSite::new(entry, RefId(10), true));
         cfg.add_block(entry_block);
 
         let mut mid_block = BasicBlock::empty(mid);
         mid_block.predecessors.insert(entry);
         mid_block.successors.insert(exit);
-        mid_block.definitions.push(crate::analysis::DefSite::new(mid, RefId(11), true));
+        mid_block
+            .definitions
+            .push(crate::analysis::DefSite::new(mid, RefId(11), true));
         cfg.add_block(mid_block);
 
         let mut exit_block = BasicBlock::empty(exit);
         exit_block.predecessors.insert(mid);
-        exit_block.definitions.push(crate::analysis::DefSite::new(exit, RefId(12), true));
+        exit_block
+            .definitions
+            .push(crate::analysis::DefSite::new(exit, RefId(12), true));
         cfg.add_block(exit_block);
 
         let mut analyzer = ConcurrencyAnalyzer::new(cfg);

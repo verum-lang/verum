@@ -68,8 +68,11 @@ fn write_cert(dir: &PathBuf, decl_name: &str, backend: &str, trace: &str) {
   "metadata": []
 }}"#
     );
-    fs::write(cert_dir.join(format!("{decl_name}.smt-cert.json")), cert_json)
-        .expect("write cert");
+    fs::write(
+        cert_dir.join(format!("{decl_name}.smt-cert.json")),
+        cert_json,
+    )
+    .expect("write cert");
 }
 
 #[test]
@@ -82,12 +85,25 @@ public fn main() -> Int { 0 }
     );
     let out_path = dir.join("out.v");
     let out = run_verum(
-        &["export", "--to", "coq", "--output", out_path.to_str().unwrap()],
+        &[
+            "export",
+            "--to",
+            "coq",
+            "--output",
+            out_path.to_str().unwrap(),
+        ],
         &dir,
     );
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let body = fs::read_to_string(&out_path).unwrap();
-    assert!(body.contains("Admitted"), "no-cert path must keep admitted scaffold");
+    assert!(
+        body.contains("Admitted"),
+        "no-cert path must keep admitted scaffold"
+    );
 }
 
 #[test]
@@ -104,17 +120,43 @@ public fn main() -> Int { 0 }
 
     let out_path = dir.join("out.v");
     let out = run_verum(
-        &["export", "--to", "coq", "--output", out_path.to_str().unwrap()],
+        &[
+            "export",
+            "--to",
+            "coq",
+            "--output",
+            out_path.to_str().unwrap(),
+        ],
         &dir,
     );
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let body = fs::read_to_string(&out_path).unwrap();
     // Real lowered proof — `Proof. ... Qed.` envelope, NOT Admitted.
-    assert!(body.contains("Qed."), "lowered proof must end with Qed.; got:\n{}", body);
-    assert!(!body.contains("Admitted"), "lowered proof must NOT use Admitted; got:\n{}", body);
+    assert!(
+        body.contains("Qed."),
+        "lowered proof must end with Qed.; got:\n{}",
+        body
+    );
+    assert!(
+        !body.contains("Admitted"),
+        "lowered proof must NOT use Admitted; got:\n{}",
+        body
+    );
     // Tactic vocabulary recognised by CoqProofReplay:
-    assert!(body.contains("intros."), "expected `intros.` from (asserted); got:\n{}", body);
-    assert!(body.contains("lia."), "expected `lia.` from (th-lemma); got:\n{}", body);
+    assert!(
+        body.contains("intros."),
+        "expected `intros.` from (asserted); got:\n{}",
+        body
+    );
+    assert!(
+        body.contains("lia."),
+        "expected `lia.` from (th-lemma); got:\n{}",
+        body
+    );
 }
 
 #[test]
@@ -129,16 +171,38 @@ public fn main() -> Int { 0 }
 
     let out_path = dir.join("out.lean");
     let out = run_verum(
-        &["export", "--to", "lean", "--output", out_path.to_str().unwrap()],
+        &[
+            "export",
+            "--to",
+            "lean",
+            "--output",
+            out_path.to_str().unwrap(),
+        ],
         &dir,
     );
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let body = fs::read_to_string(&out_path).unwrap();
     // Lean's `by ... ` tactic-block envelope.
-    assert!(body.contains("by"), "expected lean `by` envelope; got:\n{}", body);
+    assert!(
+        body.contains("by"),
+        "expected lean `by` envelope; got:\n{}",
+        body
+    );
     // Tactic vocabulary recognised by LeanProofReplay:
-    assert!(body.contains("rfl"), "expected `rfl` from (refl); got:\n{}", body);
-    assert!(body.contains("trivial"), "expected `trivial` from (true-axiom); got:\n{}", body);
+    assert!(
+        body.contains("rfl"),
+        "expected `rfl` from (refl); got:\n{}",
+        body
+    );
+    assert!(
+        body.contains("trivial"),
+        "expected `trivial` from (true-axiom); got:\n{}",
+        body
+    );
     // Lean baseline lemma close-out (tauto), present for theorem kind:
     assert!(body.contains("tauto"));
 }
@@ -156,7 +220,13 @@ public fn main() -> Int { 0 }
 
     let out_path = dir.join("out.v");
     let out = run_verum(
-        &["export", "--to", "coq", "--output", out_path.to_str().unwrap()],
+        &[
+            "export",
+            "--to",
+            "coq",
+            "--output",
+            out_path.to_str().unwrap(),
+        ],
         &dir,
     );
     assert!(out.status.success());
@@ -190,14 +260,27 @@ public fn main() -> Int { 0 }
 
     let out_path = dir.join("out.v");
     let out = run_verum(
-        &["export", "--to", "coq", "--output", out_path.to_str().unwrap()],
+        &[
+            "export",
+            "--to",
+            "coq",
+            "--output",
+            out_path.to_str().unwrap(),
+        ],
         &dir,
     );
     // Export must NOT fail because of corrupt cert — it falls
     // through to admitted scaffold.
-    assert!(out.status.success(), "corrupt cert must not fail export; stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "corrupt cert must not fail export; stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let body = fs::read_to_string(&out_path).unwrap();
-    assert!(body.contains("Admitted"), "corrupt cert must fall back to Admitted");
+    assert!(
+        body.contains("Admitted"),
+        "corrupt cert must fall back to Admitted"
+    );
 }
 
 #[test]
@@ -212,13 +295,27 @@ public fn main() -> Int { 0 }
 
     let out_path = dir.join("out.agda");
     let out = run_verum(
-        &["export", "--to", "agda", "--output", out_path.to_str().unwrap()],
+        &[
+            "export",
+            "--to",
+            "agda",
+            "--output",
+            out_path.to_str().unwrap(),
+        ],
         &dir,
     );
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let body = fs::read_to_string(&out_path).unwrap();
     // Term-style Agda definition with `refl` witness.
-    assert!(body.contains("refl_thm = refl"), "expected `refl_thm = refl`; got:\n{}", body);
+    assert!(
+        body.contains("refl_thm = refl"),
+        "expected `refl_thm = refl`; got:\n{}",
+        body
+    );
 }
 
 #[test]
@@ -233,14 +330,32 @@ public fn main() -> Int { 0 }
 
     let out_path = dir.join("out.dk");
     let out = run_verum(
-        &["export", "--to", "dedukti", "--output", out_path.to_str().unwrap()],
+        &[
+            "export",
+            "--to",
+            "dedukti",
+            "--output",
+            out_path.to_str().unwrap(),
+        ],
         &dir,
     );
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let body = fs::read_to_string(&out_path).unwrap();
     // Lowered λΠ term is emitted as `def name : Prop := <term>.`
-    assert!(body.contains("def r_thm : Prop :="), "expected `def r_thm := ...`; got:\n{}", body);
-    assert!(body.contains("logic.refl"), "expected logic.refl term; got:\n{}", body);
+    assert!(
+        body.contains("def r_thm : Prop :="),
+        "expected `def r_thm := ...`; got:\n{}",
+        body
+    );
+    assert!(
+        body.contains("logic.refl"),
+        "expected logic.refl term; got:\n{}",
+        body
+    );
 }
 
 #[test]
@@ -255,15 +370,37 @@ public fn main() -> Int { 0 }
 
     let out_path = dir.join("out.mm");
     let out = run_verum(
-        &["export", "--to", "metamath", "--output", out_path.to_str().unwrap()],
+        &[
+            "export",
+            "--to",
+            "metamath",
+            "--output",
+            out_path.to_str().unwrap(),
+        ],
         &dir,
     );
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let body = fs::read_to_string(&out_path).unwrap();
     // Real proof step uses `eqid` (set.mm reflexivity axiom).
-    assert!(body.contains("th-mm_thm $p wff"), "expected th-... header; got:\n{}", body);
-    assert!(body.contains("eqid"), "expected `eqid` from real lowering; got:\n{}", body);
-    assert!(!body.contains("$= ? $."), "lowered proof must NOT contain `?` placeholder; got:\n{}", body);
+    assert!(
+        body.contains("th-mm_thm $p wff"),
+        "expected th-... header; got:\n{}",
+        body
+    );
+    assert!(
+        body.contains("eqid"),
+        "expected `eqid` from real lowering; got:\n{}",
+        body
+    );
+    assert!(
+        !body.contains("$= ? $."),
+        "lowered proof must NOT contain `?` placeholder; got:\n{}",
+        body
+    );
 }
 
 #[test]
@@ -279,10 +416,23 @@ public fn main() -> Int { 0 }
     );
     let out_path = dir.join("out.v");
     let out = run_verum(
-        &["export", "--to", "coq", "--output", out_path.to_str().unwrap()],
+        &[
+            "export",
+            "--to",
+            "coq",
+            "--output",
+            out_path.to_str().unwrap(),
+        ],
         &dir,
     );
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let body = fs::read_to_string(&out_path).unwrap();
-    assert!(body.contains("Axiom yoneda_post : Prop"), "axiom shape preserved");
+    assert!(
+        body.contains("Axiom yoneda_post : Prop"),
+        "axiom shape preserved"
+    );
 }

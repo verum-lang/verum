@@ -119,7 +119,11 @@ impl PoloniusPoint {
     /// Create a new point.
     #[must_use]
     pub fn new(block: BlockId, statement: u32, sub: u8) -> Self {
-        Self { block, statement, sub }
+        Self {
+            block,
+            statement,
+            sub,
+        }
     }
 
     /// Start of statement.
@@ -284,7 +288,12 @@ pub struct PoloniusError {
 impl PoloniusError {
     /// Create a new error.
     #[must_use]
-    pub fn new(loan: LoanId, point: PoloniusPoint, kind: PoloniusErrorKind, message: impl Into<String>) -> Self {
+    pub fn new(
+        loan: LoanId,
+        point: PoloniusPoint,
+        kind: PoloniusErrorKind,
+        message: impl Into<String>,
+    ) -> Self {
         Self {
             loan,
             point,
@@ -530,12 +539,16 @@ impl PoloniusAnalyzer {
         }
 
         // Collect data first to avoid borrow conflicts
-        let def_data: List<(BlockId, u32, RefId)> = self.cfg.blocks
+        let def_data: List<(BlockId, u32, RefId)> = self
+            .cfg
+            .blocks
             .iter()
             .flat_map(|(block_id, block)| {
-                block.definitions.iter().enumerate().map(move |(idx, def)| {
-                    (*block_id, idx as u32, def.reference)
-                })
+                block
+                    .definitions
+                    .iter()
+                    .enumerate()
+                    .map(move |(idx, def)| (*block_id, idx as u32, def.reference))
             })
             .collect();
 
@@ -586,19 +599,32 @@ impl PoloniusAnalyzer {
             // Rule 2: origin_contains_loan_at(Origin, Loan, Point) :-
             //  loan_issued_at(Origin, Loan, Point).
             for (origin, loan, point) in self.input.loan_issued_at.iter() {
-                if self.output.origin_contains_loan_at.insert((*origin, *loan, *point)) {
+                if self
+                    .output
+                    .origin_contains_loan_at
+                    .insert((*origin, *loan, *point))
+                {
                     changed = true;
                 }
             }
 
             // Rule 3: origin_contains_loan_at propagation through CFG
-            let current: List<_> = self.output.origin_contains_loan_at.iter().cloned().collect();
+            let current: List<_> = self
+                .output
+                .origin_contains_loan_at
+                .iter()
+                .cloned()
+                .collect();
             for (origin, loan, point) in current {
                 for (from, to) in self.input.cfg_edge.iter() {
                     if *from == point {
                         // Check if loan is killed
                         if !self.input.loan_killed_at.contains(&(loan, *to)) {
-                            if self.output.origin_contains_loan_at.insert((origin, loan, *to)) {
+                            if self
+                                .output
+                                .origin_contains_loan_at
+                                .insert((origin, loan, *to))
+                            {
                                 changed = true;
                             }
                         }
@@ -625,14 +651,20 @@ impl PoloniusAnalyzer {
                 }
 
                 // Propagate loans through subset
-                let sub_loans: List<_> = self.output.origin_contains_loan_at
+                let sub_loans: List<_> = self
+                    .output
+                    .origin_contains_loan_at
                     .iter()
                     .filter(|(o, _, p)| o == sub && p == point)
                     .map(|(_, l, _)| *l)
                     .collect();
 
                 for loan in sub_loans {
-                    if self.output.origin_contains_loan_at.insert((*sup, loan, *point)) {
+                    if self
+                        .output
+                        .origin_contains_loan_at
+                        .insert((*sup, loan, *point))
+                    {
                         changed = true;
                     }
                 }
@@ -803,7 +835,9 @@ mod tests {
 
         assert!(!facts.has_errors());
 
-        facts.errors.insert((LoanId(0), PoloniusPoint::start(BlockId(0), 0)));
+        facts
+            .errors
+            .insert((LoanId(0), PoloniusPoint::start(BlockId(0), 0)));
         assert!(facts.has_errors());
     }
 

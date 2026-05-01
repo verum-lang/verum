@@ -23,17 +23,19 @@ pub mod metal;
 
 // Re-export commonly used types
 pub use backend::{
-    Backend, ComputeCapabilities, BackendRegistry, CpuBackend, MemoryPool, MemoryPoolStats,
+    Backend, BackendRegistry, ComputeCapabilities, CpuBackend, MemoryPool, MemoryPoolStats,
     SyncFlags, default_backend, get_backend, get_backend_registry,
 };
-pub use device::{DeviceId, DeviceInfo, DeviceRegistry, CpuInfo, GpuInfo, Vendor};
+pub use device::{CpuInfo, DeviceId, DeviceInfo, DeviceRegistry, GpuInfo, Vendor};
 
 // Metal exports (macOS only)
 #[cfg(all(target_os = "macos", feature = "metal"))]
-pub use metal::{MetalBackend, MetalBufferPool, MetalPoolStats, get_metal_backend, is_metal_available};
+pub use metal::{
+    MetalBackend, MetalBufferPool, MetalPoolStats, get_metal_backend, is_metal_available,
+};
 
 use super::tensor::{DType, TensorHandle};
-use crate::instruction::{TensorBinaryOp, TensorUnaryOp, TensorReduceOp};
+use crate::instruction::{TensorBinaryOp, TensorReduceOp, TensorUnaryOp};
 
 /// Kernel variant based on available SIMD capabilities
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -164,20 +166,18 @@ const MIN_GPU_SIZE: usize = 4096;
 // (NearestEven, TowardZero, TowardPosInf, TowardNegInf) for mathematical kernels.
 
 /// Re-export precision types from interpreter state
-pub use super::state::{PrecisionMode, FloatPrecision, RoundingMode};
+pub use super::state::{FloatPrecision, PrecisionMode, RoundingMode};
 
 /// Precision context for kernel operations.
 ///
 
 /// This wraps PrecisionMode and provides additional methods for kernel-specific
 /// precision handling.
-#[derive(Debug, Clone, Copy)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct PrecisionContext {
     /// The precision mode settings
     pub mode: PrecisionMode,
 }
-
 
 impl PrecisionContext {
     /// Creates a new precision context from a PrecisionMode.
@@ -300,15 +300,9 @@ pub fn dispatch_binop(
     }
 
     match (a.dtype, caps.kernel_variant) {
-        (DType::F32, KernelVariant::Avx512) if a.numel >= 128 => {
-            cpu::binop_f32_avx512(a, b, op)
-        }
-        (DType::F32, KernelVariant::Avx2) if a.numel >= 64 => {
-            cpu::binop_f32_avx2(a, b, op)
-        }
-        (DType::F32, KernelVariant::Neon) if a.numel >= 64 => {
-            cpu::binop_f32_neon(a, b, op)
-        }
+        (DType::F32, KernelVariant::Avx512) if a.numel >= 128 => cpu::binop_f32_avx512(a, b, op),
+        (DType::F32, KernelVariant::Avx2) if a.numel >= 64 => cpu::binop_f32_avx2(a, b, op),
+        (DType::F32, KernelVariant::Neon) if a.numel >= 64 => cpu::binop_f32_neon(a, b, op),
         (DType::F32, _) => cpu::binop_f32_scalar(a, b, op),
         (DType::F64, _) => cpu::binop_f64_scalar(a, b, op),
         (DType::I32, _) => cpu::binop_i32_scalar(a, b, op),
@@ -413,10 +407,7 @@ pub fn fill_f32(output: &mut TensorHandle, value: f32) -> bool {
 }
 
 /// Dispatch unary operation to appropriate kernel
-pub fn dispatch_unop(
-    a: &TensorHandle,
-    op: TensorUnaryOp,
-) -> Option<TensorHandle> {
+pub fn dispatch_unop(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     let caps = get_capabilities();
 
     // Try Metal GPU for large F32 tensors
@@ -430,15 +421,9 @@ pub fn dispatch_unop(
     }
 
     match (a.dtype, caps.kernel_variant) {
-        (DType::F32, KernelVariant::Avx512) if a.numel >= 128 => {
-            cpu::unop_f32_avx512(a, op)
-        }
-        (DType::F32, KernelVariant::Avx2) if a.numel >= 64 => {
-            cpu::unop_f32_avx2(a, op)
-        }
-        (DType::F32, KernelVariant::Neon) if a.numel >= 64 => {
-            cpu::unop_f32_neon(a, op)
-        }
+        (DType::F32, KernelVariant::Avx512) if a.numel >= 128 => cpu::unop_f32_avx512(a, op),
+        (DType::F32, KernelVariant::Avx2) if a.numel >= 64 => cpu::unop_f32_avx2(a, op),
+        (DType::F32, KernelVariant::Neon) if a.numel >= 64 => cpu::unop_f32_neon(a, op),
         (DType::F32, _) => cpu::unop_f32_scalar(a, op),
         (DType::F64, _) => cpu::unop_f64_scalar(a, op),
         (DType::I32, _) => cpu::unop_i32_scalar(a, op),
@@ -483,12 +468,8 @@ pub fn dispatch_reduce(
         (DType::F32, KernelVariant::Avx512) if a.numel >= 128 => {
             cpu::reduce_f32_avx512(a, op, axis)
         }
-        (DType::F32, KernelVariant::Avx2) if a.numel >= 64 => {
-            cpu::reduce_f32_avx2(a, op, axis)
-        }
-        (DType::F32, KernelVariant::Neon) if a.numel >= 64 => {
-            cpu::reduce_f32_neon(a, op, axis)
-        }
+        (DType::F32, KernelVariant::Avx2) if a.numel >= 64 => cpu::reduce_f32_avx2(a, op, axis),
+        (DType::F32, KernelVariant::Neon) if a.numel >= 64 => cpu::reduce_f32_neon(a, op, axis),
         (DType::F32, _) => cpu::reduce_f32_scalar(a, op, axis),
         (DType::F64, _) => cpu::reduce_f64_scalar(a, op, axis),
         // Signed integer types
@@ -509,10 +490,7 @@ pub fn dispatch_reduce(
 }
 
 /// Dispatch matrix multiplication to appropriate kernel
-pub fn dispatch_matmul(
-    a: &TensorHandle,
-    b: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn dispatch_matmul(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     // Try Metal GPU for large F32 matrices
     #[cfg(all(target_os = "macos", feature = "metal"))]
     if a.dtype == DType::F32 && a.numel >= MIN_GPU_SIZE {
@@ -536,10 +514,7 @@ pub fn dispatch_matmul(
 ///
 
 /// Uses Metal GPU for large F32 tensors on macOS, falls back to CPU otherwise.
-pub fn dispatch_softmax(
-    a: &TensorHandle,
-    axis: Option<i32>,
-) -> Option<TensorHandle> {
+pub fn dispatch_softmax(a: &TensorHandle, axis: Option<i32>) -> Option<TensorHandle> {
     // Try Metal GPU for large F32 tensors
     #[cfg(all(target_os = "macos", feature = "metal"))]
     if a.dtype == DType::F32 && a.numel >= MIN_GPU_SIZE {
@@ -728,10 +703,7 @@ fn compute_broadcast_strides(src_shape: &[usize], target_shape: &[usize]) -> Opt
 
 /// Computes the Cholesky factorization of a symmetric positive-definite matrix.
 /// Returns L such that A = L * L^T (if upper=false) or U such that A = U^T * U (if upper=true).
-pub fn dispatch_cholesky(
-    a: &TensorHandle,
-    upper: bool,
-) -> Option<TensorHandle> {
+pub fn dispatch_cholesky(a: &TensorHandle, upper: bool) -> Option<TensorHandle> {
     match a.dtype {
         DType::F32 => cpu::cholesky_f32_scalar(a, upper),
         DType::F64 => cpu::cholesky_f64_scalar(a, upper),
@@ -749,11 +721,7 @@ pub fn dispatch_cholesky(
 /// - bit 0: upper (1) or lower (0) triangular
 /// - bit 1: transpose (1) or normal (0)
 /// - bit 2: unit diagonal (1) or regular (0)
-pub fn dispatch_trisolve(
-    a: &TensorHandle,
-    b: &TensorHandle,
-    flags: u8,
-) -> Option<TensorHandle> {
+pub fn dispatch_trisolve(a: &TensorHandle, b: &TensorHandle, flags: u8) -> Option<TensorHandle> {
     let solve_flags = cpu::TriSolveFlags::from_byte(flags);
     match a.dtype {
         DType::F32 => cpu::trisolve_f32_scalar(a, b, solve_flags),
@@ -773,10 +741,7 @@ pub fn dispatch_trisolve(
 /// - Trace: "ii->"
 /// - Transpose: "ij->ji"
 /// - Batch matmul: "bij,bjk->bik"
-pub fn dispatch_einsum(
-    equation: &str,
-    operands: &[&TensorHandle],
-) -> Option<TensorHandle> {
+pub fn dispatch_einsum(equation: &str, operands: &[&TensorHandle]) -> Option<TensorHandle> {
     if operands.is_empty() {
         return None;
     }
@@ -805,11 +770,7 @@ pub fn dispatch_einsum(
 ///
 
 /// Returns complex output (Complex64) for all input types.
-pub fn dispatch_fft(
-    input: &TensorHandle,
-    dim: i8,
-    inverse: bool,
-) -> Option<TensorHandle> {
+pub fn dispatch_fft(input: &TensorHandle, dim: i8, inverse: bool) -> Option<TensorHandle> {
     match input.dtype {
         DType::F32 => cpu::fft_f32_1d(input, dim, inverse),
         DType::F64 => cpu::fft_f64_1d(input, dim, inverse),
@@ -848,10 +809,7 @@ pub fn dispatch_attention(
 
 /// Input shapes: A [batch, M, K], B [batch, K, N]
 /// Output: [batch, M, N]
-pub fn dispatch_bmm(
-    a: &TensorHandle,
-    b: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn dispatch_bmm(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     match a.dtype {
         DType::F32 => cpu::bmm_f32_scalar(a, b),
         DType::F64 => cpu::bmm_f64_scalar(a, b),
@@ -867,9 +825,7 @@ pub fn dispatch_bmm(
 
 /// Input: A [M, N] where M >= N
 /// Output: (Q [M, M], R [M, N])
-pub fn dispatch_qr(
-    a: &TensorHandle,
-) -> Option<(TensorHandle, TensorHandle)> {
+pub fn dispatch_qr(a: &TensorHandle) -> Option<(TensorHandle, TensorHandle)> {
     match a.dtype {
         DType::F32 => cpu::qr_f32_householder(a),
         DType::F64 => cpu::qr_f64_householder(a),
@@ -885,9 +841,7 @@ pub fn dispatch_qr(
 
 /// Input: A [M, N]
 /// Output: (U [M, M], S [min(M,N)], Vt [N, N])
-pub fn dispatch_svd(
-    a: &TensorHandle,
-) -> Option<(TensorHandle, TensorHandle, TensorHandle)> {
+pub fn dispatch_svd(a: &TensorHandle) -> Option<(TensorHandle, TensorHandle, TensorHandle)> {
     match a.dtype {
         DType::F32 => cpu::svd_f32_jacobi(a),
         DType::F64 => cpu::svd_f64_jacobi(a),
@@ -903,9 +857,7 @@ pub fn dispatch_svd(
 
 /// Input: A [N, N] (must be symmetric)
 /// Output: (eigenvalues [N], eigenvectors [N, N])
-pub fn dispatch_eig_symmetric(
-    a: &TensorHandle,
-) -> Option<(TensorHandle, TensorHandle)> {
+pub fn dispatch_eig_symmetric(a: &TensorHandle) -> Option<(TensorHandle, TensorHandle)> {
     match a.dtype {
         DType::F32 => cpu::eig_symmetric_f32_jacobi(a),
         DType::F64 => cpu::eig_symmetric_f64_jacobi(a),
@@ -925,10 +877,7 @@ pub fn dispatch_eig_symmetric(
 ///
 
 /// Output: x [N] or [N, K]
-pub fn dispatch_lstsq(
-    a: &TensorHandle,
-    b: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn dispatch_lstsq(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     match a.dtype {
         DType::F32 => cpu::lstsq_f32_qr(a, b),
         DType::F64 => cpu::lstsq_f64_qr(a, b),
@@ -955,11 +904,7 @@ pub fn dispatch_lstsq(
 ///
 
 /// Output: scalar (axis=None) or tensor with axis dimension removed
-pub fn dispatch_norm(
-    a: &TensorHandle,
-    ord: f64,
-    axis: Option<i8>,
-) -> Option<TensorHandle> {
+pub fn dispatch_norm(a: &TensorHandle, ord: f64, axis: Option<i8>) -> Option<TensorHandle> {
     match a.dtype {
         DType::F32 => cpu::norm_f32_scalar(a, ord, axis),
         DType::F64 => cpu::norm_f64_scalar(a, ord, axis),
@@ -979,10 +924,7 @@ pub fn dispatch_norm(
 ///
 
 /// Output: y [m] vector
-pub fn dispatch_mv(
-    a: &TensorHandle,
-    x: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn dispatch_mv(a: &TensorHandle, x: &TensorHandle) -> Option<TensorHandle> {
     match a.dtype {
         DType::F32 => cpu::mv_f32_scalar(a, x),
         DType::F64 => cpu::mv_f64_scalar(a, x),
@@ -1003,10 +945,7 @@ pub fn dispatch_mv(
 ///
 
 /// Output: 1D diagonal or 2D diagonal matrix
-pub fn dispatch_diag(
-    a: &TensorHandle,
-    k: i32,
-) -> Option<TensorHandle> {
+pub fn dispatch_diag(a: &TensorHandle, k: i32) -> Option<TensorHandle> {
     match a.dtype {
         DType::F32 => cpu::diag_f32_scalar(a, k),
         DType::F64 => cpu::diag_f64_scalar(a, k),
@@ -1026,10 +965,7 @@ pub fn dispatch_diag(
 ///
 
 /// Output: [m, n] upper triangular matrix
-pub fn dispatch_triu(
-    a: &TensorHandle,
-    k: i32,
-) -> Option<TensorHandle> {
+pub fn dispatch_triu(a: &TensorHandle, k: i32) -> Option<TensorHandle> {
     match a.dtype {
         DType::F32 => cpu::triu_f32_scalar(a, k),
         DType::F64 => cpu::triu_f64_scalar(a, k),
@@ -1049,10 +985,7 @@ pub fn dispatch_triu(
 ///
 
 /// Output: [m, n] lower triangular matrix
-pub fn dispatch_tril(
-    a: &TensorHandle,
-    k: i32,
-) -> Option<TensorHandle> {
+pub fn dispatch_tril(a: &TensorHandle, k: i32) -> Option<TensorHandle> {
     match a.dtype {
         DType::F32 => cpu::tril_f32_scalar(a, k),
         DType::F64 => cpu::tril_f64_scalar(a, k),
@@ -1071,9 +1004,7 @@ pub fn dispatch_tril(
 ///
 
 /// Returns None if matrix is singular.
-pub fn dispatch_inverse(
-    a: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn dispatch_inverse(a: &TensorHandle) -> Option<TensorHandle> {
     match a.dtype {
         DType::F32 => cpu::inverse_f32_scalar(a),
         DType::F64 => cpu::inverse_f64_scalar(a),
@@ -1133,10 +1064,7 @@ pub use cpu::ScatterMode;
 
 /// Input: tensor of any shape
 /// Output: tensor with same shape, containing cumulative sums
-pub fn dispatch_cumsum(
-    input: &TensorHandle,
-    axis: i8,
-) -> Option<TensorHandle> {
+pub fn dispatch_cumsum(input: &TensorHandle, axis: i8) -> Option<TensorHandle> {
     match input.dtype {
         DType::F32 => cpu::cumsum_f32_scalar(input, axis),
         DType::F64 => cpu::cumsum_f64_scalar(input, axis),
@@ -1153,10 +1081,7 @@ pub fn dispatch_cumsum(
 
 /// Input: tensor of any shape
 /// Output: tensor with same shape, containing cumulative products
-pub fn dispatch_cumprod(
-    input: &TensorHandle,
-    axis: i8,
-) -> Option<TensorHandle> {
+pub fn dispatch_cumprod(input: &TensorHandle, axis: i8) -> Option<TensorHandle> {
     match input.dtype {
         DType::F32 => cpu::cumprod_f32_scalar(input, axis),
         DType::F64 => cpu::cumprod_f64_scalar(input, axis),
@@ -1232,10 +1157,7 @@ pub fn dispatch_scatter(
 ///
 
 /// Output: x [N] or [N, K]
-pub fn dispatch_solve(
-    a: &TensorHandle,
-    b: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn dispatch_solve(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     match a.dtype {
         DType::F32 => cpu::solve_f32_lu(a, b),
         DType::F64 => cpu::solve_f64_lu(a, b),
@@ -1251,10 +1173,7 @@ pub fn dispatch_solve(
 
 /// Input: tensor of any shape
 /// Output: tensor with axis dimension removed, dtype I64
-pub fn dispatch_argmax(
-    input: &TensorHandle,
-    axis: i8,
-) -> Option<TensorHandle> {
+pub fn dispatch_argmax(input: &TensorHandle, axis: i8) -> Option<TensorHandle> {
     match input.dtype {
         DType::F32 => cpu::argmax_f32_scalar(input, axis),
         DType::F64 => cpu::argmax_f64_scalar(input, axis),
@@ -1270,10 +1189,7 @@ pub fn dispatch_argmax(
 
 /// Input: tensor of any shape
 /// Output: tensor with axis dimension removed, dtype I64
-pub fn dispatch_argmin(
-    input: &TensorHandle,
-    axis: i8,
-) -> Option<TensorHandle> {
+pub fn dispatch_argmin(input: &TensorHandle, axis: i8) -> Option<TensorHandle> {
     match input.dtype {
         DType::F32 => cpu::argmin_f32_scalar(input, axis),
         DType::F64 => cpu::argmin_f64_scalar(input, axis),
@@ -1354,10 +1270,7 @@ pub fn dispatch_nanmean(
 
 /// Input: tensor of any shape
 /// Output: flipped tensor
-pub fn dispatch_flip(
-    input: &TensorHandle,
-    axes: &[usize],
-) -> Option<TensorHandle> {
+pub fn dispatch_flip(input: &TensorHandle, axes: &[usize]) -> Option<TensorHandle> {
     match input.dtype {
         DType::F32 => cpu::flip_f32_scalar(input, axes),
         DType::F64 => cpu::flip_f64_scalar(input, axes),
@@ -1373,11 +1286,7 @@ pub fn dispatch_flip(
 
 /// Input: tensor of any shape
 /// Output: rolled tensor
-pub fn dispatch_roll(
-    input: &TensorHandle,
-    shift: i32,
-    axis: i8,
-) -> Option<TensorHandle> {
+pub fn dispatch_roll(input: &TensorHandle, shift: i32, axis: i8) -> Option<TensorHandle> {
     match input.dtype {
         DType::F32 => cpu::roll_f32_scalar(input, shift, axis),
         DType::F64 => cpu::roll_f64_scalar(input, shift, axis),
@@ -1393,9 +1302,7 @@ pub fn dispatch_roll(
 
 /// Input: 2D tensor (m x n matrix)
 /// Output: (P, L, U) where P is permutation, L is lower, U is upper triangular
-pub fn dispatch_lu(
-    input: &TensorHandle,
-) -> Option<(TensorHandle, TensorHandle, TensorHandle)> {
+pub fn dispatch_lu(input: &TensorHandle) -> Option<(TensorHandle, TensorHandle, TensorHandle)> {
     match input.dtype {
         DType::F32 => cpu::lu_f32_scalar(input),
         DType::F64 => cpu::lu_f64_scalar(input),
@@ -1412,9 +1319,7 @@ pub fn dispatch_lu(
 
 /// Input: 2D square tensor (n x n matrix)
 /// Output: (eigenvalues, eigenvectors)
-pub fn dispatch_eig(
-    input: &TensorHandle,
-) -> Option<(TensorHandle, TensorHandle)> {
+pub fn dispatch_eig(input: &TensorHandle) -> Option<(TensorHandle, TensorHandle)> {
     match input.dtype {
         DType::F32 => cpu::eig_f32_qr(input),
         DType::F64 => cpu::eig_f64_qr(input),
@@ -1431,10 +1336,7 @@ pub fn dispatch_eig(
 /// Input: 2D tensor (m x n matrix)
 /// tol: tolerance for singular values to be considered zero
 /// Output: integer rank
-pub fn dispatch_rank(
-    input: &TensorHandle,
-    tol: f64,
-) -> Option<usize> {
+pub fn dispatch_rank(input: &TensorHandle, tol: f64) -> Option<usize> {
     match input.dtype {
         DType::F32 => cpu::rank_f32_scalar(input, tol),
         DType::F64 => cpu::rank_f64_scalar(input, tol),
@@ -1451,10 +1353,7 @@ pub fn dispatch_rank(
 /// Input: 2D tensor (m x n matrix)
 /// p: norm type (1 for 1-norm, 2 for 2-norm, -1 for infinity-norm)
 /// Output: condition number (f64)
-pub fn dispatch_cond(
-    input: &TensorHandle,
-    p: i8,
-) -> Option<f64> {
+pub fn dispatch_cond(input: &TensorHandle, p: i8) -> Option<f64> {
     match input.dtype {
         DType::F32 => cpu::cond_f32_scalar(input, p).map(|v| v as f64),
         DType::F64 => cpu::cond_f64_scalar(input, p),
@@ -1470,9 +1369,7 @@ pub fn dispatch_cond(
 
 /// Input: 2D square tensor (n x n matrix)
 /// Output: (T, Z) where T is upper triangular and Z is unitary
-pub fn dispatch_schur(
-    input: &TensorHandle,
-) -> Option<(TensorHandle, TensorHandle)> {
+pub fn dispatch_schur(input: &TensorHandle) -> Option<(TensorHandle, TensorHandle)> {
     match input.dtype {
         DType::F32 => cpu::schur_f32_scalar(input),
         DType::F64 => cpu::schur_f64_scalar(input),
@@ -1733,10 +1630,12 @@ pub fn dispatch_random_float_01() -> f64 {
     // Simple random generation using hash-based entropy
     let state = RandomState::new();
     let mut hasher = state.build_hasher();
-    hasher.write_u64(std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0));
+    hasher.write_u64(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0),
+    );
     let random_bits = hasher.finish();
 
     // Convert to [0, 1) range
@@ -1831,11 +1730,10 @@ pub fn dispatch_from_array(values: &[f64], dtype: DType) -> Option<TensorHandle>
 // When the `tokenizers` feature is enabled, these use the HuggingFace tokenizers library.
 // Otherwise, they fall back to simple byte encoding/decoding stubs.
 pub use tokenizer::{
-    TokenizerHandle, TokenizerType,
+    TokenizerHandle, TokenizerType, dispatch_tokenizer_decode, dispatch_tokenizer_decode_batch,
+    dispatch_tokenizer_encode, dispatch_tokenizer_encode_batch, dispatch_tokenizer_encode_special,
     dispatch_tokenizer_load_bpe, dispatch_tokenizer_load_pretrained, dispatch_tokenizer_load_spm,
-    dispatch_tokenizer_encode, dispatch_tokenizer_decode,
-    dispatch_tokenizer_spm_encode, dispatch_tokenizer_spm_decode,
-    dispatch_tokenizer_encode_special, dispatch_tokenizer_encode_batch, dispatch_tokenizer_decode_batch,
+    dispatch_tokenizer_spm_decode, dispatch_tokenizer_spm_encode,
 };
 
 // =============================================================================
@@ -1859,12 +1757,12 @@ pub fn dispatch_sample_top_p(logits: &TensorHandle, p: f64) -> Option<u32> {
 
     // Softmax
     let max_val = unsafe {
-        (0..n).map(|i| *ptr.add(i)).fold(f32::NEG_INFINITY, f32::max)
+        (0..n)
+            .map(|i| *ptr.add(i))
+            .fold(f32::NEG_INFINITY, f32::max)
     };
 
-    let sum: f32 = unsafe {
-        (0..n).map(|i| (*ptr.add(i) - max_val).exp()).sum()
-    };
+    let sum: f32 = unsafe { (0..n).map(|i| (*ptr.add(i) - max_val).exp()).sum() };
 
     unsafe {
         for i in 0..n {
@@ -1904,12 +1802,12 @@ pub fn dispatch_sample_temperature(logits: &TensorHandle, temperature: f64) -> O
 
     // Apply temperature and softmax
     let max_val = unsafe {
-        (0..n).map(|i| *ptr.add(i) / temp).fold(f32::NEG_INFINITY, f32::max)
+        (0..n)
+            .map(|i| *ptr.add(i) / temp)
+            .fold(f32::NEG_INFINITY, f32::max)
     };
 
-    let sum: f32 = unsafe {
-        (0..n).map(|i| ((*ptr.add(i) / temp) - max_val).exp()).sum()
-    };
+    let sum: f32 = unsafe { (0..n).map(|i| ((*ptr.add(i) / temp) - max_val).exp()).sum() };
 
     // Sample from distribution
     let random_val = dispatch_random_float_01() as f32;
@@ -2027,10 +1925,13 @@ pub fn dispatch_paged_attention(
                         }
 
                         // Get block index from block_table
-                        let physical_block = *block_ptr.add(b * num_blocks_needed + block_idx) as usize;
+                        let physical_block =
+                            *block_ptr.add(b * num_blocks_needed + block_idx) as usize;
 
                         // K offset: [block, head, pos_in_block, head_dim]
-                        let k_offset = ((physical_block * num_heads + h) * block_size + block_offset) * (head_dim * 2);
+                        let k_offset = ((physical_block * num_heads + h) * block_size
+                            + block_offset)
+                            * (head_dim * 2);
 
                         // Dot product Q @ K
                         let mut score = 0.0f32;
@@ -2072,10 +1973,14 @@ pub fn dispatch_paged_attention(
                                 break;
                             }
 
-                            let physical_block = *block_ptr.add(b * num_blocks_needed + block_idx) as usize;
+                            let physical_block =
+                                *block_ptr.add(b * num_blocks_needed + block_idx) as usize;
 
                             // V offset: K is first half, V is second half
-                            let v_offset = ((physical_block * num_heads + h) * block_size + block_offset) * (head_dim * 2) + head_dim;
+                            let v_offset = ((physical_block * num_heads + h) * block_size
+                                + block_offset)
+                                * (head_dim * 2)
+                                + head_dim;
 
                             weighted_sum += scores[kv_pos] * *kv_ptr.add(v_offset + d);
                         }
@@ -2464,8 +2369,11 @@ pub fn dispatch_quantized_matmul(
     let zp_ptr = zero_point.data_ptr_i8();
     let out_ptr = output.data_ptr_f32_mut();
 
-    if input_ptr.is_null() || weight_ptr.is_null() || scale_ptr.is_null()
-        || zp_ptr.is_null() || out_ptr.is_null()
+    if input_ptr.is_null()
+        || weight_ptr.is_null()
+        || scale_ptr.is_null()
+        || zp_ptr.is_null()
+        || out_ptr.is_null()
     {
         return None;
     }
@@ -2504,23 +2412,31 @@ pub fn dispatch_tensor_norm(input: &TensorHandle) -> Option<f64> {
     match input.dtype {
         DType::F32 => {
             let ptr = input.data_ptr_f32();
-            if ptr.is_null() { return None; }
+            if ptr.is_null() {
+                return None;
+            }
             let sum: f32 = unsafe {
-                (0..input.numel).map(|i| {
-                    let v = *ptr.add(i);
-                    v * v
-                }).sum()
+                (0..input.numel)
+                    .map(|i| {
+                        let v = *ptr.add(i);
+                        v * v
+                    })
+                    .sum()
             };
             Some(sum.sqrt() as f64)
         }
         DType::F64 => {
             let ptr = input.data_ptr_f64();
-            if ptr.is_null() { return None; }
+            if ptr.is_null() {
+                return None;
+            }
             let sum: f64 = unsafe {
-                (0..input.numel).map(|i| {
-                    let v = *ptr.add(i);
-                    v * v
-                }).sum()
+                (0..input.numel)
+                    .map(|i| {
+                        let v = *ptr.add(i);
+                        v * v
+                    })
+                    .sum()
             };
             Some(sum.sqrt())
         }
@@ -2535,10 +2451,12 @@ pub fn dispatch_generate_request_id() -> String {
 
     let state = RandomState::new();
     let mut hasher = state.build_hasher();
-    hasher.write_u64(std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos() as u64)
-        .unwrap_or(0));
+    hasher.write_u64(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0),
+    );
 
     format!("req_{:016x}", hasher.finish())
 }
@@ -2729,7 +2647,8 @@ pub fn dispatch_vmap_transform_tensor(
     let shape = &tensor.shape[..ndim];
     let batch_size = shape[in_axis];
 
-    let mut inner_shape: Vec<usize> = shape.iter()
+    let mut inner_shape: Vec<usize> = shape
+        .iter()
         .enumerate()
         .filter(|&(i, _)| i != in_axis)
         .map(|(_, &s)| s)
@@ -2782,7 +2701,11 @@ pub fn dispatch_dist_world_group() -> ProcessGroupHandle {
 /// Stub: Returns a group based on input ranks, but single-process.
 pub fn dispatch_dist_new_group(ranks: &[usize]) -> ProcessGroupHandle {
     ProcessGroupHandle {
-        ranks: if ranks.is_empty() { vec![0] } else { ranks.to_vec() },
+        ranks: if ranks.is_empty() {
+            vec![0]
+        } else {
+            ranks.to_vec()
+        },
         world_size: 1,
         current_rank: 0,
     }
@@ -2876,10 +2799,7 @@ pub fn dispatch_set_grad(param: &mut ParameterHandle, grad: TensorHandle) {
 
 /// Execute backward pass on a module.
 /// Stub: Returns the grad_output unchanged (identity backward).
-pub fn dispatch_module_backward(
-    _module: &(),
-    grad_output: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn dispatch_module_backward(_module: &(), grad_output: &TensorHandle) -> Option<TensorHandle> {
     Some(grad_output.clone())
 }
 
@@ -3008,10 +2928,7 @@ pub fn dispatch_repetition_penalty(
 /// KV cache operation.
 /// Stub: Returns nil (KV cache not implemented in single-process interpreter).
 /// op: 0=create, 1=append, 2=truncate, 3=clear
-pub fn dispatch_kv_cache_op(
-    _op: u8,
-    _cache: &super::super::Value,
-) -> super::super::Value {
+pub fn dispatch_kv_cache_op(_op: u8, _cache: &super::super::Value) -> super::super::Value {
     super::super::Value::nil()
 }
 
@@ -3197,7 +3114,10 @@ mod tests {
 
         // Dimension broadcast
         assert_eq!(broadcast_shapes(&[3, 1], &[1, 4]), Some(vec![3, 4]));
-        assert_eq!(broadcast_shapes(&[3, 1, 5], &[1, 4, 5]), Some(vec![3, 4, 5]));
+        assert_eq!(
+            broadcast_shapes(&[3, 1, 5], &[1, 4, 5]),
+            Some(vec![3, 4, 5])
+        );
 
         // Different ranks
         assert_eq!(broadcast_shapes(&[2, 3, 4], &[3, 4]), Some(vec![2, 3, 4]));
@@ -3282,8 +3202,7 @@ mod tests {
     #[test]
     fn test_dispatch_regex_captures_optional_group_missing() {
         // Non-participating groups become empty strings.
-        let caps = dispatch_regex_captures(r"(a)(b)?(c)", "ac")
-            .expect("capture should succeed");
+        let caps = dispatch_regex_captures(r"(a)(b)?(c)", "ac").expect("capture should succeed");
         assert_eq!(caps.len(), 4);
         assert_eq!(caps[0], "ac");
         assert_eq!(caps[1], "a");
@@ -3445,13 +3364,13 @@ mod tests {
         let div_ptr = div_result.data_ptr_u32();
         let mod_ptr = mod_result.data_ptr_u32();
         unsafe {
-            assert_eq!(*div_ptr.add(0), 3);  // 10/3 = 3
-            assert_eq!(*div_ptr.add(1), 3);  // 17/5 = 3
-            assert_eq!(*div_ptr.add(2), 3);  // 25/7 = 3
+            assert_eq!(*div_ptr.add(0), 3); // 10/3 = 3
+            assert_eq!(*div_ptr.add(1), 3); // 17/5 = 3
+            assert_eq!(*div_ptr.add(2), 3); // 25/7 = 3
 
-            assert_eq!(*mod_ptr.add(0), 1);  // 10%3 = 1
-            assert_eq!(*mod_ptr.add(1), 2);  // 17%5 = 2
-            assert_eq!(*mod_ptr.add(2), 4);  // 25%7 = 4
+            assert_eq!(*mod_ptr.add(0), 1); // 10%3 = 1
+            assert_eq!(*mod_ptr.add(1), 2); // 17%5 = 2
+            assert_eq!(*mod_ptr.add(2), 4); // 25%7 = 4
         }
     }
 
@@ -3573,13 +3492,13 @@ mod tests {
         let div_ptr = div_result.data_ptr_i16();
         let mod_ptr = mod_result.data_ptr_i16();
         unsafe {
-            assert_eq!(*div_ptr.add(0), 3);   // 100/30 = 3
-            assert_eq!(*div_ptr.add(1), -3);  // -170/50 = -3 (truncated)
-            assert_eq!(*div_ptr.add(2), -3);  // 250/-70 = -3 (truncated)
+            assert_eq!(*div_ptr.add(0), 3); // 100/30 = 3
+            assert_eq!(*div_ptr.add(1), -3); // -170/50 = -3 (truncated)
+            assert_eq!(*div_ptr.add(2), -3); // 250/-70 = -3 (truncated)
 
-            assert_eq!(*mod_ptr.add(0), 10);  // 100%30 = 10
+            assert_eq!(*mod_ptr.add(0), 10); // 100%30 = 10
             assert_eq!(*mod_ptr.add(1), -20); // -170%50 = -20
-            assert_eq!(*mod_ptr.add(2), 40);  // 250%-70 = 40
+            assert_eq!(*mod_ptr.add(2), 40); // 250%-70 = 40
         }
     }
 
@@ -3706,7 +3625,7 @@ mod tests {
         let ptr = d.data_ptr_f64();
         unsafe {
             assert!(((*ptr.add(0)) - 1.0).abs() < 1e-10); // [0,0]
-            assert!((*ptr.add(1)).abs() < 1e-10);          // [0,1]
+            assert!((*ptr.add(1)).abs() < 1e-10); // [0,1]
             assert!(((*ptr.add(4)) - 2.0).abs() < 1e-10); // [1,1]
             assert!(((*ptr.add(8)) - 3.0).abs() < 1e-10); // [2,2]
         }
@@ -3716,18 +3635,23 @@ mod tests {
     fn test_triu() {
         use crate::interpreter::tensor::tensor_from_slice;
         // Upper triangular of [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
-        let a = tensor_from_slice(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0], &[3, 3], DType::F32).unwrap();
+        let a = tensor_from_slice(
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+            &[3, 3],
+            DType::F32,
+        )
+        .unwrap();
         let u = dispatch_triu(&a, 0).unwrap();
         let ptr = u.data_ptr_f32();
         unsafe {
             assert!(((*ptr.add(0)) - 1.0).abs() < 1e-5); // [0,0]
             assert!(((*ptr.add(1)) - 2.0).abs() < 1e-5); // [0,1]
             assert!(((*ptr.add(2)) - 3.0).abs() < 1e-5); // [0,2]
-            assert!((*ptr.add(3)).abs() < 1e-5);          // [1,0] = 0
+            assert!((*ptr.add(3)).abs() < 1e-5); // [1,0] = 0
             assert!(((*ptr.add(4)) - 5.0).abs() < 1e-5); // [1,1]
             assert!(((*ptr.add(5)) - 6.0).abs() < 1e-5); // [1,2]
-            assert!((*ptr.add(6)).abs() < 1e-5);          // [2,0] = 0
-            assert!((*ptr.add(7)).abs() < 1e-5);          // [2,1] = 0
+            assert!((*ptr.add(6)).abs() < 1e-5); // [2,0] = 0
+            assert!((*ptr.add(7)).abs() < 1e-5); // [2,1] = 0
             assert!(((*ptr.add(8)) - 9.0).abs() < 1e-5); // [2,2]
         }
     }
@@ -3736,16 +3660,21 @@ mod tests {
     fn test_tril() {
         use crate::interpreter::tensor::tensor_from_slice;
         // Lower triangular of [[1, 2, 3], [4, 5, 6], [7, 8, 9]]
-        let a = tensor_from_slice(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0], &[3, 3], DType::F64).unwrap();
+        let a = tensor_from_slice(
+            &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+            &[3, 3],
+            DType::F64,
+        )
+        .unwrap();
         let l = dispatch_tril(&a, 0).unwrap();
         let ptr = l.data_ptr_f64();
         unsafe {
             assert!(((*ptr.add(0)) - 1.0).abs() < 1e-10); // [0,0]
-            assert!((*ptr.add(1)).abs() < 1e-10);          // [0,1] = 0
-            assert!((*ptr.add(2)).abs() < 1e-10);          // [0,2] = 0
+            assert!((*ptr.add(1)).abs() < 1e-10); // [0,1] = 0
+            assert!((*ptr.add(2)).abs() < 1e-10); // [0,2] = 0
             assert!(((*ptr.add(3)) - 4.0).abs() < 1e-10); // [1,0]
             assert!(((*ptr.add(4)) - 5.0).abs() < 1e-10); // [1,1]
-            assert!((*ptr.add(5)).abs() < 1e-10);          // [1,2] = 0
+            assert!((*ptr.add(5)).abs() < 1e-10); // [1,2] = 0
             assert!(((*ptr.add(6)) - 7.0).abs() < 1e-10); // [2,0]
             assert!(((*ptr.add(7)) - 8.0).abs() < 1e-10); // [2,1]
             assert!(((*ptr.add(8)) - 9.0).abs() < 1e-10); // [2,2]
@@ -3771,7 +3700,12 @@ mod tests {
     fn test_inverse_identity() {
         use crate::interpreter::tensor::tensor_from_slice;
         // Inverse of identity is identity
-        let eye = tensor_from_slice(&[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0], &[3, 3], DType::F64).unwrap();
+        let eye = tensor_from_slice(
+            &[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+            &[3, 3],
+            DType::F64,
+        )
+        .unwrap();
         let inv = dispatch_inverse(&eye).unwrap();
         let ptr = inv.data_ptr_f64();
         unsafe {
@@ -3802,8 +3736,8 @@ mod tests {
         assert_eq!(result.dtype, DType::Complex64);
         let ptr = result.data_ptr_complex64();
         unsafe {
-            assert!(((*ptr.add(0)) - 6.0).abs() < 1e-5);  // re0
-            assert!(((*ptr.add(1)) - 8.0).abs() < 1e-5);  // im0
+            assert!(((*ptr.add(0)) - 6.0).abs() < 1e-5); // re0
+            assert!(((*ptr.add(1)) - 8.0).abs() < 1e-5); // im0
             assert!(((*ptr.add(2)) - 10.0).abs() < 1e-5); // re1
             assert!(((*ptr.add(3)) - 12.0).abs() < 1e-5); // im1
         }
@@ -3818,8 +3752,8 @@ mod tests {
         let result = dispatch_binop(&a, &b, TensorBinaryOp::Mul).unwrap();
         let ptr = result.data_ptr_complex64();
         unsafe {
-            assert!(((*ptr.add(0)) - (-5.0)).abs() < 1e-5);  // re
-            assert!(((*ptr.add(1)) - 10.0).abs() < 1e-5);    // im
+            assert!(((*ptr.add(0)) - (-5.0)).abs() < 1e-5); // re
+            assert!(((*ptr.add(1)) - 10.0).abs() < 1e-5); // im
         }
     }
 
@@ -3832,8 +3766,8 @@ mod tests {
         let result = dispatch_binop(&a, &b, TensorBinaryOp::Div).unwrap();
         let ptr = result.data_ptr_complex64();
         unsafe {
-            assert!(((*ptr.add(0)) - 1.0).abs() < 1e-5);  // re
-            assert!(((*ptr.add(1)) - 2.0).abs() < 1e-5);  // im
+            assert!(((*ptr.add(0)) - 1.0).abs() < 1e-5); // re
+            assert!(((*ptr.add(1)) - 2.0).abs() < 1e-5); // im
         }
     }
 
@@ -3845,8 +3779,8 @@ mod tests {
         let result = dispatch_unop(&a, TensorUnaryOp::Neg).unwrap();
         let ptr = result.data_ptr_complex64();
         unsafe {
-            assert!(((*ptr.add(0)) - (-1.0)).abs() < 1e-5);  // re
-            assert!(((*ptr.add(1)) - (-2.0)).abs() < 1e-5);  // im
+            assert!(((*ptr.add(0)) - (-1.0)).abs() < 1e-5); // re
+            assert!(((*ptr.add(1)) - (-2.0)).abs() < 1e-5); // im
         }
     }
 
@@ -3871,7 +3805,7 @@ mod tests {
         let result = dispatch_conj(&a).unwrap();
         let ptr = result.data_ptr_complex64();
         unsafe {
-            assert!(((*ptr.add(0)) - 1.0).abs() < 1e-5);   // re unchanged
+            assert!(((*ptr.add(0)) - 1.0).abs() < 1e-5); // re unchanged
             assert!(((*ptr.add(1)) - (-2.0)).abs() < 1e-5); // im negated
         }
     }
@@ -3962,8 +3896,8 @@ mod tests {
 
     #[test]
     fn test_f16_binop_add() {
+        use crate::interpreter::kernel::cpu::f16_to_f32;
         use crate::interpreter::tensor::tensor_from_f16_slice;
-        use crate::interpreter::kernel::cpu::{f16_to_f32};
         // [1.0, 2.0] + [3.0, 4.0] = [4.0, 6.0]
         let a = tensor_from_f16_slice(&[1.0, 2.0], &[2]).unwrap();
         let b = tensor_from_f16_slice(&[3.0, 4.0], &[2]).unwrap();
@@ -3980,8 +3914,8 @@ mod tests {
 
     #[test]
     fn test_f16_binop_mul() {
-        use crate::interpreter::tensor::tensor_from_f16_slice;
         use crate::interpreter::kernel::cpu::f16_to_f32;
+        use crate::interpreter::tensor::tensor_from_f16_slice;
         // [2.0, 3.0] * [4.0, 5.0] = [8.0, 15.0]
         let a = tensor_from_f16_slice(&[2.0, 3.0], &[2]).unwrap();
         let b = tensor_from_f16_slice(&[4.0, 5.0], &[2]).unwrap();
@@ -3997,8 +3931,8 @@ mod tests {
 
     #[test]
     fn test_f16_unop_neg() {
-        use crate::interpreter::tensor::tensor_from_f16_slice;
         use crate::interpreter::kernel::cpu::f16_to_f32;
+        use crate::interpreter::tensor::tensor_from_f16_slice;
         // -[1.5, -2.5] = [-1.5, 2.5]
         let a = tensor_from_f16_slice(&[1.5, -2.5], &[2]).unwrap();
         let result = dispatch_unop(&a, TensorUnaryOp::Neg).unwrap();
@@ -4013,8 +3947,8 @@ mod tests {
 
     #[test]
     fn test_f16_unop_abs() {
-        use crate::interpreter::tensor::tensor_from_f16_slice;
         use crate::interpreter::kernel::cpu::f16_to_f32;
+        use crate::interpreter::tensor::tensor_from_f16_slice;
         // abs([-3.0, 4.0]) = [3.0, 4.0]
         let a = tensor_from_f16_slice(&[-3.0, 4.0], &[2]).unwrap();
         let result = dispatch_unop(&a, TensorUnaryOp::Abs).unwrap();
@@ -4029,8 +3963,8 @@ mod tests {
 
     #[test]
     fn test_f16_unop_sqrt() {
-        use crate::interpreter::tensor::tensor_from_f16_slice;
         use crate::interpreter::kernel::cpu::f16_to_f32;
+        use crate::interpreter::tensor::tensor_from_f16_slice;
         // sqrt([4.0, 9.0]) = [2.0, 3.0]
         let a = tensor_from_f16_slice(&[4.0, 9.0], &[2]).unwrap();
         let result = dispatch_unop(&a, TensorUnaryOp::Sqrt).unwrap();
@@ -4049,8 +3983,8 @@ mod tests {
 
     #[test]
     fn test_bf16_binop_add() {
-        use crate::interpreter::tensor::tensor_from_bf16_slice;
         use crate::interpreter::kernel::cpu::bf16_to_f32;
+        use crate::interpreter::tensor::tensor_from_bf16_slice;
         // [1.0, 2.0] + [3.0, 4.0] = [4.0, 6.0]
         let a = tensor_from_bf16_slice(&[1.0, 2.0], &[2]).unwrap();
         let b = tensor_from_bf16_slice(&[3.0, 4.0], &[2]).unwrap();
@@ -4067,8 +4001,8 @@ mod tests {
 
     #[test]
     fn test_bf16_binop_mul() {
-        use crate::interpreter::tensor::tensor_from_bf16_slice;
         use crate::interpreter::kernel::cpu::bf16_to_f32;
+        use crate::interpreter::tensor::tensor_from_bf16_slice;
         // [2.0, 3.0] * [4.0, 5.0] = [8.0, 15.0]
         let a = tensor_from_bf16_slice(&[2.0, 3.0], &[2]).unwrap();
         let b = tensor_from_bf16_slice(&[4.0, 5.0], &[2]).unwrap();
@@ -4084,8 +4018,8 @@ mod tests {
 
     #[test]
     fn test_bf16_unop_neg() {
-        use crate::interpreter::tensor::tensor_from_bf16_slice;
         use crate::interpreter::kernel::cpu::bf16_to_f32;
+        use crate::interpreter::tensor::tensor_from_bf16_slice;
         // -[1.5, -2.5] = [-1.5, 2.5]
         let a = tensor_from_bf16_slice(&[1.5, -2.5], &[2]).unwrap();
         let result = dispatch_unop(&a, TensorUnaryOp::Neg).unwrap();
@@ -4100,8 +4034,8 @@ mod tests {
 
     #[test]
     fn test_bf16_unop_relu() {
-        use crate::interpreter::tensor::tensor_from_bf16_slice;
         use crate::interpreter::kernel::cpu::bf16_to_f32;
+        use crate::interpreter::tensor::tensor_from_bf16_slice;
         // relu([-2.0, 3.0]) = [0.0, 3.0]
         let a = tensor_from_bf16_slice(&[-2.0, 3.0], &[2]).unwrap();
         let result = dispatch_unop(&a, TensorUnaryOp::Relu).unwrap();
@@ -4116,8 +4050,8 @@ mod tests {
 
     #[test]
     fn test_bf16_unop_exp() {
-        use crate::interpreter::tensor::tensor_from_bf16_slice;
         use crate::interpreter::kernel::cpu::bf16_to_f32;
+        use crate::interpreter::tensor::tensor_from_bf16_slice;
         // exp([0.0, 1.0]) ≈ [1.0, 2.718]
         let a = tensor_from_bf16_slice(&[0.0, 1.0], &[2]).unwrap();
         let result = dispatch_unop(&a, TensorUnaryOp::Exp).unwrap();
@@ -4175,7 +4109,8 @@ mod tests {
 
     #[test]
     fn test_parse_tool_call_json_style() {
-        let result = dispatch_parse_tool_call(r#"{"name": "search", "arguments": {"query": "test"}}"#);
+        let result =
+            dispatch_parse_tool_call(r#"{"name": "search", "arguments": {"query": "test"}}"#);
         assert!(result.is_some());
         let (name, args) = result.unwrap();
         assert_eq!(name, "search");

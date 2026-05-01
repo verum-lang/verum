@@ -44,12 +44,12 @@
 //! ```
 
 use verum_common::Text;
+use verum_llvm::IntPredicate;
 use verum_llvm::builder::Builder;
 use verum_llvm::context::Context;
 use verum_llvm::module::Module;
 use verum_llvm::types::{BasicTypeEnum, IntType, PointerType, StructType};
 use verum_llvm::values::{BasicValueEnum, FunctionValue, IntValue, PointerValue, StructValue};
-use verum_llvm::IntPredicate;
 
 use super::error::{LlvmLoweringError, Result};
 use super::types::RefTier;
@@ -109,10 +109,8 @@ impl<'ctx> CbgrLowering<'ctx> {
         let i64_type = context.i64_type();
 
         // ThinRef: { ptr: *T, generation: u32, epoch_caps: u32 }
-        let thin_ref_type = context.struct_type(
-            &[ptr_type.into(), i32_type.into(), i32_type.into()],
-            false,
-        );
+        let thin_ref_type =
+            context.struct_type(&[ptr_type.into(), i32_type.into(), i32_type.into()], false);
 
         // FatRef: { ptr: *T, generation: u32, epoch_caps: u32, len: u64 }
         let fat_ref_type = context.struct_type(
@@ -399,15 +397,11 @@ impl<'ctx> CbgrLowering<'ctx> {
             .into_int_value();
 
         // 8. Branch: on success return pointer, on failure abort via panic
-        let valid_bb = self
-            .context
-            .append_basic_block(current_fn, "cbgr.valid_bb");
+        let valid_bb = self.context.append_basic_block(current_fn, "cbgr.valid_bb");
         let invalid_bb = self
             .context
             .append_basic_block(current_fn, "cbgr.invalid_bb");
-        let merge_bb = self
-            .context
-            .append_basic_block(current_fn, "cbgr.merge");
+        let merge_bb = self.context.append_basic_block(current_fn, "cbgr.merge");
 
         builder
             .build_conditional_branch(is_valid, valid_bb, invalid_bb)
@@ -415,13 +409,11 @@ impl<'ctx> CbgrLowering<'ctx> {
 
         // Invalid path: call panic handler and unreachable
         builder.position_at_end(invalid_bb);
-        let panic_fn = module
-            .get_function("verum_panic")
-            .unwrap_or_else(|| {
-                let void_type = self.context.void_type();
-                let fn_type = void_type.fn_type(&[ptr_type.into()], false);
-                module.add_function("verum_panic", fn_type, None)
-            });
+        let panic_fn = module.get_function("verum_panic").unwrap_or_else(|| {
+            let void_type = self.context.void_type();
+            let fn_type = void_type.fn_type(&[ptr_type.into()], false);
+            module.add_function("verum_panic", fn_type, None)
+        });
         // Build a constant panic message
         let panic_msg = builder
             .build_global_string_ptr(
@@ -528,11 +520,7 @@ impl<'ctx> CbgrLowering<'ctx> {
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
 
             builder
-                .build_call(
-                    check_fn,
-                    &[is_valid.into(), ptr.into()],
-                    "cbgr.validate",
-                )
+                .build_call(check_fn, &[is_valid.into(), ptr.into()], "cbgr.validate")
                 .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
         }
 
@@ -558,7 +546,12 @@ impl<'ctx> CbgrLowering<'ctx> {
             .build_and(caps, cap_mask, "cap.masked")
             .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
         let has_cap = builder
-            .build_int_compare(IntPredicate::NE, masked, self.context.i32_type().const_zero(), "cap.check")
+            .build_int_compare(
+                IntPredicate::NE,
+                masked,
+                self.context.i32_type().const_zero(),
+                "cap.check",
+            )
             .map_err(|e| LlvmLoweringError::llvm_error(e.to_string()))?;
 
         Ok(has_cap)

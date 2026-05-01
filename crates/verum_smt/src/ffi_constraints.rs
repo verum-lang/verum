@@ -34,8 +34,8 @@
 use crate::{Context, Error, Result, TranslationError};
 use verum_ast::ffi::{FFIBoundary, FFIFunction, MemoryEffects, Ownership};
 use verum_ast::{BinOp, Expr, ExprKind, Literal, LiteralKind, Type, UnOp};
-use verum_common::{List, Maybe, Text};
 use verum_common::ToText;
+use verum_common::{List, Maybe, Text};
 
 use z3::ast::{Array, BV, Bool, Dynamic, Int, Real};
 

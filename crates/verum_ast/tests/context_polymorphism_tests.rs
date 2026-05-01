@@ -299,10 +299,7 @@ fn test_context_param_clone() {
 
     // Verify it's a deep clone
     match (&param.kind, &cloned.kind) {
-        (
-            GenericParamKind::Context { name: n1 },
-            GenericParamKind::Context { name: n2 },
-        ) => {
+        (GenericParamKind::Context { name: n1 }, GenericParamKind::Context { name: n2 }) => {
             assert_eq!(n1.name, n2.name);
         }
         _ => panic!("Expected both to be Context"),
@@ -345,8 +342,7 @@ fn test_context_param_serialization() {
     assert!(json.contains("Context"));
 
     // Test deserialization
-    let deserialized: GenericParam =
-        serde_json::from_str(&json).expect("Should deserialize");
+    let deserialized: GenericParam = serde_json::from_str(&json).expect("Should deserialize");
     assert_eq!(param, deserialized);
 }
 
@@ -545,7 +541,11 @@ fn test_context_param_position_in_generic_list() {
         .iter()
         .position(|p| matches!(&p.kind, GenericParamKind::Context { .. }));
 
-    assert_eq!(context_pos, Some(2), "Context param should be at position 2");
+    assert_eq!(
+        context_pos,
+        Some(2),
+        "Context param should be at position 2"
+    );
 }
 
 // ============================================================================

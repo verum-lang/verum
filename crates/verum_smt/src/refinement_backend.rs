@@ -37,9 +37,7 @@ use verum_ast::literal::{Literal, LiteralKind};
 use verum_ast::span::Span;
 use verum_common::{Map, Text};
 
-use verum_types::refinement::{
-    RefinementError, SmtBackend, SmtResult, VerificationResult,
-};
+use verum_types::refinement::{RefinementError, SmtBackend, SmtResult, VerificationResult};
 
 // Import SubsumptionChecker + shared stats struct from this crate
 use crate::{CheckMode, SolverStats, SubsumptionChecker, SubsumptionResult};

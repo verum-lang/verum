@@ -23,8 +23,8 @@
 
 use verum_ast::FileId;
 use verum_common::Text;
-use verum_lexer::{Lexer, Token};
 use verum_fast_parser::{ParseError, RecursiveParser};
+use verum_lexer::{Lexer, Token};
 
 /// Helper to parse a source string and return errors.
 fn parse_and_get_errors(source: &str) -> Vec<ParseError> {

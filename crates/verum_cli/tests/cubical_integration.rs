@@ -129,7 +129,11 @@ fn explain_resolves_every_canonical_primitive() {
 #[test]
 fn explain_aliases_resolve() {
     // `transport` → `transp`, `ua` → `univalence`, `J` → `j_rule`.
-    for (alias, _canonical) in [("transport", "transp"), ("ua", "univalence"), ("j", "j_rule")] {
+    for (alias, _canonical) in [
+        ("transport", "transp"),
+        ("ua", "univalence"),
+        ("j", "j_rule"),
+    ] {
         let out = run(&["cubical", "explain", alias, "--output", "json"]);
         assert!(out.status.success(), "alias {} failed", alias);
     }
@@ -173,12 +177,14 @@ fn rules_lists_substantive_inventory() {
     let parsed: serde_json::Value =
         serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
     let count = parsed["count"].as_u64().unwrap();
-    assert!(count >= 25, "V0 rule inventory must be substantive: got {}", count);
+    assert!(
+        count >= 25,
+        "V0 rule inventory must be substantive: got {}",
+        count
+    );
     let rules = parsed["rules"].as_array().unwrap();
-    let names: std::collections::BTreeSet<&str> = rules
-        .iter()
-        .map(|r| r["name"].as_str().unwrap())
-        .collect();
+    let names: std::collections::BTreeSet<&str> =
+        rules.iter().map(|r| r["name"].as_str().unwrap()).collect();
     // Pin every reduction rule called out in #78.
     for required in [
         "path-J",
@@ -262,20 +268,18 @@ fn face_records_free_variables() {
 
 #[test]
 fn face_canonical_round_trip() {
-    let out = run(&[
-        "cubical",
-        "face",
-        "i = 0 ∧ j = 1",
-        "--output",
-        "json",
-    ]);
+    let out = run(&["cubical", "face", "i = 0 ∧ j = 1", "--output", "json"]);
     assert!(out.status.success());
     let parsed: serde_json::Value =
         serde_json::from_str(&String::from_utf8_lossy(&out.stdout)).unwrap();
     let canonical = parsed["canonical"].as_str().unwrap();
     // Re-parse the canonical form — must succeed.
     let out2 = run(&["cubical", "face", canonical]);
-    assert!(out2.status.success(), "canonical `{}` did not re-parse", canonical);
+    assert!(
+        out2.status.success(),
+        "canonical `{}` did not re-parse",
+        canonical
+    );
 }
 
 #[test]
@@ -330,7 +334,11 @@ fn task_78_every_acceptance_bullet_reachable_via_cli() {
     // the building blocks; pin their presence.
     for primitive in ["path", "j_rule", "glue", "hcomp"] {
         let out = run(&["cubical", "explain", primitive, "--output", "json"]);
-        assert!(out.status.success(), "HIT primitive `{}` missing", primitive);
+        assert!(
+            out.status.success(),
+            "HIT primitive `{}` missing",
+            primitive
+        );
     }
 }
 
@@ -356,6 +364,10 @@ fn task_78_face_formula_grammar_complete_via_cli() {
         "i = 0 or j = 1",
     ] {
         let out = run(&["cubical", "face", s]);
-        assert!(out.status.success(), "face grammar production `{}` rejected", s);
+        assert!(
+            out.status.success(),
+            "face grammar production `{}` rejected",
+            s
+        );
     }
 }

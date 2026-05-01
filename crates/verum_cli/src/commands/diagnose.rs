@@ -116,12 +116,7 @@ fn list(limit: usize) -> Result<()> {
     for (i, path) in logs.iter().take(limit).enumerate() {
         let size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
         let meta = first_report_lines(path).unwrap_or_default();
-        ui::output(&format!(
-            "  {:>2}. {}  ({} B)",
-            i + 1,
-            path.display(),
-            size
-        ));
+        ui::output(&format!("  {:>2}. {}  ({} B)", i + 1, path.display(), size));
         for line in meta {
             ui::note(&format!("        {}", line));
         }
@@ -217,8 +212,8 @@ fn bundle(output: Option<&str>, recent: usize, scrub: bool) -> Result<()> {
         }
     };
 
-    let file =
-        fs::File::create(&out_path).map_err(|e| CliError::Custom(format!("create bundle: {}", e)))?;
+    let file = fs::File::create(&out_path)
+        .map_err(|e| CliError::Custom(format!("create bundle: {}", e)))?;
     let enc = GzEncoder::new(file, Compression::default());
     let mut tar = tar::Builder::new(enc);
 
@@ -341,8 +336,7 @@ fn submit(repo: &str, recent: usize, dry_run: bool) -> Result<()> {
         .is_err()
     {
         return Err(CliError::Custom(
-            "GitHub CLI `gh` not found — install it and run `gh auth login`, then retry."
-                .into(),
+            "GitHub CLI `gh` not found — install it and run `gh auth login`, then retry.".into(),
         ));
     }
 
@@ -447,7 +441,10 @@ fn push_field(out: &mut String, key: &str, value: &str, first: bool) {
 fn clean(skip_confirm: bool) -> Result<()> {
     let dir = report_dir();
     if !dir.exists() {
-        ui::note(&format!("Nothing to clean — {} does not exist", dir.display()));
+        ui::note(&format!(
+            "Nothing to clean — {} does not exist",
+            dir.display()
+        ));
         return Ok(());
     }
     if !skip_confirm {

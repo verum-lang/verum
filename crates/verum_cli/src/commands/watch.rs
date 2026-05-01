@@ -52,23 +52,21 @@ pub fn execute(command: &str, clear: bool) -> Result<()> {
                 false, // emit_vbc
                 None,  // windows_subsystem_cli
                 // Lint options (use defaults for watch command)
-                false,     // deny_warnings
-                false,     // strict_intrinsics
+                false,      // deny_warnings
+                false,      // strict_intrinsics
                 Vec::new(), // deny_lint
                 Vec::new(), // warn_lint
                 Vec::new(), // allow_lint
                 Vec::new(), // forbid_lint
                 false,      // smt_stats
             ),
-            "test" => crate::commands::test::execute(
-                crate::commands::test::TestOptions::default(),
-            ),
+            "test" => crate::commands::test::execute(crate::commands::test::TestOptions::default()),
             "run" => crate::commands::run::execute(
-                None,                   // tier
-                None,                   // profile
-                false,                  // release
-                None,                   // example
-                None,                   // bin
+                None,                      // tier
+                None,                      // profile
+                false,                     // release
+                None,                      // example
+                None,                      // bin
                 verum_common::List::new(), // args
             ),
             _ => {

@@ -63,7 +63,10 @@ fn run_human(dir: &PathBuf) -> String {
 fn human_format_renders_rule_code_and_arrow() {
     let dir = make_fixture("arrow", "fn main() {\n    let x = Box::new(5);\n}\n");
     let out = run_human(&dir);
-    assert!(out.contains("[deprecated-syntax]"), "rule code in brackets: {out}");
+    assert!(
+        out.contains("[deprecated-syntax]"),
+        "rule code in brackets: {out}"
+    );
     assert!(out.contains("-->"), "arrow before file path: {out}");
     assert!(out.contains("src/main.vr:2:"), "file:line:col: {out}");
     let _ = std::fs::remove_dir_all(&dir);
@@ -93,7 +96,10 @@ fn human_format_includes_help_when_suggestion_present() {
 
 #[test]
 fn human_format_uses_level_keywords() {
-    let dir = make_fixture("levels", "fn main() {\n    let x = Box::new(5);\n    // TODO: x\n}\n");
+    let dir = make_fixture(
+        "levels",
+        "fn main() {\n    let x = Box::new(5);\n    // TODO: x\n}\n",
+    );
     let out = run_human(&dir);
     // Box::new is a deprecated-syntax error.
     assert!(out.contains("error"), "expected `error` keyword: {out}");

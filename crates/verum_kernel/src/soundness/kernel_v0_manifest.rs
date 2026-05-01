@@ -341,11 +341,7 @@ pub fn verify_manifest(project_root: &Path) -> Vec<ManifestIssue> {
             }
             let _ = stem; // stem unused after extension check
             let in_manifest = m.iter().any(|r| {
-                project_root
-                    .join(&r.file_path)
-                    .canonicalize()
-                    .ok()
-                    == path.canonicalize().ok()
+                project_root.join(&r.file_path).canonicalize().ok() == path.canonicalize().ok()
             });
             if !in_manifest {
                 let rel = path
@@ -490,11 +486,10 @@ mod tests {
             .filter(|r| r.status == KernelV0Status::Proved)
             .map(|r| r.name.clone())
             .collect();
-        let expected: std::collections::BTreeSet<_> =
-            ["K-Var", "K-Univ", "K-FwAx", "K-Pos"]
-                .iter()
-                .map(|s| s.to_string())
-                .collect();
+        let expected: std::collections::BTreeSet<_> = ["K-Var", "K-Univ", "K-FwAx", "K-Pos"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         assert_eq!(proved, expected);
     }
 

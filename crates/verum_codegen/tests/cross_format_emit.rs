@@ -32,7 +32,10 @@ fn out_dir() -> PathBuf {
             // Walk up from CARGO_MANIFEST_DIR until we find `target/`,
             // matching the actual workspace layout.
             let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-            manifest.parent().unwrap_or(&manifest).parent()
+            manifest
+                .parent()
+                .unwrap_or(&manifest)
+                .parent()
                 .map(|p| p.join("target"))
                 .unwrap_or_else(|| PathBuf::from("target"))
         });
@@ -70,7 +73,10 @@ fn emit_lean_identity_on_nat() {
     );
     let path = write_file("lean", "Identity.lean", content);
     let written = fs::read_to_string(&path).unwrap();
-    assert!(written.contains("fun (x : Nat) => x"), "lean lowering shape changed");
+    assert!(
+        written.contains("fun (x : Nat) => x"),
+        "lean lowering shape changed"
+    );
 }
 
 #[test]
@@ -87,7 +93,10 @@ fn emit_coq_identity_on_nat() {
     );
     let path = write_file("coq", "Identity.v", content);
     let written = fs::read_to_string(&path).unwrap();
-    assert!(written.contains("fun (x : Nat) => x"), "coq lowering shape changed");
+    assert!(
+        written.contains("fun (x : Nat) => x"),
+        "coq lowering shape changed"
+    );
 }
 
 #[test]
@@ -105,7 +114,10 @@ fn emit_agda_identity_on_nat() {
     let path = write_file("agda", "Identity.agda", content);
     let written = fs::read_to_string(&path).unwrap();
     // Agda emits Unicode lambda (λ).
-    assert!(written.contains("λ (x : Nat) → x"), "agda lowering shape changed");
+    assert!(
+        written.contains("λ (x : Nat) → x"),
+        "agda lowering shape changed"
+    );
 }
 
 #[test]
@@ -120,7 +132,10 @@ fn emit_dedukti_identity_on_nat() {
     );
     let path = write_file("dedukti", "Identity.dk", content);
     let written = fs::read_to_string(&path).unwrap();
-    assert!(written.contains("x : Nat => x"), "dedukti lowering shape changed");
+    assert!(
+        written.contains("x : Nat => x"),
+        "dedukti lowering shape changed"
+    );
 }
 
 #[test]
@@ -138,7 +153,10 @@ fn emit_metamath_identity_on_nat() {
     );
     let path = write_file("metamath", "identity.mm", content);
     let written = fs::read_to_string(&path).unwrap();
-    assert!(written.contains("( wlam x Nat x )"), "metamath lowering shape changed");
+    assert!(
+        written.contains("( wlam x Nat x )"),
+        "metamath lowering shape changed"
+    );
 }
 
 #[test]

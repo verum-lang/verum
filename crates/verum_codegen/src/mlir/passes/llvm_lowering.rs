@@ -3,8 +3,8 @@
 
 //! Converts Verum dialect operations to LLVM dialect for final code generation.
 
+use super::{PassResult, PassStats, VerumPass};
 use crate::mlir::error::Result;
-use super::{VerumPass, PassResult, PassStats};
 use verum_mlir::ir::Module;
 
 /// LLVM lowering pass.

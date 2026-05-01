@@ -71,5 +71,5 @@ unsafe extern "C" {
     /// Outputs a module provider which performs lazy deserialization.
     /// Returns 0 on success.
     pub fn LLVMGetBitcodeModule2(MemBuf: LLVMMemoryBufferRef, OutM: *mut LLVMModuleRef)
-        -> LLVMBool;
+    -> LLVMBool;
 }

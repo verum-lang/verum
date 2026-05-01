@@ -67,9 +67,9 @@
 #![allow(clippy::missing_safety_doc)]
 #![cfg_attr(docsrs, feature(doc_auto_cfg))]
 
+use std::os::raw::c_void;
 #[cfg(any(feature = "vendored", feature = "static", feature = "system"))]
 use std::os::raw::{c_char, c_int, c_uint};
-use std::os::raw::c_void;
 
 // ============================================================================
 // Build-mode detection
@@ -246,14 +246,8 @@ unsafe extern "C" {
         option: *const c_char,
         value: *const c_char,
     ) -> c_int;
-    pub fn cvc5_solver_get_option(
-        solver: cvc5_solver,
-        option: *const c_char,
-    ) -> *const c_char;
-    pub fn cvc5_solver_get_info(
-        solver: cvc5_solver,
-        info: *const c_char,
-    ) -> *const c_char;
+    pub fn cvc5_solver_get_option(solver: cvc5_solver, option: *const c_char) -> *const c_char;
+    pub fn cvc5_solver_get_info(solver: cvc5_solver, info: *const c_char) -> *const c_char;
 
     // --- Sorts ---
     pub fn cvc5_tm_mk_boolean_sort(tm: cvc5_tm) -> cvc5_sort;
@@ -261,11 +255,7 @@ unsafe extern "C" {
     pub fn cvc5_tm_mk_real_sort(tm: cvc5_tm) -> cvc5_sort;
     pub fn cvc5_tm_mk_bv_sort(tm: cvc5_tm, size: c_uint) -> cvc5_sort;
     pub fn cvc5_tm_mk_fp_sort(tm: cvc5_tm, exp: c_uint, sig: c_uint) -> cvc5_sort;
-    pub fn cvc5_tm_mk_array_sort(
-        tm: cvc5_tm,
-        index: cvc5_sort,
-        elem: cvc5_sort,
-    ) -> cvc5_sort;
+    pub fn cvc5_tm_mk_array_sort(tm: cvc5_tm, index: cvc5_sort, elem: cvc5_sort) -> cvc5_sort;
     pub fn cvc5_tm_mk_string_sort(tm: cvc5_tm) -> cvc5_sort;
     pub fn cvc5_tm_mk_sequence_sort(tm: cvc5_tm, elem: cvc5_sort) -> cvc5_sort;
     pub fn cvc5_tm_mk_set_sort(tm: cvc5_tm, elem: cvc5_sort) -> cvc5_sort;
@@ -276,10 +266,7 @@ unsafe extern "C" {
         arity: c_uint,
         codomain: cvc5_sort,
     ) -> cvc5_sort;
-    pub fn cvc5_tm_mk_uninterpreted_sort(
-        tm: cvc5_tm,
-        name: *const c_char,
-    ) -> cvc5_sort;
+    pub fn cvc5_tm_mk_uninterpreted_sort(tm: cvc5_tm, name: *const c_char) -> cvc5_sort;
     pub fn cvc5_sort_delete(sort: cvc5_sort);
 
     // --- Constants ---
@@ -340,10 +327,7 @@ unsafe extern "C" {
     // solver. Callers must copy the terms (or their string
     // representations) before invoking any other
     // `cvc5_get_assertions` call.
-    pub fn cvc5_get_assertions(
-        solver: cvc5_solver,
-        size: *mut usize,
-    ) -> *const cvc5_term;
+    pub fn cvc5_get_assertions(solver: cvc5_solver, size: *mut usize) -> *const cvc5_term;
 
     // --- Incremental solving ---
     pub fn cvc5_solver_push(solver: cvc5_solver, levels: c_uint);
@@ -359,10 +343,7 @@ unsafe extern "C" {
     ) -> *mut cvc5_term;
 
     // --- Unsat cores ---
-    pub fn cvc5_solver_get_unsat_core(
-        solver: cvc5_solver,
-        size: *mut c_uint,
-    ) -> *mut cvc5_term;
+    pub fn cvc5_solver_get_unsat_core(solver: cvc5_solver, size: *mut c_uint) -> *mut cvc5_term;
     pub fn cvc5_solver_get_unsat_core_lemmas(
         solver: cvc5_solver,
         size: *mut c_uint,
@@ -392,22 +373,13 @@ unsafe extern "C" {
     ) -> *const c_char;
 
     // --- Interpolation ---
-    pub fn cvc5_solver_get_interpolant(
-        solver: cvc5_solver,
-        conjecture: cvc5_term,
-    ) -> cvc5_term;
+    pub fn cvc5_solver_get_interpolant(solver: cvc5_solver, conjecture: cvc5_term) -> cvc5_term;
 
     // --- Abduction ---
-    pub fn cvc5_solver_get_abduct(
-        solver: cvc5_solver,
-        conjecture: cvc5_term,
-    ) -> cvc5_term;
+    pub fn cvc5_solver_get_abduct(solver: cvc5_solver, conjecture: cvc5_term) -> cvc5_term;
 
     // --- Quantifier elimination ---
-    pub fn cvc5_solver_get_quantifier_elimination(
-        solver: cvc5_solver,
-        q: cvc5_term,
-    ) -> cvc5_term;
+    pub fn cvc5_solver_get_quantifier_elimination(solver: cvc5_solver, q: cvc5_term) -> cvc5_term;
 
     // --- Term inspection ---
     pub fn cvc5_term_to_string(term: cvc5_term) -> *const c_char;
@@ -450,10 +422,7 @@ unsafe extern "C" {
         sort: cvc5_sort,
     ) -> cvc5_term;
     pub fn cvc5_solver_check_synth(solver: cvc5_solver) -> Cvc5Result;
-    pub fn cvc5_solver_get_synth_solution(
-        solver: cvc5_solver,
-        term: cvc5_term,
-    ) -> cvc5_term;
+    pub fn cvc5_solver_get_synth_solution(solver: cvc5_solver, term: cvc5_term) -> cvc5_term;
 }
 
 // ============================================================================
@@ -491,9 +460,7 @@ pub fn version() -> String {
         if ptr.is_null() {
             return "unknown".to_string();
         }
-        std::ffi::CStr::from_ptr(ptr)
-            .to_string_lossy()
-            .into_owned()
+        std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned()
     }
 }
 

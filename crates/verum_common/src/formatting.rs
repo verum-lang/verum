@@ -257,7 +257,10 @@ where
         return Text::from("{}");
     }
 
-    let mut items: List<Text> = set.iter().map(|item| Text::from(item.to_string())).collect();
+    let mut items: List<Text> = set
+        .iter()
+        .map(|item| Text::from(item.to_string()))
+        .collect();
     items.sort();
 
     Text::from(format!("{{{}}}", items.join(", ")))
@@ -285,7 +288,10 @@ where
         return Text::from("{}");
     }
 
-    let items: List<Text> = set.iter().map(|item| Text::from(item.to_string())).collect();
+    let items: List<Text> = set
+        .iter()
+        .map(|item| Text::from(item.to_string()))
+        .collect();
 
     Text::from(format!("{{{}}}", items.join(", ")))
 }
@@ -780,10 +786,7 @@ impl TableFormatter {
     }
 
     fn format_separator(&self, widths: &[usize]) -> Text {
-        let separators: List<Text> = widths
-            .iter()
-            .map(|w| Text::from("-".repeat(*w)))
-            .collect();
+        let separators: List<Text> = widths.iter().map(|w| Text::from("-".repeat(*w))).collect();
         Text::from(format!("|{}-|", separators.join("-|-")))
     }
 

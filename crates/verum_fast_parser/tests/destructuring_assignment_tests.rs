@@ -46,13 +46,13 @@ fn parse_expr_should_fail(source: &str) -> bool {
 fn try_parse_expr(source: &str) -> Result<Expr, String> {
     let file_id = FileId::new(0);
     let parser = VerumParser::new();
-    parser.parse_expr_str(source, file_id)
-        .map_err(|errors| {
-            errors.iter()
-                .map(|e| e.to_string())
-                .collect::<Vec<_>>()
-                .join("; ")
-        })
+    parser.parse_expr_str(source, file_id).map_err(|errors| {
+        errors
+            .iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("; ")
+    })
 }
 
 // === TUPLE DESTRUCTURING TESTS ===
@@ -167,14 +167,16 @@ fn test_tuple_destructuring_single_element() {
     // Single element tuple (trailing comma makes it a tuple, not grouped)
     let expr = parse_expr("(x,) = single");
     match &expr.kind {
-        ExprKind::DestructuringAssign { pattern, .. } => {
-            match &pattern.kind {
-                PatternKind::Tuple(patterns) => {
-                    assert_eq!(patterns.len(), 1, "Single-element tuple should have 1 pattern");
-                }
-                _ => panic!("Expected tuple pattern"),
+        ExprKind::DestructuringAssign { pattern, .. } => match &pattern.kind {
+            PatternKind::Tuple(patterns) => {
+                assert_eq!(
+                    patterns.len(),
+                    1,
+                    "Single-element tuple should have 1 pattern"
+                );
             }
-        }
+            _ => panic!("Expected tuple pattern"),
+        },
         _ => panic!("Expected DestructuringAssign"),
     }
 }
@@ -218,11 +220,16 @@ fn test_array_destructuring_with_rest() {
                         PatternKind::Rest => {
                             // Rest without binding
                         }
-                        PatternKind::Ident { name, subpattern, .. } => {
+                        PatternKind::Ident {
+                            name, subpattern, ..
+                        } => {
                             // ..tail becomes an ident pattern
                             assert_eq!(name.as_str(), "tail");
                         }
-                        _ => panic!("Expected rest pattern or identifier, got {:?}", patterns[1].kind),
+                        _ => panic!(
+                            "Expected rest pattern or identifier, got {:?}",
+                            patterns[1].kind
+                        ),
                     }
                 }
                 _ => panic!("Expected array pattern"),
@@ -236,14 +243,12 @@ fn test_array_destructuring_with_rest() {
 fn test_array_destructuring_middle_rest() {
     let expr = parse_expr("[first, ..middle, last] = items");
     match &expr.kind {
-        ExprKind::DestructuringAssign { pattern, .. } => {
-            match &pattern.kind {
-                PatternKind::Array(patterns) => {
-                    assert_eq!(patterns.len(), 3);
-                }
-                _ => panic!("Expected array pattern"),
+        ExprKind::DestructuringAssign { pattern, .. } => match &pattern.kind {
+            PatternKind::Array(patterns) => {
+                assert_eq!(patterns.len(), 3);
             }
-        }
+            _ => panic!("Expected array pattern"),
+        },
         _ => panic!("Expected DestructuringAssign"),
     }
 }
@@ -315,15 +320,13 @@ fn test_record_destructuring_partial() {
     // Partial destructuring - just list the fields you want:
     let expr = parse_expr("Config { timeout } = config");
     match &expr.kind {
-        ExprKind::DestructuringAssign { pattern, .. } => {
-            match &pattern.kind {
-                PatternKind::Record { fields, rest, .. } => {
-                    assert_eq!(fields.len(), 1);
-                    assert!(!rest, "Should not have rest pattern");
-                }
-                _ => panic!("Expected record pattern"),
+        ExprKind::DestructuringAssign { pattern, .. } => match &pattern.kind {
+            PatternKind::Record { fields, rest, .. } => {
+                assert_eq!(fields.len(), 1);
+                assert!(!rest, "Should not have rest pattern");
             }
-        }
+            _ => panic!("Expected record pattern"),
+        },
         _ => panic!("Expected DestructuringAssign, got {:?}", expr.kind),
     }
 }
@@ -333,15 +336,13 @@ fn test_record_destructuring_with_rest() {
     // Rest pattern: { x, y, .. } extracts fields and ignores rest
     let expr = parse_expr("Config { timeout, .. } = config");
     match &expr.kind {
-        ExprKind::DestructuringAssign { pattern, .. } => {
-            match &pattern.kind {
-                PatternKind::Record { fields, rest, .. } => {
-                    assert_eq!(fields.len(), 1, "Should have 1 field");
-                    assert!(*rest, "Should have rest pattern (..)");
-                }
-                _ => panic!("Expected record pattern"),
+        ExprKind::DestructuringAssign { pattern, .. } => match &pattern.kind {
+            PatternKind::Record { fields, rest, .. } => {
+                assert_eq!(fields.len(), 1, "Should have 1 field");
+                assert!(*rest, "Should have rest pattern (..)");
             }
-        }
+            _ => panic!("Expected record pattern"),
+        },
         _ => panic!("Expected DestructuringAssign, got {:?}", expr.kind),
     }
 }
@@ -351,15 +352,13 @@ fn test_record_destructuring_multiple_fields_with_rest() {
     // Multiple fields with rest: { x, y, .. }
     let expr = parse_expr("Point { x, y, .. } = point");
     match &expr.kind {
-        ExprKind::DestructuringAssign { pattern, .. } => {
-            match &pattern.kind {
-                PatternKind::Record { fields, rest, .. } => {
-                    assert_eq!(fields.len(), 2, "Should have 2 fields");
-                    assert!(*rest, "Should have rest pattern (..)");
-                }
-                _ => panic!("Expected record pattern"),
+        ExprKind::DestructuringAssign { pattern, .. } => match &pattern.kind {
+            PatternKind::Record { fields, rest, .. } => {
+                assert_eq!(fields.len(), 2, "Should have 2 fields");
+                assert!(*rest, "Should have rest pattern (..)");
             }
-        }
+            _ => panic!("Expected record pattern"),
+        },
         _ => panic!("Expected DestructuringAssign, got {:?}", expr.kind),
     }
 }
@@ -368,12 +367,15 @@ fn test_record_destructuring_multiple_fields_with_rest() {
 fn test_record_struct_update_rejected_in_destructuring() {
     // Struct update syntax { ..base } is NOT allowed in destructuring
     let result = try_parse_expr("Point { x, ..other } = point");
-    assert!(result.is_err(), "Struct update should be rejected in destructuring");
+    assert!(
+        result.is_err(),
+        "Struct update should be rejected in destructuring"
+    );
     let err = result.unwrap_err();
     assert!(
-        err.to_string().contains("struct update syntax") ||
-        err.to_string().contains("not allowed"),
-        "Error should mention struct update syntax: {}", err
+        err.to_string().contains("struct update syntax") || err.to_string().contains("not allowed"),
+        "Error should mention struct update syntax: {}",
+        err
     );
 }
 
@@ -381,15 +383,13 @@ fn test_record_struct_update_rejected_in_destructuring() {
 fn test_record_destructuring_qualified_path() {
     let expr = parse_expr("std.io.Config { host, port } = config");
     match &expr.kind {
-        ExprKind::DestructuringAssign { pattern, .. } => {
-            match &pattern.kind {
-                PatternKind::Record { path, fields, .. } => {
-                    assert!(path.segments.len() > 1, "Expected qualified path");
-                    assert_eq!(fields.len(), 2);
-                }
-                _ => panic!("Expected record pattern"),
+        ExprKind::DestructuringAssign { pattern, .. } => match &pattern.kind {
+            PatternKind::Record { path, fields, .. } => {
+                assert!(path.segments.len() > 1, "Expected qualified path");
+                assert_eq!(fields.len(), 2);
             }
-        }
+            _ => panic!("Expected record pattern"),
+        },
         _ => panic!("Expected DestructuringAssign"),
     }
 }
@@ -481,12 +481,10 @@ fn test_destructuring_with_function_call() {
     // RHS is function call
     let expr = parse_expr("(min, max) = compute_bounds(data)");
     match &expr.kind {
-        ExprKind::DestructuringAssign { value, .. } => {
-            match &value.kind {
-                ExprKind::Call { .. } => {}
-                _ => panic!("Expected call expression on RHS"),
-            }
-        }
+        ExprKind::DestructuringAssign { value, .. } => match &value.kind {
+            ExprKind::Call { .. } => {}
+            _ => panic!("Expected call expression on RHS"),
+        },
         _ => panic!("Expected DestructuringAssign"),
     }
 }
@@ -496,12 +494,10 @@ fn test_destructuring_with_method_call() {
     // RHS is method call
     let expr = parse_expr("(x, y) = point.to_tuple()");
     match &expr.kind {
-        ExprKind::DestructuringAssign { value, .. } => {
-            match &value.kind {
-                ExprKind::MethodCall { .. } => {}
-                _ => panic!("Expected method call expression on RHS"),
-            }
-        }
+        ExprKind::DestructuringAssign { value, .. } => match &value.kind {
+            ExprKind::MethodCall { .. } => {}
+            _ => panic!("Expected method call expression on RHS"),
+        },
         _ => panic!("Expected DestructuringAssign"),
     }
 }
@@ -531,14 +527,12 @@ fn test_empty_tuple_pattern() {
     // Empty tuple - unit assignment
     let expr = parse_expr("() = unit_value");
     match &expr.kind {
-        ExprKind::DestructuringAssign { pattern, .. } => {
-            match &pattern.kind {
-                PatternKind::Tuple(patterns) => {
-                    assert!(patterns.is_empty(), "Expected empty tuple pattern");
-                }
-                _ => panic!("Expected tuple pattern"),
+        ExprKind::DestructuringAssign { pattern, .. } => match &pattern.kind {
+            PatternKind::Tuple(patterns) => {
+                assert!(patterns.is_empty(), "Expected empty tuple pattern");
             }
-        }
+            _ => panic!("Expected tuple pattern"),
+        },
         _ => panic!("Expected DestructuringAssign"),
     }
 }
@@ -588,7 +582,9 @@ fn test_parenthesized_single_ident_not_tuple() {
     // So `(x) = y` should be regular assignment, not destructuring
     let expr = parse_expr("(x) = y");
     match &expr.kind {
-        ExprKind::Binary { op: BinOp::Assign, .. } => {
+        ExprKind::Binary {
+            op: BinOp::Assign, ..
+        } => {
             // Good - this is regular assignment
         }
         ExprKind::DestructuringAssign { pattern, .. } => {

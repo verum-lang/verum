@@ -17,8 +17,8 @@
 
 // Migrated from src/profile_cmd.rs to comply with CLAUDE.md test organization.
 
-use verum_compiler::profile_cmd::{CbgrStats, FunctionProfile, ProfileReport};
 use verum_common::Text;
+use verum_compiler::profile_cmd::{CbgrStats, FunctionProfile, ProfileReport};
 
 #[test]
 fn test_profile_report() {

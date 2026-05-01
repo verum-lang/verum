@@ -42,10 +42,10 @@
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use verum_ast::decl::{Item, ItemKind};
-use verum_ast::expr::ExprKind;
 use verum_ast::Literal;
 use verum_ast::LiteralKind;
+use verum_ast::decl::{Item, ItemKind};
+use verum_ast::expr::ExprKind;
 
 /// One framework citation: a `@framework(<framework>, "<citation>")`
 /// attribute on a theorem / lemma / corollary / axiom.
@@ -152,8 +152,7 @@ pub fn collect_framework_citations(items: &[Item]) -> FrameworkCitationManifest 
             ),
             _ => continue,
         };
-        let mut all_attrs: Vec<&verum_ast::Attribute> =
-            item.attributes.iter().collect();
+        let mut all_attrs: Vec<&verum_ast::Attribute> = item.attributes.iter().collect();
         if let Some(more) = decl_attrs {
             all_attrs.extend(more);
         }
@@ -279,12 +278,12 @@ mod tests {
         Attribute::new("framework".into(), Maybe::Some(args), span())
     }
 
-    fn make_theorem_with_attrs(
-        name: &str,
-        attrs: Vec<Attribute>,
-    ) -> Item {
+    fn make_theorem_with_attrs(name: &str, attrs: Vec<Attribute>) -> Item {
         let mut t = TheoremDecl::new(
-            verum_ast::ty::Ident { name: name.into(), span: span() },
+            verum_ast::ty::Ident {
+                name: name.into(),
+                span: span(),
+            },
             string_lit_expr("dummy"),
             span(),
         );
@@ -296,12 +295,12 @@ mod tests {
         Item::new(ItemKind::Theorem(t), span())
     }
 
-    fn make_axiom_with_attrs(
-        name: &str,
-        attrs: Vec<Attribute>,
-    ) -> Item {
+    fn make_axiom_with_attrs(name: &str, attrs: Vec<Attribute>) -> Item {
         let mut a = AxiomDecl::new(
-            verum_ast::ty::Ident { name: name.into(), span: span() },
+            verum_ast::ty::Ident {
+                name: name.into(),
+                span: span(),
+            },
             string_lit_expr("dummy"),
             span(),
         );
@@ -337,18 +336,9 @@ mod tests {
     #[test]
     fn collect_framework_citations_groups_by_framework() {
         let items = vec![
-            make_theorem_with_attrs(
-                "thm_a",
-                vec![make_framework_attr("mathlib4", "Mathlib.A")],
-            ),
-            make_theorem_with_attrs(
-                "thm_b",
-                vec![make_framework_attr("mathlib4", "Mathlib.B")],
-            ),
-            make_theorem_with_attrs(
-                "thm_c",
-                vec![make_framework_attr("zfc", "Foundation")],
-            ),
+            make_theorem_with_attrs("thm_a", vec![make_framework_attr("mathlib4", "Mathlib.A")]),
+            make_theorem_with_attrs("thm_b", vec![make_framework_attr("mathlib4", "Mathlib.B")]),
+            make_theorem_with_attrs("thm_c", vec![make_framework_attr("zfc", "Foundation")]),
         ];
         let manifest = collect_framework_citations(&items);
         assert_eq!(manifest.total(), 3);
@@ -397,34 +387,21 @@ mod tests {
         )];
         let manifest = collect_framework_citations(&items);
         let json = serde_json::to_string(&manifest).unwrap();
-        let restored: FrameworkCitationManifest =
-            serde_json::from_str(&json).unwrap();
+        let restored: FrameworkCitationManifest = serde_json::from_str(&json).unwrap();
         assert_eq!(restored, manifest);
     }
 
     #[test]
     fn manifest_for_framework_filters() {
         let items = vec![
-            make_theorem_with_attrs(
-                "a",
-                vec![make_framework_attr("mathlib4", "Mathlib.A")],
-            ),
-            make_theorem_with_attrs(
-                "b",
-                vec![make_framework_attr("zfc", "F1")],
-            ),
-            make_theorem_with_attrs(
-                "c",
-                vec![make_framework_attr("mathlib4", "Mathlib.C")],
-            ),
+            make_theorem_with_attrs("a", vec![make_framework_attr("mathlib4", "Mathlib.A")]),
+            make_theorem_with_attrs("b", vec![make_framework_attr("zfc", "F1")]),
+            make_theorem_with_attrs("c", vec![make_framework_attr("mathlib4", "Mathlib.C")]),
         ];
         let manifest = collect_framework_citations(&items);
         let mathlib_rows = manifest.for_framework("mathlib4");
         assert_eq!(mathlib_rows.len(), 2);
-        let names: Vec<&str> = mathlib_rows
-            .iter()
-            .map(|r| r.decl_name.as_str())
-            .collect();
+        let names: Vec<&str> = mathlib_rows.iter().map(|r| r.decl_name.as_str()).collect();
         assert!(names.contains(&"a"));
         assert!(names.contains(&"c"));
     }
@@ -432,18 +409,9 @@ mod tests {
     #[test]
     fn manifest_frameworks_returns_distinct() {
         let items = vec![
-            make_theorem_with_attrs(
-                "a",
-                vec![make_framework_attr("mathlib4", "Mathlib.A")],
-            ),
-            make_theorem_with_attrs(
-                "b",
-                vec![make_framework_attr("mathlib4", "Mathlib.B")],
-            ),
-            make_theorem_with_attrs(
-                "c",
-                vec![make_framework_attr("zfc", "F")],
-            ),
+            make_theorem_with_attrs("a", vec![make_framework_attr("mathlib4", "Mathlib.A")]),
+            make_theorem_with_attrs("b", vec![make_framework_attr("mathlib4", "Mathlib.B")]),
+            make_theorem_with_attrs("c", vec![make_framework_attr("zfc", "F")]),
         ];
         let manifest = collect_framework_citations(&items);
         let frameworks = manifest.frameworks();

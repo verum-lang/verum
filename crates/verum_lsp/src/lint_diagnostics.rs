@@ -20,9 +20,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use serde::Deserialize;
-use tower_lsp::lsp_types::{
-    Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url,
-};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url};
 
 /// One issue line emitted by `verum lint --format json`. Mirrors
 /// the documented schema in

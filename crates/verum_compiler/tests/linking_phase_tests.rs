@@ -23,9 +23,9 @@
 //! - JIT linking
 
 use std::path::PathBuf;
+use verum_common::{List, Map, Text};
 use verum_compiler::phases::linking::*;
 use verum_compiler::phases::{CompilationPhase, ExecutionTier};
-use verum_common::{List, Map, Text};
 
 // =============================================================================
 // OutputKind Tests

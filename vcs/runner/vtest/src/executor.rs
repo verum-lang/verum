@@ -49,12 +49,12 @@ use verum_common::{List, Map, Set, Text};
 // Direct compiler integration
 use verum_ast::FileId;
 use verum_compiler::{
-    CompilationPipeline, CompilerOptions, OutputFormat, Session,
-    TestExecutionResult, VerifyMode, get_cached_stdlib_registry,
+    CompilationPipeline, CompilerOptions, OutputFormat, Session, TestExecutionResult, VerifyMode,
+    get_cached_stdlib_registry,
 };
+use verum_fast_parser::FastParser;
 use verum_lexer::Lexer;
 use verum_parser::VerumParser;
-use verum_fast_parser::FastParser;
 
 /// Monotonic counter for per-spec FileIds. Starts at 1 because the
 /// global registry treats FileId(0) as a sentinel and parallel test
@@ -125,8 +125,9 @@ impl ParsedError {
         //   --> file:line:column
         // Note: Supports both [Exxx] and <Exxx> formats for error codes
         // Note: Also supports M codes for meta errors (M400-M999)
-        static RUST_ERROR_RE: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r"(?m)^(error|warning|note)[\[<]([EWM]\d{3,4})[\]>]:\s*(.+)$").unwrap());
+        static RUST_ERROR_RE: Lazy<Regex> = Lazy::new(|| {
+            Regex::new(r"(?m)^(error|warning|note)[\[<]([EWM]\d{3,4})[\]>]:\s*(.+)$").unwrap()
+        });
 
         // Location pattern: --> file:line:column
         static LOCATION_RE: Lazy<Regex> =
@@ -135,8 +136,10 @@ impl ParsedError {
         // GCC-style pattern: file:line:column: error[E302]: message
         // Note: Also supports M codes for meta errors (M400-M999)
         static GCC_ERROR_RE: Lazy<Regex> = Lazy::new(|| {
-            Regex::new(r"^([^:]+):(\d+):(\d+):\s*(error|warning|note)(?:\[([EWM]\d{3,4})\])?:\s*(.+)$")
-                .unwrap()
+            Regex::new(
+                r"^([^:]+):(\d+):(\d+):\s*(error|warning|note)(?:\[([EWM]\d{3,4})\])?:\s*(.+)$",
+            )
+            .unwrap()
         });
 
         let lines: Vec<&str> = stderr.lines().collect();
@@ -153,23 +156,35 @@ impl ParsedError {
                     .unwrap_or("error")
                     .to_string()
                     .into();
-                let code: Text = caps.get(2).map(|m| m.as_str()).unwrap_or("").to_string().into();
-                let message: Text = caps.get(3).map(|m| m.as_str()).unwrap_or("").to_string().into();
+                let code: Text = caps
+                    .get(2)
+                    .map(|m| m.as_str())
+                    .unwrap_or("")
+                    .to_string()
+                    .into();
+                let message: Text = caps
+                    .get(3)
+                    .map(|m| m.as_str())
+                    .unwrap_or("")
+                    .to_string()
+                    .into();
 
                 // Look for location on next line
-                let (file, line_num, column): (Option<Text>, Option<usize>, Option<usize>) = if i + 1 < lines.len() {
-                    if let Some(loc_caps) = LOCATION_RE.captures(lines[i + 1]) {
-                        let file: Option<Text> = loc_caps.get(1).map(|m| m.as_str().to_string().into());
-                        let line_num = loc_caps.get(2).and_then(|m| m.as_str().parse().ok());
-                        let column = loc_caps.get(3).and_then(|m| m.as_str().parse().ok());
-                        i += 1; // Skip the location line
-                        (file, line_num, column)
+                let (file, line_num, column): (Option<Text>, Option<usize>, Option<usize>) =
+                    if i + 1 < lines.len() {
+                        if let Some(loc_caps) = LOCATION_RE.captures(lines[i + 1]) {
+                            let file: Option<Text> =
+                                loc_caps.get(1).map(|m| m.as_str().to_string().into());
+                            let line_num = loc_caps.get(2).and_then(|m| m.as_str().parse().ok());
+                            let column = loc_caps.get(3).and_then(|m| m.as_str().parse().ok());
+                            i += 1; // Skip the location line
+                            (file, line_num, column)
+                        } else {
+                            (None, None, None)
+                        }
                     } else {
                         (None, None, None)
-                    }
-                } else {
-                    (None, None, None)
-                };
+                    };
 
                 errors.push(ParsedError {
                     code,
@@ -191,8 +206,18 @@ impl ParsedError {
                     .unwrap_or("error")
                     .to_string()
                     .into();
-                let code: Text = caps.get(5).map(|m| m.as_str()).unwrap_or("").to_string().into();
-                let message: Text = caps.get(6).map(|m| m.as_str()).unwrap_or("").to_string().into();
+                let code: Text = caps
+                    .get(5)
+                    .map(|m| m.as_str())
+                    .unwrap_or("")
+                    .to_string()
+                    .into();
+                let message: Text = caps
+                    .get(6)
+                    .map(|m| m.as_str())
+                    .unwrap_or("")
+                    .to_string()
+                    .into();
 
                 errors.push(ParsedError {
                     code,
@@ -532,9 +557,15 @@ impl ExecutorConfig {
             // verum-interpreter already calls: verum run --interp "$@"
             Tier::Tier0 => (self.interpreter_path.clone(), vec![].into()),
             // verum-jit parses --baseline and calls: verum run --jit "$@"
-            Tier::Tier1 => (self.jit_base_path.clone(), vec!["--baseline".to_string().into()].into()),
+            Tier::Tier1 => (
+                self.jit_base_path.clone(),
+                vec!["--baseline".to_string().into()].into(),
+            ),
             // verum-jit parses --optimize and calls: verum run --aot "$@"
-            Tier::Tier2 => (self.jit_opt_path.clone(), vec!["--optimize".to_string().into()].into()),
+            Tier::Tier2 => (
+                self.jit_opt_path.clone(),
+                vec!["--optimize".to_string().into()].into(),
+            ),
             // verum-aot already calls: verum run --optimized "$@"
             Tier::Tier3 => (self.aot_path.clone(), vec![].into()),
         }
@@ -712,9 +743,12 @@ impl Executor {
         let effective_test_type = if self.config.compile_time_only {
             match directives.test_type {
                 // Runtime tests become compile-time-only
-                TestType::Run | TestType::RunPanic | TestType::RunInterpreter | TestType::RunInterpreterPanic | TestType::Benchmark | TestType::Differential => {
-                    TestType::TypecheckPass
-                }
+                TestType::Run
+                | TestType::RunPanic
+                | TestType::RunInterpreter
+                | TestType::RunInterpreterPanic
+                | TestType::Benchmark
+                | TestType::Differential => TestType::TypecheckPass,
                 // Verification tests: verify-pass becomes typecheck-pass (must at least typecheck).
                 // verify-fail stays as-is to use execute_verify_fail which handles
                 // direct integration correctly (always passes since we can't test
@@ -748,7 +782,9 @@ impl Executor {
             TestType::Benchmark => self.execute_benchmark(directives, tier).await,
             // VBC-first pipeline tests
             TestType::CommonPipeline => self.execute_common_pipeline(directives, tier).await,
-            TestType::CommonPipelineFail => self.execute_common_pipeline_fail(directives, tier).await,
+            TestType::CommonPipelineFail => {
+                self.execute_common_pipeline_fail(directives, tier).await
+            }
             TestType::VbcCodegen => self.execute_vbc_codegen(directives, tier).await,
             TestType::VbcCodegenFail => self.execute_vbc_codegen_fail(directives, tier).await,
             // Meta tests - compile and evaluate meta functions
@@ -778,7 +814,9 @@ impl Executor {
         }
 
         // Check config's available features
-        self.config.available_features.contains(&Text::from(feature))
+        self.config
+            .available_features
+            .contains(&Text::from(feature))
     }
 
     /// Execute a parse-pass test.
@@ -1048,7 +1086,9 @@ impl Executor {
                 // since the source is intentionally malformed
                 TestOutcome::Fail {
                     tier,
-                    reason: "Parse succeeded without errors, but parse-recover expects errors".to_string().into(),
+                    reason: "Parse succeeded without errors, but parse-recover expects errors"
+                        .to_string()
+                        .into(),
                     expected: Some("Parse errors with recovery".to_string().into()),
                     actual: Some("No errors".to_string().into()),
                     duration: start.elapsed(),
@@ -1061,7 +1101,9 @@ impl Executor {
                     let error_msgs: Vec<String> =
                         parse_errors.iter().map(|e| format!("{:?}", e)).collect();
                     let error_output = error_msgs.join("\n");
-                    if self.check_expected_errors_in_output(&error_output, &directives.expected_errors) {
+                    if self
+                        .check_expected_errors_in_output(&error_output, &directives.expected_errors)
+                    {
                         TestOutcome::Pass {
                             tier,
                             duration: start.elapsed(),
@@ -1128,7 +1170,8 @@ impl Executor {
     ) -> Result<(Result<(), anyhow::Error>, String), String> {
         let (tx, rx) = std::sync::mpsc::channel();
         let _ = std::thread::Builder::new()
-            .name("vtest-check".into()).stack_size(512 * 1024 * 1024)
+            .name("vtest-check".into())
+            .stack_size(512 * 1024 * 1024)
             .spawn(move || {
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let mut session = if let Some(cached_registry) = get_cached_stdlib_registry() {
@@ -1198,7 +1241,8 @@ impl Executor {
         // stack overflow from deep type inference recursion on complex programs.
         let (tx, rx) = std::sync::mpsc::channel();
         let _ = std::thread::Builder::new()
-            .name("vtest-check".into()).stack_size(512 * 1024 * 1024)
+            .name("vtest-check".into())
+            .stack_size(512 * 1024 * 1024)
             .spawn(move || {
                 let check_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let mut session = if let Some(cached_registry) = get_cached_stdlib_registry() {
@@ -1279,26 +1323,27 @@ impl Executor {
             for line in content.lines().take(100) {
                 let line = line.trim();
                 // Check both `mount` (correct Verum syntax) and `import` (legacy)
-                if line.starts_with("mount sys.") ||
-                   line.starts_with("mount core.") ||
-                   line.starts_with("mount collections.") ||
-                   line.starts_with("mount io.") ||
-                   line.starts_with("mount async.") ||
-                   line.starts_with("mount net.") ||
-                   line.starts_with("mount mem.") ||
-                   line.starts_with("mount base.") ||
-                   line.starts_with("mount time.") ||
-                   line.starts_with("mount sync.") ||
-                   line.starts_with("mount runtime.") ||
-                   line.starts_with("mount text.") ||
-                   line.starts_with("mount math.") ||
-                   line.starts_with("import sys.") ||
-                   line.starts_with("import core.") ||
-                   line.starts_with("import collections.") ||
-                   line.starts_with("import io.") ||
-                   line.starts_with("import async.") ||
-                   line.starts_with("import net.") ||
-                   line.starts_with("import mem.") {
+                if line.starts_with("mount sys.")
+                    || line.starts_with("mount core.")
+                    || line.starts_with("mount collections.")
+                    || line.starts_with("mount io.")
+                    || line.starts_with("mount async.")
+                    || line.starts_with("mount net.")
+                    || line.starts_with("mount mem.")
+                    || line.starts_with("mount base.")
+                    || line.starts_with("mount time.")
+                    || line.starts_with("mount sync.")
+                    || line.starts_with("mount runtime.")
+                    || line.starts_with("mount text.")
+                    || line.starts_with("mount math.")
+                    || line.starts_with("import sys.")
+                    || line.starts_with("import core.")
+                    || line.starts_with("import collections.")
+                    || line.starts_with("import io.")
+                    || line.starts_with("import async.")
+                    || line.starts_with("import net.")
+                    || line.starts_with("import mem.")
+                {
                     return true;
                 }
             }
@@ -1401,7 +1446,8 @@ impl Executor {
         let (tx, rx) = std::sync::mpsc::channel();
         let timeout_ms = directives.effective_timeout_ms();
         let _ = std::thread::Builder::new()
-            .name("vtest-check".into()).stack_size(512 * 1024 * 1024)
+            .name("vtest-check".into())
+            .stack_size(512 * 1024 * 1024)
             .spawn(move || {
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let mut session = if let Some(cached_registry) = get_cached_stdlib_registry() {
@@ -1418,18 +1464,19 @@ impl Executor {
             })
             .expect("Failed to spawn typecheck-fail thread");
 
-        let (result, diagnostics_output) = match rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
-            Ok(Ok(pair)) => pair,
-            Ok(Err(_)) | Err(_) => {
-                return TestOutcome::Fail {
-                    tier,
-                    reason: "Typecheck panicked or timed out".to_string().into(),
-                    expected: Some("Typecheck failure".to_string().into()),
-                    actual: Some("crash/timeout".to_string().into()),
-                    duration: start.elapsed(),
-                };
-            }
-        };
+        let (result, diagnostics_output) =
+            match rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
+                Ok(Ok(pair)) => pair,
+                Ok(Err(_)) | Err(_) => {
+                    return TestOutcome::Fail {
+                        tier,
+                        reason: "Typecheck panicked or timed out".to_string().into(),
+                        expected: Some("Typecheck failure".to_string().into()),
+                        actual: Some("crash/timeout".to_string().into()),
+                        duration: start.elapsed(),
+                    };
+                }
+            };
 
         match result {
             Ok(()) => {
@@ -1453,8 +1500,10 @@ impl Executor {
                 }
 
                 // Check if expected errors match using the formatted diagnostics
-                if self.check_expected_errors_in_output(&diagnostics_output, &directives.expected_errors)
-                {
+                if self.check_expected_errors_in_output(
+                    &diagnostics_output,
+                    &directives.expected_errors,
+                ) {
                     TestOutcome::Pass {
                         tier,
                         duration: start.elapsed(),
@@ -1541,14 +1590,16 @@ impl Executor {
             // Run on dedicated thread with large stack
             let (tx, rx) = std::sync::mpsc::channel();
             let _ = std::thread::Builder::new()
-                .name("vtest-check".into()).stack_size(512 * 1024 * 1024)
+                .name("vtest-check".into())
+                .stack_size(512 * 1024 * 1024)
                 .spawn(move || {
                     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        let mut session = if let Some(cached_registry) = get_cached_stdlib_registry() {
-                            Session::with_registry(options, cached_registry)
-                        } else {
-                            Session::new(options)
-                        };
+                        let mut session =
+                            if let Some(cached_registry) = get_cached_stdlib_registry() {
+                                Session::with_registry(options, cached_registry)
+                            } else {
+                                Session::new(options)
+                            };
                         let mut pipeline = CompilationPipeline::new_check(&mut session);
                         let _ = pipeline.run_check_only();
                     }));
@@ -1576,7 +1627,9 @@ impl Executor {
                     } else {
                         TestOutcome::Fail {
                             tier,
-                            reason: "Verification failed but with wrong errors".to_string().into(),
+                            reason: "Verification failed but with wrong errors"
+                                .to_string()
+                                .into(),
                             expected: Some(format!("{:?}", directives.expected_errors).into()),
                             actual: Some(output.stderr.clone()),
                             duration: start.elapsed(),
@@ -1613,7 +1666,8 @@ impl Executor {
                 if output.timed_out {
                     return TestOutcome::Fail {
                         tier,
-                        reason: format!("Timeout after {}ms", directives.effective_timeout_ms()).into(),
+                        reason: format!("Timeout after {}ms", directives.effective_timeout_ms())
+                            .into(),
                         expected: None,
                         actual: None,
                         duration: start.elapsed(),
@@ -1711,7 +1765,8 @@ impl Executor {
         let (tx, rx) = std::sync::mpsc::channel();
 
         let _ = std::thread::Builder::new()
-            .name("vtest-check".into()).stack_size(512 * 1024 * 1024)
+            .name("vtest-check".into())
+            .stack_size(512 * 1024 * 1024)
             .spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     // Reset global state between tests to prevent isolation issues
@@ -1765,7 +1820,9 @@ impl Executor {
             Err(_) => {
                 return TestOutcome::Fail {
                     tier,
-                    reason: "Interpreter thread terminated unexpectedly".to_string().into(),
+                    reason: "Interpreter thread terminated unexpectedly"
+                        .to_string()
+                        .into(),
                     expected: None,
                     actual: None,
                     duration: start.elapsed(),
@@ -1885,7 +1942,9 @@ impl Executor {
                 if output.exit_code == Some(0) {
                     return TestOutcome::Fail {
                         tier,
-                        reason: "Expected panic but program exited normally".to_string().into(),
+                        reason: "Expected panic but program exited normally"
+                            .to_string()
+                            .into(),
                         expected: Some("Non-zero exit code (panic)".to_string().into()),
                         actual: Some("Exit code 0".to_string().into()),
                         duration: start.elapsed(),
@@ -1939,7 +1998,8 @@ impl Executor {
         let (tx, rx) = std::sync::mpsc::channel();
 
         let _ = std::thread::Builder::new()
-            .name("vtest-check".into()).stack_size(512 * 1024 * 1024)
+            .name("vtest-check".into())
+            .stack_size(512 * 1024 * 1024)
             .spawn(move || {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     // Reset global state between tests to prevent isolation issues
@@ -1993,7 +2053,9 @@ impl Executor {
             Err(_) => {
                 return TestOutcome::Fail {
                     tier,
-                    reason: "Interpreter thread terminated unexpectedly".to_string().into(),
+                    reason: "Interpreter thread terminated unexpectedly"
+                        .to_string()
+                        .into(),
                     expected: None,
                     actual: None,
                     duration: start.elapsed(),
@@ -2006,7 +2068,9 @@ impl Executor {
                 if result.exit_code == 0 {
                     return TestOutcome::Fail {
                         tier,
-                        reason: "Expected panic but program exited normally".to_string().into(),
+                        reason: "Expected panic but program exited normally"
+                            .to_string()
+                            .into(),
                         expected: Some("Non-zero exit code (panic)".to_string().into()),
                         actual: Some("Exit code 0".to_string().into()),
                         duration: start.elapsed(),
@@ -2112,7 +2176,8 @@ impl Executor {
         let (tx, rx) = std::sync::mpsc::channel();
         let timeout_ms = directives.effective_timeout_ms();
         let _ = std::thread::Builder::new()
-            .name("vtest-check".into()).stack_size(512 * 1024 * 1024)
+            .name("vtest-check".into())
+            .stack_size(512 * 1024 * 1024)
             .spawn(move || {
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let mut session = if let Some(cached_registry) = get_cached_stdlib_registry() {
@@ -2131,18 +2196,19 @@ impl Executor {
             })
             .expect("Failed to spawn compile-only thread");
 
-        let (result, diagnostics_str) = match rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
-            Ok(Ok(pair)) => pair,
-            Ok(Err(_)) | Err(_) => {
-                return TestOutcome::Fail {
-                    tier,
-                    reason: "Compilation panicked or timed out".to_string().into(),
-                    expected: Some("Successful compilation".to_string().into()),
-                    actual: Some("crash/timeout".to_string().into()),
-                    duration: start.elapsed(),
-                };
-            }
-        };
+        let (result, diagnostics_str) =
+            match rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
+                Ok(Ok(pair)) => pair,
+                Ok(Err(_)) | Err(_) => {
+                    return TestOutcome::Fail {
+                        tier,
+                        reason: "Compilation panicked or timed out".to_string().into(),
+                        expected: Some("Successful compilation".to_string().into()),
+                        actual: Some("crash/timeout".to_string().into()),
+                        duration: start.elapsed(),
+                    };
+                }
+            };
 
         match result {
             Ok(()) => TestOutcome::Pass {
@@ -2197,18 +2263,23 @@ impl Executor {
         };
 
         // --- Step 2: Build AOT binary and run it ---
-        let aot_result = self.build_and_run_aot_for_diff(&source_path, timeout_ms).await;
+        let aot_result = self
+            .build_and_run_aot_for_diff(&source_path, timeout_ms)
+            .await;
         let (aot_stdout, aot_stderr, aot_exit) = match aot_result {
             Ok((stdout, stderr, exit_code)) => (stdout, stderr, exit_code),
             Err(e) => {
                 return TestOutcome::Fail {
                     tier,
                     reason: format!("AOT build/execution failed: {}", e).into(),
-                    expected: Some(format!(
-                        "Interpreter (exit {}): {}",
-                        interp_exit,
-                        interp_stdout.trim()
-                    ).into()),
+                    expected: Some(
+                        format!(
+                            "Interpreter (exit {}): {}",
+                            interp_exit,
+                            interp_stdout.trim()
+                        )
+                        .into(),
+                    ),
                     actual: Some(e.to_string().into()),
                     duration: start.elapsed(),
                 };
@@ -2222,7 +2293,8 @@ impl Executor {
                 reason: format!(
                     "Differential exit code mismatch: interpreter={}, AOT={}",
                     interp_exit, aot_exit
-                ).into(),
+                )
+                .into(),
                 expected: Some(format!("Interpreter exit code: {}", interp_exit).into()),
                 actual: Some(format!("AOT exit code: {}", aot_exit).into()),
                 duration: start.elapsed(),
@@ -2247,7 +2319,11 @@ impl Executor {
                 let diff = self.get_diff(&expected_stdout, &interp_stdout);
                 return TestOutcome::Fail {
                     tier,
-                    reason: format!("Both tiers agree but differ from expected stdout:\n{}", diff).into(),
+                    reason: format!(
+                        "Both tiers agree but differ from expected stdout:\n{}",
+                        diff
+                    )
+                    .into(),
                     expected: Some(expected_stdout),
                     actual: Some(interp_stdout.trim().to_string().into()),
                     duration: start.elapsed(),
@@ -2263,7 +2339,8 @@ impl Executor {
                     reason: format!(
                         "Both tiers agree (exit {}) but expected exit {}",
                         interp_exit, expected_exit
-                    ).into(),
+                    )
+                    .into(),
                     expected: Some(format!("{}", expected_exit).into()),
                     actual: Some(format!("{}", interp_exit).into()),
                     duration: start.elapsed(),
@@ -2568,14 +2645,19 @@ impl Executor {
                     found
                 } else {
                     return Err(ExecutorError::CommandNotFound(
-                        "verum CLI not found. Run 'cargo build --release -p verum_cli'".to_string().into(),
+                        "verum CLI not found. Run 'cargo build --release -p verum_cli'"
+                            .to_string()
+                            .into(),
                     ));
                 }
             }
         };
 
         // Build args: verum <phase> <file>
-        let args = vec![phase.to_string().into(), directives.source_path.to_string().into()];
+        let args = vec![
+            phase.to_string().into(),
+            directives.source_path.to_string().into(),
+        ];
 
         self.run_command(&cmd_path, &args, directives.effective_timeout_ms())
             .await
@@ -2902,7 +2984,11 @@ impl Executor {
     ///
     /// Runs the full common pipeline (parse + types + contracts + context)
     /// and expects it to succeed.
-    async fn execute_common_pipeline(&self, directives: &TestDirectives, tier: Tier) -> TestOutcome {
+    async fn execute_common_pipeline(
+        &self,
+        directives: &TestDirectives,
+        tier: Tier,
+    ) -> TestOutcome {
         let start = Instant::now();
 
         // Use direct API integration
@@ -2924,8 +3010,11 @@ impl Executor {
     }
 
     /// Execute the common pipeline directly using verum_compiler::api.
-    fn execute_common_pipeline_direct(&self, directives: &TestDirectives) -> Result<(), ExecutorError> {
-        use verum_compiler::api::{run_common_pipeline, CommonPipelineConfig, SourceFile};
+    fn execute_common_pipeline_direct(
+        &self,
+        directives: &TestDirectives,
+    ) -> Result<(), ExecutorError> {
+        use verum_compiler::api::{CommonPipelineConfig, SourceFile, run_common_pipeline};
 
         let source = directives.source_content.as_str();
         let source_file = SourceFile::from_string(source);
@@ -2938,16 +3027,20 @@ impl Executor {
             .map_err(|e| ExecutorError::ProcessError(e.to_string().into()))?;
 
         if result.has_errors() {
-            let errors: Vec<String> = result.diagnostics
+            let errors: Vec<String> = result
+                .diagnostics
                 .iter()
                 .filter(|d| d.severity() == verum_diagnostics::Severity::Error)
                 .map(|d| format!("{:?}", d))
                 .collect();
 
             return Err(ExecutorError::ProcessError(
-                format!("Common pipeline failed with {} errors:\n{}",
+                format!(
+                    "Common pipeline failed with {} errors:\n{}",
                     errors.len(),
-                    errors.join("\n")).into()
+                    errors.join("\n")
+                )
+                .into(),
             ));
         }
 
@@ -2957,7 +3050,11 @@ impl Executor {
     /// Execute a common-pipeline-fail test.
     ///
     /// Runs the common pipeline and expects it to fail with specific errors.
-    async fn execute_common_pipeline_fail(&self, directives: &TestDirectives, tier: Tier) -> TestOutcome {
+    async fn execute_common_pipeline_fail(
+        &self,
+        directives: &TestDirectives,
+        tier: Tier,
+    ) -> TestOutcome {
         let start = Instant::now();
 
         let result = self.execute_common_pipeline_fail_direct(directives);
@@ -2970,7 +3067,11 @@ impl Executor {
             Err(e) => TestOutcome::Fail {
                 tier,
                 reason: e.to_string().into(),
-                expected: Some("Common pipeline should fail with expected errors".to_string().into()),
+                expected: Some(
+                    "Common pipeline should fail with expected errors"
+                        .to_string()
+                        .into(),
+                ),
                 actual: Some(e.to_string().into()),
                 duration: start.elapsed(),
             },
@@ -2978,8 +3079,11 @@ impl Executor {
     }
 
     /// Execute common pipeline fail test directly.
-    fn execute_common_pipeline_fail_direct(&self, directives: &TestDirectives) -> Result<(), ExecutorError> {
-        use verum_compiler::api::{run_common_pipeline, CommonPipelineConfig, SourceFile};
+    fn execute_common_pipeline_fail_direct(
+        &self,
+        directives: &TestDirectives,
+    ) -> Result<(), ExecutorError> {
+        use verum_compiler::api::{CommonPipelineConfig, SourceFile, run_common_pipeline};
 
         let source = directives.source_content.as_str();
         let source_file = SourceFile::from_string(source);
@@ -2990,14 +3094,17 @@ impl Executor {
 
         if !result.has_errors() {
             return Err(ExecutorError::ProcessError(
-                "Expected common pipeline to fail, but it succeeded".to_string().into()
+                "Expected common pipeline to fail, but it succeeded"
+                    .to_string()
+                    .into(),
             ));
         }
 
         // If expected errors are specified, validate them
         if !directives.expected_errors.is_empty() {
             // Convert diagnostics to ParsedError format for validation
-            let actual_errors: List<ParsedError> = result.diagnostics
+            let actual_errors: List<ParsedError> = result
+                .diagnostics
                 .iter()
                 .filter(|d| d.severity() == verum_diagnostics::Severity::Error)
                 .map(|d| ParsedError {
@@ -3012,12 +3119,12 @@ impl Executor {
 
             // Check each expected error is present
             for expected in &directives.expected_errors {
-                let found = actual_errors.iter().any(|e| {
-                    e.code.as_str() == expected.code.as_str()
-                });
+                let found = actual_errors
+                    .iter()
+                    .any(|e| e.code.as_str() == expected.code.as_str());
                 if !found {
                     return Err(ExecutorError::MissingExpectedError(
-                        format!("Expected error {} not found", expected.code).into()
+                        format!("Expected error {} not found", expected.code).into(),
                     ));
                 }
             }
@@ -3066,8 +3173,7 @@ impl Executor {
 
         let source = directives.source_content.as_str();
 
-        compile_to_vbc(source)
-            .map_err(|e| ExecutorError::ProcessError(e.to_string().into()))?;
+        compile_to_vbc(source).map_err(|e| ExecutorError::ProcessError(e.to_string().into()))?;
 
         Ok(())
     }
@@ -3075,7 +3181,11 @@ impl Executor {
     /// Execute a vbc-codegen-fail test.
     ///
     /// Runs VBC codegen and expects it to fail.
-    async fn execute_vbc_codegen_fail(&self, directives: &TestDirectives, tier: Tier) -> TestOutcome {
+    async fn execute_vbc_codegen_fail(
+        &self,
+        directives: &TestDirectives,
+        tier: Tier,
+    ) -> TestOutcome {
         let start = Instant::now();
 
         let result = self.execute_vbc_codegen_fail_direct(directives);
@@ -3088,7 +3198,11 @@ impl Executor {
             Err(e) => TestOutcome::Fail {
                 tier,
                 reason: e.to_string().into(),
-                expected: Some("VBC codegen should fail with expected errors".to_string().into()),
+                expected: Some(
+                    "VBC codegen should fail with expected errors"
+                        .to_string()
+                        .into(),
+                ),
                 actual: Some(e.to_string().into()),
                 duration: start.elapsed(),
             },
@@ -3096,14 +3210,19 @@ impl Executor {
     }
 
     /// Execute VBC codegen fail test directly.
-    fn execute_vbc_codegen_fail_direct(&self, directives: &TestDirectives) -> Result<(), ExecutorError> {
+    fn execute_vbc_codegen_fail_direct(
+        &self,
+        directives: &TestDirectives,
+    ) -> Result<(), ExecutorError> {
         use verum_compiler::api::compile_to_vbc;
 
         let source = directives.source_content.as_str();
 
         match compile_to_vbc(source) {
             Ok(_) => Err(ExecutorError::ProcessError(
-                "Expected VBC codegen to fail, but it succeeded".to_string().into()
+                "Expected VBC codegen to fail, but it succeeded"
+                    .to_string()
+                    .into(),
             )),
             Err(e) => {
                 // VBC codegen failed as expected
@@ -3152,7 +3271,8 @@ impl Executor {
         let (tx, rx) = std::sync::mpsc::channel();
         let timeout_ms = directives.effective_timeout_ms();
         let _ = std::thread::Builder::new()
-            .name("vtest-check".into()).stack_size(512 * 1024 * 1024)
+            .name("vtest-check".into())
+            .stack_size(512 * 1024 * 1024)
             .spawn(move || {
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let mut session = Session::new(options);
@@ -3165,18 +3285,19 @@ impl Executor {
             })
             .expect("Failed to spawn meta-pass thread");
 
-        let (result, diagnostics_output) = match rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
-            Ok(Ok(pair)) => pair,
-            Ok(Err(_)) | Err(_) => {
-                return TestOutcome::Fail {
-                    tier,
-                    reason: "Meta evaluation panicked or timed out".to_string().into(),
-                    expected: Some("Successful meta evaluation".to_string().into()),
-                    actual: Some("crash/timeout".to_string().into()),
-                    duration: start.elapsed(),
-                };
-            }
-        };
+        let (result, diagnostics_output) =
+            match rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
+                Ok(Ok(pair)) => pair,
+                Ok(Err(_)) | Err(_) => {
+                    return TestOutcome::Fail {
+                        tier,
+                        reason: "Meta evaluation panicked or timed out".to_string().into(),
+                        expected: Some("Successful meta evaluation".to_string().into()),
+                        actual: Some("crash/timeout".to_string().into()),
+                        duration: start.elapsed(),
+                    };
+                }
+            };
 
         match result {
             Ok(()) => TestOutcome::Pass {
@@ -3205,7 +3326,10 @@ impl Executor {
     /// Meta-fail tests verify that meta functions fail with expected errors.
     /// The test file specifies expected error codes like `@expected-error: M004`.
     async fn execute_meta_fail(&self, directives: &TestDirectives, tier: Tier) -> TestOutcome {
-        println!("[TRACE execute_meta_fail] called with source_path={}", directives.source_path.as_str());
+        println!(
+            "[TRACE execute_meta_fail] called with source_path={}",
+            directives.source_path.as_str()
+        );
         let start = Instant::now();
 
         // Use direct library integration for meta tests
@@ -3233,7 +3357,8 @@ impl Executor {
         let (tx, rx) = std::sync::mpsc::channel();
         let timeout_ms = directives.effective_timeout_ms();
         let _ = std::thread::Builder::new()
-            .name("vtest-check".into()).stack_size(512 * 1024 * 1024)
+            .name("vtest-check".into())
+            .stack_size(512 * 1024 * 1024)
             .spawn(move || {
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let mut session = Session::new(options);
@@ -3246,18 +3371,19 @@ impl Executor {
             })
             .expect("Failed to spawn meta-fail thread");
 
-        let (result, diagnostics_output) = match rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
-            Ok(Ok(pair)) => pair,
-            Ok(Err(_)) | Err(_) => {
-                return TestOutcome::Fail {
-                    tier,
-                    reason: "Meta evaluation panicked or timed out".to_string().into(),
-                    expected: Some("Meta evaluation failure".to_string().into()),
-                    actual: Some("crash/timeout".to_string().into()),
-                    duration: start.elapsed(),
-                };
-            }
-        };
+        let (result, diagnostics_output) =
+            match rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
+                Ok(Ok(pair)) => pair,
+                Ok(Err(_)) | Err(_) => {
+                    return TestOutcome::Fail {
+                        tier,
+                        reason: "Meta evaluation panicked or timed out".to_string().into(),
+                        expected: Some("Meta evaluation failure".to_string().into()),
+                        actual: Some("crash/timeout".to_string().into()),
+                        duration: start.elapsed(),
+                    };
+                }
+            };
 
         match result {
             Ok(()) => {
@@ -3282,8 +3408,10 @@ impl Executor {
 
                 // Check if expected errors match using the formatted diagnostics
                 // Meta errors use M-prefixed codes (M001, M004, M201, etc.)
-                if self.check_expected_errors_in_output(&diagnostics_output, &directives.expected_errors)
-                {
+                if self.check_expected_errors_in_output(
+                    &diagnostics_output,
+                    &directives.expected_errors,
+                ) {
                     TestOutcome::Pass {
                         tier,
                         duration: start.elapsed(),
@@ -3291,7 +3419,9 @@ impl Executor {
                 } else {
                     TestOutcome::Fail {
                         tier,
-                        reason: "Meta evaluation failed but with wrong errors".to_string().into(),
+                        reason: "Meta evaluation failed but with wrong errors"
+                            .to_string()
+                            .into(),
                         expected: Some(format!("{:?}", directives.expected_errors).into()),
                         actual: Some(diagnostics_output.into()),
                         duration: start.elapsed(),
@@ -3335,7 +3465,8 @@ impl Executor {
         let (tx, rx) = std::sync::mpsc::channel();
         let timeout_ms = directives.effective_timeout_ms();
         let _ = std::thread::Builder::new()
-            .name("vtest-check".into()).stack_size(512 * 1024 * 1024)
+            .name("vtest-check".into())
+            .stack_size(512 * 1024 * 1024)
             .spawn(move || {
                 let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let mut session = Session::new(options);
@@ -3348,18 +3479,19 @@ impl Executor {
             })
             .expect("Failed to spawn meta-eval thread");
 
-        let (result, diagnostics_output) = match rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
-            Ok(Ok(pair)) => pair,
-            Ok(Err(_)) | Err(_) => {
-                return TestOutcome::Fail {
-                    tier,
-                    reason: "Meta evaluation panicked or timed out".to_string().into(),
-                    expected: Some("Successful meta evaluation".to_string().into()),
-                    actual: Some("crash/timeout".to_string().into()),
-                    duration: start.elapsed(),
-                };
-            }
-        };
+        let (result, diagnostics_output) =
+            match rx.recv_timeout(std::time::Duration::from_millis(timeout_ms)) {
+                Ok(Ok(pair)) => pair,
+                Ok(Err(_)) | Err(_) => {
+                    return TestOutcome::Fail {
+                        tier,
+                        reason: "Meta evaluation panicked or timed out".to_string().into(),
+                        expected: Some("Successful meta evaluation".to_string().into()),
+                        actual: Some("crash/timeout".to_string().into()),
+                        duration: start.elapsed(),
+                    };
+                }
+            };
 
         match result {
             Ok(()) => TestOutcome::Pass {
@@ -3424,7 +3556,8 @@ pub fn compare_differential_results(
             return Err(format!(
                 "Exit code mismatch: tier 0 = {:?}, tier {} = {:?}",
                 reference.exit_code, i, result.exit_code
-            ).into());
+            )
+            .into());
         }
 
         // Compare stdout (exact)
@@ -3436,7 +3569,8 @@ pub fn compare_differential_results(
                 i,
                 reference.stdout.trim(),
                 result.stdout.trim()
-            ).into());
+            )
+            .into());
         }
 
         // Compare stderr (exact)
@@ -3448,7 +3582,8 @@ pub fn compare_differential_results(
                 i,
                 reference.stderr.trim(),
                 result.stderr.trim()
-            ).into());
+            )
+            .into());
         }
     }
 
@@ -3623,7 +3758,7 @@ test.vr:15:10: warning[W101]: Unused variable
 /// (Source → Parser → AST → Types → TypedAST) without execution.
 pub mod verify {
     use super::*;
-    use verum_compiler::api::{parse, run_common_pipeline, CommonPipelineConfig, SourceFile};
+    use verum_compiler::api::{CommonPipelineConfig, SourceFile, parse, run_common_pipeline};
 
     /// Result of a verification test.
     #[derive(Debug, Clone)]
@@ -3701,7 +3836,11 @@ pub mod verify {
     /// Resolve the core/ stdlib path if it exists on disk.
     fn resolve_core_path() -> Option<std::path::PathBuf> {
         let core_path = std::path::PathBuf::from("core");
-        if core_path.exists() { Some(core_path) } else { None }
+        if core_path.exists() {
+            Some(core_path)
+        } else {
+            None
+        }
     }
 
     /// Verify that source typechecks successfully.
@@ -3865,7 +4004,10 @@ pub mod verify {
     }
 
     /// Verify full common pipeline fails.
-    fn verify_common_pipeline_fail(source: &str, directives: &TestDirectives) -> VerificationResult {
+    fn verify_common_pipeline_fail(
+        source: &str,
+        directives: &TestDirectives,
+    ) -> VerificationResult {
         let source_file = SourceFile::from_string(source);
         let config = CommonPipelineConfig {
             core_source_path: resolve_core_path(),

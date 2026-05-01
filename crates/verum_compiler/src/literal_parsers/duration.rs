@@ -454,10 +454,7 @@ mod tests {
 
     #[test]
     fn test_format_duration_combined() {
-        assert_eq!(
-            format_duration(NS_PER_H + 30 * NS_PER_M).as_str(),
-            "1h30m"
-        );
+        assert_eq!(format_duration(NS_PER_H + 30 * NS_PER_M).as_str(), "1h30m");
     }
 
     #[test]

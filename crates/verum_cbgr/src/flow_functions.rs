@@ -508,12 +508,8 @@ impl IrOperation {
             IrOperation::Load { src, .. }
             | IrOperation::FieldAccess { src, .. }
             | IrOperation::AddressOf { src, .. }
-            | IrOperation::Copy { src, .. } => {
-                vec![*src].into()
-            }
-            IrOperation::Store { dest, src, .. } => {
-                vec![*dest, *src].into()
-            }
+            | IrOperation::Copy { src, .. } => vec![*src].into(),
+            IrOperation::Store { dest, src, .. } => vec![*dest, *src].into(),
             IrOperation::Call { args, .. } => args.clone(),
             IrOperation::Return { value } => {
                 if let Maybe::Some(val) = value {
@@ -1009,11 +1005,7 @@ impl FlowFunctionCompiler {
         FlowFunctionStats {
             edge_count: self.edge_functions.len(),
             block_count: self.block_functions.len(),
-            total_functions: self
-                .edge_functions
-                .values()
-                .map(|v| v.len())
-                .sum::<usize>()
+            total_functions: self.edge_functions.values().map(|v| v.len()).sum::<usize>()
                 + self
                     .block_functions
                     .values()

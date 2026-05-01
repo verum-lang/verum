@@ -1,16 +1,16 @@
 use verum_llvm_sys::core::{
     LLVMCreateMemoryBufferWithContentsOfFile, LLVMCreateMemoryBufferWithMemoryRange,
-    LLVMCreateMemoryBufferWithMemoryRangeCopy, LLVMCreateMemoryBufferWithSTDIN, LLVMDisposeMemoryBuffer,
-    LLVMGetBufferSize, LLVMGetBufferStart,
+    LLVMCreateMemoryBufferWithMemoryRangeCopy, LLVMCreateMemoryBufferWithSTDIN,
+    LLVMDisposeMemoryBuffer, LLVMGetBufferSize, LLVMGetBufferStart,
 };
 #[allow(deprecated)]
 use verum_llvm_sys::object::LLVMCreateObjectFile;
 use verum_llvm_sys::prelude::LLVMMemoryBufferRef;
 
 use crate::object_file::ObjectFile;
-use crate::support::{to_c_str, LLVMString};
+use crate::support::{LLVMString, to_c_str};
 
-use std::mem::{forget, MaybeUninit};
+use std::mem::{MaybeUninit, forget};
 use std::path::Path;
 use std::ptr;
 use std::slice;
@@ -32,7 +32,10 @@ impl MemoryBuffer {
     }
 
     pub fn create_from_file(path: &Path) -> Result<Self, LLVMString> {
-        let path = to_c_str(path.to_str().expect("Did not find a valid Unicode path string"));
+        let path = to_c_str(
+            path.to_str()
+                .expect("Did not find a valid Unicode path string"),
+        );
         let mut memory_buffer = ptr::null_mut();
         let mut err_string = MaybeUninit::uninit();
 
@@ -58,7 +61,8 @@ impl MemoryBuffer {
         let mut memory_buffer = ptr::null_mut();
         let mut err_string = MaybeUninit::uninit();
 
-        let return_code = unsafe { LLVMCreateMemoryBufferWithSTDIN(&mut memory_buffer, err_string.as_mut_ptr()) };
+        let return_code =
+            unsafe { LLVMCreateMemoryBufferWithSTDIN(&mut memory_buffer, err_string.as_mut_ptr()) };
 
         // LLVM C API: non-zero return code indicates error
         if return_code == 1 {

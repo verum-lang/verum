@@ -171,9 +171,12 @@ impl RegisterAllocator {
 
         // If this variable shadows an existing one, save the old binding
         if let Some(scope) = self.scope_stack.last_mut()
-            && let Some(old_info) = self.variables.get(name) {
-                scope.shadowed_vars.push((name.to_string(), old_info.clone()));
-            }
+            && let Some(old_info) = self.variables.get(name)
+        {
+            scope
+                .shadowed_vars
+                .push((name.to_string(), old_info.clone()));
+        }
 
         self.variables.insert(
             name.to_string(),
@@ -209,9 +212,10 @@ impl RegisterAllocator {
     /// May recycle from free list if recycling is enabled.
     pub fn alloc_temp(&mut self) -> Reg {
         if self.recycle_temps
-            && let Some(reg) = self.free_list.pop() {
-                return reg;
-            }
+            && let Some(reg) = self.free_list.pop()
+        {
+            return reg;
+        }
         self.alloc_fresh()
     }
 
@@ -471,7 +475,11 @@ mod tests {
     #[test]
     fn test_alloc_parameters() {
         let mut alloc = RegisterAllocator::new();
-        let params = vec![("a".to_string(), false), ("b".to_string(), true), ("c".to_string(), false)];
+        let params = vec![
+            ("a".to_string(), false),
+            ("b".to_string(), true),
+            ("c".to_string(), false),
+        ];
         let regs = alloc.alloc_parameters(&params);
 
         assert_eq!(regs.len(), 3);

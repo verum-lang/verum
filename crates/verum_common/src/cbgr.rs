@@ -367,9 +367,11 @@ impl CbgrHeader {
                 let new_epoch = (current_epoch() & 0xFFFF) as u32;
                 let new_epoch_caps = (new_epoch << caps::EPOCH_SHIFT) | capabilities;
                 let new_packed = Self::pack(GEN_INITIAL, new_epoch_caps);
-                if self.packed.compare_exchange(
-                    old_packed, new_packed, Ordering::AcqRel, Ordering::Relaxed
-                ).is_ok() {
+                if self
+                    .packed
+                    .compare_exchange(old_packed, new_packed, Ordering::AcqRel, Ordering::Relaxed)
+                    .is_ok()
+                {
                     advance_epoch();
                 }
                 return GEN_INITIAL;
@@ -377,9 +379,11 @@ impl CbgrHeader {
 
             let new_gen = old_gen + 1; // Safe: old_gen < GEN_MAX so no overflow
             let new_packed = old_packed.wrapping_add(1u64 << 32);
-            if self.packed.compare_exchange(
-                old_packed, new_packed, Ordering::AcqRel, Ordering::Relaxed
-            ).is_ok() {
+            if self
+                .packed
+                .compare_exchange(old_packed, new_packed, Ordering::AcqRel, Ordering::Relaxed)
+                .is_ok()
+            {
                 return new_gen;
             }
             // CAS failed due to concurrent modification, retry
@@ -426,7 +430,8 @@ impl CbgrHeader {
     pub fn invalidate(&self) {
         let old = self.packed.load(Ordering::Acquire);
         let epoch_caps = Self::unpack_epoch_caps(old);
-        self.packed.store(Self::pack(GEN_UNALLOCATED, epoch_caps), Ordering::Release);
+        self.packed
+            .store(Self::pack(GEN_UNALLOCATED, epoch_caps), Ordering::Release);
     }
 
     /// Check if still valid (generation > 0)
@@ -617,18 +622,22 @@ impl AllocationHeader {
             if old_gen >= GEN_MAX {
                 // Generation exhausted -- advance global epoch and reset.
                 // CAS ensures only one thread performs the reset.
-                if self.generation.compare_exchange(
-                    old_gen, GEN_INITIAL, Ordering::AcqRel, Ordering::Relaxed
-                ).is_ok() {
+                if self
+                    .generation
+                    .compare_exchange(old_gen, GEN_INITIAL, Ordering::AcqRel, Ordering::Relaxed)
+                    .is_ok()
+                {
                     advance_epoch();
                     self.epoch.store(current_epoch_u16(), Ordering::Release);
                 }
                 return GEN_INITIAL;
             }
             let new_gen = old_gen + 1; // Safe: old_gen < GEN_MAX so no overflow
-            if self.generation.compare_exchange(
-                old_gen, new_gen, Ordering::AcqRel, Ordering::Relaxed
-            ).is_ok() {
+            if self
+                .generation
+                .compare_exchange(old_gen, new_gen, Ordering::AcqRel, Ordering::Relaxed)
+                .is_ok()
+            {
                 return new_gen;
             }
             // CAS failed due to concurrent modification, retry
@@ -944,7 +953,10 @@ mod tests {
 
     #[test]
     fn test_allocation_header_size() {
-        assert_eq!(std::mem::size_of::<AllocationHeader>(), AllocationHeader::SIZE);
+        assert_eq!(
+            std::mem::size_of::<AllocationHeader>(),
+            AllocationHeader::SIZE
+        );
     }
 
     #[test]
@@ -978,14 +990,20 @@ mod tests {
         let header = CbgrHeader::new(5);
         header.increment_generation();
         // Wrong generation (1 vs actual 2)
-        assert_eq!(header.validate(GEN_INITIAL, 5), CbgrErrorCode::GenerationMismatch);
+        assert_eq!(
+            header.validate(GEN_INITIAL, 5),
+            CbgrErrorCode::GenerationMismatch
+        );
     }
 
     #[test]
     fn test_validation_epoch_mismatch() {
         let header = CbgrHeader::new(5);
         // Correct generation, wrong epoch
-        assert_eq!(header.validate(GEN_INITIAL, 6), CbgrErrorCode::EpochMismatch);
+        assert_eq!(
+            header.validate(GEN_INITIAL, 6),
+            CbgrErrorCode::EpochMismatch
+        );
     }
 
     #[test]
@@ -998,7 +1016,10 @@ mod tests {
         assert!(!header.is_valid());
         assert_eq!(header.generation(), GEN_UNALLOCATED);
         // Any validation should fail with ExpiredReference
-        assert_eq!(header.validate(GEN_INITIAL, 0), CbgrErrorCode::ExpiredReference);
+        assert_eq!(
+            header.validate(GEN_INITIAL, 0),
+            CbgrErrorCode::ExpiredReference
+        );
     }
 
     #[test]
@@ -1015,16 +1036,40 @@ mod tests {
     #[test]
     fn test_capability_presets() {
         // Test preset capability combinations
-        assert!(Capability::has_flag(Capability::ReadOnly.as_u32(), caps::READ));
-        assert!(Capability::has_flag(Capability::ReadOnly.as_u32(), caps::BORROWED));
-        assert!(!Capability::has_flag(Capability::ReadOnly.as_u32(), caps::WRITE));
+        assert!(Capability::has_flag(
+            Capability::ReadOnly.as_u32(),
+            caps::READ
+        ));
+        assert!(Capability::has_flag(
+            Capability::ReadOnly.as_u32(),
+            caps::BORROWED
+        ));
+        assert!(!Capability::has_flag(
+            Capability::ReadOnly.as_u32(),
+            caps::WRITE
+        ));
 
-        assert!(Capability::has_flag(Capability::ReadWrite.as_u32(), caps::READ));
-        assert!(Capability::has_flag(Capability::ReadWrite.as_u32(), caps::WRITE));
+        assert!(Capability::has_flag(
+            Capability::ReadWrite.as_u32(),
+            caps::READ
+        ));
+        assert!(Capability::has_flag(
+            Capability::ReadWrite.as_u32(),
+            caps::WRITE
+        ));
 
-        assert!(Capability::has_flag(Capability::Exclusive.as_u32(), caps::MUTABLE));
-        assert!(Capability::has_flag(Capability::Owner.as_u32(), caps::DELEGATE));
-        assert!(Capability::has_flag(Capability::Owner.as_u32(), caps::REVOKE));
+        assert!(Capability::has_flag(
+            Capability::Exclusive.as_u32(),
+            caps::MUTABLE
+        ));
+        assert!(Capability::has_flag(
+            Capability::Owner.as_u32(),
+            caps::DELEGATE
+        ));
+        assert!(Capability::has_flag(
+            Capability::Owner.as_u32(),
+            caps::REVOKE
+        ));
 
         // Test All contains all 8 capability bits
         assert_eq!(Capability::All.as_u32(), caps::ALL);
@@ -1034,7 +1079,8 @@ mod tests {
     #[test]
     fn test_epoch_caps_packing() {
         // Verify 16-bit epoch + 16-bit caps packing
-        let header = CbgrHeader::with_generation(0x1234, 42, caps::READ | caps::WRITE | caps::EXECUTE);
+        let header =
+            CbgrHeader::with_generation(0x1234, 42, caps::READ | caps::WRITE | caps::EXECUTE);
         assert_eq!(header.epoch(), 0x1234);
         let caps = header.capabilities();
         assert!(caps & caps::READ != 0);
@@ -1047,8 +1093,14 @@ mod tests {
     fn test_capability_from_bits() {
         assert_eq!(Capability::from_bits(0), Capability::None);
         assert_eq!(Capability::from_bits(caps::READ_ONLY), Capability::ReadOnly);
-        assert_eq!(Capability::from_bits(caps::READ_WRITE), Capability::ReadWrite);
-        assert_eq!(Capability::from_bits(caps::EXCLUSIVE), Capability::Exclusive);
+        assert_eq!(
+            Capability::from_bits(caps::READ_WRITE),
+            Capability::ReadWrite
+        );
+        assert_eq!(
+            Capability::from_bits(caps::EXCLUSIVE),
+            Capability::Exclusive
+        );
         assert_eq!(Capability::from_bits(caps::OWNER), Capability::Owner);
         assert_eq!(Capability::from_bits(caps::ALL), Capability::All);
     }
@@ -1191,7 +1243,8 @@ mod tests {
         // SeqCst RMW guarantees no lost updates → final == TOTAL.
         let final_value = counter.load(Ordering::SeqCst);
         assert_eq!(
-            final_value, TOTAL,
+            final_value,
+            TOTAL,
             "SeqCst contention lost updates: expected {} got {} (delta {})",
             TOTAL,
             final_value,
@@ -1314,7 +1367,7 @@ mod tests {
 
             // Strict mode: from here on, EVERY validate of the
             // captured tuple MUST reject. Iteration count sized to
-                // ensure many concurrent advances overlap the watcher
+            // ensure many concurrent advances overlap the watcher
             // window.
             for _ in 0..(TOTAL * 2) {
                 let result = h_watch.validate(captured_gen, captured_epoch);
@@ -1339,10 +1392,7 @@ mod tests {
                             captured_gen, captured_epoch
                         );
                     }
-                    other => panic!(
-                        "unexpected validation outcome: {:?}",
-                        other
-                    ),
+                    other => panic!("unexpected validation outcome: {:?}", other),
                 }
             }
         }));

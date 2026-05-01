@@ -5,9 +5,7 @@
 use verum_common::{List, Text};
 
 use verum_smt::proof_search::ProofSearchEngine;
-use verum_smt::refinement_reflection::{
-    ReflectedFunction, RefinementReflectionRegistry,
-};
+use verum_smt::refinement_reflection::{RefinementReflectionRegistry, ReflectedFunction};
 
 fn double_def() -> ReflectedFunction {
     ReflectedFunction {
@@ -46,8 +44,18 @@ fn set_registry_makes_axioms_available() {
     engine.set_reflection_registry(reg);
 
     assert_eq!(engine.reflection_registry().len(), 2);
-    assert!(engine.reflection_registry().lookup(&Text::from("double")).is_some());
-    assert!(engine.reflection_registry().lookup(&Text::from("add")).is_some());
+    assert!(
+        engine
+            .reflection_registry()
+            .lookup(&Text::from("double"))
+            .is_some()
+    );
+    assert!(
+        engine
+            .reflection_registry()
+            .lookup(&Text::from("add"))
+            .is_some()
+    );
 }
 
 #[test]
@@ -65,8 +73,18 @@ fn replacing_registry_supersedes_previous() {
 
     // Old `double` should be gone; only `add` remains.
     assert_eq!(engine.reflection_registry().len(), 1);
-    assert!(engine.reflection_registry().lookup(&Text::from("double")).is_none());
-    assert!(engine.reflection_registry().lookup(&Text::from("add")).is_some());
+    assert!(
+        engine
+            .reflection_registry()
+            .lookup(&Text::from("double"))
+            .is_none()
+    );
+    assert!(
+        engine
+            .reflection_registry()
+            .lookup(&Text::from("add"))
+            .is_some()
+    );
 }
 
 #[test]

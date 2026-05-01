@@ -632,10 +632,7 @@ impl Cvc5Backend {
         // enough for trace diagnostics; callers that want
         // round-trippable SMT-LIB use --dump-smt for the full
         // solver state.
-        crate::solver_diagnostics::log_send(&format!(
-            "(assert {:?})",
-            term
-        ));
+        crate::solver_diagnostics::log_send(&format!("(assert {:?})", term));
         // SAFETY: FFI call to assert a formula.
         // - self.solver is a valid pointer (checked in new())
         // - term.raw is a valid CVC5 term pointer created by this backend
@@ -677,10 +674,7 @@ impl Cvc5Backend {
         let mut content = String::new();
         unsafe {
             let mut size: usize = 0;
-            let arr = cvc5_sys::cvc5_get_assertions(
-                self.solver,
-                &mut size as *mut usize,
-            );
+            let arr = cvc5_sys::cvc5_get_assertions(self.solver, &mut size as *mut usize);
             if !arr.is_null() {
                 for i in 0..size {
                     let term = *arr.add(i);
@@ -717,10 +711,7 @@ impl Cvc5Backend {
         crate::solver_diagnostics::log_send("(check-sat)");
         if crate::solver_diagnostics::dump_smt_dir().is_some() {
             let dump = self.capture_smtlib_state();
-            crate::solver_diagnostics::dump_smt_query(
-                "cvc5-query",
-                &dump,
-            );
+            crate::solver_diagnostics::dump_smt_query("cvc5-query", &dump);
         }
 
         // SAFETY: FFI call to check satisfiability.

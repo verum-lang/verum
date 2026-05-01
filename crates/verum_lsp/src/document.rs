@@ -14,10 +14,10 @@ use parking_lot::RwLock;
 use std::collections::HashMap;
 use tower_lsp::lsp_types::*;
 use verum_ast::{Attribute, FileId, ItemKind, LiteralKind, Module};
+use verum_common::List;
 use verum_diagnostics::Diagnostic;
 use verum_lexer::Lexer;
 use verum_parser::VerumParser;
-use verum_common::List;
 use verum_types::{Type, TypeChecker};
 
 /// Information about a symbol in the document

@@ -15,8 +15,8 @@
 // Tests for advanced_model module
 // Migrated from src/advanced_model.rs per CLAUDE.md standards
 
-use verum_smt::advanced_model::*;
 use verum_common::{List, Text};
+use verum_smt::advanced_model::*;
 
 use z3::ast::Int;
 use z3::{Config, Solver};

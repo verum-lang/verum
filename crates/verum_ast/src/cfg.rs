@@ -429,9 +429,9 @@ pub fn parse_cfg_predicate(expr: &crate::expr::Expr) -> Maybe<CfgPredicate> {
 
     match &expr.kind {
         // Simple identifier: @cfg(unix)
-        ExprKind::Path(path) => {
-            path.as_ident().map(|ident| CfgPredicate::ident(ident.name.clone(), span))
-        }
+        ExprKind::Path(path) => path
+            .as_ident()
+            .map(|ident| CfgPredicate::ident(ident.name.clone(), span)),
 
         // Key-value: @cfg(target_os = "linux")
         ExprKind::Binary { left, op, right } if *op == BinOp::Assign => {
@@ -458,10 +458,8 @@ pub fn parse_cfg_predicate(expr: &crate::expr::Expr) -> Maybe<CfgPredicate> {
                     let name = func_ident.name.as_str();
                     match name {
                         "all" => {
-                            let predicates: Vec<CfgPredicate> = args
-                                .iter()
-                                .filter_map(parse_cfg_predicate)
-                                .collect();
+                            let predicates: Vec<CfgPredicate> =
+                                args.iter().filter_map(parse_cfg_predicate).collect();
                             if predicates.len() == args.len() {
                                 Maybe::Some(CfgPredicate::all(predicates, span))
                             } else {
@@ -469,10 +467,8 @@ pub fn parse_cfg_predicate(expr: &crate::expr::Expr) -> Maybe<CfgPredicate> {
                             }
                         }
                         "any" => {
-                            let predicates: Vec<CfgPredicate> = args
-                                .iter()
-                                .filter_map(parse_cfg_predicate)
-                                .collect();
+                            let predicates: Vec<CfgPredicate> =
+                                args.iter().filter_map(parse_cfg_predicate).collect();
                             if predicates.len() == args.len() {
                                 Maybe::Some(CfgPredicate::any(predicates, span))
                             } else {
@@ -481,7 +477,8 @@ pub fn parse_cfg_predicate(expr: &crate::expr::Expr) -> Maybe<CfgPredicate> {
                         }
                         "not" => {
                             if args.len() == 1 {
-                                parse_cfg_predicate(&args[0]).map(|inner| CfgPredicate::not(inner, span))
+                                parse_cfg_predicate(&args[0])
+                                    .map(|inner| CfgPredicate::not(inner, span))
                             } else {
                                 Maybe::None
                             }
@@ -999,17 +996,11 @@ mod tests {
         let config = TargetConfig::linux_x86_64();
 
         // not(windows) should be true on Linux
-        let pred = CfgPredicate::not(
-            CfgPredicate::ident("windows", dummy_span()),
-            dummy_span(),
-        );
+        let pred = CfgPredicate::not(CfgPredicate::ident("windows", dummy_span()), dummy_span());
         assert!(pred.evaluate(&config));
 
         // not(unix) should be false on Linux
-        let pred_false = CfgPredicate::not(
-            CfgPredicate::ident("unix", dummy_span()),
-            dummy_span(),
-        );
+        let pred_false = CfgPredicate::not(CfgPredicate::ident("unix", dummy_span()), dummy_span());
         assert!(!pred_false.evaluate(&config));
     }
 
@@ -1020,10 +1011,7 @@ mod tests {
         // all(not(windows), any(target_arch = "x86_64", target_arch = "aarch64"))
         let pred = CfgPredicate::all(
             vec![
-                CfgPredicate::not(
-                    CfgPredicate::ident("windows", dummy_span()),
-                    dummy_span(),
-                ),
+                CfgPredicate::not(CfgPredicate::ident("windows", dummy_span()), dummy_span()),
                 CfgPredicate::any(
                     vec![
                         CfgPredicate::key_value("target_arch", "x86_64", dummy_span()),
@@ -1155,10 +1143,7 @@ mod tests {
         let bad_cfg = Attribute::simple(Text::from("cfg"), dummy_span());
         let attrs = vec![bad_cfg];
         let (incl, fails) = evaluator.should_include_with_failures(&attrs);
-        assert!(
-            incl,
-            "fail-open semantic: malformed @cfg includes the item",
-        );
+        assert!(incl, "fail-open semantic: malformed @cfg includes the item",);
         assert_eq!(
             fails.len(),
             1,
@@ -1177,7 +1162,7 @@ mod tests {
     fn test_should_include_item_walks_inner_typedecl_attrs() {
         use crate::attr::Attribute;
         use crate::decl::{Item, ItemKind, TypeDecl, TypeDeclBody, Visibility};
-        use crate::expr::{Expr, ExprKind, BinOp};
+        use crate::expr::{BinOp, Expr, ExprKind};
         use crate::literal::{Literal, LiteralKind};
         use crate::ty::{Ident, Path, PathSegment};
 
@@ -1196,9 +1181,7 @@ mod tests {
         let key_expr = Expr::new(ExprKind::Path(key_path), dummy_span());
         let val_expr = Expr::new(
             ExprKind::Literal(Literal::new(
-                LiteralKind::Text(crate::literal::StringLit::Regular(Text::from(
-                    "windows",
-                ))),
+                LiteralKind::Text(crate::literal::StringLit::Regular(Text::from("windows"))),
                 dummy_span(),
             )),
             dummy_span(),

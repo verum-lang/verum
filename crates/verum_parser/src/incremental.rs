@@ -36,12 +36,11 @@
 use std::time::Instant;
 
 use verum_syntax::{
-    ChangeTracker, GreenBuilder, GreenNode, IncrementalEngine, IncrementalStats,
-    LspChange, LspRange, ReparseContext, SyntaxKind, TextEdit, TextRange, TextSize,
-    lsp_change_to_edit,
+    ChangeTracker, GreenBuilder, GreenNode, IncrementalEngine, IncrementalStats, LspChange,
+    LspRange, ReparseContext, SyntaxKind, TextEdit, TextRange, TextSize, lsp_change_to_edit,
 };
 
-use crate::syntax_bridge::{EventBasedParser, EventBasedParse};
+use crate::syntax_bridge::{EventBasedParse, EventBasedParser};
 
 // ============================================================================
 // Parser-Integrated Incremental Engine
@@ -139,12 +138,9 @@ impl IncrementalParserEngine {
         let tree = self.tree.clone().unwrap();
         let source = self.source.clone();
 
-        let new_tree = self.engine.apply_edit(
-            &tree,
-            &edit,
-            Self::reparse_with_context_static,
-            &source,
-        );
+        let new_tree =
+            self.engine
+                .apply_edit(&tree, &edit, Self::reparse_with_context_static, &source);
 
         // Update source
         self.source = edit.apply(&source);
@@ -180,12 +176,9 @@ impl IncrementalParserEngine {
             let tree = self.tree.clone().unwrap();
             let source = self.source.clone();
 
-            let new_tree = self.engine.apply_edit(
-                &tree,
-                &edit,
-                Self::reparse_with_context_static,
-                &source,
-            );
+            let new_tree =
+                self.engine
+                    .apply_edit(&tree, &edit, Self::reparse_with_context_static, &source);
 
             self.source = edit.apply(&source);
             self.tree = Some(new_tree);
@@ -224,7 +217,8 @@ impl IncrementalParserEngine {
             None => {
                 // Multiple non-contiguous edits - use heuristics
                 let pending = self.change_tracker.pending_edits();
-                let total_edit_size: usize = pending.iter()
+                let total_edit_size: usize = pending
+                    .iter()
                     .map(|e| e.new_text.len() + e.range.len() as usize)
                     .sum();
                 let tree_size = tree.width() as usize;

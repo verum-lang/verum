@@ -87,8 +87,14 @@ fn test_is_valid_extraction_range_multiline() {
 
     // Multi-line range should be valid
     let multi_line = Range {
-        start: Position { line: 1, character: 0 },
-        end: Position { line: 2, character: 0 },
+        start: Position {
+            line: 1,
+            character: 0,
+        },
+        end: Position {
+            line: 2,
+            character: 0,
+        },
     };
     assert!(is_valid_extraction_range(&doc, multi_line));
 }
@@ -99,8 +105,14 @@ fn test_is_valid_extraction_range_single_short_line() {
 
     // Single short line should not be valid
     let short = Range {
-        start: Position { line: 0, character: 0 },
-        end: Position { line: 0, character: 5 },
+        start: Position {
+            line: 0,
+            character: 0,
+        },
+        end: Position {
+            line: 0,
+            character: 5,
+        },
     };
     assert!(!is_valid_extraction_range(&doc, short));
 }
@@ -113,8 +125,14 @@ fn test_is_valid_extraction_range_long_single_line() {
 
     // Long single line should be valid
     let long_line = Range {
-        start: Position { line: 0, character: 0 },
-        end: Position { line: 0, character: 50 },
+        start: Position {
+            line: 0,
+            character: 0,
+        },
+        end: Position {
+            line: 0,
+            character: 50,
+        },
     };
     assert!(is_valid_extraction_range(&doc, long_line));
 }
@@ -125,8 +143,14 @@ fn test_is_valid_extraction_range_empty() {
 
     // Empty range should not be valid
     let empty = Range {
-        start: Position { line: 0, character: 5 },
-        end: Position { line: 0, character: 5 },
+        start: Position {
+            line: 0,
+            character: 5,
+        },
+        end: Position {
+            line: 0,
+            character: 5,
+        },
     };
     assert!(!is_valid_extraction_range(&doc, empty));
 }
@@ -140,8 +164,14 @@ fn test_code_actions_empty_context() {
     let doc = create_test_document("fn main() { }");
     let uri = create_test_uri();
     let range = Range {
-        start: Position { line: 0, character: 0 },
-        end: Position { line: 0, character: 10 },
+        start: Position {
+            line: 0,
+            character: 0,
+        },
+        end: Position {
+            line: 0,
+            character: 10,
+        },
     };
     let context = CodeActionContext {
         diagnostics: vec![],
@@ -159,14 +189,17 @@ fn test_code_actions_with_type_mismatch_diagnostic() {
     let doc = create_test_document("fn main() { let x: Int = \"hello\"; }");
     let uri = create_test_uri();
     let range = Range {
-        start: Position { line: 0, character: 25 },
-        end: Position { line: 0, character: 32 },
+        start: Position {
+            line: 0,
+            character: 25,
+        },
+        end: Position {
+            line: 0,
+            character: 32,
+        },
     };
 
-    let diagnostic = create_diagnostic(
-        "type mismatch: expected Int, found Text",
-        range,
-    );
+    let diagnostic = create_diagnostic("type mismatch: expected Int, found Text", range);
 
     let context = CodeActionContext {
         diagnostics: vec![diagnostic],
@@ -188,8 +221,14 @@ fn test_code_actions_with_missing_import_diagnostic() {
     let doc = create_test_document("fn main() { let x = List::new(); }");
     let uri = create_test_uri();
     let range = Range {
-        start: Position { line: 0, character: 20 },
-        end: Position { line: 0, character: 24 },
+        start: Position {
+            line: 0,
+            character: 20,
+        },
+        end: Position {
+            line: 0,
+            character: 24,
+        },
     };
 
     let diagnostic = create_diagnostic("List not found in scope", range);
@@ -214,14 +253,17 @@ fn test_code_actions_with_cbgr_error() {
     let doc = create_test_document("fn main() { let x = &data; }");
     let uri = create_test_uri();
     let range = Range {
-        start: Position { line: 0, character: 20 },
-        end: Position { line: 0, character: 25 },
+        start: Position {
+            line: 0,
+            character: 20,
+        },
+        end: Position {
+            line: 0,
+            character: 25,
+        },
     };
 
-    let diagnostic = create_diagnostic(
-        "CBGR: reference tier mismatch",
-        range,
-    );
+    let diagnostic = create_diagnostic("CBGR: reference tier mismatch", range);
 
     let context = CodeActionContext {
         diagnostics: vec![diagnostic],
@@ -235,7 +277,10 @@ fn test_code_actions_with_cbgr_error() {
         CodeActionOrCommand::CodeAction(ca) => ca.title.contains("checked reference"),
         _ => false,
     });
-    assert!(has_ref_conversion, "Should suggest converting to checked reference");
+    assert!(
+        has_ref_conversion,
+        "Should suggest converting to checked reference"
+    );
 }
 
 #[test]
@@ -243,14 +288,17 @@ fn test_code_actions_with_affine_type_error() {
     let doc = create_test_document("fn main() { let x = data; let y = data; }");
     let uri = create_test_uri();
     let range = Range {
-        start: Position { line: 0, character: 34 },
-        end: Position { line: 0, character: 38 },
+        start: Position {
+            line: 0,
+            character: 34,
+        },
+        end: Position {
+            line: 0,
+            character: 38,
+        },
     };
 
-    let diagnostic = create_diagnostic(
-        "value used after move (affine type)",
-        range,
-    );
+    let diagnostic = create_diagnostic("value used after move (affine type)", range);
 
     let context = CodeActionContext {
         diagnostics: vec![diagnostic],
@@ -272,14 +320,17 @@ fn test_code_actions_with_refinement_error() {
     let doc = create_test_document("fn main() { let x: Int where it > 0 = -5; }");
     let uri = create_test_uri();
     let range = Range {
-        start: Position { line: 0, character: 37 },
-        end: Position { line: 0, character: 39 },
+        start: Position {
+            line: 0,
+            character: 37,
+        },
+        end: Position {
+            line: 0,
+            character: 39,
+        },
     };
 
-    let diagnostic = create_diagnostic(
-        "refinement constraint not satisfied: it > 0",
-        range,
-    );
+    let diagnostic = create_diagnostic("refinement constraint not satisfied: it > 0", range);
 
     let context = CodeActionContext {
         diagnostics: vec![diagnostic],
@@ -296,14 +347,17 @@ fn test_code_actions_with_ambiguous_type() {
     let doc = create_test_document("fn main() { let x = None; }");
     let uri = create_test_uri();
     let range = Range {
-        start: Position { line: 0, character: 16 },
-        end: Position { line: 0, character: 17 },
+        start: Position {
+            line: 0,
+            character: 16,
+        },
+        end: Position {
+            line: 0,
+            character: 17,
+        },
     };
 
-    let diagnostic = create_diagnostic(
-        "cannot infer type for x",
-        range,
-    );
+    let diagnostic = create_diagnostic("cannot infer type for x", range);
 
     let context = CodeActionContext {
         diagnostics: vec![diagnostic],
@@ -329,15 +383,17 @@ fn test_code_actions_with_parser_error() {
     let doc = create_test_document("fn main() { let x = ; }");
     let uri = create_test_uri();
     let range = Range {
-        start: Position { line: 0, character: 20 },
-        end: Position { line: 0, character: 21 },
+        start: Position {
+            line: 0,
+            character: 20,
+        },
+        end: Position {
+            line: 0,
+            character: 21,
+        },
     };
 
-    let diagnostic = create_diagnostic_with_source(
-        "expected expression",
-        range,
-        "verum-parser",
-    );
+    let diagnostic = create_diagnostic_with_source("expected expression", range, "verum-parser");
 
     let context = CodeActionContext {
         diagnostics: vec![diagnostic],
@@ -360,8 +416,14 @@ fn test_refactoring_actions_with_selection() {
 
     // Select the expression "1 + 2 + 3"
     let range = Range {
-        start: Position { line: 1, character: 12 },
-        end: Position { line: 1, character: 21 },
+        start: Position {
+            line: 1,
+            character: 12,
+        },
+        end: Position {
+            line: 1,
+            character: 21,
+        },
     };
 
     let context = CodeActionContext {
@@ -384,8 +446,14 @@ fn test_refactoring_actions_function_body() {
 
     // Select multiple statements
     let range = Range {
-        start: Position { line: 1, character: 0 },
-        end: Position { line: 3, character: 0 },
+        start: Position {
+            line: 1,
+            character: 0,
+        },
+        end: Position {
+            line: 3,
+            character: 0,
+        },
     };
 
     let context = CodeActionContext {
@@ -407,15 +475,17 @@ fn test_code_actions_with_known_error_code() {
     let doc = create_test_document("fn main() { let x = 1; }");
     let uri = create_test_uri();
     let range = Range {
-        start: Position { line: 0, character: 0 },
-        end: Position { line: 0, character: 24 },
+        start: Position {
+            line: 0,
+            character: 0,
+        },
+        end: Position {
+            line: 0,
+            character: 24,
+        },
     };
 
-    let diagnostic = create_diagnostic_with_code(
-        "unused variable: x",
-        range,
-        "E0001",
-    );
+    let diagnostic = create_diagnostic_with_code("unused variable: x", range, "E0001");
 
     let context = CodeActionContext {
         diagnostics: vec![diagnostic],
@@ -433,13 +503,17 @@ fn test_code_actions_with_known_error_code() {
 
 #[test]
 fn test_source_organization_actions() {
-    let doc = create_test_document(
-        "link std.io;\nlink std.collections;\n\nfn main() { }",
-    );
+    let doc = create_test_document("link std.io;\nlink std.collections;\n\nfn main() { }");
     let uri = create_test_uri();
     let range = Range {
-        start: Position { line: 0, character: 0 },
-        end: Position { line: 0, character: 0 },
+        start: Position {
+            line: 0,
+            character: 0,
+        },
+        end: Position {
+            line: 0,
+            character: 0,
+        },
     };
 
     let context = CodeActionContext {
@@ -463,8 +537,14 @@ fn test_context_aware_actions_in_function() {
 
     // Cursor inside function body
     let range = Range {
-        start: Position { line: 1, character: 4 },
-        end: Position { line: 1, character: 4 },
+        start: Position {
+            line: 1,
+            character: 4,
+        },
+        end: Position {
+            line: 1,
+            character: 4,
+        },
     };
 
     let context = CodeActionContext {
@@ -484,8 +564,14 @@ fn test_context_aware_actions_in_type() {
 
     // Cursor inside type definition
     let range = Range {
-        start: Position { line: 2, character: 4 },
-        end: Position { line: 2, character: 4 },
+        start: Position {
+            line: 2,
+            character: 4,
+        },
+        end: Position {
+            line: 2,
+            character: 4,
+        },
     };
 
     let context = CodeActionContext {
@@ -507,23 +593,41 @@ fn test_code_actions_with_multiple_diagnostics() {
     let doc = create_test_document("fn main() { let x = foo; let y: Int = \"text\"; }");
     let uri = create_test_uri();
     let range = Range {
-        start: Position { line: 0, character: 0 },
-        end: Position { line: 0, character: 50 },
+        start: Position {
+            line: 0,
+            character: 0,
+        },
+        end: Position {
+            line: 0,
+            character: 50,
+        },
     };
 
     let diag1 = create_diagnostic(
         "foo not found",
         Range {
-            start: Position { line: 0, character: 20 },
-            end: Position { line: 0, character: 23 },
+            start: Position {
+                line: 0,
+                character: 20,
+            },
+            end: Position {
+                line: 0,
+                character: 23,
+            },
         },
     );
 
     let diag2 = create_diagnostic(
         "type mismatch: expected Int, found Text",
         Range {
-            start: Position { line: 0, character: 38 },
-            end: Position { line: 0, character: 44 },
+            start: Position {
+                line: 0,
+                character: 38,
+            },
+            end: Position {
+                line: 0,
+                character: 44,
+            },
         },
     );
 
@@ -535,7 +639,10 @@ fn test_code_actions_with_multiple_diagnostics() {
 
     let actions = code_actions(&doc, range, context, &uri);
     // Should have actions for both diagnostics
-    assert!(!actions.is_empty(), "Should have at least one action for multiple diagnostics");
+    assert!(
+        !actions.is_empty(),
+        "Should have at least one action for multiple diagnostics"
+    );
 }
 
 // ============================================================================
@@ -547,8 +654,14 @@ fn test_code_actions_empty_document() {
     let doc = create_test_document("");
     let uri = create_test_uri();
     let range = Range {
-        start: Position { line: 0, character: 0 },
-        end: Position { line: 0, character: 0 },
+        start: Position {
+            line: 0,
+            character: 0,
+        },
+        end: Position {
+            line: 0,
+            character: 0,
+        },
     };
 
     let context = CodeActionContext {
@@ -568,8 +681,14 @@ fn test_code_actions_out_of_bounds_range() {
 
     // Range beyond document
     let range = Range {
-        start: Position { line: 100, character: 0 },
-        end: Position { line: 101, character: 0 },
+        start: Position {
+            line: 100,
+            character: 0,
+        },
+        end: Position {
+            line: 101,
+            character: 0,
+        },
     };
 
     let context = CodeActionContext {
@@ -587,8 +706,14 @@ fn test_code_actions_unicode_content() {
     let doc = create_test_document("fn main() { let привет = \"мир\"; }");
     let uri = create_test_uri();
     let range = Range {
-        start: Position { line: 0, character: 16 },
-        end: Position { line: 0, character: 22 },
+        start: Position {
+            line: 0,
+            character: 16,
+        },
+        end: Position {
+            line: 0,
+            character: 22,
+        },
     };
 
     let context = CodeActionContext {

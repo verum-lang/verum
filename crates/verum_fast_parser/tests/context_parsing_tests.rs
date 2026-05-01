@@ -19,8 +19,8 @@
 //! context syntax, provide statements, using clauses, sub-contexts, aliases
 
 use verum_ast::{FileId, ItemKind, decl::*};
-use verum_lexer::Lexer;
 use verum_fast_parser::RecursiveParser;
+use verum_lexer::Lexer;
 
 fn parse_context_decl(source: &str) -> Result<ContextDecl, String> {
     let file_id = FileId::new(0);
@@ -455,7 +455,10 @@ fn parse_protocol_decl(source: &str) -> Result<TypeDecl, String> {
                     span: decl.span,
                 })
             }
-            other => Err(format!("Expected type/protocol declaration, got {:?}", other)),
+            other => Err(format!(
+                "Expected type/protocol declaration, got {:?}",
+                other
+            )),
         },
         Err(e) => Err(format!("Parse error: {:?}", e)),
     }
@@ -553,21 +556,21 @@ context type Logger is {
 "#;
 
     let error_msg = parse_item_expecting_error(source);
-    
+
     // Verify error mentions the missing 'protocol' keyword
     assert!(
         error_msg.contains("protocol"),
         "Error should mention 'protocol' keyword. Got: {}",
         error_msg
     );
-    
+
     // Verify helpful suggestions are present
     assert!(
         error_msg.contains("context protocol") || error_msg.contains("is protocol"),
         "Error should suggest correct syntax. Got: {}",
         error_msg
     );
-    
+
     // Verify semantic explanation is present
     assert!(
         error_msg.contains("Contexts are NOT types") || error_msg.contains("capability"),
@@ -587,7 +590,7 @@ context type Config is {
 "#;
 
     let error_msg = parse_item_expecting_error(source);
-    
+
     // Should fail with helpful error
     assert!(
         error_msg.contains("protocol") || error_msg.contains("missing"),

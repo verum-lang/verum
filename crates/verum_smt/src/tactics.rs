@@ -779,9 +779,8 @@ impl TacticExecutor {
                 // Same semantic as apply_combinator path; the
                 // timeout-tracking variant routes inner through
                 // the same timeout budget.
-                let goals = self.apply_combinator_with_timeout_tracking(
-                    goal, inner, timeout, start,
-                );
+                let goals =
+                    self.apply_combinator_with_timeout_tracking(goal, inner, timeout, start);
                 if !goals.is_empty() && self.stats.succeeded {
                     goals
                 } else {
@@ -796,9 +795,8 @@ impl TacticExecutor {
                     if start.elapsed() >= timeout {
                         break;
                     }
-                    let goals = self.apply_combinator_with_timeout_tracking(
-                        goal, branch, timeout, start,
-                    );
+                    let goals =
+                        self.apply_combinator_with_timeout_tracking(goal, branch, timeout, start);
                     if !goals.is_empty() && self.stats.succeeded {
                         return goals;
                     }
@@ -808,9 +806,8 @@ impl TacticExecutor {
             }
             TacticCombinator::Solve(inner) => {
                 // Total-discharge gate (timeout-aware).
-                let goals = self.apply_combinator_with_timeout_tracking(
-                    goal, inner, timeout, start,
-                );
+                let goals =
+                    self.apply_combinator_with_timeout_tracking(goal, inner, timeout, start);
                 if goals.is_empty() {
                     goals
                 } else {

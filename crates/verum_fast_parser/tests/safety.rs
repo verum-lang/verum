@@ -18,8 +18,8 @@
 //! Tests memory safety, panic-free guarantees, and error recovery.
 
 use verum_ast::span::FileId;
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 #[test]
 fn test_parser_never_panics_on_empty_input() {

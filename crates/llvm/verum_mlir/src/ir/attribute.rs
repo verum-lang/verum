@@ -24,14 +24,14 @@ pub use self::{
 };
 use crate::{context::Context, string_ref::StringRef, utility::print_callback};
 use distinct::DisctinctAttribute;
-use verum_mlir_sys::{
-    MlirAttribute, mlirAttributeEqual, mlirAttributeGetNull, mlirAttributeParseGet,
-    mlirAttributePrint, mlirUnitAttrGet,
-};
 use std::{
     ffi::c_void,
     fmt::{self, Debug, Display, Formatter},
     marker::PhantomData,
+};
+use verum_mlir_sys::{
+    MlirAttribute, mlirAttributeEqual, mlirAttributeGetNull, mlirAttributeParseGet,
+    mlirAttributePrint, mlirUnitAttrGet,
 };
 
 /// An attribute.

@@ -24,8 +24,8 @@
 
 use verum_common::{Heap, List, Text};
 use verum_kernel::{
-    ConstructorSig, CoreTerm, InductiveRegistry, PathCtorSig,
-    RegisteredInductive, normalize_with_inductives,
+    ConstructorSig, CoreTerm, InductiveRegistry, PathCtorSig, RegisteredInductive,
+    normalize_with_inductives,
 };
 
 fn nullary(name: &str) -> ConstructorSig {
@@ -140,7 +140,8 @@ fn nat_inductive() -> RegisteredInductive {
         List::from_iter(vec![
             nullary("Zero"),
             ConstructorSig {
-                name: Text::from("Succ"),                arg_types: List::from_iter(vec![CoreTerm::Inductive {
+                name: Text::from("Succ"),
+                arg_types: List::from_iter(vec![CoreTerm::Inductive {
                     path: Text::from("Nat"),
                     args: List::new(),
                 }]),
@@ -214,16 +215,27 @@ fn nat_elim_beta_reduces_succ_succ_with_two_recursor_calls() {
     let normal = normalize_with_inductives(&term, &reg);
 
     // Outer: App(App(case_succ, Succ(Zero)), <recursor-call β-result>)
-    let CoreTerm::App(outer_f, outer_a) = &normal else { panic!(); };
-    let CoreTerm::App(inner_f, inner_a) = outer_f.as_ref() else { panic!(); };
+    let CoreTerm::App(outer_f, outer_a) = &normal else {
+        panic!();
+    };
+    let CoreTerm::App(inner_f, inner_a) = outer_f.as_ref() else {
+        panic!();
+    };
     assert!(matches!(inner_f.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_succ"));
-    assert!(matches!(inner_a.as_ref(), CoreTerm::App(_, _)),
-        "outer arg₀ should be Succ(Zero) literal");
+    assert!(
+        matches!(inner_a.as_ref(), CoreTerm::App(_, _)),
+        "outer arg₀ should be Succ(Zero) literal"
+    );
     // outer_a is the recursor-call image: App(App(case_succ, Zero), case_zero)
     let CoreTerm::App(rec_f, rec_a) = outer_a.as_ref() else {
-        panic!("outer arg should be the recursor-call β-result, got {:?}", outer_a.as_ref());
+        panic!(
+            "outer arg should be the recursor-call β-result, got {:?}",
+            outer_a.as_ref()
+        );
     };
-    let CoreTerm::App(rec_f_inner, rec_f_arg) = rec_f.as_ref() else { panic!(); };
+    let CoreTerm::App(rec_f_inner, rec_f_arg) = rec_f.as_ref() else {
+        panic!();
+    };
     assert!(matches!(rec_f_inner.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_succ"));
     assert!(matches!(rec_f_arg.as_ref(), CoreTerm::Var(n) if n.as_str() == "Zero"));
     assert!(matches!(rec_a.as_ref(), CoreTerm::Var(n) if n.as_str() == "case_zero"));

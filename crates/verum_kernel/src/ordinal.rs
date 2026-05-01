@@ -113,12 +113,8 @@ impl Ordinal {
                 k: *k,
                 n: n.saturating_add(1),
             },
-            Ordinal::OmegaSquared => {
-                Ordinal::OmegaSquaredPlus(Box::new(Ordinal::Finite(1)))
-            }
-            Ordinal::OmegaSquaredPlus(inner) => {
-                Ordinal::OmegaSquaredPlus(Box::new(inner.succ()))
-            }
+            Ordinal::OmegaSquared => Ordinal::OmegaSquaredPlus(Box::new(Ordinal::Finite(1))),
+            Ordinal::OmegaSquaredPlus(inner) => Ordinal::OmegaSquaredPlus(Box::new(inner.succ())),
             Ordinal::OmegaPow(_e) => {
                 // ω^e has successor ω^e + 1 — represented as Sup with
                 // the +1 step. Underscore-prefixed because the
@@ -169,8 +165,8 @@ impl Ordinal {
 
             // Finite vs anything (after Sup is handled).
             (Finite(a), Finite(b)) => a < b,
-            (Finite(_), _) => true,           // every finite < every transfinite
-            (_, Finite(_)) => false,          // no transfinite < finite
+            (Finite(_), _) => true,  // every finite < every transfinite
+            (_, Finite(_)) => false, // no transfinite < finite
 
             // ω vs others.
             (Omega, Omega) => false,
@@ -509,24 +505,15 @@ mod tests {
     #[test]
     fn next_inaccessible_omega_ascends_to_kappa_0() {
         assert_eq!(Ordinal::Omega.next_inaccessible(), Ordinal::Kappa(0));
-        assert_eq!(
-            Ordinal::OmegaSquared.next_inaccessible(),
-            Ordinal::Kappa(0)
-        );
-        assert_eq!(
-            Ordinal::OmegaPow(7).next_inaccessible(),
-            Ordinal::Kappa(0)
-        );
+        assert_eq!(Ordinal::OmegaSquared.next_inaccessible(), Ordinal::Kappa(0));
+        assert_eq!(Ordinal::OmegaPow(7).next_inaccessible(), Ordinal::Kappa(0));
     }
 
     #[test]
     fn next_inaccessible_climbs_kappa_tower() {
         assert_eq!(Ordinal::Kappa(0).next_inaccessible(), Ordinal::Kappa(1));
         assert_eq!(Ordinal::Kappa(1).next_inaccessible(), Ordinal::Kappa(2));
-        assert_eq!(
-            Ordinal::Kappa(7).next_inaccessible(),
-            Ordinal::Kappa(8)
-        );
+        assert_eq!(Ordinal::Kappa(7).next_inaccessible(), Ordinal::Kappa(8));
     }
 
     #[test]
@@ -580,7 +567,7 @@ mod tests {
     fn is_regular_classification() {
         // Successor ordinals: regular.
         assert!(Ordinal::Finite(1).is_regular());
-        assert!(!Ordinal::Finite(0).is_regular());   // 0 is not regular by convention
+        assert!(!Ordinal::Finite(0).is_regular()); // 0 is not regular by convention
         assert!(Ordinal::OmegaPlus(1).is_regular());
         // ω: regular.
         assert!(Ordinal::Omega.is_regular());
@@ -609,10 +596,7 @@ mod tests {
         assert_eq!(Ordinal::Omega.render(), "ω");
         assert_eq!(Ordinal::OmegaPlus(1).render(), "ω + 1");
         assert_eq!(Ordinal::OmegaTimes(2).render(), "ω·2");
-        assert_eq!(
-            Ordinal::OmegaTimesPlus { k: 3, n: 5 }.render(),
-            "ω·3 + 5"
-        );
+        assert_eq!(Ordinal::OmegaTimesPlus { k: 3, n: 5 }.render(), "ω·3 + 5");
         assert_eq!(Ordinal::OmegaSquared.render(), "ω²");
         assert_eq!(Ordinal::OmegaPow(3).render(), "ω^3");
         assert_eq!(Ordinal::Kappa(1).render(), "κ_1");
@@ -647,7 +631,11 @@ mod tests {
 
     #[test]
     fn sup_distributes_lt() {
-        let sup = Ordinal::Sup(vec![Ordinal::Finite(2), Ordinal::Finite(5), Ordinal::Finite(10)]);
+        let sup = Ordinal::Sup(vec![
+            Ordinal::Finite(2),
+            Ordinal::Finite(5),
+            Ordinal::Finite(10),
+        ]);
         // sup < 100 iff all parts < 100
         assert!(sup.lt(&Ordinal::Finite(100)));
         // sup < 8 iff all parts < 8 — false because 10 ≥ 8

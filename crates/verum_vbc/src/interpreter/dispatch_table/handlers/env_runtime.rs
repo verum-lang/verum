@@ -30,15 +30,15 @@
 //! `permissions = ["time"]` script can't quietly mutate
 //! environment that affects child-process behaviour.
 
-use crate::interpreter::permission::{PermissionDecision, PermissionScope};
-use crate::interpreter::state::InterpreterState;
-use crate::types::TypeId;
-use crate::value::Value;
 use super::super::super::error::InterpreterResult;
 use super::heap_helpers::{
     alloc_byte_list, alloc_record_n_fields, extract_text_arg, wrap_in_variant,
 };
 use super::string_helpers::alloc_string_value;
+use crate::interpreter::permission::{PermissionDecision, PermissionScope};
+use crate::interpreter::state::InterpreterState;
+use crate::types::TypeId;
+use crate::value::Value;
 
 pub(in super::super) fn try_intercept_env_runtime(
     state: &mut InterpreterState,
@@ -298,10 +298,7 @@ fn intercept_arg(
 /// heap-string pointer). Layout matches the codegen's List
 /// representation: `[len:Value(i64)] [cap:Value(i64)] [backing_ptr:Value]`
 /// where backing is an array of Values.
-fn alloc_text_list(
-    state: &mut InterpreterState,
-    items: &[Value],
-) -> InterpreterResult<Value> {
+fn alloc_text_list(state: &mut InterpreterState, items: &[Value]) -> InterpreterResult<Value> {
     use crate::interpreter::heap::OBJECT_HEADER_SIZE;
     let len = items.len();
     let cap = if len < 16 { 16 } else { len };
@@ -310,12 +307,17 @@ fn alloc_text_list(
         .heap
         .alloc(TypeId::LIST, cap * std::mem::size_of::<Value>())?;
     state.record_allocation();
-    let backing_data = unsafe { (backing.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) as *mut Value };
+    let backing_data =
+        unsafe { (backing.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) as *mut Value };
     for (i, v) in items.iter().enumerate() {
-        unsafe { *backing_data.add(i) = *v; }
+        unsafe {
+            *backing_data.add(i) = *v;
+        }
     }
 
-    let list = state.heap.alloc(TypeId::LIST, 3 * std::mem::size_of::<Value>())?;
+    let list = state
+        .heap
+        .alloc(TypeId::LIST, 3 * std::mem::size_of::<Value>())?;
     state.record_allocation();
     let data_ptr = unsafe { (list.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) as *mut Value };
     unsafe {
@@ -325,4 +327,3 @@ fn alloc_text_list(
     }
     Ok(Value::from_ptr(list.as_ptr() as *mut u8))
 }
-

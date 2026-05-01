@@ -287,13 +287,13 @@ impl SemanticTokenProvider {
         // Handle comments (always the same)
         match kind {
             SyntaxKind::LINE_COMMENT | SyntaxKind::BLOCK_COMMENT => {
-                return Some((SemanticTokenType::Comment, 0))
+                return Some((SemanticTokenType::Comment, 0));
             }
             SyntaxKind::DOC_COMMENT | SyntaxKind::INNER_DOC_COMMENT => {
                 return Some((
                     SemanticTokenType::Comment,
                     1 << SemanticTokenModifier::Documentation as u32,
-                ))
+                ));
             }
             SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE => return None,
             _ => {}
@@ -413,14 +413,14 @@ impl SemanticTokenProvider {
         // Literals
         match kind {
             SyntaxKind::INT_LITERAL | SyntaxKind::FLOAT_LITERAL | SyntaxKind::HEX_COLOR => {
-                return Some((SemanticTokenType::Number, 0))
+                return Some((SemanticTokenType::Number, 0));
             }
             SyntaxKind::STRING_LITERAL
             | SyntaxKind::CHAR_LITERAL
             | SyntaxKind::INTERPOLATED_STRING
             | SyntaxKind::TAGGED_LITERAL => return Some((SemanticTokenType::String, 0)),
             SyntaxKind::TRUE_KW | SyntaxKind::FALSE_KW => {
-                return Some((SemanticTokenType::Keyword, 0))
+                return Some((SemanticTokenType::Keyword, 0));
             }
             _ => {}
         }

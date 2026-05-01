@@ -168,7 +168,10 @@ pub fn file_path_to_module_path(relative_file: &str) -> String {
 
     // `mod.vr` represents its parent directory: collapse the trailing
     // `.mod` segment.
-    joined.strip_suffix(".mod").map(str::to_string).unwrap_or(joined)
+    joined
+        .strip_suffix(".mod")
+        .map(str::to_string)
+        .unwrap_or(joined)
 }
 
 /// Get the global module index. Builds on first call; later calls are
@@ -176,9 +179,7 @@ pub fn file_path_to_module_path(relative_file: &str) -> String {
 /// (e.g. minimal builds without `core/`).
 pub fn get_module_index() -> Option<&'static StdlibModuleIndex> {
     MODULE_INDEX
-        .get_or_init(|| {
-            embedded_stdlib::get_embedded_stdlib().map(StdlibModuleIndex::build)
-        })
+        .get_or_init(|| embedded_stdlib::get_embedded_stdlib().map(StdlibModuleIndex::build))
         .as_ref()
 }
 
@@ -204,13 +205,18 @@ mod tests {
     #[test]
     fn file_to_module_normalises_backslashes() {
         // Defensive — archive uses forward slashes, but be safe.
-        assert_eq!(file_path_to_module_path("shell\\exec.vr"), "core.shell.exec");
+        assert_eq!(
+            file_path_to_module_path("shell\\exec.vr"),
+            "core.shell.exec"
+        );
     }
 
     #[test]
     fn index_round_trip_when_archive_present() {
         // Skip if no embedded stdlib (minimal build).
-        let Some(index) = get_module_index() else { return; };
+        let Some(index) = get_module_index() else {
+            return;
+        };
         // Round-trip a known stdlib module.
         if let Some(file) = index.module_to_file("core.shell") {
             assert_eq!(index.file_to_module(file), Some("core.shell"));

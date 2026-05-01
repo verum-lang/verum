@@ -1246,7 +1246,9 @@ mod cbgr_integration_tests {
 
         // Create mock analysis result
         let mut result = TierAnalysisResult::empty();
-        result.decisions.insert(RefId(1), verum_cbgr::tier_types::ReferenceTier::tier1());
+        result
+            .decisions
+            .insert(RefId(1), verum_cbgr::tier_types::ReferenceTier::tier1());
         result.decisions.insert(
             RefId(2),
             verum_cbgr::tier_types::ReferenceTier::tier0(
@@ -1366,8 +1368,7 @@ mod cfg_filtering_tests {
     /// Test that CodegenConfig with explicit target uses that target.
     #[test]
     fn test_codegen_config_with_target() {
-        let config = CodegenConfig::new("test")
-            .with_target(TargetConfig::linux_x86_64());
+        let config = CodegenConfig::new("test").with_target(TargetConfig::linux_x86_64());
 
         assert_eq!(config.target_config.target_os, "linux");
         assert_eq!(config.target_config.target_arch, "x86_64");
@@ -1387,8 +1388,7 @@ mod cfg_filtering_tests {
     /// Test that VbcCodegen creates cfg evaluator with target.
     #[test]
     fn test_vbc_codegen_with_target_has_evaluator() {
-        let config = CodegenConfig::new("test")
-            .with_target(TargetConfig::macos_aarch64());
+        let config = CodegenConfig::new("test").with_target(TargetConfig::macos_aarch64());
 
         let codegen = VbcCodegen::with_config(config);
         // cfg_evaluator is private, but we can verify through compilation behavior
@@ -1460,8 +1460,8 @@ mod cfg_filtering_tests {
     #[test]
     fn test_cross_compilation_codegen() {
         // Cross-compile for ARM Cortex-M4 from any host
-        let config = CodegenConfig::new("embedded_app")
-            .with_target(TargetConfig::thumbv7em_none_eabihf());
+        let config =
+            CodegenConfig::new("embedded_app").with_target(TargetConfig::thumbv7em_none_eabihf());
 
         assert_eq!(config.target_config.target_arch.as_str(), "thumbv7em");
         assert_eq!(config.target_config.target_os.as_str(), "none");

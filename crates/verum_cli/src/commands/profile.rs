@@ -333,9 +333,7 @@ fn walk_block(
                     walk_expr(v, expr_count, max_depth, current_depth);
                 }
             }
-            StmtKind::Expr { expr, .. } => {
-                walk_expr(expr, expr_count, max_depth, current_depth)
-            }
+            StmtKind::Expr { expr, .. } => walk_expr(expr, expr_count, max_depth, current_depth),
             _ => {}
         }
     }
@@ -379,7 +377,10 @@ fn walk_expr(
                 walk_expr(e, expr_count, max_depth, current_depth);
             }
         }
-        ExprKind::Match { expr: scrutinee, arms } => {
+        ExprKind::Match {
+            expr: scrutinee,
+            arms,
+        } => {
             walk_expr(scrutinee, expr_count, max_depth, current_depth);
             for arm in arms {
                 walk_expr(&arm.body, expr_count, max_depth, current_depth);
@@ -401,11 +402,16 @@ fn walk_expr(
             walk_expr(left, expr_count, max_depth, current_depth);
             walk_expr(right, expr_count, max_depth, current_depth);
         }
-        ExprKind::Unary { expr: inner, .. } => walk_expr(inner, expr_count, max_depth, current_depth),
+        ExprKind::Unary { expr: inner, .. } => {
+            walk_expr(inner, expr_count, max_depth, current_depth)
+        }
         ExprKind::Field { expr: object, .. } => {
             walk_expr(object, expr_count, max_depth, current_depth)
         }
-        ExprKind::Index { expr: object, index } => {
+        ExprKind::Index {
+            expr: object,
+            index,
+        } => {
             walk_expr(object, expr_count, max_depth, current_depth);
             walk_expr(index, expr_count, max_depth, current_depth);
         }
@@ -591,7 +597,10 @@ fn render_unified_dashboard(
     ui::section("Verum Performance Analysis");
     println!();
     if !matches!(sampling.precision, PrecisionKind::Microseconds) {
-        ui::info(&format!("Timer precision: {}", sampling.precision.description()));
+        ui::info(&format!(
+            "Timer precision: {}",
+            sampling.precision.description()
+        ));
         println!();
     }
 
@@ -787,9 +796,7 @@ fn profile_memory_no_input(format: OutputFormat) -> Result<()> {
     println!();
 
     if format == OutputFormat::Json {
-        println!(
-            "{{\"error\": \"No input file provided. Use: verum profile --memory <file>\"}}"
-        );
+        println!("{{\"error\": \"No input file provided. Use: verum profile --memory <file>\"}}");
         return Ok(());
     }
 
@@ -803,10 +810,7 @@ fn profile_memory_no_input(format: OutputFormat) -> Result<()> {
         "  {} Compile the file through the full pipeline",
         "*".dimmed()
     );
-    println!(
-        "  {} Run escape analysis on all references",
-        "*".dimmed()
-    );
+    println!("  {} Run escape analysis on all references", "*".dimmed());
     println!(
         "  {} Report tier breakdown (&T, &checked T, &unsafe T)",
         "*".dimmed()
@@ -857,10 +861,7 @@ fn profile_memory_real(format: OutputFormat, data: &ProfileData) -> Result<()> {
         .map(|(_, count)| count)
         .sum();
 
-    println!(
-        "Total references analyzed:  {}",
-        format_number(total_refs)
-    );
+    println!("Total references analyzed:  {}", format_number(total_refs));
     println!(
         "Functions analyzed:         {}",
         format_number(tier_stats.functions_analyzed)
@@ -990,11 +991,7 @@ fn print_hot_spots(data: &ProfileData) {
             func.expression_count,
             loop_indicator
         );
-        println!(
-            "   {} Recommendation:   {}",
-            "'-".dimmed(),
-            recommendation
-        );
+        println!("   {} Recommendation:   {}", "'-".dimmed(), recommendation);
         println!();
     }
 
@@ -1014,8 +1011,7 @@ fn print_reference_breakdown(tier_stats: &verum_cbgr::tier_types::TierStatistics
         println!("  No references analyzed by tier analysis.");
         println!(
             "  {}",
-            "hint: CBGR tier analysis requires references in function signatures"
-                .dimmed()
+            "hint: CBGR tier analysis requires references in function signatures".dimmed()
         );
         println!();
         return;
@@ -1066,8 +1062,10 @@ fn print_promotion_opportunities(data: &ProfileData) {
         for (_ref_id, tier) in &result.decisions {
             if let verum_cbgr::tier_types::ReferenceTier::Tier0 { reason } = tier {
                 if reason.is_recoverable() {
-                    opportunities
-                        .push((format!("ref_{}", _ref_id.0), reason.description().to_string()));
+                    opportunities.push((
+                        format!("ref_{}", _ref_id.0),
+                        reason.description().to_string(),
+                    ));
                 }
             }
         }
@@ -1080,8 +1078,7 @@ fn print_promotion_opportunities(data: &ProfileData) {
     println!("{}:", "Promotion Opportunities".bold());
 
     // Group by reason for concise display
-    let mut by_reason: std::collections::HashMap<String, usize> =
-        std::collections::HashMap::new();
+    let mut by_reason: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     for (_, reason) in &opportunities {
         *by_reason.entry(reason.clone()).or_insert(0) += 1;
     }
@@ -1091,12 +1088,7 @@ fn print_promotion_opportunities(data: &ProfileData) {
     sorted_reasons.sort_by(|a, b| b.1.cmp(&a.1));
 
     for (reason, count) in &sorted_reasons {
-        println!(
-            "  {} {} reference(s): {}",
-            "*".yellow(),
-            count,
-            reason
-        );
+        println!("  {} {} reference(s): {}", "*".yellow(), count, reason);
     }
     println!(
         "  {}",
@@ -1146,10 +1138,7 @@ fn profile_memory_json(data: &ProfileData) -> Result<()> {
         "  \"functions_analyzed\": {},",
         tier_stats.functions_analyzed
     );
-    println!(
-        "  \"promotion_rate\": {:.4},",
-        tier_stats.promotion_rate()
-    );
+    println!("  \"promotion_rate\": {:.4},", tier_stats.promotion_rate());
     println!(
         "  \"estimated_savings_ns\": {},",
         tier_stats.estimated_savings_ns
@@ -1168,8 +1157,13 @@ fn profile_memory_json(data: &ProfileData) -> Result<()> {
         };
         println!(
             "    {{ \"name\": \"{}\", \"managed_refs\": {}, \"checked_refs\": {}, \"unsafe_refs\": {}, \"expressions\": {}, \"loop_depth\": {} }}{}",
-            func.name, func.cbgr_refs, func.checked_refs, func.unsafe_refs,
-            func.expression_count, func.max_loop_depth, comma
+            func.name,
+            func.cbgr_refs,
+            func.checked_refs,
+            func.unsafe_refs,
+            func.expression_count,
+            func.max_loop_depth,
+            comma
         );
     }
     println!("  ]");
@@ -1228,8 +1222,7 @@ fn profile_cpu(
         None => {
             println!(
                 "  {}",
-                "No input file provided. Provide a source file for real phase timings:"
-                    .yellow()
+                "No input file provided. Provide a source file for real phase timings:".yellow()
             );
             println!("    verum profile --cpu your_program.vr");
         }
@@ -1283,10 +1276,7 @@ fn profile_cache(format: OutputFormat, data: Option<&ProfileData>) -> Result<()>
                 profile_data.tier_analyses.len()
             );
             println!("    Total refs tracked:  {}", tier_stats.total_refs);
-            println!(
-                "    Tier 1 promotions:   {}",
-                tier_stats.tier1_count
-            );
+            println!("    Tier 1 promotions:   {}", tier_stats.tier1_count);
             println!();
 
             let report = &profile_data.compilation_report;
@@ -1310,8 +1300,7 @@ fn profile_cache(format: OutputFormat, data: Option<&ProfileData>) -> Result<()>
         None => {
             println!(
                 "  {}",
-                "No input file provided. Provide a source file for cache analysis:"
-                    .yellow()
+                "No input file provided. Provide a source file for cache analysis:".yellow()
             );
             println!("    verum profile --cache your_program.vr");
         }
@@ -1383,8 +1372,7 @@ fn profile_compilation_no_input(format: OutputFormat) -> Result<()> {
     println!();
     println!(
         "  {}",
-        "No input file provided. Provide a source file for real compilation metrics:"
-            .yellow()
+        "No input file provided. Provide a source file for real compilation metrics:".yellow()
     );
     println!("    verum profile --compilation your_program.vr");
     println!();
@@ -1450,14 +1438,8 @@ fn print_compilation_text(report: &CompilationProfileReport, precision: Precisio
         );
     }
     if report.stats.modules_compiled > 0 {
-        println!(
-            "    Modules:        {}",
-            report.stats.modules_compiled
-        );
-        println!(
-            "    Functions:      {}",
-            report.stats.functions_compiled
-        );
+        println!("    Modules:        {}", report.stats.modules_compiled);
+        println!("    Functions:      {}", report.stats.functions_compiled);
     }
     if report.total_memory_bytes > 0 {
         println!(

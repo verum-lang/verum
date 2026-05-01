@@ -55,13 +55,13 @@
 //! - Active pattern exhaustiveness: checking that user-defined active patterns cover all cases
 //! - Pattern exhaustiveness checking: ensuring match expressions cover all possible values
 
-use super::constructors::{get_type_constructors, Constructor, TypeConstructors};
-use super::matrix::{CoverageMatrix, PatternColumn, PatternRow};
-use super::witness::{generate_any_witness, Witness};
 use super::ExhaustivenessResult;
+use super::constructors::{Constructor, TypeConstructors, get_type_constructors};
+use super::matrix::{CoverageMatrix, PatternColumn, PatternRow};
+use super::witness::{Witness, generate_any_witness};
+use crate::TypeError;
 use crate::context::TypeEnv;
 use crate::ty::Type;
-use crate::TypeError;
 use std::collections::HashMap;
 use verum_common::{List, Map, Text};
 
@@ -164,7 +164,6 @@ pub fn analyze_return_type(ty: &Type, env: &TypeEnv) -> Option<TypeConstructors>
         }
 
         // (Generic types handled by the Type::Generic arm above)
-
         _ => None,
     }
 }
@@ -197,13 +196,17 @@ pub fn check_variant_pattern_exhaustiveness(
     let mut uncovered = List::new();
 
     for ctor in pattern_info.constructors.iter() {
-        if !covered_constructors.iter().any(|c| c.as_str() == ctor.name.as_str()) {
+        if !covered_constructors
+            .iter()
+            .any(|c| c.as_str() == ctor.name.as_str())
+        {
             // Generate witness for this uncovered constructor
             let witness = Witness::constructor(
                 ctor.name.clone(),
-                ctor.arg_types.iter().map(|ty| {
-                    generate_any_witness(ty, env)
-                }).collect(),
+                ctor.arg_types
+                    .iter()
+                    .map(|ty| generate_any_witness(ty, env))
+                    .collect(),
             );
             uncovered.push(witness);
         }
@@ -248,10 +251,14 @@ pub fn detect_variant_returning_match(
     if let Some(ctors) = analyze_return_type(scrutinee_ty, env) {
         // Create a synthetic pattern info for direct variant matching
         let name = match scrutinee_ty {
-            Type::Named { path, .. } => path.segments.last().map(|s| match s {
-                verum_ast::ty::PathSegment::Name(id) => Text::from(id.name.as_str()),
-                _ => Text::from("_variant"),
-            }).unwrap_or_else(|| Text::from("_variant")),
+            Type::Named { path, .. } => path
+                .segments
+                .last()
+                .map(|s| match s {
+                    verum_ast::ty::PathSegment::Name(id) => Text::from(id.name.as_str()),
+                    _ => Text::from("_variant"),
+                })
+                .unwrap_or_else(|| Text::from("_variant")),
             Type::Variant(_) => Text::from("_inline_variant"),
             _ => Text::from("_unknown"),
         };
@@ -324,7 +331,8 @@ fn collect_constructor_names(col: &PatternColumn, out: &mut List<Text>) {
 /// Check if a match has a wildcard that covers all remaining cases
 pub fn has_wildcard_coverage(rows: &[PatternRow]) -> bool {
     rows.iter().any(|row| {
-        row.columns.first()
+        row.columns
+            .first()
             .map(|col| matches!(col, PatternColumn::Wildcard) && !row.has_guard)
             .unwrap_or(false)
     })
@@ -432,7 +440,8 @@ impl ActivePatternCallTracker {
             arms.push(arm_index);
             true // Duplicate
         } else {
-            self.call_sites.insert(call_id, List::from_iter([arm_index]));
+            self.call_sites
+                .insert(call_id, List::from_iter([arm_index]));
             self.unique_calls += 1;
             false // First occurrence
         }
@@ -501,9 +510,7 @@ impl ActivePatternOptimizationHints {
 }
 
 /// Analyze a match expression for active pattern optimization opportunities
-pub fn analyze_match_for_optimization(
-    rows: &[PatternRow],
-) -> ActivePatternCallTracker {
+pub fn analyze_match_for_optimization(rows: &[PatternRow]) -> ActivePatternCallTracker {
     let mut tracker = ActivePatternCallTracker::new();
 
     for (arm_idx, row) in rows.iter().enumerate() {
@@ -523,7 +530,11 @@ fn extract_active_calls(
     tracker: &mut ActivePatternCallTracker,
 ) {
     match col {
-        PatternColumn::Active { name, is_total, bindings } => {
+        PatternColumn::Active {
+            name,
+            is_total,
+            bindings,
+        } => {
             // Create a call ID (using pattern name and a simple hash of position)
             // In a real implementation, this would hash the actual arguments
             let call_id = ActivePatternCallId::new(name.clone(), 0);
@@ -570,7 +581,11 @@ fn extract_active_calls(
         PatternColumn::Reference { inner, .. } => {
             extract_active_calls(inner, arm_idx, tracker);
         }
-        PatternColumn::Stream { head_patterns, tail, .. } => {
+        PatternColumn::Stream {
+            head_patterns,
+            tail,
+            ..
+        } => {
             for head in head_patterns.iter() {
                 extract_active_calls(head, arm_idx, tracker);
             }

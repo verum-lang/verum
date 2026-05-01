@@ -87,12 +87,19 @@ impl<'a> SendSyncDerivation<'a> {
             // 3. Named types - check for explicit implementation or auto-derive
             Type::Named { path, args } => {
                 // Known !Send types (deny-list)
-                let type_name = path.segments.last().map(|seg| match seg {
-                    verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
-                    _ => "",
-                }).unwrap_or("");
+                let type_name = path
+                    .segments
+                    .last()
+                    .map(|seg| match seg {
+                        verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
+                        _ => "",
+                    })
+                    .unwrap_or("");
 
-                if matches!(type_name, "RawPtr" | "UnsafeCell" | "Cell" | "RefCell" | "Rc") {
+                if matches!(
+                    type_name,
+                    "RawPtr" | "UnsafeCell" | "Cell" | "RefCell" | "Rc"
+                ) {
                     return false;
                 }
 
@@ -318,10 +325,14 @@ impl<'a> SendSyncDerivation<'a> {
             // 3. Named types - check for explicit implementation or auto-derive
             Type::Named { path, args } => {
                 // Known !Sync types (deny-list) — types with interior mutability
-                let type_name = path.segments.last().map(|seg| match seg {
-                    verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
-                    _ => "",
-                }).unwrap_or("");
+                let type_name = path
+                    .segments
+                    .last()
+                    .map(|seg| match seg {
+                        verum_ast::ty::PathSegment::Name(ident) => ident.name.as_str(),
+                        _ => "",
+                    })
+                    .unwrap_or("");
 
                 if matches!(type_name, "Cell" | "RefCell" | "UnsafeCell" | "Rc") {
                     return false;
@@ -344,9 +355,7 @@ impl<'a> SendSyncDerivation<'a> {
             }
 
             // 3b. Generic types (stdlib like List<T>, Maybe<T>) - check args
-            Type::Generic { name: _, args } => {
-                args.iter().all(|arg| self.is_sync(arg))
-            }
+            Type::Generic { name: _, args } => args.iter().all(|arg| self.is_sync(arg)),
 
             // 4. Function types are NOT Sync (contain environment)
             Type::Function { .. } => false,
@@ -708,7 +717,14 @@ pub fn register_standard_send_sync_impls(checker: &mut ProtocolChecker) {
     }
 
     // 3. Register for standard library types (as Named types)
-    let std_types = vec![WKT::List.as_str(), WKT::Map.as_str(), WKT::Set.as_str(), WKT::Maybe.as_str(), WKT::Result.as_str(), WKT::Heap.as_str()];
+    let std_types = vec![
+        WKT::List.as_str(),
+        WKT::Map.as_str(),
+        WKT::Set.as_str(),
+        WKT::Maybe.as_str(),
+        WKT::Result.as_str(),
+        WKT::Heap.as_str(),
+    ];
 
     for type_name in std_types {
         let ty = Type::Named {

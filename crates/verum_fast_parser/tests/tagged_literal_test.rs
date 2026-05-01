@@ -21,7 +21,9 @@ fn parse_ok(name: &str, source: &str) {
 fn parse_fail(name: &str, source: &str) {
     let parser = FastParser::new();
     let file_id = FileId::new(0);
-    if let Ok(_) = parser.parse_module_str(source, file_id) { panic!("{name}: expected parse failure but succeeded") }
+    if let Ok(_) = parser.parse_module_str(source, file_id) {
+        panic!("{name}: expected parse failure but succeeded")
+    }
 }
 
 // =============================================================================
@@ -41,7 +43,10 @@ fn test_vcs_tagged_literals_file() {
 #[test]
 fn test_b64_tagged_literal() {
     parse_ok("b64 single", r#"fn f() { let x = b64#"SGVsbG8="; }"#);
-    parse_ok("b64 multiline", r#"fn f() { let x = b64#"""SGVsbG8gV29ybGQ="""; }"#);
+    parse_ok(
+        "b64 multiline",
+        r#"fn f() { let x = b64#"""SGVsbG8gV29ybGQ="""; }"#,
+    );
 }
 
 #[test]
@@ -61,9 +66,18 @@ fn test_pct_tagged_literal() {
 
 #[test]
 fn test_tagged_triple_quote() {
-    parse_ok("json triple-quote", r#"fn f() { let x = json#"""{"key": "value"}"""; }"#);
-    parse_ok("rx triple-quote", r#"fn f() { let x = rx#"""[a-z]+\d+"""; }"#);
-    parse_ok("path triple-quote", r#"fn f() { let x = path#"""C:\Users\Name"""; }"#);
+    parse_ok(
+        "json triple-quote",
+        r#"fn f() { let x = json#"""{"key": "value"}"""; }"#,
+    );
+    parse_ok(
+        "rx triple-quote",
+        r#"fn f() { let x = rx#"""[a-z]+\d+"""; }"#,
+    );
+    parse_ok(
+        "path triple-quote",
+        r#"fn f() { let x = path#"""C:\Users\Name"""; }"#,
+    );
 }
 
 #[test]
@@ -150,7 +164,8 @@ fn test_vcs_invalid_tagged_literal() {
 
 #[test]
 fn test_vcs_unterminated_triple_quoted() {
-    let content = include_str!("../../../vcs/specs/parser/fail/lexer/unterminated_triple_quoted.vr");
+    let content =
+        include_str!("../../../vcs/specs/parser/fail/lexer/unterminated_triple_quoted.vr");
     parse_fail("unterminated_triple_quoted.vr", content);
 }
 

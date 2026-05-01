@@ -124,7 +124,10 @@ fn proof_repair_json_output_is_well_formed() {
     let suggestions = parsed["suggestions"]
         .as_array()
         .expect("suggestions must be an array");
-    assert!(!suggestions.is_empty(), "should produce at least one suggestion");
+    assert!(
+        !suggestions.is_empty(),
+        "should produce at least one suggestion"
+    );
 
     // Each suggestion must carry required fields.
     for s in suggestions {
@@ -189,7 +192,10 @@ fn proof_repair_every_kind_produces_at_least_one_suggestion() {
     // every typed failure kind we expose at the CLI surface MUST
     // return a non-empty suggestion list when invoked via `Command`.
     let cases: &[(&str, &[(&str, &str)])] = &[
-        ("refine-depth", &[("refined_type", "X"), ("predicate_depth", "ω")]),
+        (
+            "refine-depth",
+            &[("refined_type", "X"), ("predicate_depth", "ω")],
+        ),
         (
             "positivity",
             &[
@@ -200,9 +206,15 @@ fn proof_repair_every_kind_produces_at_least_one_suggestion() {
         ),
         (
             "universe",
-            &[("source_universe", "Type_1"), ("expected_universe", "Type_0")],
+            &[
+                ("source_universe", "Type_1"),
+                ("expected_universe", "Type_0"),
+            ],
         ),
-        ("fwax-not-prop", &[("axiom_name", "ax"), ("body_sort", "Type")]),
+        (
+            "fwax-not-prop",
+            &[("axiom_name", "ax"), ("body_sort", "Type")],
+        ),
         ("adjunction", &[("side", "unit")]),
         ("type-mismatch", &[("expected", "Int"), ("actual", "Bool")]),
         ("unbound-name", &[("name", "foo")]),
@@ -214,7 +226,10 @@ fn proof_repair_every_kind_produces_at_least_one_suggestion() {
                 ("goal", "B"),
             ],
         ),
-        ("tactic-open", &[("tactic", "lia"), ("reason", "non-trivial")]),
+        (
+            "tactic-open",
+            &[("tactic", "lia"), ("reason", "non-trivial")],
+        ),
     ];
 
     for (kind, fields) in cases {

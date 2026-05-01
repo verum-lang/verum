@@ -23,11 +23,16 @@ fn run(args: &[&str]) -> Output {
 #[test]
 fn batch_inline_commands_succeed() {
     let out = run(&[
-        "proof-repl", "batch",
-        "--theorem", "thm",
-        "--goal", "P",
-        "--cmd", "intro",
-        "--cmd", "auto",
+        "proof-repl",
+        "batch",
+        "--theorem",
+        "thm",
+        "--goal",
+        "P",
+        "--cmd",
+        "intro",
+        "--cmd",
+        "auto",
     ]);
     assert!(
         out.status.success(),
@@ -43,11 +48,16 @@ fn batch_inline_commands_succeed() {
 #[test]
 fn batch_with_lemma_apply_succeeds() {
     let out = run(&[
-        "proof-repl", "batch",
-        "--theorem", "thm",
-        "--goal", "P",
-        "--lemma", "foo_lemma:::P",
-        "--cmd", "apply foo_lemma",
+        "proof-repl",
+        "batch",
+        "--theorem",
+        "thm",
+        "--goal",
+        "P",
+        "--lemma",
+        "foo_lemma:::P",
+        "--cmd",
+        "apply foo_lemma",
     ]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -57,14 +67,22 @@ fn batch_with_lemma_apply_succeeds() {
 #[test]
 fn batch_undo_redo_navigation() {
     let out = run(&[
-        "proof-repl", "batch",
-        "--theorem", "thm",
-        "--goal", "P",
-        "--cmd", "intro",
-        "--cmd", "auto",
-        "--cmd", "undo",
-        "--cmd", "redo",
-        "--cmd", "status",
+        "proof-repl",
+        "batch",
+        "--theorem",
+        "thm",
+        "--goal",
+        "P",
+        "--cmd",
+        "intro",
+        "--cmd",
+        "auto",
+        "--cmd",
+        "undo",
+        "--cmd",
+        "redo",
+        "--cmd",
+        "status",
     ]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -76,10 +94,14 @@ fn batch_undo_redo_navigation() {
 #[test]
 fn batch_hint_returns_suggestions() {
     let out = run(&[
-        "proof-repl", "batch",
-        "--theorem", "thm",
-        "--goal", "P",
-        "--cmd", "hint",
+        "proof-repl",
+        "batch",
+        "--theorem",
+        "thm",
+        "--goal",
+        "P",
+        "--cmd",
+        "hint",
     ]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -90,11 +112,16 @@ fn batch_hint_returns_suggestions() {
 #[test]
 fn batch_visualise_emits_dot() {
     let out = run(&[
-        "proof-repl", "batch",
-        "--theorem", "thm",
-        "--goal", "P",
-        "--cmd", "intro",
-        "--cmd", "visualise",
+        "proof-repl",
+        "batch",
+        "--theorem",
+        "thm",
+        "--goal",
+        "P",
+        "--cmd",
+        "intro",
+        "--cmd",
+        "visualise",
     ]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -105,16 +132,16 @@ fn batch_visualise_emits_dot() {
 fn batch_reads_commands_from_file() {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("script.repl");
-    fs::write(
-        &path,
-        "# header comment\nintro\n\nauto\nstatus\n",
-    )
-    .unwrap();
+    fs::write(&path, "# header comment\nintro\n\nauto\nstatus\n").unwrap();
     let out = run(&[
-        "proof-repl", "batch",
-        "--theorem", "thm",
-        "--goal", "P",
-        "--commands", path.to_str().unwrap(),
+        "proof-repl",
+        "batch",
+        "--theorem",
+        "thm",
+        "--goal",
+        "P",
+        "--commands",
+        path.to_str().unwrap(),
     ]);
     assert!(
         out.status.success(),
@@ -132,11 +159,16 @@ fn batch_combines_file_and_inline() {
     let path = tmp.path().join("script.repl");
     fs::write(&path, "intro\n").unwrap();
     let out = run(&[
-        "proof-repl", "batch",
-        "--theorem", "thm",
-        "--goal", "P",
-        "--commands", path.to_str().unwrap(),
-        "--cmd", "auto",
+        "proof-repl",
+        "batch",
+        "--theorem",
+        "thm",
+        "--goal",
+        "P",
+        "--commands",
+        path.to_str().unwrap(),
+        "--cmd",
+        "auto",
     ]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -151,10 +183,14 @@ fn batch_combines_file_and_inline() {
 #[test]
 fn batch_rejection_produces_non_zero_exit() {
     let out = run(&[
-        "proof-repl", "batch",
-        "--theorem", "thm",
-        "--goal", "P",
-        "--cmd", "xyz_garbage_step",
+        "proof-repl",
+        "batch",
+        "--theorem",
+        "thm",
+        "--goal",
+        "P",
+        "--cmd",
+        "xyz_garbage_step",
     ]);
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -171,12 +207,18 @@ fn batch_rejection_produces_non_zero_exit() {
 #[test]
 fn batch_json_well_formed() {
     let out = run(&[
-        "proof-repl", "batch",
-        "--theorem", "thm",
-        "--goal", "P",
-        "--cmd", "intro",
-        "--cmd", "status",
-        "--format", "json",
+        "proof-repl",
+        "batch",
+        "--theorem",
+        "thm",
+        "--goal",
+        "P",
+        "--cmd",
+        "intro",
+        "--cmd",
+        "status",
+        "--format",
+        "json",
     ]);
     assert!(out.status.success());
     let parsed: serde_json::Value =
@@ -192,13 +234,20 @@ fn batch_json_well_formed() {
 #[test]
 fn batch_json_summary_groups_by_kind() {
     let out = run(&[
-        "proof-repl", "batch",
-        "--theorem", "thm",
-        "--goal", "P",
-        "--cmd", "intro",
-        "--cmd", "status",
-        "--cmd", "hint",
-        "--format", "json",
+        "proof-repl",
+        "batch",
+        "--theorem",
+        "thm",
+        "--goal",
+        "P",
+        "--cmd",
+        "intro",
+        "--cmd",
+        "status",
+        "--cmd",
+        "hint",
+        "--format",
+        "json",
     ]);
     assert!(out.status.success());
     let parsed: serde_json::Value =
@@ -216,11 +265,16 @@ fn batch_json_summary_groups_by_kind() {
 #[test]
 fn tree_emits_dot_after_apply_sequence() {
     let out = run(&[
-        "proof-repl", "tree",
-        "--theorem", "thm",
-        "--goal", "P",
-        "--apply", "intro",
-        "--apply", "auto",
+        "proof-repl",
+        "tree",
+        "--theorem",
+        "thm",
+        "--goal",
+        "P",
+        "--apply",
+        "intro",
+        "--apply",
+        "auto",
     ]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -234,21 +288,21 @@ fn tree_emits_dot_after_apply_sequence() {
 #[test]
 fn tree_rejection_produces_non_zero_exit() {
     let out = run(&[
-        "proof-repl", "tree",
-        "--theorem", "thm",
-        "--goal", "P",
-        "--apply", "xyz_garbage",
+        "proof-repl",
+        "tree",
+        "--theorem",
+        "thm",
+        "--goal",
+        "P",
+        "--apply",
+        "xyz_garbage",
     ]);
     assert!(!out.status.success());
 }
 
 #[test]
 fn tree_with_no_steps_emits_root_only() {
-    let out = run(&[
-        "proof-repl", "tree",
-        "--theorem", "thm",
-        "--goal", "P",
-    ]);
+    let out = run(&["proof-repl", "tree", "--theorem", "thm", "--goal", "P"]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.starts_with("digraph proof_tree"));
@@ -263,26 +317,27 @@ fn tree_with_no_steps_emits_root_only() {
 
 #[test]
 fn batch_rejects_empty_theorem() {
-    let out = run(&[
-        "proof-repl", "batch", "--theorem", "", "--goal", "P",
-    ]);
+    let out = run(&["proof-repl", "batch", "--theorem", "", "--goal", "P"]);
     assert!(!out.status.success());
 }
 
 #[test]
 fn batch_rejects_empty_goal() {
-    let out = run(&[
-        "proof-repl", "batch", "--theorem", "t", "--goal", "",
-    ]);
+    let out = run(&["proof-repl", "batch", "--theorem", "t", "--goal", ""]);
     assert!(!out.status.success());
 }
 
 #[test]
 fn batch_rejects_unknown_format() {
     let out = run(&[
-        "proof-repl", "batch",
-        "--theorem", "t", "--goal", "P",
-        "--format", "yaml",
+        "proof-repl",
+        "batch",
+        "--theorem",
+        "t",
+        "--goal",
+        "P",
+        "--format",
+        "yaml",
     ]);
     assert!(!out.status.success());
 }
@@ -290,9 +345,14 @@ fn batch_rejects_unknown_format() {
 #[test]
 fn batch_rejects_malformed_lemma() {
     let out = run(&[
-        "proof-repl", "batch",
-        "--theorem", "t", "--goal", "P",
-        "--lemma", "bare-no-separator",
+        "proof-repl",
+        "batch",
+        "--theorem",
+        "t",
+        "--goal",
+        "P",
+        "--lemma",
+        "bare-no-separator",
     ]);
     assert!(!out.status.success());
 }
@@ -303,9 +363,14 @@ fn batch_command_script_error_carries_line_number() {
     let path = tmp.path().join("script.repl");
     fs::write(&path, "intro\nhint not-a-number\nauto\n").unwrap();
     let out = run(&[
-        "proof-repl", "batch",
-        "--theorem", "t", "--goal", "P",
-        "--commands", path.to_str().unwrap(),
+        "proof-repl",
+        "batch",
+        "--theorem",
+        "t",
+        "--goal",
+        "P",
+        "--commands",
+        path.to_str().unwrap(),
     ]);
     assert!(!out.status.success());
     let stderr = String::from_utf8_lossy(&out.stderr);
@@ -325,14 +390,22 @@ fn task_75_full_session_navigation_and_visualisation() {
     // must run cleanly and the final visualisation must reflect
     // the accepted history.
     let out = run(&[
-        "proof-repl", "batch",
-        "--theorem", "thm",
-        "--goal", "P",
-        "--cmd", "intro",
-        "--cmd", "auto",
-        "--cmd", "undo",
-        "--cmd", "redo",
-        "--cmd", "visualise",
+        "proof-repl",
+        "batch",
+        "--theorem",
+        "thm",
+        "--goal",
+        "P",
+        "--cmd",
+        "intro",
+        "--cmd",
+        "auto",
+        "--cmd",
+        "undo",
+        "--cmd",
+        "redo",
+        "--cmd",
+        "visualise",
     ]);
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);

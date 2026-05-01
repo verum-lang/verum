@@ -594,10 +594,7 @@ impl AsyncContextInSyncFunction {
                 self.context_name, self.function_name
             ))
             .span_label(self.usage_span.clone(), "async context used here")
-            .span_label(
-                self.function_span.clone(),
-                "in this synchronous function",
-            )
+            .span_label(self.function_span.clone(), "in this synchronous function")
             .help(format!(
                 "make the function async: `async fn {}(...)`",
                 self.function_name
@@ -605,7 +602,7 @@ impl AsyncContextInSyncFunction {
             .add_note(
                 "Async contexts require an async runtime and can only be called \
                  from async functions. Consider making this function async, or \
-                 use a synchronous alternative if available."
+                 use a synchronous alternative if available.",
             )
             .build()
     }
@@ -657,14 +654,14 @@ impl AsyncContextMethodNotAwaited {
                 ))
                 .add_note(
                     "Async context methods return a Future that must be awaited \
-                     to execute the actual operation."
+                     to execute the actual operation.",
                 );
         } else {
             builder = builder
                 .help("make the calling function async to use `.await`")
                 .add_note(
                     "Async context methods can only be called from async functions. \
-                     Either make this function async, or use a synchronous alternative."
+                     Either make this function async, or use a synchronous alternative.",
                 );
         }
 
@@ -719,13 +716,19 @@ impl SyncProviderForAsyncContext {
                 format!("{} provider for {} context", prov_kind, ctx_kind),
             )
             .help(if self.context_is_async {
-                format!("provide an async implementation for context '{}'", self.context_name)
+                format!(
+                    "provide an async implementation for context '{}'",
+                    self.context_name
+                )
             } else {
-                format!("provide a sync implementation for context '{}'", self.context_name)
+                format!(
+                    "provide a sync implementation for context '{}'",
+                    self.context_name
+                )
             })
             .add_note(
                 "Context providers must match the async/sync nature of the context. \
-                 Async contexts require async providers, and sync contexts require sync providers."
+                 Async contexts require async providers, and sync contexts require sync providers.",
             )
             .build()
     }

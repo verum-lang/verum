@@ -285,18 +285,16 @@ impl Cvc5Config {
             );
             crate::cvc5_backend::SmtLogic::ALL
         });
-        let quantifier_mode =
-            crate::cvc5_backend::QuantifierMode::from_str(&self.quantifier_mode).unwrap_or_else(
-                || {
-                    tracing::warn!(
-                        "[smt.cvc5] quantifier_mode = {:?} is not recognised — \
+        let quantifier_mode = crate::cvc5_backend::QuantifierMode::from_str(&self.quantifier_mode)
+            .unwrap_or_else(|| {
+                tracing::warn!(
+                    "[smt.cvc5] quantifier_mode = {:?} is not recognised — \
                          falling back to auto. Accepted values: auto, none, \
                          ematching, cegqi, mbqi.",
-                        self.quantifier_mode
-                    );
-                    crate::cvc5_backend::QuantifierMode::Auto
-                },
-            );
+                    self.quantifier_mode
+                );
+                crate::cvc5_backend::QuantifierMode::Auto
+            });
         crate::cvc5_backend::Cvc5Config {
             logic,
             timeout_ms: Maybe::None,
@@ -771,7 +769,10 @@ mod to_switcher_config_tests {
         assert_eq!(c.produce_proofs, false);
         assert_eq!(c.produce_unsat_cores, false);
         assert_eq!(c.preprocessing, false);
-        assert_eq!(c.quantifier_mode, crate::cvc5_backend::QuantifierMode::EMatching);
+        assert_eq!(
+            c.quantifier_mode,
+            crate::cvc5_backend::QuantifierMode::EMatching
+        );
         assert!(matches!(c.random_seed, Maybe::Some(7)));
         assert_eq!(c.verbosity, 3);
         assert!(matches!(c.timeout_ms, Maybe::None));

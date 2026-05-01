@@ -109,50 +109,47 @@
 //! ```
 
 mod engine;
-mod symbol_resolver;
+mod hot_reload;
 mod incremental;
 mod repl;
-mod hot_reload;
+mod symbol_resolver;
 
 // Re-export engine types
 pub use engine::{
-    // Core types
-    JitEngine,
-    JitConfig,
-    JitStats,
-    JitStatsSummary,
-    JitCompiler,
-
+    // Callback system
+    CallbackRegistry,
+    // Compiled function handle
+    CompiledFunction,
     // Type-safe calling traits
     JitArg,
     JitArgs,
-    JitReturn,
-
-    // Callback system
-    CallbackRegistry,
     JitCallback,
 
-    // Compiled function handle
-    CompiledFunction,
+    JitCompiler,
+
+    JitConfig,
+    // Core types
+    JitEngine,
+    JitReturn,
+
+    JitStats,
+    JitStatsSummary,
 };
 
 // Re-export symbol resolver types
 pub use symbol_resolver::{
-    // Core resolver
-    SymbolResolver,
-    SymbolResolverStats,
-
+    FfiType,
+    SymbolCategory,
     // Symbol information
     SymbolInfo,
     SymbolMetadata,
-    SymbolCategory,
-    FfiType,
+    // Core resolver
+    SymbolResolver,
+    SymbolResolverStats,
 };
 
 // Re-export incremental compilation types
 pub use incremental::{
-    // Core cache
-    IncrementalCache,
     CacheConfig,
     CacheEntry,
     CacheOptions,
@@ -161,28 +158,30 @@ pub use incremental::{
     CacheStats,
     CacheStatsSummary,
 
-    // Dependency tracking
-    DependencyTracker,
-
     // Hashing
     ContentHash,
     ContentHasher,
+    // Dependency tracking
+    DependencyTracker,
+
+    // Core cache
+    IncrementalCache,
 };
 
 // Re-export REPL types
 pub use repl::{
-    // Session management
-    ReplSession,
-    ReplConfig,
-    SessionId,
-
+    Binding,
     // Evaluation
     EvalResult,
-    Binding,
     HistoryEntry,
 
     // Commands
     ReplCommand,
+
+    ReplConfig,
+    // Session management
+    ReplSession,
+    SessionId,
 
     // Statistics
     SessionStats,
@@ -191,18 +190,18 @@ pub use repl::{
 
 // Re-export hot reload types
 pub use hot_reload::{
-    // Core reloader
-    HotReloader,
-    HotReloadConfig,
+    FunctionVersion,
 
     // Function management
     HotFunction,
-    FunctionVersion,
+    HotReloadConfig,
 
     // Statistics
     HotReloadStats,
     HotReloadStatsSummary,
 
+    // Core reloader
+    HotReloader,
     // Signature helpers
     SignatureHasher,
 };

@@ -119,7 +119,9 @@ fn jmp_offset_can_express_beyond_2_pow_16() {
     // We don't actually execute this jump (it would require a bytecode
     // function with 100K+ instructions); we only assert that the type
     // system accepts the i32 value.
-    let big_jmp = Instruction::Jmp { offset: 100_000_i32 };
+    let big_jmp = Instruction::Jmp {
+        offset: 100_000_i32,
+    };
     match big_jmp {
         Instruction::Jmp { offset } => {
             assert_eq!(offset, 100_000);
@@ -134,7 +136,9 @@ fn jmp_offset_can_express_beyond_2_pow_16() {
 
 #[test]
 fn jmp_offset_can_express_negative_beyond_2_pow_15() {
-    let big_back_jmp = Instruction::Jmp { offset: -100_000_i32 };
+    let big_back_jmp = Instruction::Jmp {
+        offset: -100_000_i32,
+    };
     match big_back_jmp {
         Instruction::Jmp { offset } => {
             assert_eq!(offset, -100_000);
@@ -221,10 +225,7 @@ fn long_basic_block_chain_roundtrips() {
     for i in 0..N {
         let dst = Reg(((i % 16383) + 1) as u16);
         let src = Reg((i % 16383) as u16);
-        bytecode::encode_instruction(
-            &Instruction::Mov { dst, src },
-            &mut encoded,
-        );
+        bytecode::encode_instruction(&Instruction::Mov { dst, src }, &mut encoded);
     }
 
     // Walk the buffer and count successfully-decoded instructions.
@@ -286,7 +287,10 @@ fn deserialize_validated_rejects_call_with_oor_function_id() {
         &Instruction::Call {
             dst: Reg(0),
             func_id: 99,
-            args: RegRange { start: Reg(0), count: 0 },
+            args: RegRange {
+                start: Reg(0),
+                count: 0,
+            },
         },
         &mut bc,
     );
@@ -310,11 +314,7 @@ fn deserialize_validated_rejects_call_with_oor_function_id() {
     let has_err = matches!(&err, VbcError::InvalidFunctionId(99))
         || matches!(&err, VbcError::MultipleErrors(errs)
             if errs.iter().any(|e| matches!(e, VbcError::InvalidFunctionId(99))));
-    assert!(
-        has_err,
-        "expected InvalidFunctionId(99), got: {:?}",
-        err
-    );
+    assert!(has_err, "expected InvalidFunctionId(99), got: {:?}", err);
 }
 
 #[test]
@@ -330,8 +330,7 @@ fn deserialize_validated_accepts_well_formed_module() {
     let mut owned: VbcModule = (*module).clone();
     owned.header.function_table_count = owned.functions.len() as u32;
     let bytes = serialize_module(&owned).expect("serialize");
-    deserialize_module_validated(&bytes)
-        .expect("well-formed module must validate cleanly");
+    deserialize_module_validated(&bytes).expect("well-formed module must validate cleanly");
 }
 
 #[test]
@@ -354,7 +353,10 @@ fn interpreter_try_new_validated_rejects_invalid_module() {
         &Instruction::Call {
             dst: Reg(0),
             func_id: 99,
-            args: RegRange { start: Reg(0), count: 0 },
+            args: RegRange {
+                start: Reg(0),
+                count: 0,
+            },
         },
         &mut bc,
     );
@@ -432,8 +434,7 @@ fn deserialize_validated_rejects_content_hash_tampering() {
     let mut bytes = serialize_module(&module).expect("serialize");
 
     // Sanity: untampered bytes pass the validating load.
-    deserialize_module_validated(&bytes)
-        .expect("untampered bytes must validate");
+    deserialize_module_validated(&bytes).expect("untampered bytes must validate");
 
     // Tamper a single byte in the post-header region — flip the
     // last byte (typically inside the extensions / source-map area).
@@ -460,7 +461,8 @@ fn deserialize_validated_rejects_content_hash_tampering() {
         }
         Err(VbcError::MultipleErrors(errs)) => {
             assert!(
-                errs.iter().any(|e| matches!(e, VbcError::ContentHashMismatch { .. })),
+                errs.iter()
+                    .any(|e| matches!(e, VbcError::ContentHashMismatch { .. })),
                 "MultipleErrors must contain ContentHashMismatch, got: {:?}",
                 errs,
             );

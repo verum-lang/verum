@@ -31,15 +31,24 @@ fn main() {
     // Get LLVM configuration (llvm-config on Unix, llvm-config.exe on Windows)
     let llvm_config = if cfg!(windows) {
         let exe_path = llvm_dir.join("bin/llvm-config.exe");
-        if exe_path.exists() { exe_path } else { llvm_dir.join("bin/llvm-config") }
+        if exe_path.exists() {
+            exe_path
+        } else {
+            llvm_dir.join("bin/llvm-config")
+        }
     } else {
         llvm_dir.join("bin/llvm-config")
     };
     if !llvm_config.exists() {
-        let build_cmd = if cfg!(windows) { r#"cd llvm && .\build.bat"# } else { "cd llvm && ./build.sh" };
+        let build_cmd = if cfg!(windows) {
+            r#"cd llvm && .\build.bat"#
+        } else {
+            "cd llvm && ./build.sh"
+        };
         panic!(
             "llvm-config not found at {}. Run: {}",
-            llvm_config.display(), build_cmd
+            llvm_config.display(),
+            build_cmd
         );
     }
 
@@ -136,7 +145,11 @@ Alternatively, set VERUM_LLVM_DIR to override:
 fn verify_llvm_version(llvm_dir: &Path) {
     let llvm_config = if cfg!(windows) {
         let exe_path = llvm_dir.join("bin/llvm-config.exe");
-        if exe_path.exists() { exe_path } else { llvm_dir.join("bin/llvm-config") }
+        if exe_path.exists() {
+            exe_path
+        } else {
+            llvm_dir.join("bin/llvm-config")
+        }
     } else {
         llvm_dir.join("bin/llvm-config")
     };
@@ -205,23 +218,23 @@ const MLIR_LIB_SKIP_FRAGMENTS: &[&str] = &[];
 /// matched against the stripped library name (`LLVMFoo`) as an exact
 /// prefix — e.g. `LLVMXRay` matches `LLVMXRay` but not `LLVMCore`.
 const LLVM_LIB_SKIP_EXACT: &[&str] = &[
-    "LLVMXRay",                        // runtime tracing
-    "LLVMCoverage",                    // code-coverage tooling
-    "LLVMLineEditor",                  // REPL line editor
-    "LLVMLibDriver",                   // lib.exe driver shim
-    "LLVMDlltoolDriver",               // Windows dlltool driver
-    "LLVMWindowsManifest",             // Windows manifest compiler
-    "LLVMTextAPIBinaryReader",         // Apple .tbd reader
-    "LLVMTelemetry",                   // telemetry hooks
-    "LLVMSymbolize",                   // addr2line / llvm-symbolizer
-    "LLVMDebugInfoPDB",                // Windows PDB debuginfo
-    "LLVMDebugInfoMSF",                // Windows MSF container
-    "LLVMDebugInfoLogicalView",        // specialised debug-info viewer
-    "LLVMDebugInfoBTF",                // BPF BTF debug format
-    "LLVMDebugInfoGSYM",               // GSYM symbolication format
-    "LLVMDWP",                         // DWARF package tool
-    "LLVMObjCopy",                     // llvm-objcopy
-    "LLVMMCA",                         // machine-code analyser
+    "LLVMXRay",                 // runtime tracing
+    "LLVMCoverage",             // code-coverage tooling
+    "LLVMLineEditor",           // REPL line editor
+    "LLVMLibDriver",            // lib.exe driver shim
+    "LLVMDlltoolDriver",        // Windows dlltool driver
+    "LLVMWindowsManifest",      // Windows manifest compiler
+    "LLVMTextAPIBinaryReader",  // Apple .tbd reader
+    "LLVMTelemetry",            // telemetry hooks
+    "LLVMSymbolize",            // addr2line / llvm-symbolizer
+    "LLVMDebugInfoPDB",         // Windows PDB debuginfo
+    "LLVMDebugInfoMSF",         // Windows MSF container
+    "LLVMDebugInfoLogicalView", // specialised debug-info viewer
+    "LLVMDebugInfoBTF",         // BPF BTF debug format
+    "LLVMDebugInfoGSYM",        // GSYM symbolication format
+    "LLVMDWP",                  // DWARF package tool
+    "LLVMObjCopy",              // llvm-objcopy
+    "LLVMMCA",                  // machine-code analyser
 ];
 
 fn mlir_lib_is_skipped(name: &str) -> bool {
@@ -345,6 +358,5 @@ fn get_system_libcpp() -> Option<&'static str> {
 }
 
 fn parse_archive_name(name: &str) -> Option<&str> {
-    name.strip_prefix("lib")
-        .and_then(|n| n.strip_suffix(".a"))
+    name.strip_prefix("lib").and_then(|n| n.strip_suffix(".a"))
 }

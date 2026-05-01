@@ -221,7 +221,10 @@ fn make_type_result(name: &Text, protocols: &List<Text>, attributes: &List<Text>
 fn make_usage_result(context: &Text, span_start: u32, span_end: u32) -> ConstValue {
     let mut result = OrderedMap::new();
     result.insert(Text::from("context"), ConstValue::Text(context.clone()));
-    result.insert(Text::from("span_start"), ConstValue::Int(span_start as i128));
+    result.insert(
+        Text::from("span_start"),
+        ConstValue::Int(span_start as i128),
+    );
     result.insert(Text::from("span_end"), ConstValue::Int(span_end as i128));
     result.insert(
         Text::from("span"),
@@ -348,8 +351,7 @@ fn meta_search_find_functions_in_module(
                 // Avoid duplicates: check if already in results by name
                 let already_found = results.iter().any(|r| {
                     if let ConstValue::Map(m) = r {
-                        m.get(&Text::from("name"))
-                            == Some(&ConstValue::Text(full_name.clone()))
+                        m.get(&Text::from("name")) == Some(&ConstValue::Text(full_name.clone()))
                     } else {
                         false
                     }
@@ -516,18 +518,13 @@ fn meta_search_find_types_in_module(
                 let full_name = Text::from(format!("{}.{}", module, item.name));
                 let already_found = results.iter().any(|r| {
                     if let ConstValue::Map(m) = r {
-                        m.get(&Text::from("name"))
-                            == Some(&ConstValue::Text(full_name.clone()))
+                        m.get(&Text::from("name")) == Some(&ConstValue::Text(full_name.clone()))
                     } else {
                         false
                     }
                 });
                 if !already_found {
-                    results.push(make_type_result(
-                        &full_name,
-                        &List::new(),
-                        &List::new(),
-                    ));
+                    results.push(make_type_result(&full_name, &List::new(), &List::new()));
                 }
             }
         }
@@ -740,8 +737,14 @@ mod tests {
         ctx.usage_index.insert(
             Text::from("math.add"),
             List::from(vec![
-                UsageInfo::new(Span::new(10, 20, verum_ast::FileId::new(0)), Text::from("call")),
-                UsageInfo::new(Span::new(50, 60, verum_ast::FileId::new(0)), Text::from("call")),
+                UsageInfo::new(
+                    Span::new(10, 20, verum_ast::FileId::new(0)),
+                    Text::from("call"),
+                ),
+                UsageInfo::new(
+                    Span::new(50, 60, verum_ast::FileId::new(0)),
+                    Text::from("call"),
+                ),
             ]),
         );
 
@@ -761,17 +764,14 @@ mod tests {
         math_module
             .public_items
             .push(ItemInfo::new(Text::from("Vector"), ItemKind::Type));
-        math_module
-            .dependencies
-            .push(Text::from("core"));
+        math_module.dependencies.push(Text::from("core"));
 
         let mut io_module = ModuleInfo::new();
         io_module
             .public_items
             .push(ItemInfo::new(Text::from("print"), ItemKind::Function));
 
-        ctx.module_registry
-            .insert(Text::from("math"), math_module);
+        ctx.module_registry.insert(Text::from("math"), math_module);
         ctx.module_registry.insert(Text::from("io"), io_module);
 
         ctx

@@ -18,7 +18,9 @@ fn infer_type(code: &str) -> String {
     let expr = parser.parse_expr().expect("Failed to parse");
 
     let mut checker = create_checker();
-    let result = checker.infer(&expr, InferMode::Synth).expect("Failed to infer type");
+    let result = checker
+        .infer(&expr, InferMode::Synth)
+        .expect("Failed to infer type");
     format!("{}", result.ty)
 }
 
@@ -299,8 +301,16 @@ fn test_alternative_regex_syntax() {
     let ty2 = infer_type(r#"re#"[a-z]+""#);
     let ty3 = infer_type(r#"regex#"[a-z]+""#);
 
-    assert!(ty1.contains("Regex"), "rx# should return Regex, got: {}", ty1);
-    assert!(ty2.contains("Regex"), "re# should return Regex, got: {}", ty2);
+    assert!(
+        ty1.contains("Regex"),
+        "rx# should return Regex, got: {}",
+        ty1
+    );
+    assert!(
+        ty2.contains("Regex"),
+        "re# should return Regex, got: {}",
+        ty2
+    );
     assert!(
         ty3.contains("Regex"),
         "regex# should return Regex, got: {}",

@@ -189,12 +189,7 @@ impl RichRenderer {
     /// Render the synthetic-expansion chain as a note-style line.
     /// Format: ` = note: in @derive expansion → in macro expansion`
     /// (chain ordered leaf-to-root). Closes #287.
-    fn render_expansion_chain(
-        &self,
-        diagnostic: &Diagnostic,
-        output: &mut String,
-        indent: usize,
-    ) {
+    fn render_expansion_chain(&self, diagnostic: &Diagnostic, output: &mut String, indent: usize) {
         let chain = diagnostic.expansion_chain();
         if chain.is_empty() {
             return;

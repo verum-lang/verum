@@ -89,39 +89,39 @@ pub use diagnostics::{
 };
 pub use matrix::{CoverageMatrix, LiteralPattern, PatternColumn, PatternRow};
 pub use ranges::{
-    Interval, IntervalSet, RangeOverlap, RangeOverlapAnalysis,
-    analyze_range_overlaps, describe_range_overlap, find_uncovered_ranges,
-    format_range_overlap_error, ranges_cover_type, suggest_uncovered_ranges,
+    Interval, IntervalSet, RangeOverlap, RangeOverlapAnalysis, analyze_range_overlaps,
+    describe_range_overlap, find_uncovered_ranges, format_range_overlap_error, ranges_cover_type,
+    suggest_uncovered_ranges,
 };
 pub use usefulness::is_useful;
 pub use witness::{Witness, WitnessLiteral, generate_any_witness, generate_uncovered_witness};
 
 // Advanced features exports
-pub use cache::{
-    CacheConfig, CacheKey, CacheStats, CachedResult, ExhaustivenessCache, clear_global_cache,
-    global_cache, global_cache_stats,
-};
-pub use refinement::{
-    RefinementConstraint, RefinementContext, check_exhaustiveness_with_refinement,
-    extract_refinement,
-};
-pub use smt::{
-    GuardedPattern, GuardVerifier, SmtGuardConfig, SmtGuardResult, SmtValue, SmtWitness,
-};
-pub use dependent::{
-    DependentExhaustivenessChecker, DependentExhaustivenessConfig, DependentExhaustivenessResult,
-    IndexRefinement, check_dependent_match_unified, check_exhaustiveness_unified,
-};
 pub use active_exhaustiveness::{
     ActivePatternCallId, ActivePatternCallTracker, ActivePatternOptimizationHints,
     ActivePatternRegistry, VariantReturningPattern, analyze_match_for_optimization,
     analyze_return_type, check_active_pattern_in_matrix, check_variant_pattern_exhaustiveness,
     detect_variant_returning_match, extract_covered_constructors,
 };
+pub use cache::{
+    CacheConfig, CacheKey, CacheStats, CachedResult, ExhaustivenessCache, clear_global_cache,
+    global_cache, global_cache_stats,
+};
+pub use dependent::{
+    DependentExhaustivenessChecker, DependentExhaustivenessConfig, DependentExhaustivenessResult,
+    IndexRefinement, check_dependent_match_unified, check_exhaustiveness_unified,
+};
+pub use refinement::{
+    RefinementConstraint, RefinementContext, check_exhaustiveness_with_refinement,
+    extract_refinement,
+};
+pub use smt::{
+    GuardVerifier, GuardedPattern, SmtGuardConfig, SmtGuardResult, SmtValue, SmtWitness,
+};
 
+use crate::TypeError;
 use crate::context::TypeEnv;
 use crate::ty::Type;
-use crate::TypeError;
 use verum_ast::pattern::Pattern;
 use verum_common::{List, Text};
 
@@ -231,7 +231,12 @@ pub fn check_exhaustiveness(
     scrutinee_ty: &Type,
     env: &TypeEnv,
 ) -> Result<ExhaustivenessResult, TypeError> {
-    check_exhaustiveness_with_options(patterns, scrutinee_ty, env, &ExhaustivenessConfig::default())
+    check_exhaustiveness_with_options(
+        patterns,
+        scrutinee_ty,
+        env,
+        &ExhaustivenessConfig::default(),
+    )
 }
 
 /// Check exhaustiveness with custom configuration
@@ -316,7 +321,8 @@ pub fn check_exhaustiveness_with_options<'a>(
                     });
                 } else if !smt_result.uncovered_witnesses.is_empty() {
                     // SMT found uncovered cases - convert to witnesses
-                    let witnesses: List<_> = smt_result.uncovered_witnesses
+                    let witnesses: List<_> = smt_result
+                        .uncovered_witnesses
                         .iter()
                         .map(|smt_witness| {
                             witness::Witness::from_smt_witness(smt_witness, scrutinee_ty)
@@ -360,10 +366,7 @@ pub fn check_exhaustiveness_with_options<'a>(
     // every pattern carries a guard. Before this wire-up the
     // field on the main mod.rs path was inert — only the
     // dependent path emitted the warning. Now both paths agree.
-    if all_guarded
-        && !matrix.rows.is_empty()
-        && config.warn_all_guarded
-    {
+    if all_guarded && !matrix.rows.is_empty() && config.warn_all_guarded {
         warnings.push(ExhaustivenessWarning::all_guarded(None));
     }
 
@@ -440,8 +443,12 @@ fn extract_guarded_patterns(
         // row level. `has_guard && guard.is_none()` rows are nested-
         // guard rows that the SMT path can't represent; they fall
         // through to the conservative verdict path.
-        let Some(ref guard_expr) = row.guard else { continue };
-        let Some(first) = row.columns.first() else { continue };
+        let Some(ref guard_expr) = row.guard else {
+            continue;
+        };
+        let Some(first) = row.columns.first() else {
+            continue;
+        };
 
         // Populate `bound_vars` from the row's collected pattern
         // bindings. The SMT translator's `bound_vars.contains_key(name)`
@@ -702,7 +709,11 @@ fn collect_numeric_coverage(
         PatternColumn::Literal(LiteralPattern::Int(n)) => {
             values.insert(*n);
         }
-        PatternColumn::Range { start, end, inclusive } => {
+        PatternColumn::Range {
+            start,
+            end,
+            inclusive,
+        } => {
             let s = start.unwrap_or(i128::MIN);
             let e = if *inclusive {
                 end.unwrap_or(i128::MAX)
@@ -772,10 +783,7 @@ fn find_uncovered_tuple(
 
     // Use the standard constructor-based approach.
     // get_type_constructors for Tuple returns a single constructor "()" with element args.
-    let constructors = constructors::get_type_constructors(
-        &Type::Tuple(elements.clone()),
-        env,
-    );
+    let constructors = constructors::get_type_constructors(&Type::Tuple(elements.clone()), env);
 
     let mut uncovered = List::new();
     for ctor in constructors.iter() {
@@ -836,7 +844,11 @@ fn is_specialized_matrix_exhaustive(
 
     // Check if there's a full wildcard row (all remaining columns are wildcards)
     let has_full_wildcard = matrix.rows.iter().any(|row| {
-        !row.has_guard && row.columns.iter().all(|c| matches!(c, PatternColumn::Wildcard))
+        !row.has_guard
+            && row
+                .columns
+                .iter()
+                .all(|c| matches!(c, PatternColumn::Wildcard))
     });
     if has_full_wildcard {
         return Ok(true);
@@ -852,7 +864,10 @@ fn is_specialized_matrix_exhaustive(
     if first_ctors.is_infinite {
         let has_col0_wildcard = matrix.rows.iter().any(|row| {
             !row.has_guard
-                && row.columns.first().is_some_and(|c| matches!(c, PatternColumn::Wildcard))
+                && row
+                    .columns
+                    .first()
+                    .is_some_and(|c| matches!(c, PatternColumn::Wildcard))
         });
         if !has_col0_wildcard {
             return Ok(false);
@@ -862,7 +877,11 @@ fn is_specialized_matrix_exhaustive(
             .rows
             .iter()
             .filter_map(|row| {
-                if row.columns.first().is_some_and(|c| matches!(c, PatternColumn::Wildcard)) {
+                if row
+                    .columns
+                    .first()
+                    .is_some_and(|c| matches!(c, PatternColumn::Wildcard))
+                {
                     let rest_cols: List<PatternColumn> =
                         row.columns.iter().skip(1).cloned().collect();
                     Some(
@@ -904,10 +923,7 @@ fn is_specialized_matrix_exhaustive(
 /// Specialize the first column of a matrix for a given constructor.
 /// Returns a new matrix where matching rows have their first column replaced
 /// by the constructor's argument patterns, and the remaining columns preserved.
-fn specialize_first_column(
-    matrix: &CoverageMatrix,
-    ctor: &Constructor,
-) -> CoverageMatrix {
+fn specialize_first_column(matrix: &CoverageMatrix, ctor: &Constructor) -> CoverageMatrix {
     let mut result = CoverageMatrix::new(matrix.scrutinee_ty.clone());
 
     for row in matrix.rows.iter() {
@@ -939,14 +955,12 @@ fn specialize_first_column(
                 PatternColumn::Guarded(inner) => {
                     // Recursively check inner pattern, mark as guarded
                     match inner.as_ref() {
-                        PatternColumn::Wildcard => {
-                            Some((
-                                (0..ctor.arg_types.len())
-                                    .map(|_| PatternColumn::Wildcard)
-                                    .collect(),
-                                true,
-                            ))
-                        }
+                        PatternColumn::Wildcard => Some((
+                            (0..ctor.arg_types.len())
+                                .map(|_| PatternColumn::Wildcard)
+                                .collect(),
+                            true,
+                        )),
                         PatternColumn::Constructor { name, args } if name == &ctor.name => {
                             Some((args.clone(), true))
                         }
@@ -1010,11 +1024,9 @@ fn matches_col_ctor(col: &PatternColumn, ctor: &Constructor) -> bool {
 /// Expand a pattern column for a constructor (for first-column specialization)
 fn expand_col_ctor(col: &PatternColumn, ctor: &Constructor) -> List<PatternColumn> {
     match col {
-        PatternColumn::Wildcard => {
-            (0..ctor.arg_types.len())
-                .map(|_| PatternColumn::Wildcard)
-                .collect()
-        }
+        PatternColumn::Wildcard => (0..ctor.arg_types.len())
+            .map(|_| PatternColumn::Wildcard)
+            .collect(),
         PatternColumn::Constructor { args, .. } => args.clone(),
         PatternColumn::Literal(LiteralPattern::Bool(_)) => List::new(),
         PatternColumn::Tuple(elements) => elements.clone(),
@@ -1119,12 +1131,22 @@ mod tests {
     use verum_ast::span::Span;
     use verum_common::Heap;
 
-    fn span() -> Span { Span::dummy() }
-    fn env() -> TypeEnv { TypeEnv::default() }
+    fn span() -> Span {
+        Span::dummy()
+    }
+    fn env() -> TypeEnv {
+        TypeEnv::default()
+    }
 
-    fn pat_wildcard() -> Pattern { Pattern::wildcard(span()) }
-    fn pat_bool(b: bool) -> Pattern { Pattern::literal(Literal::bool(b, span())) }
-    fn pat_int(n: i128) -> Pattern { Pattern::literal(Literal::int(n, span())) }
+    fn pat_wildcard() -> Pattern {
+        Pattern::wildcard(span())
+    }
+    fn pat_bool(b: bool) -> Pattern {
+        Pattern::literal(Literal::bool(b, span()))
+    }
+    fn pat_int(n: i128) -> Pattern {
+        Pattern::literal(Literal::int(n, span()))
+    }
 
     fn pat_ident(name: &str) -> Pattern {
         Pattern::new(
@@ -1181,7 +1203,10 @@ mod tests {
     fn test_bool_true_false_exhaustive() {
         let patterns = vec![pat_bool(true), pat_bool(false)];
         let result = check_exhaustiveness(&patterns, &Type::Bool, &env()).unwrap();
-        assert!(result.is_exhaustive, "true + false should be exhaustive for Bool");
+        assert!(
+            result.is_exhaustive,
+            "true + false should be exhaustive for Bool"
+        );
     }
 
     #[test]
@@ -1195,7 +1220,10 @@ mod tests {
     fn test_bool_only_true_non_exhaustive() {
         let patterns = vec![pat_bool(true)];
         let result = check_exhaustiveness(&patterns, &Type::Bool, &env()).unwrap();
-        assert!(!result.is_exhaustive, "only true should NOT be exhaustive for Bool");
+        assert!(
+            !result.is_exhaustive,
+            "only true should NOT be exhaustive for Bool"
+        );
         assert!(!result.uncovered_witnesses.is_empty());
     }
 
@@ -1217,7 +1245,10 @@ mod tests {
     fn test_bool_ident_exhaustive() {
         let patterns = vec![pat_ident("b")];
         let result = check_exhaustiveness(&patterns, &Type::Bool, &env()).unwrap();
-        assert!(result.is_exhaustive, "identifier binding should be exhaustive for Bool");
+        assert!(
+            result.is_exhaustive,
+            "identifier binding should be exhaustive for Bool"
+        );
     }
 
     // ===== Integer literal exhaustiveness =====
@@ -1255,10 +1286,7 @@ mod tests {
 
     #[test]
     fn test_range_with_wildcard_exhaustive() {
-        let patterns = vec![
-            pat_range(Some(0), Some(10), false),
-            pat_wildcard(),
-        ];
+        let patterns = vec![pat_range(Some(0), Some(10), false), pat_wildcard()];
         let result = check_exhaustiveness(&patterns, &Type::Int, &env()).unwrap();
         assert!(result.is_exhaustive);
     }
@@ -1292,7 +1320,10 @@ mod tests {
         ];
         let ty = Type::Tuple(List::from_iter([Type::Bool, Type::Bool]));
         let result = check_exhaustiveness(&patterns, &ty, &env()).unwrap();
-        assert!(result.is_exhaustive, "(true,true)+(true,false)+(false,_) should be exhaustive");
+        assert!(
+            result.is_exhaustive,
+            "(true,true)+(true,false)+(false,_) should be exhaustive"
+        );
     }
 
     #[test]
@@ -1303,7 +1334,10 @@ mod tests {
         ];
         let ty = Type::Tuple(List::from_iter([Type::Bool, Type::Bool]));
         let result = check_exhaustiveness(&patterns, &ty, &env()).unwrap();
-        assert!(!result.is_exhaustive, "missing (true,false) and (false,true)");
+        assert!(
+            !result.is_exhaustive,
+            "missing (true,false) and (false,true)"
+        );
     }
 
     #[test]
@@ -1330,19 +1364,22 @@ mod tests {
 
     #[test]
     fn test_guard_with_wildcard_fallback_exhaustive() {
-        let patterns = vec![
-            pat_guard(pat_ident("n"), expr_bool(true)),
-            pat_wildcard(),
-        ];
+        let patterns = vec![pat_guard(pat_ident("n"), expr_bool(true)), pat_wildcard()];
         let result = check_exhaustiveness(&patterns, &Type::Int, &env()).unwrap();
-        assert!(result.is_exhaustive, "guarded pattern + wildcard fallback should be exhaustive");
+        assert!(
+            result.is_exhaustive,
+            "guarded pattern + wildcard fallback should be exhaustive"
+        );
     }
 
     #[test]
     fn test_guard_without_fallback_non_exhaustive() {
         let patterns = vec![pat_guard(pat_ident("n"), expr_bool(true))];
         let result = check_exhaustiveness(&patterns, &Type::Int, &env()).unwrap();
-        assert!(!result.is_exhaustive, "guarded pattern without fallback should NOT be exhaustive");
+        assert!(
+            !result.is_exhaustive,
+            "guarded pattern without fallback should NOT be exhaustive"
+        );
     }
 
     #[test]
@@ -1358,10 +1395,7 @@ mod tests {
 
     #[test]
     fn test_guard_on_bool_with_wildcard() {
-        let patterns = vec![
-            pat_guard(pat_bool(true), expr_bool(true)),
-            pat_wildcard(),
-        ];
+        let patterns = vec![pat_guard(pat_bool(true), expr_bool(true)), pat_wildcard()];
         let result = check_exhaustiveness(&patterns, &Type::Bool, &env()).unwrap();
         assert!(result.is_exhaustive);
     }
@@ -1373,7 +1407,10 @@ mod tests {
             pat_guard(pat_bool(false), expr_bool(true)),
         ];
         let result = check_exhaustiveness(&patterns, &Type::Bool, &env()).unwrap();
-        assert!(!result.is_exhaustive, "all-guarded bool match should NOT be exhaustive");
+        assert!(
+            !result.is_exhaustive,
+            "all-guarded bool match should NOT be exhaustive"
+        );
     }
 
     // ===== Mixed patterns =====
@@ -1419,10 +1456,7 @@ mod tests {
         // not the placeholder `true` literal that the pre-fix path
         // baked in.
         let inner = pat_ident("n");
-        let guard_expr = Expr::new(
-            ExprKind::Literal(Literal::bool(true, span())),
-            span(),
-        );
+        let guard_expr = Expr::new(ExprKind::Literal(Literal::bool(true, span())), span());
         let guarded = Pattern::new(
             PatternKind::Guard {
                 pattern: Heap::new(inner),
@@ -1480,10 +1514,7 @@ mod tests {
         // (instead of silently dropping the variable reference and
         // falling through to the `unknown_guards` skip path).
         let inner = pat_ident("n");
-        let guard_expr = Expr::new(
-            ExprKind::Literal(Literal::bool(true, span())),
-            span(),
-        );
+        let guard_expr = Expr::new(ExprKind::Literal(Literal::bool(true, span())), span());
         let guarded = Pattern::new(
             PatternKind::Guard {
                 pattern: Heap::new(inner),
@@ -1510,10 +1541,7 @@ mod tests {
             PatternKind::Tuple(List::from_iter([pat_ident("a"), pat_ident("b")])),
             span(),
         );
-        let guard_expr = Expr::new(
-            ExprKind::Literal(Literal::bool(true, span())),
-            span(),
-        );
+        let guard_expr = Expr::new(ExprKind::Literal(Literal::bool(true, span())), span());
         let guarded = Pattern::new(
             PatternKind::Guard {
                 pattern: Heap::new(inner),

@@ -28,8 +28,8 @@
 //! - View patterns, active patterns, and-patterns, type test patterns
 
 use verum_ast::{FileId, ItemKind, Module};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 fn parse_module(source: &str) -> Module {
     let file_id = FileId::new(0);
@@ -645,22 +645,26 @@ fn test_cbgr_mixed_tier_references() {
 
 #[test]
 fn test_cbgr_ref_in_type_definition() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         type RefHolder is {
             safe_ref: &Int,
             checked_ref: &checked Int,
             unsafe_ref: &unsafe Int,
         };
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn test_cbgr_genref_type() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         fn lending_iter(data: &List<Int>) -> GenRef<Int> {
             data.first()
         }
-    "#);
+    "#,
+    );
 }
 
 // ============================================================================
@@ -669,65 +673,76 @@ fn test_cbgr_genref_type() {
 
 #[test]
 fn test_async_fn_with_context() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         async fn fetch_user(id: Int) -> User using [Database, Logger] {
             Logger.info(f"Fetching user {id}");
             Database.query(f"SELECT * FROM users WHERE id = {id}").await
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn test_async_spawn_basic() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         async fn parallel() {
             let handle = spawn compute_heavy();
             let result = handle.await;
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn test_async_nursery_block() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         async fn structured() {
             nursery {
                 spawn task_a();
                 spawn task_b();
             }
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn test_async_select_with_arms() {
     // Grammar: select_arm = pattern '=' await_expr '=>' expr
     // The future expression must end with `.await`.
-    assert_parses(r#"
+    assert_parses(
+        r#"
         async fn race() {
             select {
                 result = fetch_a().await => process(result),
                 result = fetch_b().await => process(result),
             }
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn test_async_defer_and_errdefer() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         async fn with_cleanup() {
             let conn = open_connection();
             defer close_connection(conn);
             errdefer log_error("connection failed");
             conn.query("SELECT 1").await
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn test_async_yield_in_generator() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         fn* fibonacci() -> Int {
             let a = 0;
             let b = 1;
@@ -738,7 +753,8 @@ fn test_async_yield_in_generator() {
                 b = temp + b;
             }
         }
-    "#);
+    "#,
+    );
 }
 
 // ============================================================================
@@ -747,53 +763,63 @@ fn test_async_yield_in_generator() {
 
 #[test]
 fn test_context_using_multiple() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         fn process() using [Database, Logger, Cache] {
             Logger.info("processing");
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn test_context_provide_scope() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         fn main() {
             provide Logger = ConsoleLogger.new() {
                 run_app();
             }
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn test_context_provide_multiple() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         fn setup() {
             provide Logger = ConsoleLogger.new();
             provide Database = PostgresDb.connect("localhost");
             run_server();
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn test_context_async() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         async context EventBus {
             fn publish(event: Event) -> Result<Unit>;
             fn subscribe(topic: Text) -> Stream<Event>;
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn test_context_with_generic() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         context Storage<T> {
             fn get(key: Text) -> Maybe<T>;
             fn set(key: Text, value: T) -> Result<Unit>;
         }
-    "#);
+    "#,
+    );
 }
 
 // ============================================================================
@@ -802,7 +828,8 @@ fn test_context_with_generic() {
 
 #[test]
 fn test_pattern_or_with_guard() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         fn classify(n: Int) -> Text {
             match n {
                 x if x > 0 => "positive",
@@ -810,12 +837,14 @@ fn test_pattern_or_with_guard() {
                 _ => "negative",
             }
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn test_pattern_nested_variant() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         fn depth(tree: Tree<Int>) -> Int {
             match tree {
                 Leaf(_) => 1,
@@ -826,59 +855,69 @@ fn test_pattern_nested_variant() {
                 }
             }
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn test_pattern_slice_with_rest() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         fn first_two(items: List<Int>) -> Maybe<(Int, Int)> {
             match items {
                 [a, b, ..] => Some((a, b)),
                 _ => None,
             }
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn test_pattern_binding_with_at() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         fn check(opt: Maybe<Int>) {
             match opt {
                 whole @ Some(n) if n > 0 => print(f"positive: {n}"),
                 _ => print("other"),
             }
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn test_pattern_or_alternatives() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         fn is_weekend(day: Day) -> Bool {
             match day {
                 Saturday | Sunday => true,
                 _ => false,
             }
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn test_pattern_record_with_rest() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         fn get_name(user: User) -> Text {
             match user {
                 User { name, .. } => name,
             }
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn test_pattern_range() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         fn classify_char(c: Char) -> Text {
             match c {
                 'a'..='z' => "lowercase",
@@ -887,19 +926,22 @@ fn test_pattern_range() {
                 _ => "other",
             }
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn test_pattern_reference() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         fn process(data: &Maybe<Int>) {
             match data {
                 &Some(n) => print(f"value: {n}"),
                 &None => print("empty"),
             }
         }
-    "#);
+    "#,
+    );
 }
 
 // ============================================================================
@@ -924,7 +966,11 @@ fn test_multiple_theorems_and_lemmas() {
             proof by ring
     "#;
     let module = parse_module(source);
-    assert!(module.items.len() >= 4, "Expected at least 4 items, got {}", module.items.len());
+    assert!(
+        module.items.len() >= 4,
+        "Expected at least 4 items, got {}",
+        module.items.len()
+    );
 }
 
 // ============================================================================
@@ -968,28 +1014,34 @@ fn test_axiom_must_end_with_semicolon() {
 
 #[test]
 fn test_type_record_definition() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         type Point is {
             x: Float,
             y: Float,
         };
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn test_type_sum_definition() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         type Option<T> is None | Some(T);
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn test_type_protocol_definition() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         type Printable is protocol {
             fn to_text(&self) -> Text;
         };
-    "#);
+    "#,
+    );
 }
 
 #[test]
@@ -1004,7 +1056,8 @@ fn test_type_unit_definition() {
 
 #[test]
 fn test_implement_block() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         implement Point {
             fn distance(&self, other: &Point) -> Float {
                 let dx = self.x - other.x;
@@ -1012,18 +1065,21 @@ fn test_implement_block() {
                 (dx * dx + dy * dy).sqrt()
             }
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn test_implement_protocol_for_type() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         implement Printable for Point {
             fn to_text(&self) -> Text {
                 f"({self.x}, {self.y})"
             }
         }
-    "#);
+    "#,
+    );
 }
 
 // ============================================================================
@@ -1051,20 +1107,24 @@ fn test_mount_with_alias() {
 
 #[test]
 fn test_rank2_fn_type_in_struct() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         type Transducer<A, B> is {
             transform: fn<R>(Reducer<B, R>) -> Reducer<A, R>,
         };
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn test_rank2_fn_type_as_parameter() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         fn apply_to_all(f: fn<T>(T) -> T, x: Int) -> Int {
             f(x)
         }
-    "#);
+    "#,
+    );
 }
 
 // ============================================================================
@@ -1083,7 +1143,8 @@ fn test_rank2_fn_type_as_parameter() {
 
 #[test]
 fn proof_block_let_with_type_annotation_parses() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         theorem my_thm() -> Bool
             requires true
             ensures  true
@@ -1094,12 +1155,14 @@ fn proof_block_let_with_type_annotation_parses() {
                 x
             }
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn proof_block_let_with_generic_type_parses() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         type MyList<T> is { value: T };
 
         theorem generic_let_thm() -> Bool
@@ -1112,14 +1175,16 @@ fn proof_block_let_with_generic_type_parses() {
                 true
             }
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn proof_block_untyped_let_still_parses() {
     // Pin: the type annotation is OPTIONAL — pre-existing untyped form
     // must still work.
-    assert_parses(r#"
+    assert_parses(
+        r#"
         theorem untyped_thm() -> Bool
             requires true
             ensures  true
@@ -1130,7 +1195,8 @@ fn proof_block_untyped_let_still_parses() {
                 true
             }
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
@@ -1138,7 +1204,8 @@ fn proof_block_let_missing_type_after_colon_fails() {
     // Mirror of stmt.rs E043: `let x: = expr` should error rather than
     // silently consuming weird input. The fix included this guardrail
     // for the proof-block path.
-    assert!(assert_fails(r#"
+    assert!(assert_fails(
+        r#"
         theorem bad_thm() -> Bool
         {
             proof {
@@ -1146,13 +1213,15 @@ fn proof_block_let_missing_type_after_colon_fails() {
                 true
             }
         }
-    "#));
+    "#
+    ));
 }
 
 #[test]
 fn proof_block_let_literal_as_type_fails() {
     // Mirror of stmt.rs E043: `let x: 123 = expr` should error.
-    assert!(assert_fails(r#"
+    assert!(assert_fails(
+        r#"
         theorem bad_thm() -> Bool
         {
             proof {
@@ -1160,7 +1229,8 @@ fn proof_block_let_literal_as_type_fails() {
                 true
             }
         }
-    "#));
+    "#
+    ));
 }
 
 // ============================================================================
@@ -1179,7 +1249,8 @@ fn proof_block_let_literal_as_type_fails() {
 
 #[test]
 fn proof_block_bare_equality_tail_parses() {
-    assert_parses(r#"
+    assert_parses(
+        r#"
         theorem eq_thm(a: Int, b: Int) -> Bool
             requires true
             ensures  true
@@ -1190,13 +1261,15 @@ fn proof_block_bare_equality_tail_parses() {
                 lhs == rhs
             }
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn proof_block_field_access_equality_parses() {
     // Pin the `bound.value == rhs.value` shape (writer.vr).
-    assert_parses(r#"
+    assert_parses(
+        r#"
         type Pair is { value: Int, output: Bool };
 
         theorem field_eq_thm(p: Pair, q: Pair) -> Bool
@@ -1207,13 +1280,15 @@ fn proof_block_field_access_equality_parses() {
                 p.value == q.value && p.output == q.output
             }
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn proof_block_logical_combination_parses() {
     // Pin `&&` and `||` work as top-level proof-step expressions.
-    assert_parses(r#"
+    assert_parses(
+        r#"
         theorem logical_thm(a: Bool, b: Bool) -> Bool
             requires true
             ensures  true
@@ -1222,14 +1297,16 @@ fn proof_block_logical_combination_parses() {
                 a || b
             }
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn proof_block_tactic_with_args_still_parses() {
     // Regression guard: tactic calls like `induction(n)` must NOT
     // be misrouted to the bare-expression path.
-    assert_parses(r#"
+    assert_parses(
+        r#"
         theorem tactic_thm(n: Int) -> Bool
             requires true
             ensures  true
@@ -1238,7 +1315,8 @@ fn proof_block_tactic_with_args_still_parses() {
                 trivial
             }
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
@@ -1247,7 +1325,8 @@ fn proof_block_paren_grouped_binop_inside_call_parses() {
     // parens (i.e. `f(x == y)`) must NOT route to expression-path
     // — the call itself is a tactic. The depth counter prevents
     // false positives.
-    assert_parses(r#"
+    assert_parses(
+        r#"
         theorem grouped_thm() -> Bool
             requires true
             ensures  true
@@ -1256,5 +1335,6 @@ fn proof_block_paren_grouped_binop_inside_call_parses() {
                 trivial
             }
         }
-    "#);
+    "#,
+    );
 }

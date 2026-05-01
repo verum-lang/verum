@@ -305,28 +305,25 @@ impl DeviceRegistry {
 
     /// Get device info by ID
     pub fn get_device(&self, id: DeviceId) -> Option<&DeviceInfo> {
-        self.devices.iter()
+        self.devices
+            .iter()
             .find(|(dev_id, _)| *dev_id == id)
             .map(|(_, info)| info)
     }
 
     /// Get CPU info
     pub fn cpu_info(&self) -> Option<&CpuInfo> {
-        self.get_device(DeviceId::CPU).and_then(|info| {
-            match info {
-                DeviceInfo::Cpu(cpu) => Some(cpu),
-                _ => None,
-            }
+        self.get_device(DeviceId::CPU).and_then(|info| match info {
+            DeviceInfo::Cpu(cpu) => Some(cpu),
+            _ => None,
         })
     }
 
     /// Get all GPU devices
     pub fn gpus(&self) -> impl Iterator<Item = (DeviceId, &GpuInfo)> {
-        self.devices.iter().filter_map(|(id, info)| {
-            match info {
-                DeviceInfo::Gpu(gpu) => Some((*id, gpu)),
-                _ => None,
-            }
+        self.devices.iter().filter_map(|(id, info)| match info {
+            DeviceInfo::Gpu(gpu) => Some((*id, gpu)),
+            _ => None,
         })
     }
 

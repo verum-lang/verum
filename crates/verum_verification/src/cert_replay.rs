@@ -236,8 +236,9 @@ impl SmtCertificate {
     /// True iff `body_hash` matches blake3 of `body`. Pure
     /// integrity check — no semantic verification.
     pub fn body_hash_valid(&self) -> bool {
-        let recomputed =
-            Text::from(hex32(blake3::hash(self.body.as_str().as_bytes()).as_bytes()));
+        let recomputed = Text::from(hex32(
+            blake3::hash(self.body.as_str().as_bytes()).as_bytes(),
+        ));
         recomputed == self.body_hash
     }
 }
@@ -422,7 +423,12 @@ impl std::fmt::Display for DecomposeError {
                 write!(f, "decomposer not yet implemented for `{}`", fmt.name())
             }
             Self::Malformed { line, message } => {
-                write!(f, "malformed cert body at line {}: {}", line, message.as_str())
+                write!(
+                    f,
+                    "malformed cert body at line {}: {}",
+                    line,
+                    message.as_str()
+                )
             }
             Self::Empty => write!(f, "cert body has no inference steps"),
         }
@@ -486,7 +492,6 @@ pub const KERNEL_RULE_REGISTRY: &[(&str, &str)] = &[
     ("bfun_elim", "boolean_simplification"),
     ("eq_simplify", "boolean_simplification"),
     ("tautology_unit", "tautology"),
-
     // ----- Equality -----
     ("refl", "reflexivity"),
     ("eq-reflexive", "reflexivity"),
@@ -498,7 +503,6 @@ pub const KERNEL_RULE_REGISTRY: &[(&str, &str)] = &[
     ("congruence", "congruence"),
     ("monotonicity", "congruence"),
     ("cong", "congruence"),
-
     // ----- Implication / modus ponens -----
     ("mp", "modus_ponens"),
     ("modus-ponens", "modus_ponens"),
@@ -511,7 +515,6 @@ pub const KERNEL_RULE_REGISTRY: &[(&str, &str)] = &[
     ("asserted", "hypothesis"),
     ("goal", "hypothesis"),
     ("lemma", "theory_lemma"),
-
     // ----- Quantifier -----
     ("forall_inst", "forall_instantiation"),
     ("forall-inst", "forall_instantiation"),
@@ -533,7 +536,6 @@ pub const KERNEL_RULE_REGISTRY: &[(&str, &str)] = &[
     ("bind", "binder"),
     ("let_pos", "binder"),
     ("let_neg", "binder"),
-
     // ----- Theory: linear / nonlinear arithmetic -----
     ("la_generic", "linear_arithmetic"),
     ("la-generic", "linear_arithmetic"),
@@ -545,12 +547,10 @@ pub const KERNEL_RULE_REGISTRY: &[(&str, &str)] = &[
     ("lia_generic", "linear_arithmetic"),
     ("nlia_generic", "nonlinear_arithmetic"),
     ("nra_generic", "nonlinear_arithmetic"),
-
     // ----- Theory: array / UF -----
     ("array_ext", "array_extensionality"),
     ("array-ext", "array_extensionality"),
     ("array_distinct", "array_extensionality"),
-
     // ----- Z3 rewrite class — generic rewrite rules.
     // The rewrite rule itself is a black-box family in Z3; the
     // kernel admits the rule name and re-checks the *result*
@@ -564,11 +564,9 @@ pub const KERNEL_RULE_REGISTRY: &[(&str, &str)] = &[
     ("iff-false", "rewrite"),
     ("commutativity", "rewrite"),
     ("distributivity", "rewrite"),
-
     // ----- Definitional --------------------------------------------------
     ("intro-def", "definitional_axiom"),
     ("apply-def", "definitional_axiom"),
-
     // ----- Final / closing -----
     ("step", "step"),
     ("subproof", "subproof"),
@@ -950,10 +948,7 @@ fn walk_z3_sexpr(s: &Sexpr, steps: &mut Vec<InferenceStep>, next_id: &mut u32) {
                 if lookup_kernel_rule(head).is_some() {
                     let id = format!("z3_step_{}", *next_id);
                     *next_id += 1;
-                    let conclusion = items
-                        .last()
-                        .map(render_sexpr)
-                        .unwrap_or_default();
+                    let conclusion = items.last().map(render_sexpr).unwrap_or_default();
                     let mut premises: Vec<Text> = Vec::new();
                     for sub in items.iter().skip(1).take(items.len().saturating_sub(2)) {
                         if let Sexpr::List(_) = sub {
@@ -1198,11 +1193,7 @@ fn decompose_mathsat(body: &str) -> Result<Vec<InferenceStep>, DecomposeError> {
             .map(Text::from)
             .collect();
         let after = line[paren_close + 1..].trim_start();
-        let conclusion = after
-            .strip_prefix("->")
-            .map(str::trim)
-            .unwrap_or("")
-            .trim();
+        let conclusion = after.strip_prefix("->").map(str::trim).unwrap_or("").trim();
         if conclusion.is_empty() {
             return Err(DecomposeError::Malformed {
                 line: lineno + 1,
@@ -1232,9 +1223,8 @@ impl KernelOnlyReplayEngine {
 }
 
 const KNOWN_THEORIES: &[&str] = &[
-    "QF_BV", "QF_LIA", "QF_LRA", "QF_NIA", "QF_NRA", "QF_UF", "QF_UFLIA", "QF_UFLRA",
-    "QF_UFNIA", "QF_UFNRA", "LIA", "LRA", "NIA", "NRA", "UF", "UFLIA", "UFLRA",
-    "UFNIA", "UFNRA", "ALL",
+    "QF_BV", "QF_LIA", "QF_LRA", "QF_NIA", "QF_NRA", "QF_UF", "QF_UFLIA", "QF_UFLRA", "QF_UFNIA",
+    "QF_UFNRA", "LIA", "LRA", "NIA", "NRA", "UF", "UFLIA", "UFLRA", "UFNIA", "UFNRA", "ALL",
 ];
 
 impl CertReplayEngine for KernelOnlyReplayEngine {
@@ -1573,7 +1563,10 @@ mod tests {
 
     #[test]
     fn format_aliases_resolve() {
-        assert_eq!(CertFormat::from_name("alethe"), Some(CertFormat::Cvc5Alethe));
+        assert_eq!(
+            CertFormat::from_name("alethe"),
+            Some(CertFormat::Cvc5Alethe)
+        );
         assert_eq!(CertFormat::from_name("z3"), Some(CertFormat::Z3Proof));
         assert_eq!(
             CertFormat::from_name("canonical"),
@@ -1599,7 +1592,11 @@ mod tests {
             ReplayBackend::OpenSmt,
             ReplayBackend::Mathsat,
         ] {
-            assert!(!b.is_intrinsic(), "{} must require an external tool", b.name());
+            assert!(
+                !b.is_intrinsic(),
+                "{} must require an external tool",
+                b.name()
+            );
         }
     }
 
@@ -1721,8 +1718,7 @@ mod tests {
 
     #[test]
     fn mock_engine_unsupported_format_errors() {
-        let e = MockReplayEngine::new(ReplayBackend::Z3)
-            .supporting(&[CertFormat::Z3Proof]);
+        let e = MockReplayEngine::new(ReplayBackend::Z3).supporting(&[CertFormat::Z3Proof]);
         let mut c = fixture_cert();
         c.format = CertFormat::Cvc5Alethe;
         let r = e.replay(&c);
@@ -1747,7 +1743,11 @@ mod tests {
             ReplayBackend::Mathsat,
         ] {
             let e = engine_for(b);
-            assert!(!e.is_available(), "{} should be unavailable in V0", b.name());
+            assert!(
+                !e.is_available(),
+                "{} should be unavailable in V0",
+                b.name()
+            );
         }
     }
 
@@ -1906,10 +1906,24 @@ mod tests {
     fn registry_covers_z3_canonical_rule_names() {
         // Z3 leaf / propagation rules emitted in `(proof ...)` traces.
         for name in [
-            "asserted", "goal", "lemma", "rewrite", "rewrite*", "nnf-pos",
-            "nnf-neg", "commutativity", "distributivity", "iff-true",
-            "iff-false", "der", "elim-unused", "pull-quant", "push-quant",
-            "quant-intro", "intro-def", "apply-def",
+            "asserted",
+            "goal",
+            "lemma",
+            "rewrite",
+            "rewrite*",
+            "nnf-pos",
+            "nnf-neg",
+            "commutativity",
+            "distributivity",
+            "iff-true",
+            "iff-false",
+            "der",
+            "elim-unused",
+            "pull-quant",
+            "push-quant",
+            "quant-intro",
+            "intro-def",
+            "apply-def",
         ] {
             assert!(
                 lookup_kernel_rule(name).is_some(),
@@ -1923,13 +1937,39 @@ mod tests {
     fn registry_covers_alethe_canonical_rule_names() {
         // CVC5/Alethe canonical rules emitted in `:rule` annotations.
         for name in [
-            "or", "not_or", "not_and", "and", "equiv1", "equiv2",
-            "not_equiv1", "not_equiv2", "ite1", "ite2", "not_ite1",
-            "not_ite2", "ite_intro", "xor1", "xor2", "not_xor1",
-            "not_xor2", "bool_simplify", "connective_def", "bfun_elim",
-            "eq_simplify", "tautology_unit", "cong", "bind", "let_pos",
-            "let_neg", "qnt_simplify", "qnt_rm_unused", "onepoint",
-            "lia_generic", "nlia_generic", "nra_generic", "false",
+            "or",
+            "not_or",
+            "not_and",
+            "and",
+            "equiv1",
+            "equiv2",
+            "not_equiv1",
+            "not_equiv2",
+            "ite1",
+            "ite2",
+            "not_ite1",
+            "not_ite2",
+            "ite_intro",
+            "xor1",
+            "xor2",
+            "not_xor1",
+            "not_xor2",
+            "bool_simplify",
+            "connective_def",
+            "bfun_elim",
+            "eq_simplify",
+            "tautology_unit",
+            "cong",
+            "bind",
+            "let_pos",
+            "let_neg",
+            "qnt_simplify",
+            "qnt_rm_unused",
+            "onepoint",
+            "lia_generic",
+            "nlia_generic",
+            "nra_generic",
+            "false",
         ] {
             assert!(
                 lookup_kernel_rule(name).is_some(),
@@ -2022,7 +2062,8 @@ mod tests {
 
     #[test]
     fn decompose_verum_canonical_skips_comments_and_blank_lines() {
-        let body = "; header\n\nstep s1 refl : (= x x)\n; comment between\nstep s2 mp s1 : (= x x)\n";
+        let body =
+            "; header\n\nstep s1 refl : (= x x)\n; comment between\nstep s2 mp s1 : (= x x)\n";
         let cert = SmtCertificate::new(CertFormat::VerumCanonical, "QF_UF", "(= x x)", body);
         let steps = decompose_cert(&cert).unwrap();
         assert_eq!(steps.len(), 2);
@@ -2070,7 +2111,10 @@ mod tests {
         let body = "(mp (asserted (>= x 0)) (rewrite (= a b)) (>= y 0))";
         let cert = SmtCertificate::new(CertFormat::Z3Proof, "QF_LIA", "(>= y 0)", body);
         let steps = decompose_cert(&cert).unwrap();
-        assert!(!steps.is_empty(), "z3 decomposer must find at least one step");
+        assert!(
+            !steps.is_empty(),
+            "z3 decomposer must find at least one step"
+        );
         assert!(steps.iter().any(|s| s.rule.as_str() == "mp"));
     }
 

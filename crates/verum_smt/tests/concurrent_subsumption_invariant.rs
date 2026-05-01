@@ -146,8 +146,7 @@ fn concurrent_stats_counter_no_lost_updates() {
     }
 
     let stats = checker.stats();
-    let recorded =
-        stats.cache_hits + stats.cache_misses + stats.syntactic_checks;
+    let recorded = stats.cache_hits + stats.cache_misses + stats.syntactic_checks;
     let issued = (THREADS * ITERATIONS) as u64;
 
     // Note: `record_syntactic` increments BOTH `syntactic_checks`

@@ -10,13 +10,12 @@
 use std::path::Path;
 
 use crate::error::{CliError, Result};
-use verum_smt::smtlib_check::{check_smtlib_string, CheckError};
+use verum_smt::smtlib_check::{CheckError, check_smtlib_string};
 
 /// Run the `--check-smt-formula FILE` dispatch.
 pub fn run(path: &Path, solver: &str, timeout_s: u64) -> Result<()> {
-    let contents = std::fs::read_to_string(path).map_err(|e| {
-        CliError::Custom(format!("reading {}: {}", path.display(), e).into())
-    })?;
+    let contents = std::fs::read_to_string(path)
+        .map_err(|e| CliError::Custom(format!("reading {}: {}", path.display(), e).into()))?;
 
     match check_smtlib_string(&contents, solver, timeout_s) {
         Ok(verdict) => {
@@ -31,11 +30,8 @@ pub fn run(path: &Path, solver: &str, timeout_s: u64) -> Result<()> {
             )
             .into(),
         )),
-        Err(CheckError::UnsupportedSolver(msg)) => {
-            Err(CliError::InvalidArgument(
-                format!("--check-smt-formula: unsupported solver: {}", msg)
-                    .into(),
-            ))
-        }
+        Err(CheckError::UnsupportedSolver(msg)) => Err(CliError::InvalidArgument(
+            format!("--check-smt-formula: unsupported solver: {}", msg).into(),
+        )),
     }
 }

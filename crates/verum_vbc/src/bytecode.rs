@@ -64,9 +64,9 @@ use crate::encoding::{
 use crate::error::{VbcError, VbcResult};
 use crate::instruction::{
     BinaryFloatOp, BinaryGenericOp, BinaryIntOp, BitwiseOp, CmpSubOpcode, CompareOp,
-    FloatToIntMode, GpuSubOpcode, GradMode, Instruction, Opcode, Reg,
-    TensorBinaryOp, TensorCumulativeOp, TensorDType, TensorExtSubOpcode, TensorPoolOp,
-    TensorReduceOp, TensorSubOpcode, TensorUnaryOp, UnaryFloatOp, UnaryIntOp,
+    FloatToIntMode, GpuSubOpcode, GradMode, Instruction, Opcode, Reg, TensorBinaryOp,
+    TensorCumulativeOp, TensorDType, TensorExtSubOpcode, TensorPoolOp, TensorReduceOp,
+    TensorSubOpcode, TensorUnaryOp, UnaryFloatOp, UnaryIntOp,
 };
 // `ExtendedSubOpcode` is consumed both by the encoder (typed
 // `MakeVariantTyped` arm — #146 Phase 3a) and by the test
@@ -355,7 +355,11 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
         // ====================================================================
         // Memory
         // ====================================================================
-        Instruction::New { dst, type_id, field_count } => {
+        Instruction::New {
+            dst,
+            type_id,
+            field_count,
+        } => {
             output.push(Opcode::New.to_byte());
             encode_reg(*dst, output);
             encode_varint(*type_id as u64, output);
@@ -373,7 +377,11 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg_vec(type_args, output);
         }
 
-        Instruction::GetF { dst, obj, field_idx } => {
+        Instruction::GetF {
+            dst,
+            obj,
+            field_idx,
+        } => {
             output.push(Opcode::GetF.to_byte());
             encode_reg(*dst, output);
             encode_reg(*obj, output);
@@ -405,7 +413,11 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*value, output);
         }
 
-        Instruction::Len { dst, arr, type_hint } => {
+        Instruction::Len {
+            dst,
+            arr,
+            type_hint,
+        } => {
             output.push(Opcode::Len.to_byte());
             encode_reg(*dst, output);
             encode_reg(*arr, output);
@@ -490,7 +502,11 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg_range(*args, output);
         }
 
-        Instruction::CallC { dst, cache_id, args } => {
+        Instruction::CallC {
+            dst,
+            cache_id,
+            args,
+        } => {
             output.push(Opcode::CallC.to_byte());
             encode_reg(*dst, output);
             encode_varint(*cache_id as u64, output);
@@ -555,7 +571,6 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
         // Generator Operations: encoding for GenCreate/GenNext/GenHasNext/Yield opcodes.
         // These implement the iterator protocol for fn* generator functions.
         // ====================================================================
-
         Instruction::GenCreate { dst, func_id, args } => {
             output.push(Opcode::GenCreate.to_byte());
             encode_reg(*dst, output);
@@ -613,7 +628,11 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
         // ====================================================================
         // Autodiff
         // ====================================================================
-        Instruction::GradBegin { scope_id, mode, wrt } => {
+        Instruction::GradBegin {
+            scope_id,
+            mode,
+            wrt,
+        } => {
             output.push(Opcode::GradBegin.to_byte());
             encode_varint(*scope_id as u64, output);
             output.push(*mode as u8);
@@ -820,7 +839,11 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
         // existing TensorExt sub-opcode dispatcher routes the
         // decode; the actual call lands in the dispatch handler
         // (interpreter/dispatch_table/handlers/tensor_extended.rs).
-        Instruction::PermissionCheckWire { dst, scope_tag, target_id } => {
+        Instruction::PermissionCheckWire {
+            dst,
+            scope_tag,
+            target_id,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorExtSubOpcode::PermissionCheckWire.to_byte());
             encode_reg(*dst, output);
@@ -833,7 +856,10 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
         // mirroring PermissionScope::to_wire_tag) since codegen
         // knows it statically from the intrinsic category;
         // target_id remains a register read at dispatch time.
-        Instruction::PermissionAssert { scope_tag, target_id } => {
+        Instruction::PermissionAssert {
+            scope_tag,
+            target_id,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorExtSubOpcode::PermissionAssert.to_byte());
             output.push(*scope_tag);
@@ -886,7 +912,11 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*stream, output);
         }
 
-        Instruction::GpuMemcpy { dst, src, direction } => {
+        Instruction::GpuMemcpy {
+            dst,
+            src,
+            direction,
+        } => {
             output.push(Opcode::GpuMemcpy.to_byte());
             encode_reg(*dst, output);
             encode_reg(*src, output);
@@ -949,7 +979,11 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*stream, output);
         }
 
-        Instruction::GpuStreamAddCallback { stream, callback_id, user_data } => {
+        Instruction::GpuStreamAddCallback {
+            stream,
+            callback_id,
+            user_data,
+        } => {
             output.push(Opcode::GpuExtended.to_byte());
             output.push(GpuSubOpcode::StreamAddCallback.to_byte());
             encode_reg(*stream, output);
@@ -986,7 +1020,11 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*stream, output);
         }
 
-        Instruction::GpuEventRecordWithFlags { event, stream, flags } => {
+        Instruction::GpuEventRecordWithFlags {
+            event,
+            stream,
+            flags,
+        } => {
             output.push(Opcode::GpuExtended.to_byte());
             output.push(GpuSubOpcode::EventRecordWithFlags.to_byte());
             encode_reg(*event, output);
@@ -1007,7 +1045,11 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*event, output);
         }
 
-        Instruction::GpuEventElapsed { dst, start_event, end_event } => {
+        Instruction::GpuEventElapsed {
+            dst,
+            start_event,
+            end_event,
+        } => {
             output.push(Opcode::GpuExtended.to_byte());
             output.push(GpuSubOpcode::EventElapsed.to_byte());
             encode_reg(*dst, output);
@@ -1036,7 +1078,11 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*dst, output);
         }
 
-        Instruction::GpuGetDeviceProperty { dst, device, property_id } => {
+        Instruction::GpuGetDeviceProperty {
+            dst,
+            device,
+            property_id,
+        } => {
             output.push(Opcode::GpuExtended.to_byte());
             output.push(GpuSubOpcode::GetDeviceProperty.to_byte());
             encode_reg(*dst, output);
@@ -1044,7 +1090,11 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(*property_id);
         }
 
-        Instruction::GpuGetMemoryInfo { free, total, device } => {
+        Instruction::GpuGetMemoryInfo {
+            free,
+            total,
+            device,
+        } => {
             output.push(Opcode::GpuExtended.to_byte());
             output.push(GpuSubOpcode::GetMemoryInfo.to_byte());
             encode_reg(*free, output);
@@ -1052,7 +1102,11 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*device, output);
         }
 
-        Instruction::GpuCanAccessPeer { dst, device, peer_device } => {
+        Instruction::GpuCanAccessPeer {
+            dst,
+            device,
+            peer_device,
+        } => {
             output.push(Opcode::GpuExtended.to_byte());
             output.push(GpuSubOpcode::CanAccessPeer.to_byte());
             encode_reg(*dst, output);
@@ -1060,14 +1114,20 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*peer_device, output);
         }
 
-        Instruction::GpuEnablePeerAccess { device, peer_device } => {
+        Instruction::GpuEnablePeerAccess {
+            device,
+            peer_device,
+        } => {
             output.push(Opcode::GpuExtended.to_byte());
             output.push(GpuSubOpcode::EnablePeerAccess.to_byte());
             encode_reg(*device, output);
             encode_reg(*peer_device, output);
         }
 
-        Instruction::GpuDisablePeerAccess { device, peer_device } => {
+        Instruction::GpuDisablePeerAccess {
+            device,
+            peer_device,
+        } => {
             output.push(Opcode::GpuExtended.to_byte());
             output.push(GpuSubOpcode::DisablePeerAccess.to_byte());
             encode_reg(*device, output);
@@ -1089,7 +1149,13 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
         // ====================================================================
         // GPU Extended - Memory Operations
         // ====================================================================
-        Instruction::GpuMemcpyAsync { dst, src, size, direction, stream } => {
+        Instruction::GpuMemcpyAsync {
+            dst,
+            src,
+            size,
+            direction,
+            stream,
+        } => {
             output.push(Opcode::GpuExtended.to_byte());
             output.push(GpuSubOpcode::MemcpyAsync.to_byte());
             encode_reg(*dst, output);
@@ -1118,7 +1184,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*ptr, output);
         }
 
-        Instruction::GpuPrefetch { ptr, size, device, stream } => {
+        Instruction::GpuPrefetch {
+            ptr,
+            size,
+            device,
+            stream,
+        } => {
             output.push(Opcode::GpuExtended.to_byte());
             output.push(GpuSubOpcode::Prefetch.to_byte());
             encode_reg(*ptr, output);
@@ -1135,7 +1206,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*size, output);
         }
 
-        Instruction::GpuMemsetAsync { ptr, value, size, stream } => {
+        Instruction::GpuMemsetAsync {
+            ptr,
+            value,
+            size,
+            stream,
+        } => {
             output.push(Opcode::GpuExtended.to_byte());
             output.push(GpuSubOpcode::MemsetAsync.to_byte());
             encode_reg(*ptr, output);
@@ -1144,7 +1220,15 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*stream, output);
         }
 
-        Instruction::GpuMemcpy2D { dst, dst_pitch, src, src_pitch, width, height, direction } => {
+        Instruction::GpuMemcpy2D {
+            dst,
+            dst_pitch,
+            src,
+            src_pitch,
+            width,
+            height,
+            direction,
+        } => {
             output.push(Opcode::GpuExtended.to_byte());
             output.push(GpuSubOpcode::Memcpy2D.to_byte());
             encode_reg(*dst, output);
@@ -1156,7 +1240,16 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(*direction);
         }
 
-        Instruction::GpuMemcpy2DAsync { dst, dst_pitch, src, src_pitch, width, height, direction, stream } => {
+        Instruction::GpuMemcpy2DAsync {
+            dst,
+            dst_pitch,
+            src,
+            src_pitch,
+            width,
+            height,
+            direction,
+            stream,
+        } => {
             output.push(Opcode::GpuExtended.to_byte());
             output.push(GpuSubOpcode::Memcpy2DAsync.to_byte());
             encode_reg(*dst, output);
@@ -1193,7 +1286,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*size, output);
         }
 
-        Instruction::GpuMemcpyAsyncH2D { dst, src, size, stream } => {
+        Instruction::GpuMemcpyAsyncH2D {
+            dst,
+            src,
+            size,
+            stream,
+        } => {
             output.push(Opcode::GpuExtended.to_byte());
             output.push(GpuSubOpcode::MemcpyAsyncH2D.to_byte());
             encode_reg(*dst, output);
@@ -1202,7 +1300,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*stream, output);
         }
 
-        Instruction::GpuMemcpyAsyncD2H { dst, src, size, stream } => {
+        Instruction::GpuMemcpyAsyncD2H {
+            dst,
+            src,
+            size,
+            stream,
+        } => {
             output.push(Opcode::GpuExtended.to_byte());
             output.push(GpuSubOpcode::MemcpyAsyncD2H.to_byte());
             encode_reg(*dst, output);
@@ -1214,7 +1317,11 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
         // ====================================================================
         // GPU Extended - Unified Memory
         // ====================================================================
-        Instruction::GpuMallocManaged { dst, size, attach_flags } => {
+        Instruction::GpuMallocManaged {
+            dst,
+            size,
+            attach_flags,
+        } => {
             output.push(Opcode::GpuExtended.to_byte());
             output.push(GpuSubOpcode::MallocManaged.to_byte());
             encode_reg(*dst, output);
@@ -1222,7 +1329,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(*attach_flags);
         }
 
-        Instruction::GpuMemAdvise { ptr, size, advice, device } => {
+        Instruction::GpuMemAdvise {
+            ptr,
+            size,
+            advice,
+            device,
+        } => {
             output.push(Opcode::GpuExtended.to_byte());
             output.push(GpuSubOpcode::MemAdvise.to_byte());
             encode_reg(*ptr, output);
@@ -1231,7 +1343,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*device, output);
         }
 
-        Instruction::GpuPrefetchAsync { ptr, size, device, stream } => {
+        Instruction::GpuPrefetchAsync {
+            ptr,
+            size,
+            device,
+            stream,
+        } => {
             output.push(Opcode::GpuExtended.to_byte());
             output.push(GpuSubOpcode::PrefetchAsync.to_byte());
             encode_reg(*ptr, output);
@@ -1240,7 +1357,11 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*stream, output);
         }
 
-        Instruction::GpuMemGetAttribute { dst, ptr, attribute } => {
+        Instruction::GpuMemGetAttribute {
+            dst,
+            ptr,
+            attribute,
+        } => {
             output.push(Opcode::GpuExtended.to_byte());
             output.push(GpuSubOpcode::MemGetAttribute.to_byte());
             encode_reg(*dst, output);
@@ -1400,7 +1521,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
         // ====================================================================
         // Additional Tensor Operations
         // ====================================================================
-        Instruction::TensorFull { dst, value, shape, dtype } => {
+        Instruction::TensorFull {
+            dst,
+            value,
+            shape,
+            dtype,
+        } => {
             output.push(Opcode::TensorFull.to_byte());
             encode_reg(*dst, output);
             encode_reg(*value, output);
@@ -1408,7 +1534,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(*dtype as u8);
         }
 
-        Instruction::TensorFromSlice { dst, data, shape, dtype } => {
+        Instruction::TensorFromSlice {
+            dst,
+            data,
+            shape,
+            dtype,
+        } => {
             output.push(Opcode::TensorFromSlice.to_byte());
             encode_reg(*dst, output);
             encode_reg(*data, output);
@@ -1416,7 +1547,13 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(*dtype as u8);
         }
 
-        Instruction::TensorArange { dst, start, end, step, dtype } => {
+        Instruction::TensorArange {
+            dst,
+            start,
+            end,
+            step,
+            dtype,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorSubOpcode::Arange.to_byte());
             encode_reg(*dst, output);
@@ -1426,7 +1563,13 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(*dtype as u8);
         }
 
-        Instruction::TensorLinspace { dst, start, end, num, dtype } => {
+        Instruction::TensorLinspace {
+            dst,
+            start,
+            end,
+            num,
+            dtype,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorSubOpcode::Linspace.to_byte());
             encode_reg(*dst, output);
@@ -1474,7 +1617,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.extend_from_slice(perm);
         }
 
-        Instruction::TensorSlice { dst, src, starts, ends } => {
+        Instruction::TensorSlice {
+            dst,
+            src,
+            starts,
+            ends,
+        } => {
             output.push(Opcode::TensorSlice.to_byte());
             encode_reg(*dst, output);
             encode_reg(*src, output);
@@ -1482,7 +1630,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg_vec(ends, output);
         }
 
-        Instruction::TensorIndex { dst, src, indices, axis } => {
+        Instruction::TensorIndex {
+            dst,
+            src,
+            indices,
+            axis,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorSubOpcode::Index.to_byte());
             encode_reg(*dst, output);
@@ -1559,7 +1712,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(*dtype as u8);
         }
 
-        Instruction::TensorMaskedFill { dst, src, mask, value } => {
+        Instruction::TensorMaskedFill {
+            dst,
+            src,
+            mask,
+            value,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorSubOpcode::MaskedFill.to_byte());
             encode_reg(*dst, output);
@@ -1577,7 +1735,13 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*t, output);
         }
 
-        Instruction::TensorDot { dst, a, b, axes_a, axes_b } => {
+        Instruction::TensorDot {
+            dst,
+            a,
+            b,
+            axes_a,
+            axes_b,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorSubOpcode::Dot.to_byte());
             encode_reg(*dst, output);
@@ -1589,7 +1753,16 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.extend_from_slice(axes_b);
         }
 
-        Instruction::TensorConv { dst, input, kernel, bias, stride, padding, dilation, groups } => {
+        Instruction::TensorConv {
+            dst,
+            input,
+            kernel,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorSubOpcode::Conv.to_byte());
             encode_reg(*dst, output);
@@ -1613,7 +1786,11 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*b, output);
         }
 
-        Instruction::TensorEinsum { dst, inputs, equation_id } => {
+        Instruction::TensorEinsum {
+            dst,
+            inputs,
+            equation_id,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorSubOpcode::Einsum.to_byte());
             encode_reg(*dst, output);
@@ -1646,7 +1823,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(if *upper { 1 } else { 0 });
         }
 
-        Instruction::TensorArgmax { dst, src, axis, keepdim } => {
+        Instruction::TensorArgmax {
+            dst,
+            src,
+            axis,
+            keepdim,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorSubOpcode::Argmax.to_byte());
             encode_reg(*dst, output);
@@ -1655,7 +1837,14 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(if *keepdim { 1 } else { 0 });
         }
 
-        Instruction::TensorTopk { values, indices, src, k, axis, largest } => {
+        Instruction::TensorTopk {
+            values,
+            indices,
+            src,
+            k,
+            axis,
+            largest,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorSubOpcode::Topk.to_byte());
             encode_reg(*values, output);
@@ -1683,7 +1872,14 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(*axis as u8);
         }
 
-        Instruction::TensorLayerNorm { dst, input, gamma, beta, normalized_shape, eps } => {
+        Instruction::TensorLayerNorm {
+            dst,
+            input,
+            gamma,
+            beta,
+            normalized_shape,
+            eps,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorSubOpcode::LayerNorm.to_byte());
             encode_reg(*dst, output);
@@ -1694,7 +1890,17 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.extend_from_slice(&eps.to_le_bytes());
         }
 
-        Instruction::TensorBatchNorm { dst, input, gamma, beta, running_mean, running_var, training, momentum, eps } => {
+        Instruction::TensorBatchNorm {
+            dst,
+            input,
+            gamma,
+            beta,
+            running_mean,
+            running_var,
+            training,
+            momentum,
+            eps,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorSubOpcode::BatchNorm.to_byte());
             encode_reg(*dst, output);
@@ -1708,7 +1914,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.extend_from_slice(&eps.to_le_bytes());
         }
 
-        Instruction::TensorRmsNorm { dst, input, gamma, eps } => {
+        Instruction::TensorRmsNorm {
+            dst,
+            input,
+            gamma,
+            eps,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorExtSubOpcode::RmsNorm.to_byte());
             encode_reg(*dst, output);
@@ -1717,7 +1928,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.extend_from_slice(&eps.to_le_bytes());
         }
 
-        Instruction::TensorFft { dst, src, dim, inverse } => {
+        Instruction::TensorFft {
+            dst,
+            src,
+            dim,
+            inverse,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorExtSubOpcode::Fft.to_byte());
             encode_reg(*dst, output);
@@ -1726,7 +1942,14 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(if *inverse { 1 } else { 0 });
         }
 
-        Instruction::TensorScatter { dst, src, index, values, axis, mode } => {
+        Instruction::TensorScatter {
+            dst,
+            src,
+            index,
+            values,
+            axis,
+            mode,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorExtSubOpcode::Scatter.to_byte());
             encode_reg(*dst, output);
@@ -1737,7 +1960,14 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(*mode);
         }
 
-        Instruction::TensorPool { op, dst, src, kernel_size, stride, padding } => {
+        Instruction::TensorPool {
+            op,
+            dst,
+            src,
+            kernel_size,
+            stride,
+            padding,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorSubOpcode::Pool.to_byte());
             output.push(*op as u8);
@@ -1752,7 +1982,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
         }
 
         // TensorExtended operations
-        Instruction::TensorArgmin { dst, src, axis, keepdim } => {
+        Instruction::TensorArgmin {
+            dst,
+            src,
+            axis,
+            keepdim,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorSubOpcode::Argmin.to_byte());
             encode_reg(*dst, output);
@@ -1769,7 +2004,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*b, output);
         }
 
-        Instruction::TensorGather { dst, src, index, axis } => {
+        Instruction::TensorGather {
+            dst,
+            src,
+            index,
+            axis,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorSubOpcode::Gather.to_byte());
             encode_reg(*dst, output);
@@ -1796,7 +2036,14 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(*mode);
         }
 
-        Instruction::TensorSVD { u, s, vh, src, full_matrices, compute_uv } => {
+        Instruction::TensorSVD {
+            u,
+            s,
+            vh,
+            src,
+            full_matrices,
+            compute_uv,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorSubOpcode::SVD.to_byte());
             encode_reg(*u, output);
@@ -1816,7 +2063,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*src, output);
         }
 
-        Instruction::TensorEig { eigenvalues, eigenvectors, src, compute_v } => {
+        Instruction::TensorEig {
+            eigenvalues,
+            eigenvectors,
+            src,
+            compute_v,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorSubOpcode::Eig.to_byte());
             encode_reg(*eigenvalues, output);
@@ -1825,7 +2077,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(if *compute_v { 1 } else { 0 });
         }
 
-        Instruction::TensorEigSymmetric { eigenvalues, eigenvectors, src, upper } => {
+        Instruction::TensorEigSymmetric {
+            eigenvalues,
+            eigenvectors,
+            src,
+            upper,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorSubOpcode::EigSymmetric.to_byte());
             encode_reg(*eigenvalues, output);
@@ -1834,7 +2091,15 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(if *upper { 1 } else { 0 });
         }
 
-        Instruction::TensorLstsq { x, residuals, rank, s, a, b, rcond } => {
+        Instruction::TensorLstsq {
+            x,
+            residuals,
+            rank,
+            s,
+            a,
+            b,
+            rcond,
+        } => {
             output.push(Opcode::TensorExtended.to_byte());
             output.push(TensorSubOpcode::Lstsq.to_byte());
             encode_reg(*x, output);
@@ -1915,7 +2180,11 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*dst, output);
             encode_reg(*iterable, output);
         }
-        Instruction::IterNext { dst, has_next, iter } => {
+        Instruction::IterNext {
+            dst,
+            has_next,
+            iter,
+        } => {
             output.push(Opcode::IterNext.to_byte());
             encode_reg(*dst, output);
             encode_reg(*has_next, output);
@@ -1937,7 +2206,11 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(args.start, output);
             output.push(args.count);
         }
-        Instruction::NewClosure { dst, func_id, captures } => {
+        Instruction::NewClosure {
+            dst,
+            func_id,
+            captures,
+        } => {
             output.push(Opcode::NewClosure.to_byte());
             encode_reg(*dst, output);
             encode_varint(*func_id as u64, output);
@@ -1951,7 +2224,10 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(Opcode::CtxEnd.to_byte());
         }
 
-        Instruction::CtxCheckNegative { ctx_type, func_name: _ } => {
+        Instruction::CtxCheckNegative {
+            ctx_type,
+            func_name: _,
+        } => {
             // Negative context enforcement: emit CtxGet to a scratch register.
             // If the context IS present (non-nil), the program should panic.
             // In the bytecode interpreter path, negative contexts are enforced
@@ -2041,7 +2317,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*src, output);
         }
 
-        Instruction::NewRange { dst, start, end, inclusive } => {
+        Instruction::NewRange {
+            dst,
+            start,
+            end,
+            inclusive,
+        } => {
             output.push(Opcode::NewRange.to_byte());
             encode_reg(*dst, output);
             encode_reg(*start, output);
@@ -2137,7 +2418,11 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_varint(*name as u64, output);
         }
 
-        Instruction::Attenuate { dst, context, capabilities } => {
+        Instruction::Attenuate {
+            dst,
+            context,
+            capabilities,
+        } => {
             output.push(Opcode::Attenuate.to_byte());
             encode_reg(*dst, output);
             encode_reg(*context, output);
@@ -2159,7 +2444,11 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*variant, output);
         }
 
-        Instruction::MakeVariant { dst, tag, field_count } => {
+        Instruction::MakeVariant {
+            dst,
+            tag,
+            field_count,
+        } => {
             output.push(Opcode::MakeVariant.to_byte());
             encode_reg(*dst, output);
             encode_varint(*tag as u64, output);
@@ -2186,42 +2475,66 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_varint(*field_count as u64, output);
         }
 
-        Instruction::SetVariantData { variant, field, value } => {
+        Instruction::SetVariantData {
+            variant,
+            field,
+            value,
+        } => {
             output.push(Opcode::SetVariantData.to_byte());
             encode_reg(*variant, output);
             encode_varint(*field as u64, output);
             encode_reg(*value, output);
         }
 
-        Instruction::GetVariantData { dst, variant, field } => {
+        Instruction::GetVariantData {
+            dst,
+            variant,
+            field,
+        } => {
             output.push(Opcode::GetVariantData.to_byte());
             encode_reg(*dst, output);
             encode_reg(*variant, output);
             encode_varint(*field as u64, output);
         }
 
-        Instruction::GetVariantDataRef { dst, variant, field } => {
+        Instruction::GetVariantDataRef {
+            dst,
+            variant,
+            field,
+        } => {
             output.push(Opcode::GetVariantDataRef.to_byte());
             encode_reg(*dst, output);
             encode_reg(*variant, output);
             encode_varint(*field as u64, output);
         }
 
-        Instruction::MakePi { dst, param, return_type_id } => {
+        Instruction::MakePi {
+            dst,
+            param,
+            return_type_id,
+        } => {
             output.push(Opcode::MakePi.to_byte());
             encode_reg(*dst, output);
             encode_reg(*param, output);
             encode_varint(*return_type_id as u64, output);
         }
 
-        Instruction::MakeSigma { dst, witness, payload } => {
+        Instruction::MakeSigma {
+            dst,
+            witness,
+            payload,
+        } => {
             output.push(Opcode::MakeSigma.to_byte());
             encode_reg(*dst, output);
             encode_reg(*witness, output);
             encode_reg(*payload, output);
         }
 
-        Instruction::MakeWitness { dst, value, proof_hash } => {
+        Instruction::MakeWitness {
+            dst,
+            value,
+            proof_hash,
+        } => {
             output.push(Opcode::MakeWitness.to_byte());
             encode_reg(*dst, output);
             encode_reg(*value, output);
@@ -2253,7 +2566,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*value, output);
         }
 
-        Instruction::MakeTensor { dst, shape_len, total_size, data } => {
+        Instruction::MakeTensor {
+            dst,
+            shape_len,
+            total_size,
+            data,
+        } => {
             output.push(Opcode::TensorNew.to_byte());
             encode_reg(*dst, output);
             encode_varint(*shape_len as u64, output);
@@ -2345,7 +2663,16 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
         // ====================================================================
         // V-LLSI System Operations
         // ====================================================================
-        Instruction::SyscallLinux { dst, num, a1, a2, a3, a4, a5, a6 } => {
+        Instruction::SyscallLinux {
+            dst,
+            num,
+            a1,
+            a2,
+            a3,
+            a4,
+            a5,
+            a6,
+        } => {
             output.push(Opcode::SyscallLinux.to_byte());
             encode_reg(*dst, output);
             encode_reg(*num, output);
@@ -2357,7 +2684,15 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*a6, output);
         }
 
-        Instruction::Mmap { dst, addr, len, prot, flags, fd, offset } => {
+        Instruction::Mmap {
+            dst,
+            addr,
+            len,
+            prot,
+            flags,
+            fd,
+            offset,
+        } => {
             output.push(Opcode::Mmap.to_byte());
             encode_reg(*dst, output);
             encode_reg(*addr, output);
@@ -2375,7 +2710,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*len, output);
         }
 
-        Instruction::AtomicLoad { dst, ptr, ordering, size } => {
+        Instruction::AtomicLoad {
+            dst,
+            ptr,
+            ordering,
+            size,
+        } => {
             output.push(Opcode::AtomicLoad.to_byte());
             encode_reg(*dst, output);
             encode_reg(*ptr, output);
@@ -2383,7 +2723,12 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(*size);
         }
 
-        Instruction::AtomicStore { ptr, val, ordering, size } => {
+        Instruction::AtomicStore {
+            ptr,
+            val,
+            ordering,
+            size,
+        } => {
             output.push(Opcode::AtomicStore.to_byte());
             encode_reg(*ptr, output);
             encode_reg(*val, output);
@@ -2391,7 +2736,14 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             output.push(*size);
         }
 
-        Instruction::AtomicCas { dst, ptr, expected, desired, ordering, size } => {
+        Instruction::AtomicCas {
+            dst,
+            ptr,
+            expected,
+            desired,
+            ordering,
+            size,
+        } => {
             output.push(Opcode::AtomicCas.to_byte());
             encode_reg(*dst, output);
             encode_reg(*ptr, output);
@@ -2413,7 +2765,11 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
             encode_reg(*ops, output);
         }
 
-        Instruction::IoPoll { dst, engine, timeout } => {
+        Instruction::IoPoll {
+            dst,
+            engine,
+            timeout,
+        } => {
             output.push(Opcode::IoPoll.to_byte());
             encode_reg(*dst, output);
             encode_reg(*engine, output);
@@ -2543,7 +2899,10 @@ pub fn encode_instruction(instr: &Instruction, output: &mut Vec<u8>) -> usize {
         // ====================================================================
         // Meta-Programming
         // ====================================================================
-        Instruction::MetaQuote { dst, bytes_const_id } => {
+        Instruction::MetaQuote {
+            dst,
+            bytes_const_id,
+        } => {
             output.push(Opcode::MetaQuote.to_byte());
             encode_reg(*dst, output);
             encode_varint(*bytes_const_id as u64, output);
@@ -2973,9 +3332,8 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
 
         Opcode::CmpExtended => {
             let sub_byte = decode_u8(data, offset)?;
-            let sub_op = CmpSubOpcode::from_byte(sub_byte).ok_or({
-                VbcError::InvalidOpcode(sub_byte)
-            })?;
+            let sub_op =
+                CmpSubOpcode::from_byte(sub_byte).ok_or({ VbcError::InvalidOpcode(sub_byte) })?;
             let dst = decode_reg(data, offset)?;
             let a = decode_reg(data, offset)?;
             let b = decode_reg(data, offset)?;
@@ -3001,9 +3359,7 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         // ====================================================================
         Opcode::Jmp => {
             let offset_val = decode_signed_varint(data, offset)? as i32;
-            Ok(Instruction::Jmp {
-                offset: offset_val,
-            })
+            Ok(Instruction::Jmp { offset: offset_val })
         }
 
         Opcode::JmpIf => {
@@ -3075,7 +3431,11 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let dst = decode_reg(data, offset)?;
             let func_id = decode_varint(data, offset)? as u32;
             let captures = decode_reg_vec(data, offset)?;
-            Ok(Instruction::NewClosure { dst, func_id, captures })
+            Ok(Instruction::NewClosure {
+                dst,
+                func_id,
+                captures,
+            })
         }
 
         // ====================================================================
@@ -3085,7 +3445,11 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let dst = decode_reg(data, offset)?;
             let type_id = decode_varint(data, offset)? as u32;
             let field_count = decode_varint(data, offset)? as u32;
-            Ok(Instruction::New { dst, type_id, field_count })
+            Ok(Instruction::New {
+                dst,
+                type_id,
+                field_count,
+            })
         }
 
         Opcode::NewG => {
@@ -3103,7 +3467,11 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let dst = decode_reg(data, offset)?;
             let obj = decode_reg(data, offset)?;
             let field_idx = decode_varint(data, offset)? as u32;
-            Ok(Instruction::GetF { dst, obj, field_idx })
+            Ok(Instruction::GetF {
+                dst,
+                obj,
+                field_idx,
+            })
         }
 
         Opcode::SetF => {
@@ -3141,7 +3509,11 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             } else {
                 0 // backward compatibility
             };
-            Ok(Instruction::Len { dst, arr, type_hint })
+            Ok(Instruction::Len {
+                dst,
+                arr,
+                type_hint,
+            })
         }
 
         Opcode::NewArray => {
@@ -3283,7 +3655,11 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let dst = decode_reg(data, offset)?;
             let cache_id = decode_varint(data, offset)? as u32;
             let args = decode_reg_range(data, offset)?;
-            Ok(Instruction::CallC { dst, cache_id, args })
+            Ok(Instruction::CallC {
+                dst,
+                cache_id,
+                args,
+            })
         }
 
         Opcode::SizeOfG | Opcode::AlignOfG | Opcode::Instantiate => {
@@ -3350,17 +3726,14 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             })
         }
 
-        Opcode::MatchGuard => {
-            Ok(Instruction::Raw {
-                opcode,
-                data: vec![],
-            })
-        }
+        Opcode::MatchGuard => Ok(Instruction::Raw {
+            opcode,
+            data: vec![],
+        }),
 
         // ====================================================================
         // Generator Operations: decoding for GenCreate/GenNext/GenHasNext/Yield opcodes.
         // ====================================================================
-
         Opcode::GenCreate => {
             let dst = decode_reg(data, offset)?;
             let func_id = decode_varint(data, offset)? as u32;
@@ -3436,7 +3809,11 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                 _ => GradMode::Auto,
             };
             let wrt = decode_reg_vec(data, offset)?;
-            Ok(Instruction::GradBegin { scope_id, mode, wrt })
+            Ok(Instruction::GradBegin {
+                scope_id,
+                mode,
+                wrt,
+            })
         }
 
         Opcode::GradEnd => {
@@ -3525,12 +3902,10 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
 
         Opcode::Unreachable => Ok(Instruction::Unreachable),
 
-        Opcode::Requires | Opcode::Ensures | Opcode::Invariant => {
-            Ok(Instruction::Raw {
-                opcode,
-                data: vec![],
-            })
-        }
+        Opcode::Requires | Opcode::Ensures | Opcode::Invariant => Ok(Instruction::Raw {
+            opcode,
+            data: vec![],
+        }),
 
         // ====================================================================
         // Tensor Operations
@@ -3594,7 +3969,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let shape = decode_reg_vec(data, offset)?;
             let dtype_byte = decode_u8(data, offset)?;
             let dtype = TensorDType::try_from(dtype_byte).unwrap_or(TensorDType::F32);
-            Ok(Instruction::TensorFull { dst, value, shape, dtype })
+            Ok(Instruction::TensorFull {
+                dst,
+                value,
+                shape,
+                dtype,
+            })
         }
 
         Opcode::TensorFromSlice => {
@@ -3603,7 +3983,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let shape = decode_reg_vec(data, offset)?;
             let dtype_byte = decode_u8(data, offset)?;
             let dtype = TensorDType::try_from(dtype_byte).unwrap_or(TensorDType::F32);
-            Ok(Instruction::TensorFromSlice { dst, data: data_reg, shape, dtype })
+            Ok(Instruction::TensorFromSlice {
+                dst,
+                data: data_reg,
+                shape,
+                dtype,
+            })
         }
 
         Opcode::TensorReshape => {
@@ -3629,7 +4014,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let src = decode_reg(data, offset)?;
             let starts = decode_reg_vec(data, offset)?;
             let ends = decode_reg_vec(data, offset)?;
-            Ok(Instruction::TensorSlice { dst, src, starts, ends })
+            Ok(Instruction::TensorSlice {
+                dst,
+                src,
+                starts,
+                ends,
+            })
         }
 
         Opcode::TensorExtended => {
@@ -3658,7 +4048,14 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     for _ in 0..padding_len {
                         padding.push(decode_u8(data, offset)?);
                     }
-                    Ok(Instruction::TensorPool { op, dst, src, kernel_size, stride, padding })
+                    Ok(Instruction::TensorPool {
+                        op,
+                        dst,
+                        src,
+                        kernel_size,
+                        stride,
+                        padding,
+                    })
                 }
                 // Register-based tensor ops — decode as generic TensorExtended
                 // The interpreter reads operands directly from the byte stream.
@@ -3684,16 +4081,16 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     // For decode, we need to reconstruct the raw bytes.
                     // Since these sub-opcodes have known parameter counts, read accordingly.
                     let param_count = match sub_opcode.unwrap() {
-                        TensorSubOpcode::NewFromArgs => 3,  // dst, shape, dtype
-                        TensorSubOpcode::FillFromArgs => 4, // dst, shape, value, dtype
-                        TensorSubOpcode::FromSliceArgs => 4, // dst, data, shape, dtype
-                        TensorSubOpcode::BinopFromArgs => 4, // dst, a, b, op
-                        TensorSubOpcode::UnopFromArgs => 3,  // dst, src, op
-                        TensorSubOpcode::MatmulFromArgs => 3, // dst, a, b
-                        TensorSubOpcode::ReduceFromArgs => 4, // dst, src, op, axis
-                        TensorSubOpcode::ReshapeFromArgs => 3, // dst, src, shape
-                        TensorSubOpcode::TransposeFromArgs => 2, // dst, src
-                        TensorSubOpcode::SliceFromArgs => 3, // dst, src, ranges
+                        TensorSubOpcode::NewFromArgs => 3,        // dst, shape, dtype
+                        TensorSubOpcode::FillFromArgs => 4,       // dst, shape, value, dtype
+                        TensorSubOpcode::FromSliceArgs => 4,      // dst, data, shape, dtype
+                        TensorSubOpcode::BinopFromArgs => 4,      // dst, a, b, op
+                        TensorSubOpcode::UnopFromArgs => 3,       // dst, src, op
+                        TensorSubOpcode::MatmulFromArgs => 3,     // dst, a, b
+                        TensorSubOpcode::ReduceFromArgs => 4,     // dst, src, op, axis
+                        TensorSubOpcode::ReshapeFromArgs => 3,    // dst, src, shape
+                        TensorSubOpcode::TransposeFromArgs => 2,  // dst, src
+                        TensorSubOpcode::SliceFromArgs => 3,      // dst, src, ranges
                         TensorSubOpcode::GetElementFromArgs => 3, // dst, src, index
                         TensorSubOpcode::SetElementFromArgs => 4, // dst, src, index, value
                         _ => 0,
@@ -3708,7 +4105,10 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                             operands.push(b);
                         }
                     }
-                    Ok(Instruction::TensorExtended { sub_op: sub_opcode_byte, operands })
+                    Ok(Instruction::TensorExtended {
+                        sub_op: sub_opcode_byte,
+                        operands,
+                    })
                 }
                 Some(TensorSubOpcode::Argmin) => {
                     // Argmin: dst, src, axis, keepdim
@@ -3716,7 +4116,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let src = decode_reg(data, offset)?;
                     let axis = decode_u8(data, offset)? as i8;
                     let keepdim = decode_u8(data, offset)? != 0;
-                    Ok(Instruction::TensorArgmin { dst, src, axis, keepdim })
+                    Ok(Instruction::TensorArgmin {
+                        dst,
+                        src,
+                        axis,
+                        keepdim,
+                    })
                 }
                 Some(TensorSubOpcode::Solve) => {
                     // Solve: dst, a, b
@@ -3731,7 +4136,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let src = decode_reg(data, offset)?;
                     let index = decode_reg(data, offset)?;
                     let axis = decode_u8(data, offset)? as i8;
-                    Ok(Instruction::TensorGather { dst, src, index, axis })
+                    Ok(Instruction::TensorGather {
+                        dst,
+                        src,
+                        index,
+                        axis,
+                    })
                 }
                 Some(TensorSubOpcode::Permute) => {
                     // Permute: dst, src, axes
@@ -3760,7 +4170,14 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let src = decode_reg(data, offset)?;
                     let full_matrices = decode_u8(data, offset)? != 0;
                     let compute_uv = decode_u8(data, offset)? != 0;
-                    Ok(Instruction::TensorSVD { u, s, vh, src, full_matrices, compute_uv })
+                    Ok(Instruction::TensorSVD {
+                        u,
+                        s,
+                        vh,
+                        src,
+                        full_matrices,
+                        compute_uv,
+                    })
                 }
                 Some(TensorSubOpcode::LU) => {
                     // LU: p, l, u, src
@@ -3776,7 +4193,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let eigenvectors = decode_reg(data, offset)?;
                     let src = decode_reg(data, offset)?;
                     let compute_v = decode_u8(data, offset)? != 0;
-                    Ok(Instruction::TensorEig { eigenvalues, eigenvectors, src, compute_v })
+                    Ok(Instruction::TensorEig {
+                        eigenvalues,
+                        eigenvectors,
+                        src,
+                        compute_v,
+                    })
                 }
                 Some(TensorSubOpcode::EigSymmetric) => {
                     // EigSymmetric: eigenvalues, eigenvectors, src, upper
@@ -3784,7 +4206,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let eigenvectors = decode_reg(data, offset)?;
                     let src = decode_reg(data, offset)?;
                     let upper = decode_u8(data, offset)? != 0;
-                    Ok(Instruction::TensorEigSymmetric { eigenvalues, eigenvectors, src, upper })
+                    Ok(Instruction::TensorEigSymmetric {
+                        eigenvalues,
+                        eigenvectors,
+                        src,
+                        upper,
+                    })
                 }
                 Some(TensorSubOpcode::Lstsq) => {
                     // Lstsq: x, residuals, rank, s, a, b, rcond
@@ -3795,7 +4222,15 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let a = decode_reg(data, offset)?;
                     let b = decode_reg(data, offset)?;
                     let rcond = decode_f64(data, offset)?;
-                    Ok(Instruction::TensorLstsq { x, residuals, rank: rank_reg, s, a, b, rcond })
+                    Ok(Instruction::TensorLstsq {
+                        x,
+                        residuals,
+                        rank: rank_reg,
+                        s,
+                        a,
+                        b,
+                        rcond,
+                    })
                 }
                 Some(TensorSubOpcode::Det) => {
                     // Det: dst, src
@@ -3824,7 +4259,13 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let end = decode_reg(data, offset)?;
                     let step = decode_reg(data, offset)?;
                     let dtype = TensorDType::from_byte(decode_u8(data, offset)?);
-                    Ok(Instruction::TensorArange { dst, start, end, step, dtype })
+                    Ok(Instruction::TensorArange {
+                        dst,
+                        start,
+                        end,
+                        step,
+                        dtype,
+                    })
                 }
                 Some(TensorSubOpcode::Linspace) => {
                     let dst = decode_reg(data, offset)?;
@@ -3832,7 +4273,13 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let end = decode_reg(data, offset)?;
                     let num = decode_reg(data, offset)?;
                     let dtype = TensorDType::from_byte(decode_u8(data, offset)?);
-                    Ok(Instruction::TensorLinspace { dst, start, end, num, dtype })
+                    Ok(Instruction::TensorLinspace {
+                        dst,
+                        start,
+                        end,
+                        num,
+                        dtype,
+                    })
                 }
                 Some(TensorSubOpcode::Rand) => {
                     let dst = decode_reg(data, offset)?;
@@ -3858,7 +4305,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let src = decode_reg(data, offset)?;
                     let indices = decode_reg(data, offset)?;
                     let axis = decode_u8(data, offset)?;
-                    Ok(Instruction::TensorIndex { dst, src, indices, axis })
+                    Ok(Instruction::TensorIndex {
+                        dst,
+                        src,
+                        indices,
+                        axis,
+                    })
                 }
                 Some(TensorSubOpcode::Concat) => {
                     let dst = decode_reg(data, offset)?;
@@ -3922,7 +4374,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let src = decode_reg(data, offset)?;
                     let mask = decode_reg(data, offset)?;
                     let value = decode_reg(data, offset)?;
-                    Ok(Instruction::TensorMaskedFill { dst, src, mask, value })
+                    Ok(Instruction::TensorMaskedFill {
+                        dst,
+                        src,
+                        mask,
+                        value,
+                    })
                 }
                 Some(TensorSubOpcode::Lerp) => {
                     let dst = decode_reg(data, offset)?;
@@ -3947,7 +4404,13 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     for _ in 0..axes_b_len {
                         axes_b.push(decode_u8(data, offset)?);
                     }
-                    Ok(Instruction::TensorDot { dst, a, b, axes_a, axes_b })
+                    Ok(Instruction::TensorDot {
+                        dst,
+                        a,
+                        b,
+                        axes_a,
+                        axes_b,
+                    })
                 }
                 Some(TensorSubOpcode::Conv) => {
                     let dst = decode_reg(data, offset)?;
@@ -3970,7 +4433,16 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                         dilation.push(decode_u8(data, offset)?);
                     }
                     let groups = decode_varint(data, offset)? as u8;
-                    Ok(Instruction::TensorConv { dst, input, kernel, bias, stride, padding, dilation, groups })
+                    Ok(Instruction::TensorConv {
+                        dst,
+                        input,
+                        kernel,
+                        bias,
+                        stride,
+                        padding,
+                        dilation,
+                        groups,
+                    })
                 }
                 Some(TensorSubOpcode::BatchMatmul) => {
                     let dst = decode_reg(data, offset)?;
@@ -3982,7 +4454,11 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let dst = decode_reg(data, offset)?;
                     let inputs = decode_reg_vec(data, offset)?;
                     let equation_id = decode_varint(data, offset)? as u32;
-                    Ok(Instruction::TensorEinsum { dst, inputs, equation_id })
+                    Ok(Instruction::TensorEinsum {
+                        dst,
+                        inputs,
+                        equation_id,
+                    })
                 }
                 Some(TensorSubOpcode::Outer) => {
                     let dst = decode_reg(data, offset)?;
@@ -4012,7 +4488,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let src = decode_reg(data, offset)?;
                     let axis = decode_u8(data, offset)? as i8;
                     let keepdim = decode_u8(data, offset)? != 0;
-                    Ok(Instruction::TensorArgmax { dst, src, axis, keepdim })
+                    Ok(Instruction::TensorArgmax {
+                        dst,
+                        src,
+                        axis,
+                        keepdim,
+                    })
                 }
                 Some(TensorSubOpcode::Topk) => {
                     let values = decode_reg(data, offset)?;
@@ -4021,7 +4502,14 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let k = decode_reg(data, offset)?;
                     let axis = decode_u8(data, offset)? as i8;
                     let largest = decode_u8(data, offset)? != 0;
-                    Ok(Instruction::TensorTopk { values, indices, src, k, axis, largest })
+                    Ok(Instruction::TensorTopk {
+                        values,
+                        indices,
+                        src,
+                        k,
+                        axis,
+                        largest,
+                    })
                 }
                 Some(TensorSubOpcode::Cumulative) => {
                     let op_byte = decode_u8(data, offset)?;
@@ -4046,7 +4534,14 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let beta = decode_optional_reg(data, offset)?;
                     let normalized_shape = decode_varint(data, offset)? as u32;
                     let eps = decode_f32(data, offset)?;
-                    Ok(Instruction::TensorLayerNorm { dst, input, gamma, beta, normalized_shape, eps })
+                    Ok(Instruction::TensorLayerNorm {
+                        dst,
+                        input,
+                        gamma,
+                        beta,
+                        normalized_shape,
+                        eps,
+                    })
                 }
                 Some(TensorSubOpcode::BatchNorm) => {
                     let dst = decode_reg(data, offset)?;
@@ -4058,7 +4553,17 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let training = decode_u8(data, offset)? != 0;
                     let momentum = decode_f32(data, offset)?;
                     let eps = decode_f32(data, offset)?;
-                    Ok(Instruction::TensorBatchNorm { dst, input, gamma, beta, running_mean, running_var, training, momentum, eps })
+                    Ok(Instruction::TensorBatchNorm {
+                        dst,
+                        input,
+                        gamma,
+                        beta,
+                        running_mean,
+                        running_var,
+                        training,
+                        momentum,
+                        eps,
+                    })
                 }
 
                 // Try TensorExtSubOpcode for overflow operations
@@ -4070,14 +4575,24 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                             let input = decode_reg(data, offset)?;
                             let gamma = decode_optional_reg(data, offset)?;
                             let eps = decode_f32(data, offset)?;
-                            Ok(Instruction::TensorRmsNorm { dst, input, gamma, eps })
+                            Ok(Instruction::TensorRmsNorm {
+                                dst,
+                                input,
+                                gamma,
+                                eps,
+                            })
                         }
                         Some(TensorExtSubOpcode::Fft) => {
                             let dst = decode_reg(data, offset)?;
                             let src = decode_reg(data, offset)?;
                             let dim = decode_u8(data, offset)? as i8;
                             let inverse = decode_u8(data, offset)? != 0;
-                            Ok(Instruction::TensorFft { dst, src, dim, inverse })
+                            Ok(Instruction::TensorFft {
+                                dst,
+                                src,
+                                dim,
+                                inverse,
+                            })
                         }
                         Some(TensorExtSubOpcode::Scatter) => {
                             let dst = decode_reg(data, offset)?;
@@ -4086,7 +4601,14 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                             let values = decode_reg(data, offset)?;
                             let axis = decode_u8(data, offset)? as i8;
                             let mode = decode_u8(data, offset)?;
-                            Ok(Instruction::TensorScatter { dst, src, index, values, axis, mode })
+                            Ok(Instruction::TensorScatter {
+                                dst,
+                                src,
+                                index,
+                                values,
+                                axis,
+                                mode,
+                            })
                         }
                         Some(TensorExtSubOpcode::FlashAttention) => {
                             // FlashAttention: dst, q, k, v, mask?, scale, causal
@@ -4097,7 +4619,15 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                             let mask = decode_optional_reg(data, offset)?;
                             let scale = decode_reg(data, offset)?;
                             let causal = decode_u8(data, offset)? != 0;
-                            Ok(Instruction::TensorFlashAttention { dst, q, k, v, mask, scale, causal })
+                            Ok(Instruction::TensorFlashAttention {
+                                dst,
+                                q,
+                                k,
+                                v,
+                                mask,
+                                scale,
+                                causal,
+                            })
                         }
                         Some(TensorExtSubOpcode::ContiguousView) => {
                             let dst = decode_reg(data, offset)?;
@@ -4193,7 +4723,11 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let dst = decode_reg(data, offset)?;
             let src = decode_reg(data, offset)?;
             let direction = decode_u8(data, offset)?;
-            Ok(Instruction::GpuMemcpy { dst, src, direction })
+            Ok(Instruction::GpuMemcpy {
+                dst,
+                src,
+                direction,
+            })
         }
 
         Opcode::GpuAlloc => {
@@ -4208,8 +4742,8 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         // ====================================================================
         Opcode::GpuExtended => {
             let sub_op_byte = decode_u8(data, offset)?;
-            let sub_op = GpuSubOpcode::from_byte(sub_op_byte)
-                .ok_or(VbcError::InvalidOpcode(sub_op_byte))?;
+            let sub_op =
+                GpuSubOpcode::from_byte(sub_op_byte).ok_or(VbcError::InvalidOpcode(sub_op_byte))?;
 
             match sub_op {
                 GpuSubOpcode::Launch => {
@@ -4225,7 +4759,14 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let shared_mem = decode_reg(data, offset)?;
                     let stream = decode_reg(data, offset)?;
                     let args = decode_reg_vec(data, offset)?;
-                    Ok(Instruction::GpuLaunch { kernel_id, grid, block, shared_mem, stream, args })
+                    Ok(Instruction::GpuLaunch {
+                        kernel_id,
+                        grid,
+                        block,
+                        shared_mem,
+                        stream,
+                        args,
+                    })
                 }
 
                 GpuSubOpcode::LaunchCooperative => {
@@ -4241,7 +4782,14 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let shared_mem = decode_reg(data, offset)?;
                     let stream = decode_reg(data, offset)?;
                     let args = decode_reg_vec(data, offset)?;
-                    Ok(Instruction::GpuLaunchCooperative { kernel_id, grid, block, shared_mem, stream, args })
+                    Ok(Instruction::GpuLaunchCooperative {
+                        kernel_id,
+                        grid,
+                        block,
+                        shared_mem,
+                        stream,
+                        args,
+                    })
                 }
 
                 GpuSubOpcode::LaunchMultiDevice => {
@@ -4257,7 +4805,14 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     }
                     let shared_mem = decode_reg(data, offset)?;
                     let args = decode_reg_vec(data, offset)?;
-                    Ok(Instruction::GpuLaunchMultiDevice { kernel_id, devices, grid, block, shared_mem, args })
+                    Ok(Instruction::GpuLaunchMultiDevice {
+                        kernel_id,
+                        devices,
+                        grid,
+                        block,
+                        shared_mem,
+                        args,
+                    })
                 }
 
                 GpuSubOpcode::SyncStream => {
@@ -4265,9 +4820,7 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     Ok(Instruction::GpuSync { stream })
                 }
 
-                GpuSubOpcode::SyncDevice => {
-                    Ok(Instruction::GpuDeviceSync)
-                }
+                GpuSubOpcode::SyncDevice => Ok(Instruction::GpuDeviceSync),
 
                 GpuSubOpcode::SyncEvent => {
                     let event = decode_reg(data, offset)?;
@@ -4284,7 +4837,11 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let dst = decode_reg(data, offset)?;
                     let src = decode_reg(data, offset)?;
                     let direction = decode_u8(data, offset)?;
-                    Ok(Instruction::GpuMemcpy { dst, src, direction })
+                    Ok(Instruction::GpuMemcpy {
+                        dst,
+                        src,
+                        direction,
+                    })
                 }
 
                 GpuSubOpcode::MemcpyAsync => {
@@ -4293,7 +4850,13 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let size = decode_reg(data, offset)?;
                     let direction = decode_u8(data, offset)?;
                     let stream = decode_reg(data, offset)?;
-                    Ok(Instruction::GpuMemcpyAsync { dst, src, size, direction, stream })
+                    Ok(Instruction::GpuMemcpyAsync {
+                        dst,
+                        src,
+                        size,
+                        direction,
+                        stream,
+                    })
                 }
 
                 GpuSubOpcode::Alloc => {
@@ -4324,7 +4887,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let size = decode_reg(data, offset)?;
                     let device = decode_reg(data, offset)?;
                     let stream = decode_reg(data, offset)?;
-                    Ok(Instruction::GpuPrefetch { ptr, size, device, stream })
+                    Ok(Instruction::GpuPrefetch {
+                        ptr,
+                        size,
+                        device,
+                        stream,
+                    })
                 }
 
                 GpuSubOpcode::Memset => {
@@ -4339,7 +4907,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let value = decode_u8(data, offset)?;
                     let size = decode_reg(data, offset)?;
                     let stream = decode_reg(data, offset)?;
-                    Ok(Instruction::GpuMemsetAsync { ptr, value, size, stream })
+                    Ok(Instruction::GpuMemsetAsync {
+                        ptr,
+                        value,
+                        size,
+                        stream,
+                    })
                 }
 
                 GpuSubOpcode::Memcpy2D => {
@@ -4350,7 +4923,15 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let width = decode_reg(data, offset)?;
                     let height = decode_reg(data, offset)?;
                     let direction = decode_u8(data, offset)?;
-                    Ok(Instruction::GpuMemcpy2D { dst, dst_pitch, src, src_pitch, width, height, direction })
+                    Ok(Instruction::GpuMemcpy2D {
+                        dst,
+                        dst_pitch,
+                        src,
+                        src_pitch,
+                        width,
+                        height,
+                        direction,
+                    })
                 }
 
                 GpuSubOpcode::Memcpy2DAsync => {
@@ -4362,7 +4943,16 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let height = decode_reg(data, offset)?;
                     let direction = decode_u8(data, offset)?;
                     let stream = decode_reg(data, offset)?;
-                    Ok(Instruction::GpuMemcpy2DAsync { dst, dst_pitch, src, src_pitch, width, height, direction, stream })
+                    Ok(Instruction::GpuMemcpy2DAsync {
+                        dst,
+                        dst_pitch,
+                        src,
+                        src_pitch,
+                        width,
+                        height,
+                        direction,
+                        stream,
+                    })
                 }
 
                 GpuSubOpcode::MemcpyH2D => {
@@ -4391,7 +4981,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let src = decode_reg(data, offset)?;
                     let size = decode_reg(data, offset)?;
                     let stream = decode_reg(data, offset)?;
-                    Ok(Instruction::GpuMemcpyAsyncH2D { dst, src, size, stream })
+                    Ok(Instruction::GpuMemcpyAsyncH2D {
+                        dst,
+                        src,
+                        size,
+                        stream,
+                    })
                 }
 
                 GpuSubOpcode::MemcpyAsyncD2H => {
@@ -4399,7 +4994,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let src = decode_reg(data, offset)?;
                     let size = decode_reg(data, offset)?;
                     let stream = decode_reg(data, offset)?;
-                    Ok(Instruction::GpuMemcpyAsyncD2H { dst, src, size, stream })
+                    Ok(Instruction::GpuMemcpyAsyncD2H {
+                        dst,
+                        src,
+                        size,
+                        stream,
+                    })
                 }
 
                 GpuSubOpcode::StreamCreate => {
@@ -4445,7 +5045,11 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let stream = decode_reg(data, offset)?;
                     let callback_id = decode_varint(data, offset)? as u32;
                     let user_data = decode_reg(data, offset)?;
-                    Ok(Instruction::GpuStreamAddCallback { stream, callback_id, user_data })
+                    Ok(Instruction::GpuStreamAddCallback {
+                        stream,
+                        callback_id,
+                        user_data,
+                    })
                 }
 
                 GpuSubOpcode::EventCreate => {
@@ -4479,7 +5083,11 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let dst = decode_reg(data, offset)?;
                     let start_event = decode_reg(data, offset)?;
                     let end_event = decode_reg(data, offset)?;
-                    Ok(Instruction::GpuEventElapsed { dst, start_event, end_event })
+                    Ok(Instruction::GpuEventElapsed {
+                        dst,
+                        start_event,
+                        end_event,
+                    })
                 }
 
                 GpuSubOpcode::EventCreateWithFlags => {
@@ -4492,7 +5100,11 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let event = decode_reg(data, offset)?;
                     let stream = decode_reg(data, offset)?;
                     let flags = decode_u8(data, offset)?;
-                    Ok(Instruction::GpuEventRecordWithFlags { event, stream, flags })
+                    Ok(Instruction::GpuEventRecordWithFlags {
+                        event,
+                        stream,
+                        flags,
+                    })
                 }
 
                 GpuSubOpcode::GetDevice => {
@@ -4514,33 +5126,51 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let dst = decode_reg(data, offset)?;
                     let device = decode_reg(data, offset)?;
                     let property_id = decode_u8(data, offset)?;
-                    Ok(Instruction::GpuGetDeviceProperty { dst, device, property_id })
+                    Ok(Instruction::GpuGetDeviceProperty {
+                        dst,
+                        device,
+                        property_id,
+                    })
                 }
 
                 GpuSubOpcode::GetMemoryInfo => {
                     let free = decode_reg(data, offset)?;
                     let total = decode_reg(data, offset)?;
                     let device = decode_reg(data, offset)?;
-                    Ok(Instruction::GpuGetMemoryInfo { free, total, device })
+                    Ok(Instruction::GpuGetMemoryInfo {
+                        free,
+                        total,
+                        device,
+                    })
                 }
 
                 GpuSubOpcode::CanAccessPeer => {
                     let dst = decode_reg(data, offset)?;
                     let device = decode_reg(data, offset)?;
                     let peer_device = decode_reg(data, offset)?;
-                    Ok(Instruction::GpuCanAccessPeer { dst, device, peer_device })
+                    Ok(Instruction::GpuCanAccessPeer {
+                        dst,
+                        device,
+                        peer_device,
+                    })
                 }
 
                 GpuSubOpcode::EnablePeerAccess => {
                     let device = decode_reg(data, offset)?;
                     let peer_device = decode_reg(data, offset)?;
-                    Ok(Instruction::GpuEnablePeerAccess { device, peer_device })
+                    Ok(Instruction::GpuEnablePeerAccess {
+                        device,
+                        peer_device,
+                    })
                 }
 
                 GpuSubOpcode::DisablePeerAccess => {
                     let device = decode_reg(data, offset)?;
                     let peer_device = decode_reg(data, offset)?;
-                    Ok(Instruction::GpuDisablePeerAccess { device, peer_device })
+                    Ok(Instruction::GpuDisablePeerAccess {
+                        device,
+                        peer_device,
+                    })
                 }
 
                 GpuSubOpcode::DeviceReset => {
@@ -4557,7 +5187,11 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let dst = decode_reg(data, offset)?;
                     let size = decode_reg(data, offset)?;
                     let attach_flags = decode_u8(data, offset)?;
-                    Ok(Instruction::GpuMallocManaged { dst, size, attach_flags })
+                    Ok(Instruction::GpuMallocManaged {
+                        dst,
+                        size,
+                        attach_flags,
+                    })
                 }
 
                 GpuSubOpcode::MemAdvise => {
@@ -4565,7 +5199,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let size = decode_reg(data, offset)?;
                     let advice = decode_u8(data, offset)?;
                     let device = decode_reg(data, offset)?;
-                    Ok(Instruction::GpuMemAdvise { ptr, size, advice, device })
+                    Ok(Instruction::GpuMemAdvise {
+                        ptr,
+                        size,
+                        advice,
+                        device,
+                    })
                 }
 
                 GpuSubOpcode::PrefetchAsync => {
@@ -4573,14 +5212,23 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let size = decode_reg(data, offset)?;
                     let device = decode_reg(data, offset)?;
                     let stream = decode_reg(data, offset)?;
-                    Ok(Instruction::GpuPrefetchAsync { ptr, size, device, stream })
+                    Ok(Instruction::GpuPrefetchAsync {
+                        ptr,
+                        size,
+                        device,
+                        stream,
+                    })
                 }
 
                 GpuSubOpcode::MemGetAttribute => {
                     let dst = decode_reg(data, offset)?;
                     let ptr = decode_reg(data, offset)?;
                     let attribute = decode_u8(data, offset)?;
-                    Ok(Instruction::GpuMemGetAttribute { dst, ptr, attribute })
+                    Ok(Instruction::GpuMemGetAttribute {
+                        dst,
+                        ptr,
+                        attribute,
+                    })
                 }
 
                 GpuSubOpcode::GraphCreate => {
@@ -4633,18 +5281,14 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     Ok(Instruction::GpuProfileRangeStart { name_id })
                 }
 
-                GpuSubOpcode::ProfileRangeEnd => {
-                    Ok(Instruction::GpuProfileRangeEnd)
-                }
+                GpuSubOpcode::ProfileRangeEnd => Ok(Instruction::GpuProfileRangeEnd),
 
                 GpuSubOpcode::ProfileMarkerPush => {
                     let name_id = decode_varint(data, offset)? as u32;
                     Ok(Instruction::GpuProfileMarkerPush { name_id })
                 }
 
-                GpuSubOpcode::ProfileMarkerPop => {
-                    Ok(Instruction::GpuProfileMarkerPop)
-                }
+                GpuSubOpcode::ProfileMarkerPop => Ok(Instruction::GpuProfileMarkerPop),
 
                 // Device Enumeration
                 GpuSubOpcode::EnumerateCuda => {
@@ -4689,12 +5333,10 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     })
                 }
 
-                GpuSubOpcode::SyncThreads => {
-                    Ok(Instruction::Raw {
-                        opcode: Opcode::GpuExtended,
-                        data: vec![sub_op_byte],
-                    })
-                }
+                GpuSubOpcode::SyncThreads => Ok(Instruction::Raw {
+                    opcode: Opcode::GpuExtended,
+                    data: vec![sub_op_byte],
+                }),
 
                 GpuSubOpcode::SyncWarp => {
                     let mask = decode_reg(data, offset)?;
@@ -4756,7 +5398,13 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
                     let desired = decode_reg(data, offset)?;
                     Ok(Instruction::Raw {
                         opcode: Opcode::GpuExtended,
-                        data: vec![sub_op_byte, dst.0 as u8, off.0 as u8, expected.0 as u8, desired.0 as u8],
+                        data: vec![
+                            sub_op_byte,
+                            dst.0 as u8,
+                            off.0 as u8,
+                            expected.0 as u8,
+                            desired.0 as u8,
+                        ],
                     })
                 }
             }
@@ -4765,13 +5413,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
         // ====================================================================
         // Meta Operations
         // ====================================================================
-        Opcode::MetaEval
-        | Opcode::MetaQuote
-        | Opcode::MetaSplice
-        | Opcode::MetaReflect => Ok(Instruction::Raw {
-            opcode,
-            data: vec![],
-        }),
+        Opcode::MetaEval | Opcode::MetaQuote | Opcode::MetaSplice | Opcode::MetaReflect => {
+            Ok(Instruction::Raw {
+                opcode,
+                data: vec![],
+            })
+        }
 
         // ====================================================================
         // Memory Extended Operations
@@ -4938,7 +5585,11 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let dst = decode_reg(data, offset)?;
             let has_next = decode_reg(data, offset)?;
             let iter = decode_reg(data, offset)?;
-            Ok(Instruction::IterNext { dst, has_next, iter })
+            Ok(Instruction::IterNext {
+                dst,
+                has_next,
+                iter,
+            })
         }
 
         // ====================================================================
@@ -4949,7 +5600,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let ptr = decode_reg(data, offset)?;
             let ordering = decode_u8(data, offset)?;
             let size = decode_u8(data, offset)?;
-            Ok(Instruction::AtomicLoad { dst, ptr, ordering, size })
+            Ok(Instruction::AtomicLoad {
+                dst,
+                ptr,
+                ordering,
+                size,
+            })
         }
 
         Opcode::AtomicStore => {
@@ -4957,7 +5613,12 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let val = decode_reg(data, offset)?;
             let ordering = decode_u8(data, offset)?;
             let size = decode_u8(data, offset)?;
-            Ok(Instruction::AtomicStore { ptr, val, ordering, size })
+            Ok(Instruction::AtomicStore {
+                ptr,
+                val,
+                ordering,
+                size,
+            })
         }
 
         Opcode::AtomicCas => {
@@ -4967,7 +5628,14 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let desired = decode_reg(data, offset)?;
             let ordering = decode_u8(data, offset)?;
             let size = decode_u8(data, offset)?;
-            Ok(Instruction::AtomicCas { dst, ptr, expected, desired, ordering, size })
+            Ok(Instruction::AtomicCas {
+                dst,
+                ptr,
+                expected,
+                desired,
+                ordering,
+                size,
+            })
         }
 
         Opcode::AtomicFence => {
@@ -4992,21 +5660,33 @@ pub fn decode_instruction(data: &[u8], offset: &mut usize) -> VbcResult<Instruct
             let dst = decode_reg(data, offset)?;
             let param = decode_reg(data, offset)?;
             let return_type_id = decode_varint(data, offset)? as u32;
-            Ok(Instruction::MakePi { dst, param, return_type_id })
+            Ok(Instruction::MakePi {
+                dst,
+                param,
+                return_type_id,
+            })
         }
 
         Opcode::MakeSigma => {
             let dst = decode_reg(data, offset)?;
             let witness = decode_reg(data, offset)?;
             let payload = decode_reg(data, offset)?;
-            Ok(Instruction::MakeSigma { dst, witness, payload })
+            Ok(Instruction::MakeSigma {
+                dst,
+                witness,
+                payload,
+            })
         }
 
         Opcode::MakeWitness => {
             let dst = decode_reg(data, offset)?;
             let value = decode_reg(data, offset)?;
             let proof_hash = decode_varint(data, offset)? as u32;
-            Ok(Instruction::MakeWitness { dst, value, proof_hash })
+            Ok(Instruction::MakeWitness {
+                dst,
+                value,
+                proof_hash,
+            })
         }
 
         // ====================================================================
@@ -5418,7 +6098,11 @@ pub fn fixup_jump_offsets(instructions: &mut [Instruction]) {
         byte_offsets.push(current_offset); // End position
 
         if trace && iteration == 0 {
-            eprintln!("FIXUP: {} instructions, initial {} bytes", instructions.len(), current_offset);
+            eprintln!(
+                "FIXUP: {} instructions, initial {} bytes",
+                instructions.len(),
+                current_offset
+            );
         }
 
         // Track if any offset changed
@@ -5429,58 +6113,70 @@ pub fn fixup_jump_offsets(instructions: &mut [Instruction]) {
             let instr_end_byte = byte_offsets[idx] + instr_sizes[idx];
 
             if let Some(target_idx) = jump_targets[idx]
-                && target_idx < byte_offsets.len() {
-                    let target_byte = byte_offsets[target_idx];
-                    let new_offset = target_byte as i32 - instr_end_byte as i32;
+                && target_idx < byte_offsets.len()
+            {
+                let target_byte = byte_offsets[target_idx];
+                let new_offset = target_byte as i32 - instr_end_byte as i32;
 
-                    match instr {
-                        Instruction::Jmp { offset }
-                            if *offset != new_offset => {
-                                if trace {
-                                    eprintln!("FIXUP[{}] Jmp[{}]: target_idx={} -> byte_offset={} (was {}, instr_end={})",
-                                        iteration, idx, target_idx, new_offset, *offset, instr_end_byte);
-                                }
-                                *offset = new_offset;
-                                changed = true;
-                            }
-                        Instruction::JmpIf { offset, .. } | Instruction::JmpNot { offset, .. }
-                            if *offset != new_offset => {
-                                if trace {
-                                    eprintln!("FIXUP[{}] JmpIf/Not[{}]: target_idx={} -> byte_offset={} (was {}, instr_end={})",
-                                        iteration, idx, target_idx, new_offset, *offset, instr_end_byte);
-                                }
-                                *offset = new_offset;
-                                changed = true;
-                            }
-                        Instruction::JmpCmp { offset, .. }
-                            if *offset != new_offset => {
-                                *offset = new_offset;
-                                changed = true;
-                            }
-                        Instruction::CtxProvide { body_offset, .. }
-                            if *body_offset != new_offset => {
-                                *body_offset = new_offset;
-                                changed = true;
-                            }
-                        Instruction::TryBegin { handler_offset }
-                            if *handler_offset != new_offset => {
-                                if trace {
-                                    eprintln!("FIXUP[{}] TryBegin[{}]: target_idx={} -> byte_offset={} (was {}, instr_end={})",
-                                        iteration, idx, target_idx, new_offset, *handler_offset, instr_end_byte);
-                                }
-                                *handler_offset = new_offset;
-                                changed = true;
-                            }
-                        _ => {}
+                match instr {
+                    Instruction::Jmp { offset } if *offset != new_offset => {
+                        if trace {
+                            eprintln!(
+                                "FIXUP[{}] Jmp[{}]: target_idx={} -> byte_offset={} (was {}, instr_end={})",
+                                iteration, idx, target_idx, new_offset, *offset, instr_end_byte
+                            );
+                        }
+                        *offset = new_offset;
+                        changed = true;
                     }
+                    Instruction::JmpIf { offset, .. } | Instruction::JmpNot { offset, .. }
+                        if *offset != new_offset =>
+                    {
+                        if trace {
+                            eprintln!(
+                                "FIXUP[{}] JmpIf/Not[{}]: target_idx={} -> byte_offset={} (was {}, instr_end={})",
+                                iteration, idx, target_idx, new_offset, *offset, instr_end_byte
+                            );
+                        }
+                        *offset = new_offset;
+                        changed = true;
+                    }
+                    Instruction::JmpCmp { offset, .. } if *offset != new_offset => {
+                        *offset = new_offset;
+                        changed = true;
+                    }
+                    Instruction::CtxProvide { body_offset, .. } if *body_offset != new_offset => {
+                        *body_offset = new_offset;
+                        changed = true;
+                    }
+                    Instruction::TryBegin { handler_offset } if *handler_offset != new_offset => {
+                        if trace {
+                            eprintln!(
+                                "FIXUP[{}] TryBegin[{}]: target_idx={} -> byte_offset={} (was {}, instr_end={})",
+                                iteration,
+                                idx,
+                                target_idx,
+                                new_offset,
+                                *handler_offset,
+                                instr_end_byte
+                            );
+                        }
+                        *handler_offset = new_offset;
+                        changed = true;
+                    }
+                    _ => {}
                 }
+            }
         }
 
         // If no offsets changed, we've converged
         if !changed {
             if trace {
-                eprintln!("FIXUP: converged after {} iteration(s), final {} bytes",
-                    iteration + 1, current_offset);
+                eprintln!(
+                    "FIXUP: converged after {} iteration(s), final {} bytes",
+                    iteration + 1,
+                    current_offset
+                );
             }
             break;
         }
@@ -6657,13 +7353,9 @@ mod tests {
             const_id: u32::MAX,
         });
 
-        test_roundtrip(&Instruction::Jmp {
-            offset: i32::MAX,
-        });
+        test_roundtrip(&Instruction::Jmp { offset: i32::MAX });
 
-        test_roundtrip(&Instruction::Jmp {
-            offset: i32::MIN,
-        });
+        test_roundtrip(&Instruction::Jmp { offset: i32::MIN });
     }
 
     // ========================================================================
@@ -6744,8 +7436,8 @@ mod tests {
             f64::INFINITY,
             f64::NEG_INFINITY,
             f64::NAN,
-            1.0e-308,  // Very small denormalized
-            1.0e308,   // Very large
+            1.0e-308, // Very small denormalized
+            1.0e308,  // Very large
             std::f64::consts::PI,
             std::f64::consts::E,
         ];
@@ -6759,10 +7451,8 @@ mod tests {
             let mut offset = 0;
             let decoded = decode_instruction(&encoded, &mut offset).unwrap();
             // For NaN, check that it's still NaN (NaN != NaN)
-            if let (
-                Instruction::LoadF { value: v1, .. },
-                Instruction::LoadF { value: v2, .. },
-            ) = (&instr, &decoded)
+            if let (Instruction::LoadF { value: v1, .. }, Instruction::LoadF { value: v2, .. }) =
+                (&instr, &decoded)
             {
                 if v1.is_nan() {
                     assert!(v2.is_nan(), "NaN should decode to NaN");
@@ -6796,9 +7486,7 @@ mod tests {
         use smallvec::smallvec;
         // Complex function type with many parameters
         let type_ref = TypeRef::Function {
-            params: (0..20)
-                .map(|i| TypeRef::Concrete(TypeId(i)))
-                .collect(),
+            params: (0..20).map(|i| TypeRef::Concrete(TypeId(i))).collect(),
             return_type: Box::new(TypeRef::Tuple(
                 (0..5).map(|i| TypeRef::Concrete(TypeId(i))).collect(),
             )),
@@ -7017,11 +7705,7 @@ mod tests {
                 "Should decode correct instruction in sequence"
             );
         }
-        assert_eq!(
-            offset,
-            encoded.len(),
-            "Should consume all bytes exactly"
-        );
+        assert_eq!(offset, encoded.len(), "Should consume all bytes exactly");
     }
 
     // ========================================================================
@@ -7292,11 +7976,7 @@ mod tests {
     #[test]
     fn test_wide_tuple_type() {
         // Tuple with many elements
-        let type_ref = TypeRef::Tuple(
-            (0..50)
-                .map(|i| TypeRef::Concrete(TypeId(i)))
-                .collect(),
-        );
+        let type_ref = TypeRef::Tuple((0..50).map(|i| TypeRef::Concrete(TypeId(i))).collect());
         let instr = Instruction::LoadT {
             dst: Reg(0),
             type_ref,

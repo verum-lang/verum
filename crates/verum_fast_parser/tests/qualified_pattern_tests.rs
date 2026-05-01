@@ -14,8 +14,8 @@
 )]
 // Integration tests for qualified path patterns
 use verum_ast::{FileId, Item};
-use verum_lexer::Lexer;
 use verum_fast_parser::RecursiveParser;
+use verum_lexer::Lexer;
 
 fn parse_source(source: &str) -> Result<Vec<Item>, verum_fast_parser::error::ParseError> {
     let file_id = FileId::new(0);

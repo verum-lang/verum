@@ -11,9 +11,9 @@
 //! - GreenTreeSink: builds immutable green trees for the syntax infrastructure
 //! - TextTreeSink: produces text representation for debugging/testing
 
+use crate::SyntaxKind;
 use crate::event::EventSink;
 use crate::green::{GreenBuilder, GreenNode};
-use crate::SyntaxKind;
 
 /// Builds a green tree from parser events.
 pub struct GreenTreeSink {

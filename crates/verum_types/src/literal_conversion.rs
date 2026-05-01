@@ -65,10 +65,10 @@
 
 use crate::TypeError;
 use crate::const_eval::ConstEvaluator;
-use verum_common::ConstValue;
 use crate::ty::Type;
 use verum_ast::literal::Literal;
 use verum_ast::span::Span;
+use verum_common::ConstValue;
 #[allow(unused_imports)]
 use verum_common::Text;
 

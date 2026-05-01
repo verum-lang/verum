@@ -10,13 +10,13 @@
 //! introspection (@type_name, @type_fields, @variants_of, etc.). Everything desugars
 //! to meta-system operations (tagged literals, derives, const_eval, interpolation).
 
-use crate::module::ConstId;
-use crate::module::Constant;
-use crate::value::Value;
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
+use crate::module::ConstId;
+use crate::module::Constant;
+use crate::value::Value;
 
 // ============================================================================
 // Meta Operations
@@ -27,7 +27,9 @@ use super::bytecode_io::*;
 
 /// At runtime, the expression was already evaluated at compile time.
 /// Just copy the value through.
-pub(in super::super) fn handle_meta_eval(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_meta_eval(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let expr = read_reg(state)?;
     let value = state.get_reg(expr);
@@ -36,7 +38,9 @@ pub(in super::super) fn handle_meta_eval(state: &mut InterpreterState) -> Interp
 }
 
 /// MetaQuote (0xB9) - Create TokenStream from serialized token data.
-pub(in super::super) fn handle_meta_quote(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_meta_quote(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let bytes_const_id = read_varint(state)? as u32;
 
@@ -74,13 +78,17 @@ pub(in super::super) fn handle_meta_quote(state: &mut InterpreterState) -> Inter
 ///
 
 /// Compile-time only -- at runtime, spliced code is already in the bytecode.
-pub(in super::super) fn handle_meta_splice(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_meta_splice(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let _src = read_reg(state)?;
     Ok(DispatchResult::Continue)
 }
 
 /// MetaReflect (0xBB) - Type introspection operations.
-pub(in super::super) fn handle_meta_reflect(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_meta_reflect(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     use crate::instruction::MetaReflectOp;
     use crate::types::TypeId;
 
@@ -140,9 +148,7 @@ pub(in super::super) fn handle_meta_reflect(state: &mut InterpreterState) -> Int
         Some(MetaReflectOp::TypeName) => {
             let type_name = get_type_name(tid);
             let text_value = Value::from_small_string(type_name)
-                .unwrap_or_else(|| {
-                    Value::from_small_string("Type").unwrap_or(Value::nil())
-                });
+                .unwrap_or_else(|| Value::from_small_string("Type").unwrap_or(Value::nil()));
             state.set_reg(dst, text_value);
         }
         Some(MetaReflectOp::NeedsDrop) => {

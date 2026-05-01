@@ -26,9 +26,15 @@ fn print_human_readable() -> Result<()> {
     let cvc5_caps = verum_smt::cvc5_advanced::detect_capabilities();
 
     println!();
-    println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
+    println!(
+        "{}",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan()
+    );
     println!("  {} Formal Verification Engine", "Verum".bold().cyan());
-    println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
+    println!(
+        "{}",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan()
+    );
     println!();
 
     // Backend status
@@ -51,7 +57,11 @@ fn print_human_readable() -> Result<()> {
     println!(
         "    Secondary solver {}  {}",
         secondary_status,
-        registry.cvc5_version.as_deref().unwrap_or("(not linked)").dimmed(),
+        registry
+            .cvc5_version
+            .as_deref()
+            .unwrap_or("(not linked)")
+            .dimmed(),
     );
     println!();
 
@@ -122,11 +132,17 @@ fn print_human_readable() -> Result<()> {
             "    {} are unavailable. To enable them, rebuild with:",
             "ℹ".blue()
         );
-        println!("      {}", "cargo build --features verum_smt/cvc5-ffi".dimmed());
+        println!(
+            "      {}",
+            "cargo build --features verum_smt/cvc5-ffi".dimmed()
+        );
         println!();
     }
 
-    println!("{}", "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan());
+    println!(
+        "{}",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━".cyan()
+    );
     println!();
 
     Ok(())

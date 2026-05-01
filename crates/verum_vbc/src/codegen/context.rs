@@ -582,7 +582,10 @@ impl TierContext {
         if !self.enabled {
             return CbgrTier::Tier0;
         }
-        self.decisions.get(&expr_id).copied().unwrap_or(self.default_tier)
+        self.decisions
+            .get(&expr_id)
+            .copied()
+            .unwrap_or(self.default_tier)
     }
 
     /// Get tier for an expression with span information.
@@ -604,12 +607,18 @@ impl TierContext {
 
     /// The reason is stored only for Tier 0 expressions to enable better
     /// diagnostics when explaining why a reference couldn't be promoted.
-    pub fn set_tier_with_reason(&mut self, expr_id: ExprId, tier: CbgrTier, reason: Option<Tier0Reason>) {
+    pub fn set_tier_with_reason(
+        &mut self,
+        expr_id: ExprId,
+        tier: CbgrTier,
+        reason: Option<Tier0Reason>,
+    ) {
         self.decisions.insert(expr_id, tier);
         if tier == CbgrTier::Tier0
-            && let Some(r) = reason {
-                self.tier0_reasons.insert(expr_id, r);
-            }
+            && let Some(r) = reason
+        {
+            self.tier0_reasons.insert(expr_id, r);
+        }
     }
 
     /// Get the Tier0Reason for an expression, if available.
@@ -628,7 +637,10 @@ impl TierContext {
     /// compiler diagnostics.
     pub fn get_tier0_diagnostic(&self, expr_id: ExprId) -> String {
         if let Some(reason) = self.get_tier0_reason(expr_id) {
-            format!("Reference requires runtime validation: {}", reason.description())
+            format!(
+                "Reference requires runtime validation: {}",
+                reason.description()
+            )
         } else if self.get_tier(expr_id) == CbgrTier::Tier0 {
             "Reference requires runtime validation (reason not analyzed)".to_string()
         } else {
@@ -1042,8 +1054,14 @@ impl CodegenContext {
 
     /// The key is (scrutinee_register, pattern_name) to handle multiple patterns
     /// in the same match expression.
-    pub fn cache_active_pattern_result(&mut self, scrutinee: Reg, pattern_name: &str, result_reg: Reg) {
-        self.active_pattern_cache.insert((scrutinee, pattern_name.to_string()), result_reg);
+    pub fn cache_active_pattern_result(
+        &mut self,
+        scrutinee: Reg,
+        pattern_name: &str,
+        result_reg: Reg,
+    ) {
+        self.active_pattern_cache
+            .insert((scrutinee, pattern_name.to_string()), result_reg);
     }
 
     /// Retrieves a cached Active pattern result.
@@ -1054,8 +1072,14 @@ impl CodegenContext {
     ///
 
     /// Returns `None` if no cached result exists (shouldn't happen in normal flow).
-    pub fn get_cached_active_pattern_result(&self, scrutinee: Reg, pattern_name: &str) -> Option<Reg> {
-        self.active_pattern_cache.get(&(scrutinee, pattern_name.to_string())).copied()
+    pub fn get_cached_active_pattern_result(
+        &self,
+        scrutinee: Reg,
+        pattern_name: &str,
+    ) -> Option<Reg> {
+        self.active_pattern_cache
+            .get(&(scrutinee, pattern_name.to_string()))
+            .copied()
     }
 
     /// Clears the active pattern cache for a specific scrutinee.
@@ -1064,7 +1088,8 @@ impl CodegenContext {
     /// Called at the end of each match arm to prevent stale entries from
     /// being used in subsequent arms.
     pub fn clear_active_pattern_cache_for(&mut self, scrutinee: Reg) {
-        self.active_pattern_cache.retain(|(s, _), _| *s != scrutinee);
+        self.active_pattern_cache
+            .retain(|(s, _), _| *s != scrutinee);
     }
 
     /// Clears all active pattern cache entries.
@@ -1189,7 +1214,12 @@ impl CodegenContext {
             Instruction::Jmp { offset: o } => *o = offset,
             Instruction::JmpIf { cond: _, offset: o } => *o = offset,
             Instruction::JmpNot { cond: _, offset: o } => *o = offset,
-            Instruction::JmpCmp { op: _, a: _, b: _, offset: o } => *o = offset,
+            Instruction::JmpCmp {
+                op: _,
+                a: _,
+                b: _,
+                offset: o,
+            } => *o = offset,
             Instruction::CtxProvide { body_offset, .. } => *body_offset = offset,
             Instruction::TryBegin { handler_offset } => *handler_offset = offset,
             _ => {}
@@ -1220,8 +1250,13 @@ impl CodegenContext {
     }
 
     /// Emits a jump to a known label (backward jump).
-    pub fn emit_backward_jump(&mut self, label: &str, make_instr: impl FnOnce(i32) -> Instruction) -> CodegenResult<()> {
-        let offset = self.label_offset(label)
+    pub fn emit_backward_jump(
+        &mut self,
+        label: &str,
+        make_instr: impl FnOnce(i32) -> Instruction,
+    ) -> CodegenResult<()> {
+        let offset = self
+            .label_offset(label)
             .ok_or_else(|| CodegenError::internal(format!("undefined label: {}", label)))?;
         // Note: offset is instruction-level, fixup_jump_offsets converts to bytes
         self.emit(make_instr(offset));
@@ -1246,7 +1281,11 @@ impl CodegenContext {
     // ==================== Loop Management ====================
 
     /// Enters a loop.
-    pub fn enter_loop(&mut self, source_label: Option<String>, break_value_reg: Option<Reg>) -> LoopContext {
+    pub fn enter_loop(
+        &mut self,
+        source_label: Option<String>,
+        break_value_reg: Option<Reg>,
+    ) -> LoopContext {
         let continue_label = self.new_label("loop_continue");
         let break_label = self.new_label("loop_break");
         let scope_level = self.registers.scope_level();
@@ -1276,9 +1315,11 @@ impl CodegenContext {
     /// Finds a loop by label.
     pub fn find_loop(&self, label: Option<&str>) -> Option<&LoopContext> {
         match label {
-            Some(lbl) => self.loop_stack.iter().rev().find(|ctx| {
-                ctx.source_label.as_deref() == Some(lbl)
-            }),
+            Some(lbl) => self
+                .loop_stack
+                .iter()
+                .rev()
+                .find(|ctx| ctx.source_label.as_deref() == Some(lbl)),
             None => self.loop_stack.last(),
         }
     }
@@ -1374,7 +1415,10 @@ impl CodegenContext {
     ///
 
     /// Returns variables that went out of scope (for drop calls).
-    pub fn exit_scope(&mut self, is_error_path: bool) -> (Vec<(String, Reg)>, Vec<Vec<Instruction>>) {
+    pub fn exit_scope(
+        &mut self,
+        is_error_path: bool,
+    ) -> (Vec<(String, Reg)>, Vec<Vec<Instruction>>) {
         let defers = self.pop_defer_scope(is_error_path);
         let vars = self.registers.exit_scope();
         (vars, defers)
@@ -1432,7 +1476,11 @@ impl CodegenContext {
 
     /// Delegates to TierContext's get_effective_tier for full tier promotion
     /// logic including unsafe block handling.
-    pub fn get_effective_tier(&self, expr_id: super::context::ExprId, want_tier2: bool) -> CbgrTier {
+    pub fn get_effective_tier(
+        &self,
+        expr_id: super::context::ExprId,
+        want_tier2: bool,
+    ) -> CbgrTier {
         self.tier_context.get_effective_tier(expr_id, want_tier2)
     }
 
@@ -1473,9 +1521,10 @@ impl CodegenContext {
         // Check for existing
         for (i, c) in self.constants.iter().enumerate() {
             if let ConstantEntry::Int(v) = c
-                && *v == value {
-                    return ConstId(i as u32);
-                }
+                && *v == value
+            {
+                return ConstId(i as u32);
+            }
         }
 
         let id = ConstId(self.constants.len() as u32);
@@ -1489,9 +1538,10 @@ impl CodegenContext {
         // Check for existing (careful with NaN)
         for (i, c) in self.constants.iter().enumerate() {
             if let ConstantEntry::Float(v) = c
-                && v.to_bits() == value.to_bits() {
-                    return ConstId(i as u32);
-                }
+                && v.to_bits() == value.to_bits()
+            {
+                return ConstId(i as u32);
+            }
         }
 
         let id = ConstId(self.constants.len() as u32);
@@ -1531,9 +1581,10 @@ impl CodegenContext {
         // Check for existing string constant
         for (i, c) in self.constants.iter().enumerate() {
             if let ConstantEntry::String(sid) = c
-                && *sid == string_id {
-                    return ConstId(i as u32);
-                }
+                && *sid == string_id
+            {
+                return ConstId(i as u32);
+            }
         }
 
         let id = ConstId(self.constants.len() as u32);
@@ -1583,7 +1634,8 @@ impl CodegenContext {
 
     /// Gets the register for a variable.
     pub fn get_var_reg(&self, name: &str) -> CodegenResult<Reg> {
-        self.registers.get_reg(name)
+        self.registers
+            .get_reg(name)
             .ok_or_else(|| CodegenError::undefined_variable(name))
     }
 
@@ -1613,7 +1665,12 @@ impl CodegenContext {
     ///
 
     /// Each parameter is a tuple of (name, is_mutable).
-    pub fn begin_function(&mut self, name: &str, params: &[(String, bool)], return_type: Option<TypeRef>) {
+    pub fn begin_function(
+        &mut self,
+        name: &str,
+        params: &[(String, bool)],
+        return_type: Option<TypeRef>,
+    ) {
         self.registers.reset();
         self.instructions.clear();
         self.labels.clear();
@@ -1746,8 +1803,7 @@ impl CodegenContext {
     /// same name — see `register_type_constructors`.
     pub fn has_variants_for_type(&self, type_name: &str) -> bool {
         self.functions.iter().any(|(_, info)| {
-            info.variant_tag.is_some()
-                && info.parent_type_name.as_deref() == Some(type_name)
+            info.variant_tag.is_some() && info.parent_type_name.as_deref() == Some(type_name)
         })
     }
 
@@ -1767,8 +1823,7 @@ impl CodegenContext {
             .functions
             .iter()
             .filter(|(_, info)| {
-                info.variant_tag.is_some()
-                    && info.parent_type_name.as_deref() == Some(type_name)
+                info.variant_tag.is_some() && info.parent_type_name.as_deref() == Some(type_name)
             })
             .map(|(k, _)| k.clone())
             .collect();
@@ -1841,7 +1896,10 @@ impl CodegenContext {
             }
             // Also try the match_scrutinee_type for pattern matching context
             if let Some(ref scrutinee_type) = self.match_scrutinee_type {
-                let base = scrutinee_type.split('<').next().unwrap_or(scrutinee_type.as_str());
+                let base = scrutinee_type
+                    .split('<')
+                    .next()
+                    .unwrap_or(scrutinee_type.as_str());
                 for info in &matches {
                     if info.parent_type_name.as_deref() == Some(base) {
                         return Some(info);
@@ -1849,10 +1907,14 @@ impl CodegenContext {
                 }
             }
             // Prefer variants from user-defined types over stdlib types
-            let user_matches: Vec<_> = matches.iter()
-                .filter(|info| info.parent_type_name.as_ref()
-                    .map(|p| self.user_defined_types.contains(p))
-                    .unwrap_or(false))
+            let user_matches: Vec<_> = matches
+                .iter()
+                .filter(|info| {
+                    info.parent_type_name
+                        .as_ref()
+                        .map(|p| self.user_defined_types.contains(p))
+                        .unwrap_or(false)
+                })
                 .collect();
             if user_matches.len() == 1 {
                 return Some(user_matches[0]);
@@ -1875,10 +1937,12 @@ impl CodegenContext {
         // Collect all matches with their parent type names for disambiguation.
         let mut matches: Vec<(u32, Option<String>)> = Vec::new();
         for (fn_name, fn_info) in &self.functions {
-            if fn_name.ends_with(&suffix) && fn_info.param_count == arg_count
-                && let Some(tag) = fn_info.variant_tag {
-                    matches.push((tag, fn_info.parent_type_name.clone()));
-                }
+            if fn_name.ends_with(&suffix)
+                && fn_info.param_count == arg_count
+                && let Some(tag) = fn_info.variant_tag
+            {
+                matches.push((tag, fn_info.parent_type_name.clone()));
+            }
         }
         if matches.len() == 1 {
             return Some(matches[0].0);
@@ -1902,7 +1966,10 @@ impl CodegenContext {
             // when the constructor pattern itself produces a value, e.g. via
             // a guard expression that re-constructs).
             if let Some(ref scrutinee_type) = self.match_scrutinee_type {
-                let base = scrutinee_type.split('<').next().unwrap_or(scrutinee_type.as_str());
+                let base = scrutinee_type
+                    .split('<')
+                    .next()
+                    .unwrap_or(scrutinee_type.as_str());
                 for (tag, parent) in &matches {
                     if parent.as_deref() == Some(base) {
                         return Some(*tag);
@@ -1912,10 +1979,14 @@ impl CodegenContext {
             // Last: prefer user-defined types over stdlib types — kept as a
             // weak final fallback so user code still wins when both contexts
             // above are absent.
-            let user_matches: Vec<u32> = matches.iter()
-                .filter(|(_, parent)| parent.as_ref()
-                    .map(|p| self.user_defined_types.contains(p))
-                    .unwrap_or(false))
+            let user_matches: Vec<u32> = matches
+                .iter()
+                .filter(|(_, parent)| {
+                    parent
+                        .as_ref()
+                        .map(|p| self.user_defined_types.contains(p))
+                        .unwrap_or(false)
+                })
                 .map(|(tag, _)| *tag)
                 .collect();
             if user_matches.len() == 1 {
@@ -1931,9 +2002,14 @@ impl CodegenContext {
     /// When a simple variant name (e.g., "Done") is in the collision set and
     /// we know the expected parent type (from match scrutinee), try the
     /// qualified form "TypeName.VariantName" directly.
-    pub fn find_variant_by_type_and_name(&self, type_name: &str, variant_name: &str) -> Option<u32> {
+    pub fn find_variant_by_type_and_name(
+        &self,
+        type_name: &str,
+        variant_name: &str,
+    ) -> Option<u32> {
         let qualified = format!("{}.{}", type_name, variant_name);
-        self.functions.get(&qualified)
+        self.functions
+            .get(&qualified)
             .and_then(|info| info.variant_tag)
     }
 
@@ -1948,9 +2024,10 @@ impl CodegenContext {
                 && fn_info.variant_tag.is_some()
                 && fn_info.param_count == arg_count
                 && let Some(ref parent) = fn_info.parent_type_name
-                    && !parents.contains(parent) {
-                        parents.push(parent.clone());
-                    }
+                && !parents.contains(parent)
+            {
+                parents.push(parent.clone());
+            }
         }
         if parents.len() == 1 {
             parents.into_iter().next()
@@ -1969,20 +2046,23 @@ impl CodegenContext {
         let suffix = format!(".{}", variant_name);
         let mut parents = Vec::new();
         for (fn_name, fn_info) in &self.functions {
-            if fn_name.ends_with(&suffix) && fn_info.variant_tag.is_some()
+            if fn_name.ends_with(&suffix)
+                && fn_info.variant_tag.is_some()
                 && let Some(ref parent) = fn_info.parent_type_name
-                    && !parents.contains(parent) {
-                        parents.push(parent.clone());
-                    }
+                && !parents.contains(parent)
+            {
+                parents.push(parent.clone());
+            }
         }
         // Also check if variant_name itself is a registered variant
         if parents.is_empty() {
             for fn_info in self.functions.values() {
                 if fn_info.variant_tag.is_some()
                     && let Some(ref parent) = fn_info.parent_type_name
-                        && parent == variant_name {
-                            return Some(variant_name.to_string());
-                        }
+                    && parent == variant_name
+                {
+                    return Some(variant_name.to_string());
+                }
             }
         }
         if parents.len() == 1 {
@@ -2005,7 +2085,11 @@ impl CodegenContext {
     /// This is used when matching patterns to find the correct variant when
     /// there are name collisions (e.g., IpAddr.V6 vs SocketAddr.V6).
     /// Returns the first matching variant with payload type information.
-    pub fn find_variant_with_suffix(&self, suffix: &str, expected_param_count: usize) -> Option<&FunctionInfo> {
+    pub fn find_variant_with_suffix(
+        &self,
+        suffix: &str,
+        expected_param_count: usize,
+    ) -> Option<&FunctionInfo> {
         for (name, info) in &self.functions {
             // Only consider variant constructors (must have variant_tag set)
             if info.variant_tag.is_some()
@@ -2100,7 +2184,10 @@ impl CodegenContext {
     /// `io.print("hello")` should resolve to it). Never use this for method
     /// dispatch — see the doc on `lookup_qualified_function` for the
     /// regression this avoids.
-    pub fn lookup_qualified_function_with_fallback(&self, qualified_name: &str) -> Option<&FunctionInfo> {
+    pub fn lookup_qualified_function_with_fallback(
+        &self,
+        qualified_name: &str,
+    ) -> Option<&FunctionInfo> {
         if let Some(info) = self.functions.get(qualified_name) {
             return Some(info);
         }
@@ -2119,9 +2206,10 @@ impl CodegenContext {
         }
 
         if let Some(simple_name) = qualified_name.rsplit("::").next()
-            && let Some(info) = self.functions.get(simple_name) {
-                return Some(info);
-            }
+            && let Some(info) = self.functions.get(simple_name)
+        {
+            return Some(info);
+        }
 
         None
     }
@@ -2132,7 +2220,10 @@ impl CodegenContext {
     /// This is used during stdlib compilation to make functions from
     /// previously compiled modules (e.g., core) available when compiling
     /// dependent modules (e.g., collections, async).
-    pub fn import_functions(&mut self, functions: &std::collections::HashMap<String, FunctionInfo>) {
+    pub fn import_functions(
+        &mut self,
+        functions: &std::collections::HashMap<String, FunctionInfo>,
+    ) {
         for (name, info) in functions {
             // Don't overwrite if already registered (local definitions take precedence)
             if !self.functions.contains_key(name) {
@@ -2220,7 +2311,10 @@ impl CodegenContext {
 
     /// Resolve alias → context type name. Returns name itself if not an alias.
     pub fn resolve_context_alias(&self, name: &str) -> String {
-        self.context_aliases.get(name).cloned().unwrap_or_else(|| name.to_string())
+        self.context_aliases
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| name.to_string())
     }
 
     /// Clears the required contexts and aliases.
@@ -2236,7 +2330,10 @@ impl CodegenContext {
 
     /// Gets a variable's type for instruction selection.
     pub fn get_variable_type(&self, name: &str) -> VarTypeKind {
-        self.variable_types.get(name).copied().unwrap_or(VarTypeKind::Unknown)
+        self.variable_types
+            .get(name)
+            .copied()
+            .unwrap_or(VarTypeKind::Unknown)
     }
 
     /// Registers a constant's type for correct instruction selection.
@@ -2254,7 +2351,10 @@ impl CodegenContext {
 
     /// Returns Unknown if the constant type is not registered.
     pub fn get_constant_type(&self, name: &str) -> VarTypeKind {
-        self.constant_types.get(name).copied().unwrap_or(VarTypeKind::Unknown)
+        self.constant_types
+            .get(name)
+            .copied()
+            .unwrap_or(VarTypeKind::Unknown)
     }
 }
 
@@ -2379,7 +2479,11 @@ mod tests {
     fn test_function_lifecycle() {
         let mut ctx = CodegenContext::new();
 
-        ctx.begin_function("test_fn", &[("a".to_string(), false), ("b".to_string(), false)], None);
+        ctx.begin_function(
+            "test_fn",
+            &[("a".to_string(), false), ("b".to_string(), false)],
+            None,
+        );
 
         assert!(ctx.in_function);
         assert_eq!(ctx.current_function.as_deref(), Some("test_fn"));

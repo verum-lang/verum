@@ -1,13 +1,13 @@
 use verum_llvm_sys::core::LLVMGetArrayLength2;
 use verum_llvm_sys::prelude::LLVMTypeRef;
 
+use crate::AddressSpace;
 use crate::context::ContextRef;
 use crate::support::LLVMString;
 use crate::types::enums::BasicMetadataTypeEnum;
 use crate::types::traits::AsTypeRef;
 use crate::types::{BasicTypeEnum, FunctionType, PointerType, Type};
 use crate::values::{ArrayValue, IntValue};
-use crate::AddressSpace;
 
 use std::fmt::{self, Display};
 
@@ -113,7 +113,11 @@ impl<'ctx> ArrayType<'ctx> {
     /// let i8_array_type = i8_type.array_type(3);
     /// let fn_type = i8_array_type.fn_type(&[], false);
     /// ```
-    pub fn fn_type(self, param_types: &[BasicMetadataTypeEnum<'ctx>], is_var_args: bool) -> FunctionType<'ctx> {
+    pub fn fn_type(
+        self,
+        param_types: &[BasicMetadataTypeEnum<'ctx>],
+        is_var_args: bool,
+    ) -> FunctionType<'ctx> {
         self.array_type.fn_type(param_types, is_var_args)
     }
 

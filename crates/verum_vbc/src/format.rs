@@ -279,10 +279,7 @@ impl VbcHeader {
                 self.string_table_size as u64,
             ),
             (self.bytecode_offset as u64, self.bytecode_size as u64),
-            (
-                self.source_map_offset as u64,
-                self.source_map_size as u64,
-            ),
+            (self.source_map_offset as u64, self.source_map_size as u64),
         ];
 
         for (offset, size) in sections {
@@ -399,9 +396,18 @@ mod tests {
 
     #[test]
     fn test_compression_algorithm() {
-        assert_eq!(CompressionAlgorithm::try_from(0), Ok(CompressionAlgorithm::None));
-        assert_eq!(CompressionAlgorithm::try_from(1), Ok(CompressionAlgorithm::Zstd));
-        assert_eq!(CompressionAlgorithm::try_from(2), Ok(CompressionAlgorithm::Lz4));
+        assert_eq!(
+            CompressionAlgorithm::try_from(0),
+            Ok(CompressionAlgorithm::None)
+        );
+        assert_eq!(
+            CompressionAlgorithm::try_from(1),
+            Ok(CompressionAlgorithm::Zstd)
+        );
+        assert_eq!(
+            CompressionAlgorithm::try_from(2),
+            Ok(CompressionAlgorithm::Lz4)
+        );
         assert_eq!(CompressionAlgorithm::try_from(3), Err(3));
     }
 

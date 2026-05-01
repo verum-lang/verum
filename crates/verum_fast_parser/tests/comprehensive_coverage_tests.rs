@@ -32,22 +32,32 @@
 //! - Try/errdefer
 
 use verum_ast::span::FileId;
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 fn parse_module_ok(input: &str) {
     let file_id = FileId::new(0);
     let lexer = Lexer::new(input, file_id);
     let parser = VerumParser::new();
     let result = parser.parse_module(lexer, file_id);
-    assert!(result.is_ok(), "Failed to parse module:\n{}\nError: {:?}", input, result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse module:\n{}\nError: {:?}",
+        input,
+        result.err()
+    );
 }
 
 fn parse_expr_ok(input: &str) {
     let file_id = FileId::new(0);
     let parser = VerumParser::new();
     let result = parser.parse_expr_str(input, file_id);
-    assert!(result.is_ok(), "Failed to parse expression:\n{}\nError: {:?}", input, result.err());
+    assert!(
+        result.is_ok(),
+        "Failed to parse expression:\n{}\nError: {:?}",
+        input,
+        result.err()
+    );
 }
 
 fn parse_module_err(input: &str) {
@@ -227,7 +237,9 @@ fn test_unit_type_definition() {
 
 #[test]
 fn test_protocol_type() {
-    parse_module_ok("type Iterator is protocol { type Item; fn next(&mut self) -> Maybe<Self.Item>; };");
+    parse_module_ok(
+        "type Iterator is protocol { type Item; fn next(&mut self) -> Maybe<Self.Item>; };",
+    );
 }
 
 #[test]
@@ -247,7 +259,9 @@ fn test_function_with_multiple_where_predicates() {
 
 #[test]
 fn test_complex_sum_type() {
-    parse_module_ok("type Tree<T> is Leaf(T) | Node { left: Heap<Tree<T>>, right: Heap<Tree<T>> };");
+    parse_module_ok(
+        "type Tree<T> is Leaf(T) | Node { left: Heap<Tree<T>>, right: Heap<Tree<T>> };",
+    );
 }
 
 #[test]
@@ -261,7 +275,9 @@ fn test_type_alias() {
 
 #[test]
 fn test_rank2_function_type_in_record() {
-    parse_module_ok("type Transducer<A, B> is { transform: fn<R>(fn(R, B) -> R) -> fn(R, A) -> R };");
+    parse_module_ok(
+        "type Transducer<A, B> is { transform: fn<R>(fn(R, B) -> R) -> fn(R, A) -> R };",
+    );
 }
 
 #[test]
@@ -304,7 +320,9 @@ fn test_simple_implement() {
 
 #[test]
 fn test_implement_protocol() {
-    parse_module_ok("implement Display for Point { fn fmt(&self) -> Text { f\"({self.x}, {self.y})\" } }");
+    parse_module_ok(
+        "implement Display for Point { fn fmt(&self) -> Text { f\"({self.x}, {self.y})\" } }",
+    );
 }
 
 #[test]
@@ -323,7 +341,9 @@ fn test_context_definition() {
 
 #[test]
 fn test_using_clause() {
-    parse_module_ok("fn get_users() -> List<Text> using [Database] { Database.query(\"SELECT name\") }");
+    parse_module_ok(
+        "fn get_users() -> List<Text> using [Database] { Database.query(\"SELECT name\") }",
+    );
 }
 
 #[test]
@@ -333,7 +353,9 @@ fn test_provide_statement() {
 
 #[test]
 fn test_provide_in_block() {
-    parse_module_ok("fn main() { provide Logger = StdLogger.new() in { Logger.info(\"hello\"); } }");
+    parse_module_ok(
+        "fn main() { provide Logger = StdLogger.new() in { Logger.info(\"hello\"); } }",
+    );
 }
 
 // ============================================================================
@@ -376,12 +398,16 @@ fn test_if_else_if_chain() {
 
 #[test]
 fn test_match_basic() {
-    parse_module_ok("fn f(x: Int) -> Text { match x { 0 => \"zero\", 1 => \"one\", _ => \"other\" } }");
+    parse_module_ok(
+        "fn f(x: Int) -> Text { match x { 0 => \"zero\", 1 => \"one\", _ => \"other\" } }",
+    );
 }
 
 #[test]
 fn test_match_with_guard() {
-    parse_module_ok("fn f(x: Int) -> Text { match x { n if n > 0 => \"positive\", _ => \"non-positive\" } }");
+    parse_module_ok(
+        "fn f(x: Int) -> Text { match x { n if n > 0 => \"positive\", _ => \"non-positive\" } }",
+    );
 }
 
 #[test]
@@ -396,7 +422,9 @@ fn test_for_loop() {
 
 #[test]
 fn test_loop_break_continue() {
-    parse_module_ok("fn f() -> Int { let mut x = 0; loop { x = x + 1; if x > 10 { break x; } continue; } }");
+    parse_module_ok(
+        "fn f() -> Int { let mut x = 0; loop { x = x + 1; if x > 10 { break x; } continue; } }",
+    );
 }
 
 // ============================================================================
@@ -424,12 +452,14 @@ fn test_spawn_expression() {
 
 #[test]
 fn test_select_basic() {
-    parse_module_ok(r#"async fn race() {
+    parse_module_ok(
+        r#"async fn race() {
     select {
         val = ch1.recv().await => { print(val); }
         val = ch2.recv().await => { print(val); }
     }
-}"#);
+}"#,
+    );
 }
 
 // ============================================================================
@@ -684,7 +714,9 @@ fn test_deeply_nested_parens() {
 
 #[test]
 fn test_deeply_nested_if() {
-    parse_module_ok("fn f(x: Int) -> Int { if x > 5 { if x > 10 { if x > 15 { 3 } else { 2 } } else { 1 } } else { 0 } }");
+    parse_module_ok(
+        "fn f(x: Int) -> Int { if x > 5 { if x > 10 { if x > 15 { 3 } else { 2 } } else { 1 } } else { 0 } }",
+    );
 }
 
 // ============================================================================
@@ -693,17 +725,20 @@ fn test_deeply_nested_if() {
 
 #[test]
 fn test_multiple_functions() {
-    parse_module_ok(r#"
+    parse_module_ok(
+        r#"
 fn add(a: Int, b: Int) -> Int { a + b }
 fn sub(a: Int, b: Int) -> Int { a - b }
 fn mul(a: Int, b: Int) -> Int { a * b }
 fn div(a: Int, b: Int) -> Int { a / b }
-"#);
+"#,
+    );
 }
 
 #[test]
 fn test_mixed_declarations() {
-    parse_module_ok(r#"
+    parse_module_ok(
+        r#"
 type Color is Red | Green | Blue;
 fn color_name(c: Color) -> Text {
     match c {
@@ -715,7 +750,8 @@ fn color_name(c: Color) -> Text {
 implement Display for Color {
     fn fmt(&self) -> Text { color_name(self) }
 }
-"#);
+"#,
+    );
 }
 
 // ============================================================================
@@ -766,7 +802,8 @@ fn test_return_unit() {
 
 #[test]
 fn test_method_with_generic_return() {
-    parse_module_ok(r#"
+    parse_module_ok(
+        r#"
 implement<T> List<T> {
     pub fn first(&self) -> Maybe<&T> {
         if self.len() > 0 {
@@ -776,12 +813,14 @@ implement<T> List<T> {
         }
     }
 }
-"#);
+"#,
+    );
 }
 
 #[test]
 fn test_nested_match_with_bindings() {
-    parse_module_ok(r#"
+    parse_module_ok(
+        r#"
 fn process(input: Result<Option<Int>, Text>) -> Int {
     match input {
         Ok(Some(value)) if value > 0 => value,
@@ -790,5 +829,6 @@ fn process(input: Result<Option<Int>, Text>) -> Int {
         Err(msg) => -2,
     }
 }
-"#);
+"#,
+    );
 }

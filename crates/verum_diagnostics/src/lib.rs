@@ -120,10 +120,10 @@ pub use must_handle_errors::{
     BranchInfo, E0317, FlowContext, MustHandleTracker, ResultHandling, TrackedResult, ViolationKind,
 };
 pub use recovery::{
-    ErrorKind, ErrorRecovery, NameContext, PartialCompilation, RecoveryAction, RecoverySeverity,
-    RecoveryState, SyntaxErrorContext, SyntaxErrorKind, TypeConversion,
-    find_closest_name, rust_keyword_suggestion, rust_macro_suggestion, rust_type_suggestion,
-    RUST_KEYWORD_MAP, RUST_MACRO_MAP, RUST_TYPE_MAP,
+    ErrorKind, ErrorRecovery, NameContext, PartialCompilation, RUST_KEYWORD_MAP, RUST_MACRO_MAP,
+    RUST_TYPE_MAP, RecoveryAction, RecoverySeverity, RecoveryState, SyntaxErrorContext,
+    SyntaxErrorKind, TypeConversion, find_closest_name, rust_keyword_suggestion,
+    rust_macro_suggestion, rust_type_suggestion,
 };
 pub use refinement_error::{
     Constraint, ConstraintViolation, CounterExample, RefinementError, RefinementErrorBuilder,

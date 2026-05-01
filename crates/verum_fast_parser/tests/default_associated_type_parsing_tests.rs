@@ -21,8 +21,8 @@ use verum_ast::decl::{ItemKind, ProtocolItemKind};
 use verum_ast::span::FileId;
 use verum_ast::ty::TypeKind;
 use verum_common::List;
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 fn parse(source: &str) -> Result<List<verum_ast::Item>, String> {
     let file_id = FileId::new(0);

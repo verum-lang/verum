@@ -109,7 +109,10 @@ fn test_evidence_scope_push_pop() {
     let mut evidence = RefinementEvidence::new();
 
     evidence.push_scope();
-    evidence.add_evidence_from_condition(&make_binary_expr(BinOp::Gt, make_var_expr("x"), make_int_literal(0)), dummy_span());
+    evidence.add_evidence_from_condition(
+        &make_binary_expr(BinOp::Gt, make_var_expr("x"), make_int_literal(0)),
+        dummy_span(),
+    );
 
     // Evidence should be accessible
     let assumptions = evidence.to_smt_assumptions();
@@ -128,11 +131,17 @@ fn test_evidence_nested_scopes() {
 
     // Outer scope evidence
     evidence.push_scope();
-    evidence.add_evidence_from_condition(&make_binary_expr(BinOp::Gt, make_var_expr("x"), make_int_literal(0)), dummy_span());
+    evidence.add_evidence_from_condition(
+        &make_binary_expr(BinOp::Gt, make_var_expr("x"), make_int_literal(0)),
+        dummy_span(),
+    );
 
     // Inner scope evidence
     evidence.push_scope();
-    evidence.add_evidence_from_condition(&make_binary_expr(BinOp::Lt, make_var_expr("x"), make_int_literal(100)), dummy_span());
+    evidence.add_evidence_from_condition(
+        &make_binary_expr(BinOp::Lt, make_var_expr("x"), make_int_literal(100)),
+        dummy_span(),
+    );
 
     // Should see both conditions
     let all = evidence.get_all_conditions();
@@ -313,7 +322,10 @@ fn test_variable_evidence_lookup() {
     evidence.push_scope();
 
     evidence.add_method_evidence(Text::from("data"), "is_empty", true, dummy_span());
-    evidence.add_evidence_from_condition(&make_binary_expr(BinOp::Gt, make_var_expr("x"), make_int_literal(0)), dummy_span());
+    evidence.add_evidence_from_condition(
+        &make_binary_expr(BinOp::Gt, make_var_expr("x"), make_int_literal(0)),
+        dummy_span(),
+    );
 
     let data_evidence = evidence.get_variable_evidence(&Text::from("data"));
     assert_eq!(data_evidence.len(), 1);
@@ -358,8 +370,14 @@ fn test_to_smt_assumptions() {
     let mut evidence = RefinementEvidence::new();
     evidence.push_scope();
 
-    evidence.add_evidence_from_condition(&make_binary_expr(BinOp::Gt, make_var_expr("x"), make_int_literal(0)), dummy_span());
-    evidence.add_evidence_from_condition(&make_binary_expr(BinOp::Lt, make_var_expr("x"), make_int_literal(100)), dummy_span());
+    evidence.add_evidence_from_condition(
+        &make_binary_expr(BinOp::Gt, make_var_expr("x"), make_int_literal(0)),
+        dummy_span(),
+    );
+    evidence.add_evidence_from_condition(
+        &make_binary_expr(BinOp::Lt, make_var_expr("x"), make_int_literal(100)),
+        dummy_span(),
+    );
 
     let assumptions = evidence.to_smt_assumptions();
     assert_eq!(assumptions.len(), 2);
@@ -370,10 +388,16 @@ fn test_to_smt_assumptions_with_nested_scopes() {
     let mut evidence = RefinementEvidence::new();
 
     evidence.push_scope();
-    evidence.add_evidence_from_condition(&make_binary_expr(BinOp::Gt, make_var_expr("x"), make_int_literal(0)), dummy_span());
+    evidence.add_evidence_from_condition(
+        &make_binary_expr(BinOp::Gt, make_var_expr("x"), make_int_literal(0)),
+        dummy_span(),
+    );
 
     evidence.push_scope();
-    evidence.add_evidence_from_condition(&make_binary_expr(BinOp::Lt, make_var_expr("y"), make_int_literal(50)), dummy_span());
+    evidence.add_evidence_from_condition(
+        &make_binary_expr(BinOp::Lt, make_var_expr("y"), make_int_literal(50)),
+        dummy_span(),
+    );
 
     // Should see both conditions
     let assumptions = evidence.to_smt_assumptions();
@@ -389,9 +413,15 @@ fn test_evidence_clear() {
     let mut evidence = RefinementEvidence::new();
 
     evidence.push_scope();
-    evidence.add_evidence_from_condition(&make_binary_expr(BinOp::Gt, make_var_expr("x"), make_int_literal(0)), dummy_span());
+    evidence.add_evidence_from_condition(
+        &make_binary_expr(BinOp::Gt, make_var_expr("x"), make_int_literal(0)),
+        dummy_span(),
+    );
     evidence.push_scope();
-    evidence.add_evidence_from_condition(&make_binary_expr(BinOp::Lt, make_var_expr("y"), make_int_literal(50)), dummy_span());
+    evidence.add_evidence_from_condition(
+        &make_binary_expr(BinOp::Lt, make_var_expr("y"), make_int_literal(50)),
+        dummy_span(),
+    );
 
     assert_eq!(evidence.get_all_conditions().len(), 2);
 
@@ -410,7 +440,10 @@ fn test_evidence_stats() {
     assert_eq!(used, 0);
     assert_eq!(hits, 0);
 
-    evidence.add_evidence_from_condition(&make_binary_expr(BinOp::Gt, make_var_expr("x"), make_int_literal(0)), dummy_span());
+    evidence.add_evidence_from_condition(
+        &make_binary_expr(BinOp::Gt, make_var_expr("x"), make_int_literal(0)),
+        dummy_span(),
+    );
     evidence.add_method_evidence(Text::from("data"), "is_empty", true, dummy_span());
 
     let (added2, _, _) = evidence.stats();
@@ -429,8 +462,8 @@ fn test_evidence_stats() {
 
 #[test]
 fn test_evidence_with_refinement_checker() {
-    use verum_types::refinement::{RefinementType, RefinementPredicate, RefinementBinding};
     use verum_types::context::TypeContext;
+    use verum_types::refinement::{RefinementBinding, RefinementPredicate, RefinementType};
 
     let mut checker = RefinementChecker::new(RefinementConfig {
         enable_smt: false, // Disable SMT for unit test
@@ -453,7 +486,11 @@ fn test_evidence_with_refinement_checker() {
     };
 
     // Create evidence: x > 0
-    let evidence = vec![make_binary_expr(BinOp::Gt, make_var_expr("x"), make_int_literal(0))];
+    let evidence = vec![make_binary_expr(
+        BinOp::Gt,
+        make_var_expr("x"),
+        make_int_literal(0),
+    )];
 
     let ctx = TypeContext::new();
 
@@ -486,7 +523,10 @@ fn test_evidence_after_all_scopes_popped() {
     let mut evidence = RefinementEvidence::new();
 
     evidence.push_scope();
-    evidence.add_evidence_from_condition(&make_binary_expr(BinOp::Gt, make_var_expr("x"), make_int_literal(0)), dummy_span());
+    evidence.add_evidence_from_condition(
+        &make_binary_expr(BinOp::Gt, make_var_expr("x"), make_int_literal(0)),
+        dummy_span(),
+    );
     evidence.pop_scope();
 
     // Pop the root scope too (edge case - should be safe)
@@ -521,9 +561,18 @@ fn test_evidence_multiple_variables() {
     let mut evidence = RefinementEvidence::new();
     evidence.push_scope();
 
-    evidence.add_evidence_from_condition(&make_binary_expr(BinOp::Gt, make_var_expr("x"), make_int_literal(0)), dummy_span());
-    evidence.add_evidence_from_condition(&make_binary_expr(BinOp::Gt, make_var_expr("y"), make_int_literal(0)), dummy_span());
-    evidence.add_evidence_from_condition(&make_binary_expr(BinOp::Gt, make_var_expr("z"), make_int_literal(0)), dummy_span());
+    evidence.add_evidence_from_condition(
+        &make_binary_expr(BinOp::Gt, make_var_expr("x"), make_int_literal(0)),
+        dummy_span(),
+    );
+    evidence.add_evidence_from_condition(
+        &make_binary_expr(BinOp::Gt, make_var_expr("y"), make_int_literal(0)),
+        dummy_span(),
+    );
+    evidence.add_evidence_from_condition(
+        &make_binary_expr(BinOp::Gt, make_var_expr("z"), make_int_literal(0)),
+        dummy_span(),
+    );
     evidence.add_method_evidence(Text::from("data"), "is_empty", true, dummy_span());
 
     assert_eq!(evidence.get_variable_evidence(&Text::from("x")).len(), 1);

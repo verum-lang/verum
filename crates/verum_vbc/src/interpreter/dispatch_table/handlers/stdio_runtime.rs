@@ -31,11 +31,11 @@
 //! surface-layer permission gates apply at the higher `using [...]`
 //! capability level, not at this intrinsic intercept.)
 
-use crate::interpreter::state::InterpreterState;
-use crate::value::Value;
 use super::super::super::error::InterpreterResult;
 use super::heap_helpers::{alloc_record_n_fields, extract_text_arg, wrap_in_variant};
 use super::string_helpers::alloc_string_value;
+use crate::interpreter::state::InterpreterState;
+use crate::value::Value;
 
 pub(in super::super) fn try_intercept_stdio_runtime(
     state: &mut InterpreterState,
@@ -106,8 +106,12 @@ fn intercept_read_line(state: &mut InterpreterState) -> InterpreterResult<Option
         Ok(_) => {
             // Strip trailing \n and optional \r (CRLF) — matches the
             // Verum stdlib `read_line` contract at stdio.vr:388-394.
-            if line.ends_with('\n') { line.pop(); }
-            if line.ends_with('\r') { line.pop(); }
+            if line.ends_with('\n') {
+                line.pop();
+            }
+            if line.ends_with('\r') {
+                line.pop();
+            }
             let text = alloc_string_value(state, &line)?;
             Ok(Some(wrap_in_variant(state, "Result", 0, &[text])?))
         }
@@ -198,7 +202,6 @@ fn intercept_println_empty(_state: &mut InterpreterState) -> InterpreterResult<O
     Ok(Some(Value::unit()))
 }
 
-
 /// Read one trimmed line from stdin (host-side; reused by read_int /
 /// read_float). Returns `Ok(line_no_newline)` or `Err(io_error)`.
 fn read_one_line() -> InterpreterResult<Result<String, std::io::Error>> {
@@ -208,8 +211,12 @@ fn read_one_line() -> InterpreterResult<Result<String, std::io::Error>> {
     let mut line = String::new();
     match handle.read_line(&mut line) {
         Ok(_) => {
-            if line.ends_with('\n') { line.pop(); }
-            if line.ends_with('\r') { line.pop(); }
+            if line.ends_with('\n') {
+                line.pop();
+            }
+            if line.ends_with('\r') {
+                line.pop();
+            }
             Ok(Ok(line))
         }
         Err(e) => Ok(Err(e)),
@@ -223,26 +230,26 @@ fn read_one_line() -> InterpreterResult<Result<String, std::io::Error>> {
 fn build_io_err_text(state: &mut InterpreterState, e: &std::io::Error) -> InterpreterResult<Value> {
     use std::io::ErrorKind as K;
     let kind_tag = match e.kind() {
-        K::NotFound          => 0u32,
-        K::PermissionDenied  => 1,
+        K::NotFound => 0u32,
+        K::PermissionDenied => 1,
         K::ConnectionRefused => 2,
-        K::ConnectionReset   => 3,
+        K::ConnectionReset => 3,
         K::ConnectionAborted => 4,
-        K::NotConnected      => 5,
-        K::AddrInUse         => 6,
-        K::AddrNotAvailable  => 7,
-        K::BrokenPipe        => 8,
-        K::AlreadyExists     => 9,
-        K::WouldBlock        => 10,
-        K::InvalidInput      => 11,
-        K::InvalidData       => 12,
-        K::TimedOut          => 13,
-        K::WriteZero         => 14,
-        K::Interrupted       => 15,
-        K::UnexpectedEof     => 16,
-        K::OutOfMemory       => 17,
-        K::Unsupported       => 18,
-        _                    => 19,
+        K::NotConnected => 5,
+        K::AddrInUse => 6,
+        K::AddrNotAvailable => 7,
+        K::BrokenPipe => 8,
+        K::AlreadyExists => 9,
+        K::WouldBlock => 10,
+        K::InvalidInput => 11,
+        K::InvalidData => 12,
+        K::TimedOut => 13,
+        K::WriteZero => 14,
+        K::Interrupted => 15,
+        K::UnexpectedEof => 16,
+        K::OutOfMemory => 17,
+        K::Unsupported => 18,
+        _ => 19,
     };
     let kind_variant = wrap_in_variant(state, "IoErrorKind", kind_tag, &[])?;
     let msg_text = alloc_string_value(state, &format!("{}", e))?;

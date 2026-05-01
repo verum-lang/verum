@@ -14,7 +14,11 @@ fn binary() -> &'static str {
 
 fn make_fixture(name: &str) -> PathBuf {
     let mut dir = std::env::temp_dir();
-    dir.push(format!("verum_lint_cache_test_{}_{}", name, std::process::id()));
+    dir.push(format!(
+        "verum_lint_cache_test_{}_{}",
+        name,
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("src")).expect("create src");
     std::fs::write(
@@ -55,13 +59,14 @@ fn count_cache_files(dir: &PathBuf) -> usize {
     if let Ok(buckets) = std::fs::read_dir(&cache) {
         for bucket in buckets.flatten() {
             if bucket.path().is_dir()
-                && let Ok(entries) = std::fs::read_dir(bucket.path()) {
-                    for e in entries.flatten() {
-                        if e.path().extension().and_then(|s| s.to_str()) == Some("json") {
-                            count += 1;
-                        }
+                && let Ok(entries) = std::fs::read_dir(bucket.path())
+            {
+                for e in entries.flatten() {
+                    if e.path().extension().and_then(|s| s.to_str()) == Some("json") {
+                        count += 1;
                     }
                 }
+            }
         }
     }
     count

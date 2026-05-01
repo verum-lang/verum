@@ -17,19 +17,12 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use verum_ast::Item;
 use verum_ast::attr::{
-    Owl2Characteristic,
-    Owl2CharacteristicAttr,
-    Owl2ClassAttr,
-    Owl2DisjointWithAttr,
-    Owl2EquivalentClassAttr,
-    Owl2HasKeyAttr,
-    Owl2PropertyAttr,
-    Owl2Semantics,
-    Owl2SubClassOfAttr,
+    Owl2Characteristic, Owl2CharacteristicAttr, Owl2ClassAttr, Owl2DisjointWithAttr,
+    Owl2EquivalentClassAttr, Owl2HasKeyAttr, Owl2PropertyAttr, Owl2Semantics, Owl2SubClassOfAttr,
 };
 use verum_ast::decl::ItemKind;
-use verum_ast::Item;
 use verum_common::{Maybe, Text};
 
 /// Kind of OWL 2 entity discovered at audit time. Class declarations
@@ -45,7 +38,7 @@ pub enum Owl2EntityKind {
 impl Owl2EntityKind {
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Class    => "class",
+            Self::Class => "class",
             Self::Property => "property",
         }
     }
@@ -63,7 +56,7 @@ pub struct Owl2Entity {
     pub file: PathBuf,
     /// Property metadata — only populated when kind == Property.
     pub property_domain: Option<Text>,
-    pub property_range:  Option<Text>,
+    pub property_range: Option<Text>,
     pub property_inverse_of: Option<Text>,
     pub property_characteristics: BTreeSet<Owl2Characteristic>,
     /// Has-key constraints (only for classes).
@@ -71,14 +64,15 @@ pub struct Owl2Entity {
 }
 
 impl Owl2Entity {
-    pub fn new_class(
-        name: Text,
-        semantics: Option<Owl2Semantics>,
-        file: PathBuf,
-    ) -> Self {
+    pub fn new_class(name: Text, semantics: Option<Owl2Semantics>, file: PathBuf) -> Self {
         Self {
-            name, kind: Owl2EntityKind::Class, semantics, file,
-            property_domain: None, property_range: None, property_inverse_of: None,
+            name,
+            kind: Owl2EntityKind::Class,
+            semantics,
+            file,
+            property_domain: None,
+            property_range: None,
+            property_inverse_of: None,
             property_characteristics: BTreeSet::new(),
             keys: Vec::new(),
         }
@@ -93,9 +87,12 @@ impl Owl2Entity {
         characteristics: BTreeSet<Owl2Characteristic>,
     ) -> Self {
         Self {
-            name, kind: Owl2EntityKind::Property, semantics: None, file,
+            name,
+            kind: Owl2EntityKind::Property,
+            semantics: None,
+            file,
             property_domain: domain,
-            property_range:  range,
+            property_range: range,
             property_inverse_of: inverse_of,
             property_characteristics: characteristics,
             keys: Vec::new(),
@@ -133,9 +130,15 @@ impl Owl2Graph {
                 for c in &e.property_characteristics {
                     existing.property_characteristics.insert(*c);
                 }
-                if existing.property_domain.is_none()    { existing.property_domain    = e.property_domain;    }
-                if existing.property_range.is_none()     { existing.property_range     = e.property_range;     }
-                if existing.property_inverse_of.is_none(){ existing.property_inverse_of= e.property_inverse_of;}
+                if existing.property_domain.is_none() {
+                    existing.property_domain = e.property_domain;
+                }
+                if existing.property_range.is_none() {
+                    existing.property_range = e.property_range;
+                }
+                if existing.property_inverse_of.is_none() {
+                    existing.property_inverse_of = e.property_inverse_of;
+                }
             }
             Some(existing) if matches!(existing.kind, Owl2EntityKind::Class) => {
                 for k in &e.keys {
@@ -175,17 +178,16 @@ impl Owl2Graph {
                     }
                 }
             }
-            if !changed { break; }
+            if !changed {
+                break;
+            }
         }
         closure
     }
 
     /// Detect subclass cycles by walking the closure. Returns the
     /// names of cyclic classes (both halves of every cycle).
-    pub fn detect_cycles(
-        &self,
-        closure: &BTreeMap<Text, BTreeSet<Text>>,
-    ) -> BTreeSet<Text> {
+    pub fn detect_cycles(&self, closure: &BTreeMap<Text, BTreeSet<Text>>) -> BTreeSet<Text> {
         let mut cyclic: BTreeSet<Text> = BTreeSet::new();
         for (child, parent) in &self.subclass_edges {
             if child == parent {
@@ -213,7 +215,9 @@ impl Owl2Graph {
         }
         fn find(parent: &mut BTreeMap<Text, Text>, x: &Text) -> Text {
             let p = parent.get(x).cloned().unwrap_or_else(|| x.clone());
-            if &p == x { return p; }
+            if &p == x {
+                return p;
+            }
             let root = find(parent, &p);
             parent.insert(x.clone(), root.clone());
             root
@@ -266,20 +270,17 @@ impl Owl2Graph {
 /// and feed entities + edges into the graph. Walks both
 /// `item.attributes` (outer) and the inner decl.attributes (per
 /// kind) to mirror the framework / hygiene audit collection paths.
-pub fn collect_owl2_attrs(
-    item: &Item,
-    rel_path: &Path,
-    graph: &mut Owl2Graph,
-) {
-    let (item_name, decl_attrs): (Text, &verum_common::List<verum_ast::attr::Attribute>) = match &item.kind {
-        ItemKind::Type(decl)     => (decl.name.name.clone(), &decl.attributes),
-        ItemKind::Function(decl) => (decl.name.name.clone(), &decl.attributes),
-        ItemKind::Theorem(decl) | ItemKind::Lemma(decl) | ItemKind::Corollary(decl) => {
-            (decl.name.name.clone(), &decl.attributes)
-        }
-        ItemKind::Axiom(decl) => (decl.name.name.clone(), &decl.attributes),
-        _ => return,
-    };
+pub fn collect_owl2_attrs(item: &Item, rel_path: &Path, graph: &mut Owl2Graph) {
+    let (item_name, decl_attrs): (Text, &verum_common::List<verum_ast::attr::Attribute>) =
+        match &item.kind {
+            ItemKind::Type(decl) => (decl.name.name.clone(), &decl.attributes),
+            ItemKind::Function(decl) => (decl.name.name.clone(), &decl.attributes),
+            ItemKind::Theorem(decl) | ItemKind::Lemma(decl) | ItemKind::Corollary(decl) => {
+                (decl.name.name.clone(), &decl.attributes)
+            }
+            ItemKind::Axiom(decl) => (decl.name.name.clone(), &decl.attributes),
+            _ => return,
+        };
 
     let attr_lists = [&item.attributes, decl_attrs];
 
@@ -287,11 +288,11 @@ pub fn collect_owl2_attrs(
     let mut class_semantics: Option<Owl2Semantics> = None;
     let mut subclass_parents: Vec<Text> = Vec::new();
     let mut equivalent_classes: Vec<Text> = Vec::new();
-    let mut disjoint_classes:  Vec<Text> = Vec::new();
+    let mut disjoint_classes: Vec<Text> = Vec::new();
     let mut keys: Vec<Vec<Text>> = Vec::new();
     let mut is_property = false;
     let mut prop_domain: Option<Text> = None;
-    let mut prop_range:  Option<Text> = None;
+    let mut prop_range: Option<Text> = None;
     let mut prop_inverse: Option<Text> = None;
     let mut prop_chars: BTreeSet<Owl2Characteristic> = BTreeSet::new();
 
@@ -323,10 +324,18 @@ pub fn collect_owl2_attrs(
             }
             if let Maybe::Some(p) = Owl2PropertyAttr::from_attribute(attr) {
                 is_property = true;
-                if let Maybe::Some(d) = p.domain     { prop_domain  = Some(d); }
-                if let Maybe::Some(r) = p.range      { prop_range   = Some(r); }
-                if let Maybe::Some(i) = p.inverse_of { prop_inverse = Some(i); }
-                for c in p.characteristics { prop_chars.insert(c); }
+                if let Maybe::Some(d) = p.domain {
+                    prop_domain = Some(d);
+                }
+                if let Maybe::Some(r) = p.range {
+                    prop_range = Some(r);
+                }
+                if let Maybe::Some(i) = p.inverse_of {
+                    prop_inverse = Some(i);
+                }
+                for c in p.characteristics {
+                    prop_chars.insert(c);
+                }
             }
             if let Maybe::Some(c) = Owl2CharacteristicAttr::from_attribute(attr) {
                 is_property = true;
@@ -336,18 +345,17 @@ pub fn collect_owl2_attrs(
     }
 
     if is_class {
-        let mut entity = Owl2Entity::new_class(
-            item_name.clone(),
-            class_semantics,
-            rel_path.to_path_buf(),
-        );
+        let mut entity =
+            Owl2Entity::new_class(item_name.clone(), class_semantics, rel_path.to_path_buf());
         entity.keys = keys;
         graph.add_entity(entity);
         for p in subclass_parents {
             graph.subclass_edges.insert((item_name.clone(), p));
         }
         for e in equivalent_classes {
-            graph.equivalence_pairs.insert((item_name.clone(), e.clone()));
+            graph
+                .equivalence_pairs
+                .insert((item_name.clone(), e.clone()));
             graph.equivalence_pairs.insert((e, item_name.clone()));
         }
         for d in disjoint_classes {
@@ -357,8 +365,12 @@ pub fn collect_owl2_attrs(
     }
     if is_property {
         let entity = Owl2Entity::new_property(
-            item_name, rel_path.to_path_buf(),
-            prop_domain, prop_range, prop_inverse, prop_chars,
+            item_name,
+            rel_path.to_path_buf(),
+            prop_domain,
+            prop_range,
+            prop_inverse,
+            prop_chars,
         );
         graph.add_entity(entity);
     }

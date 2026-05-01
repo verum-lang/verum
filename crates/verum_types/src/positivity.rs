@@ -89,14 +89,14 @@ pub fn check_user_inductive_with_self_var(
     for ctor in constructors.iter() {
         for (i, arg_ty) in ctor.args.iter().enumerate() {
             let mut breadcrumb = format!("constructor '{}' arg #{}", ctor.name.as_str(), i);
-            check_strictly_positive(type_name, self_var, arg_ty, &mut breadcrumb).map_err(|pos| {
-                PositivityViolation {
+            check_strictly_positive(type_name, self_var, arg_ty, &mut breadcrumb).map_err(
+                |pos| PositivityViolation {
                     type_name: type_name.to_string(),
                     constructor: ctor.name.as_str().to_string(),
                     arg_index: i,
                     position: pos,
-                }
-            })?;
+                },
+            )?;
         }
     }
     Ok(())
@@ -175,12 +175,21 @@ pub fn check_record_body_positivity(
 fn name_appears_in(target: &str, self_var: Option<TypeVar>, ty: &Type) -> bool {
     match ty {
         Type::Var(tv) => self_var == Some(*tv),
-        Type::Inductive { name, params, indices, .. } => {
+        Type::Inductive {
+            name,
+            params,
+            indices,
+            ..
+        } => {
             if name.as_str() == target {
                 return true;
             }
-            params.iter().any(|(_, t)| name_appears_in(target, self_var, t))
-                || indices.iter().any(|(_, t)| name_appears_in(target, self_var, t))
+            params
+                .iter()
+                .any(|(_, t)| name_appears_in(target, self_var, t))
+                || indices
+                    .iter()
+                    .any(|(_, t)| name_appears_in(target, self_var, t))
         }
         Type::Generic { name, args } => {
             if name.as_str() == target {
@@ -195,7 +204,9 @@ fn name_appears_in(target: &str, self_var: Option<TypeVar>, ty: &Type) -> bool {
             // `Bad` references resolve to `Type::Named { path: Bad
             // }`. The positivity check must recognise this shape
             // alongside Inductive / Generic.
-            let name_matches = path.segments.last()
+            let name_matches = path
+                .segments
+                .last()
                 .and_then(|seg| match seg {
                     verum_ast::ty::PathSegment::Name(id) => Some(id.name.as_str() == target),
                     _ => None,
@@ -206,7 +217,11 @@ fn name_appears_in(target: &str, self_var: Option<TypeVar>, ty: &Type) -> bool {
             }
             args.iter().any(|a| name_appears_in(target, self_var, a))
         }
-        Type::Function { params, return_type, .. } => {
+        Type::Function {
+            params,
+            return_type,
+            ..
+        } => {
             params.iter().any(|p| name_appears_in(target, self_var, p))
                 || name_appears_in(target, self_var, return_type)
         }
@@ -216,9 +231,17 @@ fn name_appears_in(target: &str, self_var: Option<TypeVar>, ty: &Type) -> bool {
         Type::Reference { inner, .. }
         | Type::CheckedReference { inner, .. }
         | Type::UnsafeReference { inner, .. } => name_appears_in(target, self_var, inner),
-        Type::Record(fields) => fields.values().any(|t| name_appears_in(target, self_var, t)),
-        Type::Variant(variants) => variants.values().any(|t| name_appears_in(target, self_var, t)),
-        Type::Pi { param_type, return_type, .. } => {
+        Type::Record(fields) => fields
+            .values()
+            .any(|t| name_appears_in(target, self_var, t)),
+        Type::Variant(variants) => variants
+            .values()
+            .any(|t| name_appears_in(target, self_var, t)),
+        Type::Pi {
+            param_type,
+            return_type,
+            ..
+        } => {
             name_appears_in(target, self_var, param_type)
                 || name_appears_in(target, self_var, return_type)
         }
@@ -240,7 +263,11 @@ fn check_strictly_positive(
     breadcrumb: &mut String,
 ) -> Result<(), String> {
     match ty {
-        Type::Function { params, return_type, .. } => {
+        Type::Function {
+            params,
+            return_type,
+            ..
+        } => {
             // Negative position: target must not appear in any param.
             for (i, p) in params.iter().enumerate() {
                 if name_appears_in(target, self_var, p) {
@@ -259,7 +286,11 @@ fn check_strictly_positive(
             *breadcrumb = saved;
             Ok(())
         }
-        Type::Pi { param_type, return_type, .. } => {
+        Type::Pi {
+            param_type,
+            return_type,
+            ..
+        } => {
             if name_appears_in(target, self_var, param_type) {
                 return Err(format!(
                     "{} → Π-domain (left of an arrow / negative position)",
@@ -272,7 +303,9 @@ fn check_strictly_positive(
             *breadcrumb = saved;
             Ok(())
         }
-        Type::Inductive { params, indices, .. } => {
+        Type::Inductive {
+            params, indices, ..
+        } => {
             for (i, (_, t)) in params.iter().enumerate() {
                 let saved = breadcrumb.clone();
                 breadcrumb.push_str(&format!(" → Inductive param #{}", i));
@@ -442,9 +475,10 @@ mod tests {
         use verum_ast::ty::{Ident, Path, PathSegment};
         let bad_named = Type::Named {
             path: Path::new(
-                List::from_iter(vec![PathSegment::Name(
-                    Ident::new(Text::from("Bad"), Span::default()),
-                )]),
+                List::from_iter(vec![PathSegment::Name(Ident::new(
+                    Text::from("Bad"),
+                    Span::default(),
+                ))]),
                 Span::default(),
             ),
             args: List::new(),

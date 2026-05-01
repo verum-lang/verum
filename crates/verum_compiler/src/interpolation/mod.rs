@@ -52,8 +52,8 @@ pub use sql::{SqlInterpolationHandler, SqlQuery};
 pub use url::{SafeUrl, UrlComponent, UrlInterpolationHandler};
 
 use verum_ast::{Expr, Span};
-use verum_diagnostics::Diagnostic;
 use verum_common::Text;
+use verum_diagnostics::Diagnostic;
 
 /// Unified interpolation handler that dispatches to the correct handler
 /// based on the tag prefix.

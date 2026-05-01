@@ -145,10 +145,7 @@ fn emit_list_plain(entries: &[TacticEntry], cat_filter: Option<CombinatorCategor
     println!("{}", header);
     println!("{}", "─".repeat(header.len()));
     println!();
-    println!(
-        "  {:<18}  {:<14}  {}",
-        "Name", "Category", "Semantics"
-    );
+    println!("  {:<18}  {:<14}  {}", "Name", "Category", "Semantics");
     println!(
         "  {}  {}  {}",
         "─".repeat(18),
@@ -191,7 +188,9 @@ fn emit_explain_plain(entry: &TacticEntry, catalog: &DefaultTacticCatalog) {
         println!("Algebraic laws:");
         let all_laws = catalog.laws();
         for law_name in &entry.laws {
-            let law = all_laws.iter().find(|l| l.name.as_str() == law_name.as_str());
+            let law = all_laws
+                .iter()
+                .find(|l| l.name.as_str() == law_name.as_str());
             match law {
                 Some(l) => {
                     println!("  • {}", l.name.as_str());
@@ -265,7 +264,9 @@ fn emit_explain_json(entry: &TacticEntry, catalog: &DefaultTacticCatalog) {
     ));
     out.push_str("  \"laws\": [\n");
     for (i, law_name) in entry.laws.iter().enumerate() {
-        let law = all_laws.iter().find(|l| l.name.as_str() == law_name.as_str());
+        let law = all_laws
+            .iter()
+            .find(|l| l.name.as_str() == law_name.as_str());
         match law {
             Some(l) => {
                 out.push_str(&format_law_json(l, "    "));
@@ -277,7 +278,11 @@ fn emit_explain_json(entry: &TacticEntry, catalog: &DefaultTacticCatalog) {
                 ));
             }
         }
-        out.push_str(if i + 1 < entry.laws.len() { ",\n" } else { "\n" });
+        out.push_str(if i + 1 < entry.laws.len() {
+            ",\n"
+        } else {
+            "\n"
+        });
     }
     out.push_str("  ]\n}");
     println!("{}", out);

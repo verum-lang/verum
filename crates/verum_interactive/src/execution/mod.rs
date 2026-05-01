@@ -27,9 +27,9 @@ mod pipeline;
 pub mod value_format;
 
 pub use async_exec::{
-    AsyncExecutor, ExecutionHandle, ExecutionMessage, ExecutionStatus,
-    StreamingOutput, OutputLine, ProgressDisplay, ProgressStyle,
+    AsyncExecutor, ExecutionHandle, ExecutionMessage, ExecutionStatus, OutputLine, ProgressDisplay,
+    ProgressStyle, StreamingOutput,
 };
 pub use context::{BindingInfo, ExecutionContext, FunctionInfo as ExecFunctionInfo};
 pub use pipeline::{CompiledCell, ExecutionError, ExecutionPipeline, ExecutionResult};
-pub use value_format::{format_value, format_value_with_type, ValueDisplayOptions};
+pub use value_format::{ValueDisplayOptions, format_value, format_value_with_type};

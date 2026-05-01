@@ -221,8 +221,7 @@ impl AttributeMetadata {
 ///
 
 /// Categories help organize attributes in documentation and IDE support.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum AttributeCategory {
     /// Optimization hints: `@inline`, `@cold`, `@hot`, `@vectorize`
     Optimization,
@@ -312,7 +311,6 @@ impl AttributeCategory {
         }
     }
 }
-
 
 impl std::fmt::Display for AttributeCategory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

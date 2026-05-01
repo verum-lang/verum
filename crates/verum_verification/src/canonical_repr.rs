@@ -114,8 +114,7 @@ impl<T: Serialize> CanonicalRepr for T {
 /// for the cache fingerprint.
 pub fn canonical_json_bytes<T: Serialize>(value: &T) -> Vec<u8> {
     // First convert to a Value tree so we can rewrite map keys.
-    let v: Value = serde_json::to_value(value)
-        .expect("Serialize impl must not fail on AST nodes");
+    let v: Value = serde_json::to_value(value).expect("Serialize impl must not fail on AST nodes");
     let canon = canonicalise(v);
     // serde_json's `to_writer` with a Value preserves the BTreeMap-
     // backed object order — which after `canonicalise` is sorted.
@@ -238,8 +237,7 @@ mod tests {
 
     #[test]
     fn canonicalise_sorts_object_keys() {
-        let v: Value =
-            serde_json::from_str(r#"{"z": 1, "a": 2, "m": {"y": 3, "b": 4}}"#).unwrap();
+        let v: Value = serde_json::from_str(r#"{"z": 1, "a": 2, "m": {"y": 3, "b": 4}}"#).unwrap();
         let bytes = serde_json::to_vec(&canonicalise(v)).unwrap();
         let s = std::str::from_utf8(&bytes).unwrap();
         // Outer keys sorted: a, m, z.
@@ -301,10 +299,8 @@ mod tests {
 
     #[test]
     fn nested_objects_recursively_sorted() {
-        let v: Value = serde_json::from_str(
-            r#"{"outer": {"z": 1, "a": {"q": 1, "b": 2}}}"#,
-        )
-        .unwrap();
+        let v: Value =
+            serde_json::from_str(r#"{"outer": {"z": 1, "a": {"q": 1, "b": 2}}}"#).unwrap();
         let bytes = serde_json::to_vec(&canonicalise(v)).unwrap();
         let s = std::str::from_utf8(&bytes).unwrap();
         // Innermost keys sorted: b, q.
@@ -317,10 +313,8 @@ mod tests {
 
     #[test]
     fn canonicalise_is_idempotent() {
-        let v: Value = serde_json::from_str(
-            r#"{"z": 1, "a": [{"y": 1, "b": 2}, {"d": 3}]}"#,
-        )
-        .unwrap();
+        let v: Value =
+            serde_json::from_str(r#"{"z": 1, "a": [{"y": 1, "b": 2}, {"d": 3}]}"#).unwrap();
         let once = canonicalise(v.clone());
         let twice = canonicalise(once.clone());
         // Bytes-equivalent.

@@ -41,8 +41,8 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use verum_ast::{Expr, ExprKind, span::Span};
 use verum_ast::ty::{Ident, Path};
+use verum_ast::{Expr, ExprKind, span::Span};
 use verum_common::{List, Text};
 
 use super::context_requirements::{BuiltinInfo, BuiltinRegistry};
@@ -167,7 +167,10 @@ pub fn register_tier1_builtins(map: &mut BuiltinRegistry) {
 /// Example: `gensym("tmp")` might return `__verum_gensym_tmp_42`
 fn meta_gensym(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     let prefix = match &args[0] {
@@ -256,7 +259,10 @@ pub fn gensym_counter() -> u64 {
 /// instead of as a parse error later.
 fn meta_ident(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
@@ -302,7 +308,10 @@ fn is_valid_ident(s: &str) -> bool {
 /// Quote an expression as AST
 fn meta_quote(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
@@ -318,7 +327,10 @@ fn meta_quote(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstVal
 /// Unquote AST back to value
 fn meta_unquote(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     match &args[0] {
@@ -334,7 +346,10 @@ fn meta_unquote(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstV
 /// Convert expression to string representation
 fn meta_stringify(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
     if args.len() != 1 {
-        return Err(MetaError::ArityMismatch { expected: 1, got: args.len() });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: args.len(),
+        });
     }
 
     let text = match &args[0] {
@@ -342,15 +357,9 @@ fn meta_stringify(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<Cons
             // Pretty-print the expression
             verum_ast::pretty::format_expr(expr).to_string()
         }
-        ConstValue::Type(ty) => {
-            verum_ast::pretty::format_type(ty).to_string()
-        }
-        ConstValue::Pattern(pat) => {
-            verum_ast::pretty::format_pattern(pat).to_string()
-        }
-        ConstValue::Item(item) => {
-            verum_ast::pretty::format_item(item).to_string()
-        }
+        ConstValue::Type(ty) => verum_ast::pretty::format_type(ty).to_string(),
+        ConstValue::Pattern(pat) => verum_ast::pretty::format_pattern(pat).to_string(),
+        ConstValue::Item(item) => verum_ast::pretty::format_item(item).to_string(),
         ConstValue::Text(t) => t.to_string(),
         ConstValue::Int(i) => i.to_string(),
         ConstValue::UInt(u) => u.to_string(),
@@ -373,9 +382,15 @@ fn meta_stringify(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<Cons
 }
 
 /// Concatenate identifiers
-fn meta_concat_idents(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_concat_idents(
+    _ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 1, got: 0 });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: 0,
+        });
     }
 
     let mut result = String::new();
@@ -397,9 +412,15 @@ fn meta_concat_idents(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<
 }
 
 /// Format identifier name using simple substitution
-fn meta_format_ident(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_format_ident(
+    _ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 1, got: 0 });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: 0,
+        });
     }
 
     let format_str = match &args[0] {
@@ -435,9 +456,15 @@ fn meta_format_ident(_ctx: &mut MetaContext, args: List<ConstValue>) -> Result<C
 // ============================================================================
 
 /// Emit a compile error
-fn meta_compile_error(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_compile_error(
+    ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 1, got: 0 });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: 0,
+        });
     }
 
     let message = match &args[0] {
@@ -457,20 +484,22 @@ fn meta_compile_error(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<C
     // code_gen `meta_compile_error` builtin (sibling to the
     // identical fix in `tier1/diagnostics.rs`).
     let span = verum_common::global_span_to_line_col(ctx.call_site_span);
-    let diagnostic = verum_diagnostics::Diagnostic::new_error(
-        message.to_string(),
-        span,
-        "E0000",
-    );
+    let diagnostic = verum_diagnostics::Diagnostic::new_error(message.to_string(), span, "E0000");
     ctx.diagnostics.push(diagnostic);
 
     Err(MetaError::CompileError(message))
 }
 
 /// Emit a compile warning
-fn meta_compile_warning(ctx: &mut MetaContext, args: List<ConstValue>) -> Result<ConstValue, MetaError> {
+fn meta_compile_warning(
+    ctx: &mut MetaContext,
+    args: List<ConstValue>,
+) -> Result<ConstValue, MetaError> {
     if args.is_empty() {
-        return Err(MetaError::ArityMismatch { expected: 1, got: 0 });
+        return Err(MetaError::ArityMismatch {
+            expected: 1,
+            got: 0,
+        });
     }
 
     let message = match &args[0] {
@@ -485,11 +514,7 @@ fn meta_compile_warning(ctx: &mut MetaContext, args: List<ConstValue>) -> Result
     // registry — sibling fix to `meta_compile_error`. See its
     // comment for the rationale.
     let span = verum_common::global_span_to_line_col(ctx.call_site_span);
-    let diagnostic = verum_diagnostics::Diagnostic::new_warning(
-        message.to_string(),
-        span,
-        "W0000",
-    );
+    let diagnostic = verum_diagnostics::Diagnostic::new_warning(message.to_string(), span, "W0000");
     ctx.diagnostics.push(diagnostic);
 
     Ok(ConstValue::Unit)

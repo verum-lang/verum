@@ -5,19 +5,19 @@
 pub mod cache_manager;
 pub mod client;
 pub mod content_store;
-pub mod lockfile_v3;
-pub mod pubgrub_resolver;
-pub mod resolver_errors;
-pub mod workspace_manifest;
 pub mod enterprise;
 pub mod ipfs;
 pub mod lockfile;
+pub mod lockfile_v3;
 pub mod mirror;
+pub mod pubgrub_resolver;
 pub mod resolver;
+pub mod resolver_errors;
 pub mod sat_resolver;
 pub mod security;
 pub mod signing;
 pub mod types;
+pub mod workspace_manifest;
 
 pub use cache_manager::CacheManager;
 pub use client::RegistryClient;

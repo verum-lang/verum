@@ -1,17 +1,19 @@
 //! Integer arithmetic handlers for VBC interpreter dispatch.
 
-use crate::value::Value;
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::super::format_value_for_print;
 use super::bytecode_io::*;
+use crate::value::Value;
 
 // ============================================================================
 // Handler Implementations - Integer Arithmetic
 // ============================================================================
 
-pub(in super::super) fn handle_addi(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_addi(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -21,7 +23,9 @@ pub(in super::super) fn handle_addi(state: &mut InterpreterState) -> Interpreter
     // Fast path: both are inline integers (most common case)
     // Check tag bits directly via is_inline_int() to skip the string check entirely
     if val_a.is_inline_int() && val_b.is_inline_int() {
-        let result = val_a.as_integer_compatible().wrapping_add(val_b.as_integer_compatible());
+        let result = val_a
+            .as_integer_compatible()
+            .wrapping_add(val_b.as_integer_compatible());
         state.set_reg(dst, Value::from_i64(result));
         return Ok(DispatchResult::Continue);
     }
@@ -52,13 +56,17 @@ pub(in super::super) fn handle_addi(state: &mut InterpreterState) -> Interpreter
         state.set_reg(dst, result);
     } else {
         // Non-inline integers (boxed, pointer-tagged from compiled stdlib, etc.) — extract and add
-        let result = val_a.as_integer_compatible().wrapping_add(val_b.as_integer_compatible());
+        let result = val_a
+            .as_integer_compatible()
+            .wrapping_add(val_b.as_integer_compatible());
         state.set_reg(dst, Value::from_i64(result));
     }
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_subi(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_subi(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -70,24 +78,32 @@ pub(in super::super) fn handle_subi(state: &mut InterpreterState) -> Interpreter
     // allocator's `Shared::new` path passes `SharedInner<T>.size` through
     // a codegen path that lands here on a value still wearing its
     // construction-time tag (observed in `Shared<Int>::new(42)`).
-    let result = va.as_integer_compatible().wrapping_sub(vb.as_integer_compatible());
+    let result = va
+        .as_integer_compatible()
+        .wrapping_sub(vb.as_integer_compatible());
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_muli(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_muli(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
     let va = state.get_reg(a);
     let vb = state.get_reg(b);
     // Same tag-robustness as handle_addi / handle_subi.
-    let result = va.as_integer_compatible().wrapping_mul(vb.as_integer_compatible());
+    let result = va
+        .as_integer_compatible()
+        .wrapping_mul(vb.as_integer_compatible());
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_divi(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_divi(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -95,12 +111,17 @@ pub(in super::super) fn handle_divi(state: &mut InterpreterState) -> Interpreter
     if divisor == 0 {
         return Err(InterpreterError::DivisionByZero);
     }
-    let result = state.get_reg(a).as_integer_compatible().wrapping_div(divisor);
+    let result = state
+        .get_reg(a)
+        .as_integer_compatible()
+        .wrapping_div(divisor);
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }
 
-pub(in super::super) fn handle_modi(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_modi(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -108,7 +129,10 @@ pub(in super::super) fn handle_modi(state: &mut InterpreterState) -> Interpreter
     if divisor == 0 {
         return Err(InterpreterError::DivisionByZero);
     }
-    let result = state.get_reg(a).as_integer_compatible().wrapping_rem(divisor);
+    let result = state
+        .get_reg(a)
+        .as_integer_compatible()
+        .wrapping_rem(divisor);
     state.set_reg(dst, Value::from_i64(result));
     Ok(DispatchResult::Continue)
 }
@@ -122,7 +146,9 @@ pub(in super::super) fn handle_modi(state: &mut InterpreterState) -> Interpreter
 /// `(i64)(-1) / 10 = 0` — same bit pattern, different operations.
 /// `Text.parse_int` and any other stdlib path that operates on
 /// `UInt64` magnitudes ≥ 2^63 depends on this.
-pub(in super::super) fn handle_udivi(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_udivi(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -138,7 +164,9 @@ pub(in super::super) fn handle_udivi(state: &mut InterpreterState) -> Interprete
 
 /// Unsigned integer remainder: `dst = (a as u64) % (b as u64)`.
 /// Sister handler to `handle_udivi` — same justification.
-pub(in super::super) fn handle_umodi(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_umodi(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let a = read_reg(state)?;
     let b = read_reg(state)?;
@@ -156,7 +184,9 @@ pub(in super::super) fn handle_umodi(state: &mut InterpreterState) -> Interprete
 // Handler Implementations - Unary Integer Operations
 // ============================================================================
 
-pub(in super::super) fn handle_negi(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_negi(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let result = state.get_reg(src).as_integer_compatible().wrapping_neg();
@@ -169,7 +199,9 @@ pub(in super::super) fn handle_negi(state: &mut InterpreterState) -> Interpreter
 // ============================================================================
 
 /// Integer power: `dst = a ** b`
-pub(in super::super) fn handle_powi(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_powi(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let base = read_reg(state)?;
     let exp = read_reg(state)?;
@@ -186,7 +218,9 @@ pub(in super::super) fn handle_powi(state: &mut InterpreterState) -> Interpreter
 }
 
 /// Integer absolute value: `dst = |src|`
-pub(in super::super) fn handle_absi(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_absi(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let src_val = state.get_reg(src);
@@ -196,7 +230,9 @@ pub(in super::super) fn handle_absi(state: &mut InterpreterState) -> Interpreter
 }
 
 /// Increment: `dst = src + 1`
-pub(in super::super) fn handle_inc(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_inc(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let result = state.get_reg(src).as_integer_compatible().wrapping_add(1);
@@ -205,7 +241,9 @@ pub(in super::super) fn handle_inc(state: &mut InterpreterState) -> InterpreterR
 }
 
 /// Decrement: `dst = src - 1`
-pub(in super::super) fn handle_dec(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_dec(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let result = state.get_reg(src).as_integer_compatible().wrapping_sub(1);

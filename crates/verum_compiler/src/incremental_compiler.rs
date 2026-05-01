@@ -64,7 +64,6 @@ pub struct IncrementalCompiler {
     // =========================================================================
     // Fine-Grained Invalidation (Signature vs Body)
     // =========================================================================
-
     /// Item hashes for fine-grained change detection.
     /// Maps module path to its item-level hashes.
     item_hashes: Map<PathBuf, crate::hash::ItemHashes>,
@@ -941,11 +940,17 @@ impl CacheStats {
         lines.push(format!("Dependency edges:      {}", self.dependency_edges));
 
         // Item hashes (fine-grained invalidation)
-        lines.push(format!("Item hashes cached:    {}", self.item_hashes_cached));
+        lines.push(format!(
+            "Item hashes cached:    {}",
+            self.item_hashes_cached
+        ));
 
         // Verification-only files
         if self.verification_only_count > 0 {
-            lines.push(format!("Verify-only pending:   {}", self.verification_only_count));
+            lines.push(format!(
+                "Verify-only pending:   {}",
+                self.verification_only_count
+            ));
         }
 
         // Meta registry status

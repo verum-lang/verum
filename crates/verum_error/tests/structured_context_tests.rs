@@ -87,7 +87,8 @@ fn test_context_value_list() {
         ContextValue::Int(1),
         ContextValue::Int(2),
         ContextValue::Int(3),
-    ].into();
+    ]
+    .into();
     let value = ContextValue::List(list.clone());
     assert_eq!(value.as_list(), Some(&list));
     assert_eq!(value.as_map(), None);
@@ -97,7 +98,10 @@ fn test_context_value_list() {
 fn test_context_value_map() {
     let mut map: Map<Text, ContextValue> = Map::new();
     map.insert("key1".to_string().into(), ContextValue::Int(42));
-    map.insert("key2".to_string().into(), ContextValue::Text("value".to_string().into()));
+    map.insert(
+        "key2".to_string().into(),
+        ContextValue::Text("value".to_string().into()),
+    );
 
     let value = ContextValue::Map(map.clone());
     assert_eq!(value.as_map(), Some(&map));
@@ -138,14 +142,8 @@ fn test_to_context_value_string_types() {
     let expected_world: Text = "world".to_string().into();
     let expected_rust: Text = "rust".to_string().into();
 
-    assert_eq!(
-        text.to_context_value().as_text(),
-        Some(&expected_hello)
-    );
-    assert_eq!(
-        str_ref.to_context_value().as_text(),
-        Some(&expected_world)
-    );
+    assert_eq!(text.to_context_value().as_text(), Some(&expected_hello));
+    assert_eq!(str_ref.to_context_value().as_text(), Some(&expected_world));
     // Test &str instead of String since ToContextValue is only implemented for &str
     assert_eq!(
         string_as_str.to_context_value().as_text(),
@@ -260,7 +258,8 @@ fn test_json_list_compact() {
         ContextValue::Int(1),
         ContextValue::Int(2),
         ContextValue::Int(3),
-    ].into();
+    ]
+    .into();
     let value = ContextValue::List(list);
     assert_eq!(value.to_json(false), "[1,2,3]");
 }
@@ -271,7 +270,8 @@ fn test_json_list_pretty() {
         ContextValue::Int(1),
         ContextValue::Int(2),
         ContextValue::Int(3),
-    ].into();
+    ]
+    .into();
     let value = ContextValue::List(list);
     let json = value.to_json(true);
     assert!(json.contains("[\n"));
@@ -281,7 +281,10 @@ fn test_json_list_pretty() {
 #[test]
 fn test_json_map_compact() {
     let mut map: Map<Text, ContextValue> = Map::new();
-    map.insert("name".to_string().into(), ContextValue::Text("Alice".to_string().into()));
+    map.insert(
+        "name".to_string().into(),
+        ContextValue::Text("Alice".to_string().into()),
+    );
     map.insert("age".to_string().into(), ContextValue::Int(30));
 
     let value = ContextValue::Map(map);
@@ -297,7 +300,10 @@ fn test_json_map_compact() {
 #[test]
 fn test_json_map_pretty() {
     let mut map: Map<Text, ContextValue> = Map::new();
-    map.insert("name".to_string().into(), ContextValue::Text("Alice".to_string().into()));
+    map.insert(
+        "name".to_string().into(),
+        ContextValue::Text("Alice".to_string().into()),
+    );
     map.insert("age".to_string().into(), ContextValue::Int(30));
 
     let value = ContextValue::Map(map);
@@ -328,7 +334,10 @@ fn test_json_special_floats() {
 
 #[test]
 fn test_yaml_primitives() {
-    assert_eq!(ContextValue::Text("hello".to_string().into()).to_yaml(0), "hello");
+    assert_eq!(
+        ContextValue::Text("hello".to_string().into()).to_yaml(0),
+        "hello"
+    );
     assert_eq!(ContextValue::Int(42).to_yaml(0), "42");
     assert_eq!(ContextValue::UInt(100).to_yaml(0), "100");
     assert_eq!(ContextValue::Float(1.5).to_yaml(0), "1.5");
@@ -362,7 +371,8 @@ fn test_yaml_list() {
         ContextValue::Int(1),
         ContextValue::Int(2),
         ContextValue::Int(3),
-    ].into();
+    ]
+    .into();
     let value = ContextValue::List(list);
     let yaml = value.to_yaml(0);
     assert!(yaml.contains("- 1"));
@@ -373,7 +383,10 @@ fn test_yaml_list() {
 #[test]
 fn test_yaml_map() {
     let mut map: Map<Text, ContextValue> = Map::new();
-    map.insert("name".to_string().into(), ContextValue::Text("Alice".to_string().into()));
+    map.insert(
+        "name".to_string().into(),
+        ContextValue::Text("Alice".to_string().into()),
+    );
     map.insert("age".to_string().into(), ContextValue::Int(30));
 
     let value = ContextValue::Map(map);
@@ -388,7 +401,10 @@ fn test_yaml_map() {
 
 #[test]
 fn test_logfmt_primitives() {
-    assert_eq!(ContextValue::Text("hello".to_string().into()).to_logfmt(), "hello");
+    assert_eq!(
+        ContextValue::Text("hello".to_string().into()).to_logfmt(),
+        "hello"
+    );
     assert_eq!(ContextValue::Int(42).to_logfmt(), "42");
     assert_eq!(ContextValue::Bool(true).to_logfmt(), "true");
     assert_eq!(ContextValue::Null.to_logfmt(), "null");
@@ -461,7 +477,10 @@ fn test_add_multiple_structured_contexts() {
 fn test_add_structured_map() {
     let mut map: Map<Text, ContextValue> = Map::new();
     map.insert("key1".to_string().into(), ContextValue::Int(42));
-    map.insert("key2".to_string().into(), ContextValue::Text("value".to_string().into()));
+    map.insert(
+        "key2".to_string().into(),
+        ContextValue::Text("value".to_string().into()),
+    );
 
     let error = VerumError::new("Error", ErrorKind::Other);
     let ctx_error = ContextError::new(error, "Context").add_structured_map(map);
@@ -513,7 +532,10 @@ fn test_result_with_structured() {
 fn test_result_with_structured_map() {
     let mut map: Map<Text, ContextValue> = Map::new();
     map.insert("key1".to_string().into(), ContextValue::Int(42));
-    map.insert("key2".to_string().into(), ContextValue::Text("value".to_string().into()));
+    map.insert(
+        "key2".to_string().into(),
+        ContextValue::Text("value".to_string().into()),
+    );
 
     let result: Result<(), VerumError> = Err(VerumError::new("Error", ErrorKind::Other));
     let ctx_result = result.with_structured_map(map);

@@ -52,11 +52,13 @@ use std::ptr::NonNull;
 use bitflags::bitflags;
 
 // CBGR types from verum_common (V-LLSI architecture)
-use verum_common::cbgr::{CbgrHeader, CbgrErrorCode, tracked_alloc_zeroed, tracked_dealloc, TrackedAllocation};
+use verum_common::cbgr::{
+    CbgrErrorCode, CbgrHeader, TrackedAllocation, tracked_alloc_zeroed, tracked_dealloc,
+};
 
+use super::error::{CbgrViolationKind, InterpreterError, InterpreterResult};
 use crate::types::TypeId;
 use crate::value::Value;
-use super::error::{InterpreterError, InterpreterResult, CbgrViolationKind};
 
 /// Size of object metadata in bytes (placed after CbgrHeader).
 pub const OBJECT_META_SIZE: usize = 16;
@@ -271,30 +273,22 @@ impl CbgrObject {
 
         match result {
             CbgrErrorCode::Success => Ok(()),
-            CbgrErrorCode::GenerationMismatch => {
-                Err(InterpreterError::CbgrViolation {
-                    kind: CbgrViolationKind::GenerationMismatch,
-                    ptr: self.as_ptr() as usize,
-                })
-            }
-            CbgrErrorCode::EpochMismatch => {
-                Err(InterpreterError::CbgrViolation {
-                    kind: CbgrViolationKind::EpochExpired,
-                    ptr: self.as_ptr() as usize,
-                })
-            }
-            CbgrErrorCode::ExpiredReference => {
-                Err(InterpreterError::CbgrViolation {
-                    kind: CbgrViolationKind::UseAfterFree,
-                    ptr: self.as_ptr() as usize,
-                })
-            }
-            _ => {
-                Err(InterpreterError::CbgrViolation {
-                    kind: CbgrViolationKind::InvalidReference,
-                    ptr: self.as_ptr() as usize,
-                })
-            }
+            CbgrErrorCode::GenerationMismatch => Err(InterpreterError::CbgrViolation {
+                kind: CbgrViolationKind::GenerationMismatch,
+                ptr: self.as_ptr() as usize,
+            }),
+            CbgrErrorCode::EpochMismatch => Err(InterpreterError::CbgrViolation {
+                kind: CbgrViolationKind::EpochExpired,
+                ptr: self.as_ptr() as usize,
+            }),
+            CbgrErrorCode::ExpiredReference => Err(InterpreterError::CbgrViolation {
+                kind: CbgrViolationKind::UseAfterFree,
+                ptr: self.as_ptr() as usize,
+            }),
+            _ => Err(InterpreterError::CbgrViolation {
+                kind: CbgrViolationKind::InvalidReference,
+                ptr: self.as_ptr() as usize,
+            }),
         }
     }
 
@@ -411,11 +405,12 @@ impl CbgrHeap {
         }
 
         // Use verum_common's tracked allocation
-        let allocation = tracked_alloc_zeroed(total_size, MIN_ALIGNMENT)
-            .map_err(|_e| InterpreterError::OutOfMemory {
+        let allocation = tracked_alloc_zeroed(total_size, MIN_ALIGNMENT).map_err(|_e| {
+            InterpreterError::OutOfMemory {
                 requested: total_size,
                 available: self.threshold.saturating_sub(self.allocated),
-            })?;
+            }
+        })?;
 
         // Initialize ObjectMeta at the start of user data
         let meta = ObjectMeta::new(type_id, size as u32);
@@ -434,8 +429,8 @@ impl CbgrHeap {
 
         // Track object
         // SAFETY: TrackedAllocation always contains a non-null pointer from a successful allocation.
-        let ptr = NonNull::new(allocation.as_ptr())
-            .expect("TrackedAllocation returned null pointer");
+        let ptr =
+            NonNull::new(allocation.as_ptr()).expect("TrackedAllocation returned null pointer");
         self.objects.push(ptr);
 
         // Update stats
@@ -450,7 +445,11 @@ impl CbgrHeap {
     }
 
     /// Allocates an array of values.
-    pub fn alloc_array(&mut self, element_type: TypeId, length: usize) -> InterpreterResult<CbgrObject> {
+    pub fn alloc_array(
+        &mut self,
+        element_type: TypeId,
+        length: usize,
+    ) -> InterpreterResult<CbgrObject> {
         let size = length * std::mem::size_of::<Value>();
         self.alloc(element_type, size)
     }
@@ -536,7 +535,9 @@ impl CbgrHeap {
         let objects = std::mem::take(&mut self.objects);
         for ptr in objects {
             let allocation = unsafe { TrackedAllocation::from_user_ptr(ptr.as_ptr()) };
-            unsafe { tracked_dealloc(allocation); }
+            unsafe {
+                tracked_dealloc(allocation);
+            }
             self.stats.total_frees += 1;
         }
         self.allocated = 0;
@@ -554,7 +555,7 @@ impl CbgrHeap {
         // Each call increments it for uniqueness
         let epoch = verum_common::cbgr::current_epoch();
         // Combine epoch with allocation count for uniqueness
-        
+
         (epoch as u32).wrapping_add(self.stats.total_allocs as u32)
     }
 
@@ -688,12 +689,14 @@ mod tests {
     fn test_cbgr_heap_alloc_with_init() {
         let mut heap = CbgrHeap::new();
 
-        let obj = heap.alloc_with_init(TypeId(1), 8, |data| {
-            data[0] = 0xDE;
-            data[1] = 0xAD;
-            data[2] = 0xBE;
-            data[3] = 0xEF;
-        }).unwrap();
+        let obj = heap
+            .alloc_with_init(TypeId(1), 8, |data| {
+                data[0] = 0xDE;
+                data[1] = 0xAD;
+                data[2] = 0xBE;
+                data[3] = 0xEF;
+            })
+            .unwrap();
 
         let data = unsafe { std::slice::from_raw_parts(obj.data_ptr(), 4) };
         assert_eq!(data, &[0xDE, 0xAD, 0xBE, 0xEF]);
@@ -757,7 +760,7 @@ mod tests {
         assert_eq!(meta.refcount, 2);
 
         assert!(!meta.decref()); // count = 1, not zero
-        assert!(meta.decref());  // count = 0, return true
+        assert!(meta.decref()); // count = 0, return true
     }
 
     #[test]

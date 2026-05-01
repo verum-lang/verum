@@ -697,13 +697,15 @@ impl Ring {
             addition: MathOperation {
                 name: "add".into(),
                 arity: 2,
-                signature: format!("{} -> {} -> {}", carrier_type, carrier_type, carrier_type).into(),
+                signature: format!("{} -> {} -> {}", carrier_type, carrier_type, carrier_type)
+                    .into(),
                 implementation: Maybe::None,
             },
             multiplication: MathOperation {
                 name: "mul".into(),
                 arity: 2,
-                signature: format!("{} -> {} -> {}", carrier_type, carrier_type, carrier_type).into(),
+                signature: format!("{} -> {} -> {}", carrier_type, carrier_type, carrier_type)
+                    .into(),
                 implementation: Maybe::None,
             },
             zero: Heap::new(create_const_expr("zero")),

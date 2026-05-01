@@ -1084,11 +1084,7 @@ impl SupervisionConfig {
     /// rate-limit semantic as a public API so a future supervisor
     /// implementation can consult the config without re-deriving
     /// the limits at the call site.
-    pub fn should_permit_restart(
-        &self,
-        restart_count: usize,
-        window_start: Instant,
-    ) -> bool {
+    pub fn should_permit_restart(&self, restart_count: usize, window_start: Instant) -> bool {
         // Window has expired → caller resets the counter and
         // restart is permitted. Returning true here is the natural
         // signal — the supervisor treats this as "fresh window,

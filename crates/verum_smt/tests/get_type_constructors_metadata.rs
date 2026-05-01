@@ -22,11 +22,7 @@ fn registered_non_recursive_variant_yields_constructors_with_no_recursive_args()
     let mut engine = ProofSearchEngine::new();
     engine.register_variant_type(
         Text::from("Color"),
-        vec![
-            Text::from("Red"),
-            Text::from("Green"),
-            Text::from("Blue"),
-        ],
+        vec![Text::from("Red"), Text::from("Green"), Text::from("Blue")],
     );
 
     let ctors = engine
@@ -37,7 +33,10 @@ fn registered_non_recursive_variant_yields_constructors_with_no_recursive_args()
     assert_eq!(names, vec!["Red", "Green", "Blue"]);
     // No recursion info registered → all empty.
     for (_, args) in &ctors {
-        assert!(args.is_empty(), "Color is non-recursive — no recursive args expected");
+        assert!(
+            args.is_empty(),
+            "Color is non-recursive — no recursive args expected"
+        );
     }
 }
 
@@ -49,10 +48,7 @@ fn registered_recursive_variant_with_explicit_recursion_carries_arg_positions() 
         Text::from("List"),
         vec![Text::from("Nil"), Text::from("Cons")],
     );
-    engine.register_variant_recursion(
-        Text::from("List"),
-        vec![vec![], vec![1]],
-    );
+    engine.register_variant_recursion(Text::from("List"), vec![vec![], vec![1]]);
 
     let ctors = engine
         .get_type_constructors_for_test(&Text::from("List"))
@@ -108,11 +104,7 @@ fn recursion_info_shorter_than_ctor_list_defaults_remaining_to_empty() {
     let mut engine = ProofSearchEngine::new();
     engine.register_variant_type(
         Text::from("PartiallyKnown"),
-        vec![
-            Text::from("A"),
-            Text::from("B"),
-            Text::from("C"),
-        ],
+        vec![Text::from("A"), Text::from("B"), Text::from("C")],
     );
     engine.register_variant_recursion(
         Text::from("PartiallyKnown"),

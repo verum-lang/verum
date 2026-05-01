@@ -14,8 +14,8 @@
 //! - Output shape is the element-wise max of input shapes
 //! - Broadcast dimensions have effective stride 0
 
-use super::super::tensor::{DType, TensorHandle, MAX_DIMS};
-use crate::instruction::{TensorBinaryOp, TensorUnaryOp, TensorReduceOp};
+use super::super::tensor::{DType, MAX_DIMS, TensorHandle};
+use crate::instruction::{TensorBinaryOp, TensorReduceOp, TensorUnaryOp};
 
 // ============================================================================
 // Broadcasting Support
@@ -63,8 +63,16 @@ pub fn compute_broadcast_shape(
         let a_idx = (a_ndim as isize) - 1 - (out_ndim as isize - 1 - i as isize);
         let b_idx = (b_ndim as isize) - 1 - (out_ndim as isize - 1 - i as isize);
 
-        let a_dim = if a_idx >= 0 { a_shape[a_idx as usize] } else { 1 };
-        let b_dim = if b_idx >= 0 { b_shape[b_idx as usize] } else { 1 };
+        let a_dim = if a_idx >= 0 {
+            a_shape[a_idx as usize]
+        } else {
+            1
+        };
+        let b_dim = if b_idx >= 0 {
+            b_shape[b_idx as usize]
+        } else {
+            1
+        };
 
         // Check broadcast compatibility
         if a_dim != b_dim && a_dim != 1 && b_dim != 1 {
@@ -550,21 +558,13 @@ pub fn binop_i32_scalar(
             TensorBinaryOp::Div => {
                 for i in 0..n {
                     let bv = *b_ptr.add(i);
-                    *out_ptr.add(i) = if bv != 0 {
-                        (*a_ptr.add(i)) / bv
-                    } else {
-                        0
-                    };
+                    *out_ptr.add(i) = if bv != 0 { (*a_ptr.add(i)) / bv } else { 0 };
                 }
             }
             TensorBinaryOp::Mod => {
                 for i in 0..n {
                     let bv = *b_ptr.add(i);
-                    *out_ptr.add(i) = if bv != 0 {
-                        (*a_ptr.add(i)) % bv
-                    } else {
-                        0
-                    };
+                    *out_ptr.add(i) = if bv != 0 { (*a_ptr.add(i)) % bv } else { 0 };
                 }
             }
             TensorBinaryOp::Max => {
@@ -638,21 +638,13 @@ pub fn binop_i64_scalar(
             TensorBinaryOp::Div => {
                 for i in 0..n {
                     let bv = *b_ptr.add(i);
-                    *out_ptr.add(i) = if bv != 0 {
-                        (*a_ptr.add(i)) / bv
-                    } else {
-                        0
-                    };
+                    *out_ptr.add(i) = if bv != 0 { (*a_ptr.add(i)) / bv } else { 0 };
                 }
             }
             TensorBinaryOp::Mod => {
                 for i in 0..n {
                     let bv = *b_ptr.add(i);
-                    *out_ptr.add(i) = if bv != 0 {
-                        (*a_ptr.add(i)) % bv
-                    } else {
-                        0
-                    };
+                    *out_ptr.add(i) = if bv != 0 { (*a_ptr.add(i)) % bv } else { 0 };
                 }
             }
             TensorBinaryOp::Max => {
@@ -726,21 +718,13 @@ pub fn binop_u32_scalar(
             TensorBinaryOp::Div => {
                 for i in 0..n {
                     let bv = *b_ptr.add(i);
-                    *out_ptr.add(i) = if bv != 0 {
-                        (*a_ptr.add(i)) / bv
-                    } else {
-                        0
-                    };
+                    *out_ptr.add(i) = if bv != 0 { (*a_ptr.add(i)) / bv } else { 0 };
                 }
             }
             TensorBinaryOp::Mod => {
                 for i in 0..n {
                     let bv = *b_ptr.add(i);
-                    *out_ptr.add(i) = if bv != 0 {
-                        (*a_ptr.add(i)) % bv
-                    } else {
-                        0
-                    };
+                    *out_ptr.add(i) = if bv != 0 { (*a_ptr.add(i)) % bv } else { 0 };
                 }
             }
             TensorBinaryOp::Max => {
@@ -810,21 +794,13 @@ pub fn binop_u64_scalar(
             TensorBinaryOp::Div => {
                 for i in 0..n {
                     let bv = *b_ptr.add(i);
-                    *out_ptr.add(i) = if bv != 0 {
-                        (*a_ptr.add(i)) / bv
-                    } else {
-                        0
-                    };
+                    *out_ptr.add(i) = if bv != 0 { (*a_ptr.add(i)) / bv } else { 0 };
                 }
             }
             TensorBinaryOp::Mod => {
                 for i in 0..n {
                     let bv = *b_ptr.add(i);
-                    *out_ptr.add(i) = if bv != 0 {
-                        (*a_ptr.add(i)) % bv
-                    } else {
-                        0
-                    };
+                    *out_ptr.add(i) = if bv != 0 { (*a_ptr.add(i)) % bv } else { 0 };
                 }
             }
             TensorBinaryOp::Max => {
@@ -898,21 +874,13 @@ pub fn binop_u8_scalar(
             TensorBinaryOp::Div => {
                 for i in 0..n {
                     let bv = *b_ptr.add(i);
-                    *out_ptr.add(i) = if bv != 0 {
-                        (*a_ptr.add(i)) / bv
-                    } else {
-                        0
-                    };
+                    *out_ptr.add(i) = if bv != 0 { (*a_ptr.add(i)) / bv } else { 0 };
                 }
             }
             TensorBinaryOp::Mod => {
                 for i in 0..n {
                     let bv = *b_ptr.add(i);
-                    *out_ptr.add(i) = if bv != 0 {
-                        (*a_ptr.add(i)) % bv
-                    } else {
-                        0
-                    };
+                    *out_ptr.add(i) = if bv != 0 { (*a_ptr.add(i)) % bv } else { 0 };
                 }
             }
             TensorBinaryOp::Max => {
@@ -1085,21 +1053,13 @@ pub fn binop_u16_scalar(
             TensorBinaryOp::Div => {
                 for i in 0..n {
                     let bv = *b_ptr.add(i);
-                    *out_ptr.add(i) = if bv != 0 {
-                        (*a_ptr.add(i)) / bv
-                    } else {
-                        0
-                    };
+                    *out_ptr.add(i) = if bv != 0 { (*a_ptr.add(i)) / bv } else { 0 };
                 }
             }
             TensorBinaryOp::Mod => {
                 for i in 0..n {
                     let bv = *b_ptr.add(i);
-                    *out_ptr.add(i) = if bv != 0 {
-                        (*a_ptr.add(i)) % bv
-                    } else {
-                        0
-                    };
+                    *out_ptr.add(i) = if bv != 0 { (*a_ptr.add(i)) % bv } else { 0 };
                 }
             }
             TensorBinaryOp::Max => {
@@ -1169,21 +1129,13 @@ pub fn binop_i16_scalar(
             TensorBinaryOp::Div => {
                 for i in 0..n {
                     let bv = *b_ptr.add(i);
-                    *out_ptr.add(i) = if bv != 0 {
-                        (*a_ptr.add(i)) / bv
-                    } else {
-                        0
-                    };
+                    *out_ptr.add(i) = if bv != 0 { (*a_ptr.add(i)) / bv } else { 0 };
                 }
             }
             TensorBinaryOp::Mod => {
                 for i in 0..n {
                     let bv = *b_ptr.add(i);
-                    *out_ptr.add(i) = if bv != 0 {
-                        (*a_ptr.add(i)) % bv
-                    } else {
-                        0
-                    };
+                    *out_ptr.add(i) = if bv != 0 { (*a_ptr.add(i)) % bv } else { 0 };
                 }
             }
             TensorBinaryOp::Max => {
@@ -1259,21 +1211,13 @@ pub fn binop_i8_scalar(
             TensorBinaryOp::Div => {
                 for i in 0..n {
                     let bv = *b_ptr.add(i);
-                    *out_ptr.add(i) = if bv != 0 {
-                        (*a_ptr.add(i)) / bv
-                    } else {
-                        0
-                    };
+                    *out_ptr.add(i) = if bv != 0 { (*a_ptr.add(i)) / bv } else { 0 };
                 }
             }
             TensorBinaryOp::Mod => {
                 for i in 0..n {
                     let bv = *b_ptr.add(i);
-                    *out_ptr.add(i) = if bv != 0 {
-                        (*a_ptr.add(i)) % bv
-                    } else {
-                        0
-                    };
+                    *out_ptr.add(i) = if bv != 0 { (*a_ptr.add(i)) % bv } else { 0 };
                 }
             }
             TensorBinaryOp::Max => {
@@ -2142,10 +2086,7 @@ pub fn binop_f32_neon(
 // ============================================================================
 
 /// Scalar F32 unary operation
-pub fn unop_f32_scalar(
-    a: &TensorHandle,
-    op: TensorUnaryOp,
-) -> Option<TensorHandle> {
+pub fn unop_f32_scalar(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     if a.dtype != DType::F32 {
         return None;
     }
@@ -2288,8 +2229,13 @@ pub fn unop_f32_scalar(
                 for i in 0..n {
                     let x = *a_ptr.add(i);
                     let t = 1.0 / (1.0 + 0.3275911 * x.abs());
-                    let y = 1.0 - (((((1.061_405_4 * t - 1.453_152_1) * t) + 1.421_413_8) * t
-                        - 0.284_496_72) * t + 0.254_829_6) * t * (-x * x).exp();
+                    let y = 1.0
+                        - (((((1.061_405_4 * t - 1.453_152_1) * t) + 1.421_413_8) * t
+                            - 0.284_496_72)
+                            * t
+                            + 0.254_829_6)
+                            * t
+                            * (-x * x).exp();
                     *out_ptr.add(i) = if x >= 0.0 { y } else { -y };
                 }
             }
@@ -2300,10 +2246,7 @@ pub fn unop_f32_scalar(
 }
 
 /// Scalar F64 unary operation
-pub fn unop_f64_scalar(
-    a: &TensorHandle,
-    op: TensorUnaryOp,
-) -> Option<TensorHandle> {
+pub fn unop_f64_scalar(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     if a.dtype != DType::F64 {
         return None;
     }
@@ -2321,37 +2264,59 @@ pub fn unop_f64_scalar(
     unsafe {
         match op {
             TensorUnaryOp::Neg => {
-                for i in 0..n { *out_ptr.add(i) = -(*a_ptr.add(i)); }
+                for i in 0..n {
+                    *out_ptr.add(i) = -(*a_ptr.add(i));
+                }
             }
             TensorUnaryOp::Abs => {
-                for i in 0..n { *out_ptr.add(i) = (*a_ptr.add(i)).abs(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).abs();
+                }
             }
             TensorUnaryOp::Sqrt => {
-                for i in 0..n { *out_ptr.add(i) = (*a_ptr.add(i)).sqrt(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).sqrt();
+                }
             }
             TensorUnaryOp::Rsqrt => {
-                for i in 0..n { *out_ptr.add(i) = 1.0 / (*a_ptr.add(i)).sqrt(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = 1.0 / (*a_ptr.add(i)).sqrt();
+                }
             }
             TensorUnaryOp::Exp => {
-                for i in 0..n { *out_ptr.add(i) = (*a_ptr.add(i)).exp(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).exp();
+                }
             }
             TensorUnaryOp::Log => {
-                for i in 0..n { *out_ptr.add(i) = (*a_ptr.add(i)).ln(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).ln();
+                }
             }
             TensorUnaryOp::Log2 => {
-                for i in 0..n { *out_ptr.add(i) = (*a_ptr.add(i)).log2(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).log2();
+                }
             }
             TensorUnaryOp::Sin => {
-                for i in 0..n { *out_ptr.add(i) = (*a_ptr.add(i)).sin(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).sin();
+                }
             }
             TensorUnaryOp::Cos => {
-                for i in 0..n { *out_ptr.add(i) = (*a_ptr.add(i)).cos(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).cos();
+                }
             }
             TensorUnaryOp::Tan => {
-                for i in 0..n { *out_ptr.add(i) = (*a_ptr.add(i)).tan(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).tan();
+                }
             }
             TensorUnaryOp::Tanh => {
-                for i in 0..n { *out_ptr.add(i) = (*a_ptr.add(i)).tanh(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).tanh();
+                }
             }
             TensorUnaryOp::Sigmoid => {
                 for i in 0..n {
@@ -2393,26 +2358,43 @@ pub fn unop_f64_scalar(
                 }
             }
             TensorUnaryOp::Floor => {
-                for i in 0..n { *out_ptr.add(i) = (*a_ptr.add(i)).floor(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).floor();
+                }
             }
             TensorUnaryOp::Ceil => {
-                for i in 0..n { *out_ptr.add(i) = (*a_ptr.add(i)).ceil(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).ceil();
+                }
             }
             TensorUnaryOp::Round => {
-                for i in 0..n { *out_ptr.add(i) = (*a_ptr.add(i)).round(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).round();
+                }
             }
             TensorUnaryOp::Sign => {
                 for i in 0..n {
                     let x = *a_ptr.add(i);
-                    *out_ptr.add(i) = if x > 0.0 { 1.0 } else if x < 0.0 { -1.0 } else { 0.0 };
+                    *out_ptr.add(i) = if x > 0.0 {
+                        1.0
+                    } else if x < 0.0 {
+                        -1.0
+                    } else {
+                        0.0
+                    };
                 }
             }
             TensorUnaryOp::Erf => {
                 for i in 0..n {
                     let x = *a_ptr.add(i);
                     let t = 1.0 / (1.0 + 0.3275911 * x.abs());
-                    let y = 1.0 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t
-                        - 0.284496736) * t + 0.254829592) * t * (-x * x).exp();
+                    let y = 1.0
+                        - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t
+                            - 0.284496736)
+                            * t
+                            + 0.254829592)
+                            * t
+                            * (-x * x).exp();
                     *out_ptr.add(i) = if x >= 0.0 { y } else { -y };
                 }
             }
@@ -2423,10 +2405,7 @@ pub fn unop_f64_scalar(
 }
 
 /// Scalar I32 unary operation
-pub fn unop_i32_scalar(
-    a: &TensorHandle,
-    op: TensorUnaryOp,
-) -> Option<TensorHandle> {
+pub fn unop_i32_scalar(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     if a.dtype != DType::I32 {
         return None;
     }
@@ -2444,15 +2423,25 @@ pub fn unop_i32_scalar(
     unsafe {
         match op {
             TensorUnaryOp::Neg => {
-                for i in 0..n { *out_ptr.add(i) = (*a_ptr.add(i)).wrapping_neg(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).wrapping_neg();
+                }
             }
             TensorUnaryOp::Abs => {
-                for i in 0..n { *out_ptr.add(i) = (*a_ptr.add(i)).wrapping_abs(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).wrapping_abs();
+                }
             }
             TensorUnaryOp::Sign => {
                 for i in 0..n {
                     let x = *a_ptr.add(i);
-                    *out_ptr.add(i) = if x > 0 { 1 } else if x < 0 { -1 } else { 0 };
+                    *out_ptr.add(i) = if x > 0 {
+                        1
+                    } else if x < 0 {
+                        -1
+                    } else {
+                        0
+                    };
                 }
             }
             // Integer-specific operations
@@ -2464,7 +2453,9 @@ pub fn unop_i32_scalar(
             }
             // Floor/Ceil/Round are identity for integers
             TensorUnaryOp::Floor | TensorUnaryOp::Ceil | TensorUnaryOp::Round => {
-                for i in 0..n { *out_ptr.add(i) = *a_ptr.add(i); }
+                for i in 0..n {
+                    *out_ptr.add(i) = *a_ptr.add(i);
+                }
             }
             // Unsupported ops for integers
             _ => return None,
@@ -2475,10 +2466,7 @@ pub fn unop_i32_scalar(
 }
 
 /// Scalar I64 unary operation
-pub fn unop_i64_scalar(
-    a: &TensorHandle,
-    op: TensorUnaryOp,
-) -> Option<TensorHandle> {
+pub fn unop_i64_scalar(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     if a.dtype != DType::I64 {
         return None;
     }
@@ -2496,15 +2484,25 @@ pub fn unop_i64_scalar(
     unsafe {
         match op {
             TensorUnaryOp::Neg => {
-                for i in 0..n { *out_ptr.add(i) = (*a_ptr.add(i)).wrapping_neg(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).wrapping_neg();
+                }
             }
             TensorUnaryOp::Abs => {
-                for i in 0..n { *out_ptr.add(i) = (*a_ptr.add(i)).wrapping_abs(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).wrapping_abs();
+                }
             }
             TensorUnaryOp::Sign => {
                 for i in 0..n {
                     let x = *a_ptr.add(i);
-                    *out_ptr.add(i) = if x > 0 { 1 } else if x < 0 { -1 } else { 0 };
+                    *out_ptr.add(i) = if x > 0 {
+                        1
+                    } else if x < 0 {
+                        -1
+                    } else {
+                        0
+                    };
                 }
             }
             // Integer-specific operations
@@ -2516,7 +2514,9 @@ pub fn unop_i64_scalar(
             }
             // Floor/Ceil/Round are identity for integers
             TensorUnaryOp::Floor | TensorUnaryOp::Ceil | TensorUnaryOp::Round => {
-                for i in 0..n { *out_ptr.add(i) = *a_ptr.add(i); }
+                for i in 0..n {
+                    *out_ptr.add(i) = *a_ptr.add(i);
+                }
             }
             // Unsupported ops for integers
             _ => return None,
@@ -2527,10 +2527,7 @@ pub fn unop_i64_scalar(
 }
 
 /// U32 unary operation (scalar fallback)
-pub fn unop_u32_scalar(
-    a: &TensorHandle,
-    op: TensorUnaryOp,
-) -> Option<TensorHandle> {
+pub fn unop_u32_scalar(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     if a.dtype != DType::U32 {
         return None;
     }
@@ -2549,11 +2546,15 @@ pub fn unop_u32_scalar(
         match op {
             TensorUnaryOp::Neg => {
                 // Unsigned negation wraps
-                for i in 0..n { *out_ptr.add(i) = (*a_ptr.add(i)).wrapping_neg(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).wrapping_neg();
+                }
             }
             TensorUnaryOp::Abs => {
                 // Abs is identity for unsigned
-                for i in 0..n { *out_ptr.add(i) = *a_ptr.add(i); }
+                for i in 0..n {
+                    *out_ptr.add(i) = *a_ptr.add(i);
+                }
             }
             TensorUnaryOp::Sign => {
                 for i in 0..n {
@@ -2563,11 +2564,15 @@ pub fn unop_u32_scalar(
             }
             TensorUnaryOp::Relu => {
                 // ReLU is identity for unsigned (all values >= 0)
-                for i in 0..n { *out_ptr.add(i) = *a_ptr.add(i); }
+                for i in 0..n {
+                    *out_ptr.add(i) = *a_ptr.add(i);
+                }
             }
             TensorUnaryOp::Floor | TensorUnaryOp::Ceil | TensorUnaryOp::Round => {
                 // Identity for integers
-                for i in 0..n { *out_ptr.add(i) = *a_ptr.add(i); }
+                for i in 0..n {
+                    *out_ptr.add(i) = *a_ptr.add(i);
+                }
             }
             _ => return None,
         }
@@ -2577,10 +2582,7 @@ pub fn unop_u32_scalar(
 }
 
 /// U64 unary operation (scalar fallback)
-pub fn unop_u64_scalar(
-    a: &TensorHandle,
-    op: TensorUnaryOp,
-) -> Option<TensorHandle> {
+pub fn unop_u64_scalar(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     if a.dtype != DType::U64 {
         return None;
     }
@@ -2598,10 +2600,14 @@ pub fn unop_u64_scalar(
     unsafe {
         match op {
             TensorUnaryOp::Neg => {
-                for i in 0..n { *out_ptr.add(i) = (*a_ptr.add(i)).wrapping_neg(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).wrapping_neg();
+                }
             }
             TensorUnaryOp::Abs => {
-                for i in 0..n { *out_ptr.add(i) = *a_ptr.add(i); }
+                for i in 0..n {
+                    *out_ptr.add(i) = *a_ptr.add(i);
+                }
             }
             TensorUnaryOp::Sign => {
                 for i in 0..n {
@@ -2610,10 +2616,14 @@ pub fn unop_u64_scalar(
                 }
             }
             TensorUnaryOp::Relu => {
-                for i in 0..n { *out_ptr.add(i) = *a_ptr.add(i); }
+                for i in 0..n {
+                    *out_ptr.add(i) = *a_ptr.add(i);
+                }
             }
             TensorUnaryOp::Floor | TensorUnaryOp::Ceil | TensorUnaryOp::Round => {
-                for i in 0..n { *out_ptr.add(i) = *a_ptr.add(i); }
+                for i in 0..n {
+                    *out_ptr.add(i) = *a_ptr.add(i);
+                }
             }
             _ => return None,
         }
@@ -2623,10 +2633,7 @@ pub fn unop_u64_scalar(
 }
 
 /// U8 unary operation (scalar fallback)
-pub fn unop_u8_scalar(
-    a: &TensorHandle,
-    op: TensorUnaryOp,
-) -> Option<TensorHandle> {
+pub fn unop_u8_scalar(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     if a.dtype != DType::U8 {
         return None;
     }
@@ -2644,10 +2651,14 @@ pub fn unop_u8_scalar(
     unsafe {
         match op {
             TensorUnaryOp::Neg => {
-                for i in 0..n { *out_ptr.add(i) = (*a_ptr.add(i)).wrapping_neg(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).wrapping_neg();
+                }
             }
             TensorUnaryOp::Abs => {
-                for i in 0..n { *out_ptr.add(i) = *a_ptr.add(i); }
+                for i in 0..n {
+                    *out_ptr.add(i) = *a_ptr.add(i);
+                }
             }
             TensorUnaryOp::Sign => {
                 for i in 0..n {
@@ -2656,10 +2667,14 @@ pub fn unop_u8_scalar(
                 }
             }
             TensorUnaryOp::Relu => {
-                for i in 0..n { *out_ptr.add(i) = *a_ptr.add(i); }
+                for i in 0..n {
+                    *out_ptr.add(i) = *a_ptr.add(i);
+                }
             }
             TensorUnaryOp::Floor | TensorUnaryOp::Ceil | TensorUnaryOp::Round => {
-                for i in 0..n { *out_ptr.add(i) = *a_ptr.add(i); }
+                for i in 0..n {
+                    *out_ptr.add(i) = *a_ptr.add(i);
+                }
             }
             _ => return None,
         }
@@ -2676,10 +2691,7 @@ pub fn unop_u8_scalar(
 /// - Abs: identity (0/1 already non-negative)
 /// - Sign: identity (0→0, 1→1)
 /// - Other ops: return None (not meaningful for Bool)
-pub fn unop_bool_scalar(
-    a: &TensorHandle,
-    op: TensorUnaryOp,
-) -> Option<TensorHandle> {
+pub fn unop_bool_scalar(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     if a.dtype != DType::Bool {
         return None;
     }
@@ -2734,10 +2746,7 @@ pub fn unop_bool_scalar(
 }
 
 /// U16 unary operation (scalar fallback)
-pub fn unop_u16_scalar(
-    a: &TensorHandle,
-    op: TensorUnaryOp,
-) -> Option<TensorHandle> {
+pub fn unop_u16_scalar(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     if a.dtype != DType::U16 {
         return None;
     }
@@ -2755,10 +2764,14 @@ pub fn unop_u16_scalar(
     unsafe {
         match op {
             TensorUnaryOp::Neg => {
-                for i in 0..n { *out_ptr.add(i) = (*a_ptr.add(i)).wrapping_neg(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).wrapping_neg();
+                }
             }
             TensorUnaryOp::Abs => {
-                for i in 0..n { *out_ptr.add(i) = *a_ptr.add(i); }
+                for i in 0..n {
+                    *out_ptr.add(i) = *a_ptr.add(i);
+                }
             }
             TensorUnaryOp::Sign => {
                 for i in 0..n {
@@ -2767,10 +2780,14 @@ pub fn unop_u16_scalar(
                 }
             }
             TensorUnaryOp::Relu => {
-                for i in 0..n { *out_ptr.add(i) = *a_ptr.add(i); }
+                for i in 0..n {
+                    *out_ptr.add(i) = *a_ptr.add(i);
+                }
             }
             TensorUnaryOp::Floor | TensorUnaryOp::Ceil | TensorUnaryOp::Round => {
-                for i in 0..n { *out_ptr.add(i) = *a_ptr.add(i); }
+                for i in 0..n {
+                    *out_ptr.add(i) = *a_ptr.add(i);
+                }
             }
             _ => return None,
         }
@@ -2780,10 +2797,7 @@ pub fn unop_u16_scalar(
 }
 
 /// I16 unary operation (scalar fallback)
-pub fn unop_i16_scalar(
-    a: &TensorHandle,
-    op: TensorUnaryOp,
-) -> Option<TensorHandle> {
+pub fn unop_i16_scalar(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     if a.dtype != DType::I16 {
         return None;
     }
@@ -2801,7 +2815,9 @@ pub fn unop_i16_scalar(
     unsafe {
         match op {
             TensorUnaryOp::Neg => {
-                for i in 0..n { *out_ptr.add(i) = (*a_ptr.add(i)).wrapping_neg(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).wrapping_neg();
+                }
             }
             TensorUnaryOp::Abs => {
                 for i in 0..n {
@@ -2812,7 +2828,13 @@ pub fn unop_i16_scalar(
             TensorUnaryOp::Sign => {
                 for i in 0..n {
                     let x = *a_ptr.add(i);
-                    *out_ptr.add(i) = if x > 0 { 1 } else if x < 0 { -1 } else { 0 };
+                    *out_ptr.add(i) = if x > 0 {
+                        1
+                    } else if x < 0 {
+                        -1
+                    } else {
+                        0
+                    };
                 }
             }
             TensorUnaryOp::Relu => {
@@ -2823,7 +2845,9 @@ pub fn unop_i16_scalar(
             }
             TensorUnaryOp::Floor | TensorUnaryOp::Ceil | TensorUnaryOp::Round => {
                 // Identity for integers
-                for i in 0..n { *out_ptr.add(i) = *a_ptr.add(i); }
+                for i in 0..n {
+                    *out_ptr.add(i) = *a_ptr.add(i);
+                }
             }
             _ => return None,
         }
@@ -2833,10 +2857,7 @@ pub fn unop_i16_scalar(
 }
 
 /// I8 unary operation (scalar fallback)
-pub fn unop_i8_scalar(
-    a: &TensorHandle,
-    op: TensorUnaryOp,
-) -> Option<TensorHandle> {
+pub fn unop_i8_scalar(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     if a.dtype != DType::I8 {
         return None;
     }
@@ -2854,7 +2875,9 @@ pub fn unop_i8_scalar(
     unsafe {
         match op {
             TensorUnaryOp::Neg => {
-                for i in 0..n { *out_ptr.add(i) = (*a_ptr.add(i)).wrapping_neg(); }
+                for i in 0..n {
+                    *out_ptr.add(i) = (*a_ptr.add(i)).wrapping_neg();
+                }
             }
             TensorUnaryOp::Abs => {
                 for i in 0..n {
@@ -2865,7 +2888,13 @@ pub fn unop_i8_scalar(
             TensorUnaryOp::Sign => {
                 for i in 0..n {
                     let x = *a_ptr.add(i);
-                    *out_ptr.add(i) = if x > 0 { 1 } else if x < 0 { -1 } else { 0 };
+                    *out_ptr.add(i) = if x > 0 {
+                        1
+                    } else if x < 0 {
+                        -1
+                    } else {
+                        0
+                    };
                 }
             }
             TensorUnaryOp::Relu => {
@@ -2876,7 +2905,9 @@ pub fn unop_i8_scalar(
             }
             TensorUnaryOp::Floor | TensorUnaryOp::Ceil | TensorUnaryOp::Round => {
                 // Identity for integers
-                for i in 0..n { *out_ptr.add(i) = *a_ptr.add(i); }
+                for i in 0..n {
+                    *out_ptr.add(i) = *a_ptr.add(i);
+                }
             }
             _ => return None,
         }
@@ -2890,10 +2921,7 @@ pub fn unop_i8_scalar(
 // ============================================================================
 
 /// F16 unary operation (scalar fallback)
-pub fn unop_f16_scalar(
-    a: &TensorHandle,
-    op: TensorUnaryOp,
-) -> Option<TensorHandle> {
+pub fn unop_f16_scalar(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     if a.dtype != DType::F16 {
         return None;
     }
@@ -2926,7 +2954,13 @@ pub fn unop_f16_scalar(
             TensorUnaryOp::Sign => {
                 for i in 0..n {
                     let v = f16_to_f32(*a_ptr.add(i));
-                    let s = if v > 0.0 { 1.0 } else if v < 0.0 { -1.0 } else { 0.0 };
+                    let s = if v > 0.0 {
+                        1.0
+                    } else if v < 0.0 {
+                        -1.0
+                    } else {
+                        0.0
+                    };
                     *out_ptr.add(i) = f32_to_f16(s);
                 }
             }
@@ -2998,10 +3032,7 @@ pub fn unop_f16_scalar(
 }
 
 /// BF16 unary operation (scalar fallback)
-pub fn unop_bf16_scalar(
-    a: &TensorHandle,
-    op: TensorUnaryOp,
-) -> Option<TensorHandle> {
+pub fn unop_bf16_scalar(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     if a.dtype != DType::BF16 {
         return None;
     }
@@ -3034,7 +3065,13 @@ pub fn unop_bf16_scalar(
             TensorUnaryOp::Sign => {
                 for i in 0..n {
                     let v = bf16_to_f32(*a_ptr.add(i));
-                    let s = if v > 0.0 { 1.0 } else if v < 0.0 { -1.0 } else { 0.0 };
+                    let s = if v > 0.0 {
+                        1.0
+                    } else if v < 0.0 {
+                        -1.0
+                    } else {
+                        0.0
+                    };
                     *out_ptr.add(i) = f32_to_bf16(s);
                 }
             }
@@ -3110,10 +3147,7 @@ pub fn unop_bf16_scalar(
 // ============================================================================
 
 /// Complex64 unary operation (scalar fallback)
-pub fn unop_complex64_scalar(
-    a: &TensorHandle,
-    op: TensorUnaryOp,
-) -> Option<TensorHandle> {
+pub fn unop_complex64_scalar(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     if a.dtype != DType::Complex64 {
         return None;
     }
@@ -3169,10 +3203,7 @@ pub fn unop_complex64_scalar(
 }
 
 /// Complex128 unary operation (scalar fallback)
-pub fn unop_complex128_scalar(
-    a: &TensorHandle,
-    op: TensorUnaryOp,
-) -> Option<TensorHandle> {
+pub fn unop_complex128_scalar(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     if a.dtype != DType::Complex128 {
         return None;
     }
@@ -3385,10 +3416,7 @@ pub fn complex128_imag_scalar(a: &TensorHandle) -> Option<TensorHandle> {
 
 /// AVX2 F32 unary operation
 #[cfg(target_arch = "x86_64")]
-pub fn unop_f32_avx2(
-    a: &TensorHandle,
-    op: TensorUnaryOp,
-) -> Option<TensorHandle> {
+pub fn unop_f32_avx2(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     use std::arch::x86_64::*;
 
     if !std::arch::is_x86_feature_detected!("avx2") {
@@ -3461,10 +3489,7 @@ pub fn unop_f32_avx2(
 
 /// AVX2 unary op fallback for non-x86_64 platforms.
 #[cfg(not(target_arch = "x86_64"))]
-pub fn unop_f32_avx2(
-    a: &TensorHandle,
-    op: TensorUnaryOp,
-) -> Option<TensorHandle> {
+pub fn unop_f32_avx2(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     unop_f32_scalar(a, op)
 }
 
@@ -3474,10 +3499,7 @@ pub fn unop_f32_avx2(
 
 /// AVX-512 F32 unary operation (16 floats per operation)
 #[cfg(target_arch = "x86_64")]
-pub fn unop_f32_avx512(
-    a: &TensorHandle,
-    op: TensorUnaryOp,
-) -> Option<TensorHandle> {
+pub fn unop_f32_avx512(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     use std::arch::x86_64::*;
 
     if !std::arch::is_x86_feature_detected!("avx512f") {
@@ -3486,8 +3508,11 @@ pub fn unop_f32_avx512(
 
     // Only implement simple ops in SIMD, complex ones fall back
     match op {
-        TensorUnaryOp::Neg | TensorUnaryOp::Abs | TensorUnaryOp::Relu |
-        TensorUnaryOp::Sqrt | TensorUnaryOp::Rsqrt => {}
+        TensorUnaryOp::Neg
+        | TensorUnaryOp::Abs
+        | TensorUnaryOp::Relu
+        | TensorUnaryOp::Sqrt
+        | TensorUnaryOp::Rsqrt => {}
         _ => return unop_f32_avx2(a, op),
     }
 
@@ -3570,26 +3595,25 @@ pub fn unop_f32_avx512(
 
 /// AVX-512 unary op fallback for non-x86_64 platforms.
 #[cfg(not(target_arch = "x86_64"))]
-pub fn unop_f32_avx512(
-    a: &TensorHandle,
-    op: TensorUnaryOp,
-) -> Option<TensorHandle> {
+pub fn unop_f32_avx512(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     unop_f32_avx2(a, op)
 }
 
 /// NEON F32 unary operation (ARM) - Optimized for Apple Silicon M3
 #[cfg(target_arch = "aarch64")]
-pub fn unop_f32_neon(
-    a: &TensorHandle,
-    op: TensorUnaryOp,
-) -> Option<TensorHandle> {
+pub fn unop_f32_neon(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     use std::arch::aarch64::*;
 
     // NEON-optimized ops (others fall back to scalar)
     match op {
-        TensorUnaryOp::Neg | TensorUnaryOp::Abs | TensorUnaryOp::Relu |
-        TensorUnaryOp::Sqrt | TensorUnaryOp::Rsqrt | TensorUnaryOp::Floor |
-        TensorUnaryOp::Ceil | TensorUnaryOp::Round => {}
+        TensorUnaryOp::Neg
+        | TensorUnaryOp::Abs
+        | TensorUnaryOp::Relu
+        | TensorUnaryOp::Sqrt
+        | TensorUnaryOp::Rsqrt
+        | TensorUnaryOp::Floor
+        | TensorUnaryOp::Ceil
+        | TensorUnaryOp::Round => {}
         _ => return unop_f32_scalar(a, op),
     }
 
@@ -3674,7 +3698,7 @@ pub fn unop_f32_neon(
             TensorUnaryOp::Floor => {
                 for i in (0..simd_len).step_by(4) {
                     let av = vld1q_f32(a_ptr.add(i));
-                    let cv = vrndmq_f32(av);  // Round towards minus infinity
+                    let cv = vrndmq_f32(av); // Round towards minus infinity
                     vst1q_f32(out_ptr.add(i), cv);
                 }
                 for i in simd_len..n {
@@ -3684,7 +3708,7 @@ pub fn unop_f32_neon(
             TensorUnaryOp::Ceil => {
                 for i in (0..simd_len).step_by(4) {
                     let av = vld1q_f32(a_ptr.add(i));
-                    let cv = vrndpq_f32(av);  // Round towards plus infinity
+                    let cv = vrndpq_f32(av); // Round towards plus infinity
                     vst1q_f32(out_ptr.add(i), cv);
                 }
                 for i in simd_len..n {
@@ -3694,7 +3718,7 @@ pub fn unop_f32_neon(
             TensorUnaryOp::Round => {
                 for i in (0..simd_len).step_by(4) {
                     let av = vld1q_f32(a_ptr.add(i));
-                    let cv = vrndnq_f32(av);  // Round to nearest, ties to even
+                    let cv = vrndnq_f32(av); // Round to nearest, ties to even
                     vst1q_f32(out_ptr.add(i), cv);
                 }
                 for i in simd_len..n {
@@ -3709,10 +3733,7 @@ pub fn unop_f32_neon(
 }
 
 #[cfg(not(target_arch = "aarch64"))]
-pub fn unop_f32_neon(
-    a: &TensorHandle,
-    op: TensorUnaryOp,
-) -> Option<TensorHandle> {
+pub fn unop_f32_neon(a: &TensorHandle, op: TensorUnaryOp) -> Option<TensorHandle> {
     unop_f32_scalar(a, op)
 }
 
@@ -3875,32 +3896,44 @@ pub fn reduce_f64_scalar(
         match op {
             TensorReduceOp::Sum => {
                 let mut sum = 0.0f64;
-                for i in 0..n { sum += *a_ptr.add(i); }
+                for i in 0..n {
+                    sum += *a_ptr.add(i);
+                }
                 sum
             }
             TensorReduceOp::Prod => {
                 let mut prod = 1.0f64;
-                for i in 0..n { prod *= *a_ptr.add(i); }
+                for i in 0..n {
+                    prod *= *a_ptr.add(i);
+                }
                 prod
             }
             TensorReduceOp::Max => {
                 let mut max = f64::NEG_INFINITY;
-                for i in 0..n { max = max.max(*a_ptr.add(i)); }
+                for i in 0..n {
+                    max = max.max(*a_ptr.add(i));
+                }
                 max
             }
             TensorReduceOp::Min => {
                 let mut min = f64::INFINITY;
-                for i in 0..n { min = min.min(*a_ptr.add(i)); }
+                for i in 0..n {
+                    min = min.min(*a_ptr.add(i));
+                }
                 min
             }
             TensorReduceOp::Mean => {
                 let mut sum = 0.0f64;
-                for i in 0..n { sum += *a_ptr.add(i); }
+                for i in 0..n {
+                    sum += *a_ptr.add(i);
+                }
                 sum / n as f64
             }
             TensorReduceOp::Var => {
                 let mut sum = 0.0f64;
-                for i in 0..n { sum += *a_ptr.add(i); }
+                for i in 0..n {
+                    sum += *a_ptr.add(i);
+                }
                 let mean = sum / n as f64;
                 let mut var = 0.0f64;
                 for i in 0..n {
@@ -3911,7 +3944,9 @@ pub fn reduce_f64_scalar(
             }
             TensorReduceOp::Std => {
                 let mut sum = 0.0f64;
-                for i in 0..n { sum += *a_ptr.add(i); }
+                for i in 0..n {
+                    sum += *a_ptr.add(i);
+                }
                 let mean = sum / n as f64;
                 let mut var = 0.0f64;
                 for i in 0..n {
@@ -3930,22 +3965,32 @@ pub fn reduce_f64_scalar(
             }
             TensorReduceOp::LogSumExp => {
                 let mut max = f64::NEG_INFINITY;
-                for i in 0..n { max = max.max(*a_ptr.add(i)); }
+                for i in 0..n {
+                    max = max.max(*a_ptr.add(i));
+                }
                 let mut sum = 0.0f64;
-                for i in 0..n { sum += (*a_ptr.add(i) - max).exp(); }
+                for i in 0..n {
+                    sum += (*a_ptr.add(i) - max).exp();
+                }
                 max + sum.ln()
             }
             TensorReduceOp::All => {
                 let mut all = true;
                 for i in 0..n {
-                    if *a_ptr.add(i) == 0.0 { all = false; break; }
+                    if *a_ptr.add(i) == 0.0 {
+                        all = false;
+                        break;
+                    }
                 }
                 if all { 1.0 } else { 0.0 }
             }
             TensorReduceOp::Any => {
                 let mut any = false;
                 for i in 0..n {
-                    if *a_ptr.add(i) != 0.0 { any = true; break; }
+                    if *a_ptr.add(i) != 0.0 {
+                        any = true;
+                        break;
+                    }
                 }
                 if any { 1.0 } else { 0.0 }
             }
@@ -3955,7 +4000,9 @@ pub fn reduce_f64_scalar(
     let mut output = TensorHandle::zeros(&[], DType::F64)?;
     let out_ptr = output.data_ptr_f64_mut();
     if !out_ptr.is_null() {
-        unsafe { *out_ptr = result; }
+        unsafe {
+            *out_ptr = result;
+        }
     }
 
     Some(output)
@@ -4009,7 +4056,9 @@ macro_rules! impl_reduce_int {
                         let mut max: $rust_ty = $min_val;
                         for i in 0..n {
                             let v = *a_ptr.add(i);
-                            if v > max { max = v; }
+                            if v > max {
+                                max = v;
+                            }
                         }
                         ($dtype, max as f64)
                     }
@@ -4017,7 +4066,9 @@ macro_rules! impl_reduce_int {
                         let mut min: $rust_ty = $max_val;
                         for i in 0..n {
                             let v = *a_ptr.add(i);
-                            if v < min { min = v; }
+                            if v < min {
+                                min = v;
+                            }
                         }
                         ($dtype, min as f64)
                     }
@@ -4067,7 +4118,9 @@ macro_rules! impl_reduce_int {
                         let mut max = f64::NEG_INFINITY;
                         for i in 0..n {
                             let v = *a_ptr.add(i) as f64;
-                            if v > max { max = v; }
+                            if v > max {
+                                max = v;
+                            }
                         }
                         let mut sum = 0.0f64;
                         for i in 0..n {
@@ -4083,7 +4136,14 @@ macro_rules! impl_reduce_int {
                                 break;
                             }
                         }
-                        ($dtype, if all { 1 as $rust_ty as f64 } else { 0 as $rust_ty as f64 })
+                        (
+                            $dtype,
+                            if all {
+                                1 as $rust_ty as f64
+                            } else {
+                                0 as $rust_ty as f64
+                            },
+                        )
                     }
                     TensorReduceOp::Any => {
                         let mut any = false;
@@ -4093,7 +4153,14 @@ macro_rules! impl_reduce_int {
                                 break;
                             }
                         }
-                        ($dtype, if any { 1 as $rust_ty as f64 } else { 0 as $rust_ty as f64 })
+                        (
+                            $dtype,
+                            if any {
+                                1 as $rust_ty as f64
+                            } else {
+                                0 as $rust_ty as f64
+                            },
+                        )
                     }
                 }
             };
@@ -4104,14 +4171,18 @@ macro_rules! impl_reduce_int {
                 DType::F64 => {
                     let out_ptr = output.data_ptr_f64_mut();
                     if !out_ptr.is_null() {
-                        unsafe { *out_ptr = result_val; }
+                        unsafe {
+                            *out_ptr = result_val;
+                        }
                     }
                 }
                 _ => {
                     // For integer dtypes, write back using appropriate pointer
                     let out_ptr = output.$data_ptr_mut();
                     if !out_ptr.is_null() {
-                        unsafe { *out_ptr = result_val as $rust_ty; }
+                        unsafe {
+                            *out_ptr = result_val as $rust_ty;
+                        }
                     }
                 }
             }
@@ -4122,19 +4193,91 @@ macro_rules! impl_reduce_int {
 }
 
 // Signed integers
-impl_reduce_int!(reduce_i8_scalar, DType::I8, i8, data_ptr_i8, data_ptr_i8_mut, i8::MIN, i8::MAX);
-impl_reduce_int!(reduce_i16_scalar, DType::I16, i16, data_ptr_i16, data_ptr_i16_mut, i16::MIN, i16::MAX);
-impl_reduce_int!(reduce_i32_scalar, DType::I32, i32, data_ptr_i32, data_ptr_i32_mut, i32::MIN, i32::MAX);
-impl_reduce_int!(reduce_i64_scalar, DType::I64, i64, data_ptr_i64, data_ptr_i64_mut, i64::MIN, i64::MAX);
+impl_reduce_int!(
+    reduce_i8_scalar,
+    DType::I8,
+    i8,
+    data_ptr_i8,
+    data_ptr_i8_mut,
+    i8::MIN,
+    i8::MAX
+);
+impl_reduce_int!(
+    reduce_i16_scalar,
+    DType::I16,
+    i16,
+    data_ptr_i16,
+    data_ptr_i16_mut,
+    i16::MIN,
+    i16::MAX
+);
+impl_reduce_int!(
+    reduce_i32_scalar,
+    DType::I32,
+    i32,
+    data_ptr_i32,
+    data_ptr_i32_mut,
+    i32::MIN,
+    i32::MAX
+);
+impl_reduce_int!(
+    reduce_i64_scalar,
+    DType::I64,
+    i64,
+    data_ptr_i64,
+    data_ptr_i64_mut,
+    i64::MIN,
+    i64::MAX
+);
 
 // Unsigned integers
-impl_reduce_int!(reduce_u8_scalar, DType::U8, u8, data_ptr_u8, data_ptr_u8_mut, u8::MIN, u8::MAX);
-impl_reduce_int!(reduce_u16_scalar, DType::U16, u16, data_ptr_u16, data_ptr_u16_mut, u16::MIN, u16::MAX);
-impl_reduce_int!(reduce_u32_scalar, DType::U32, u32, data_ptr_u32, data_ptr_u32_mut, u32::MIN, u32::MAX);
-impl_reduce_int!(reduce_u64_scalar, DType::U64, u64, data_ptr_u64, data_ptr_u64_mut, u64::MIN, u64::MAX);
+impl_reduce_int!(
+    reduce_u8_scalar,
+    DType::U8,
+    u8,
+    data_ptr_u8,
+    data_ptr_u8_mut,
+    u8::MIN,
+    u8::MAX
+);
+impl_reduce_int!(
+    reduce_u16_scalar,
+    DType::U16,
+    u16,
+    data_ptr_u16,
+    data_ptr_u16_mut,
+    u16::MIN,
+    u16::MAX
+);
+impl_reduce_int!(
+    reduce_u32_scalar,
+    DType::U32,
+    u32,
+    data_ptr_u32,
+    data_ptr_u32_mut,
+    u32::MIN,
+    u32::MAX
+);
+impl_reduce_int!(
+    reduce_u64_scalar,
+    DType::U64,
+    u64,
+    data_ptr_u64,
+    data_ptr_u64_mut,
+    u64::MIN,
+    u64::MAX
+);
 
 // Bool (uses u8 storage, 0=false, non-zero=true)
-impl_reduce_int!(reduce_bool_scalar, DType::Bool, u8, data_ptr_u8, data_ptr_u8_mut, 0u8, 1u8);
+impl_reduce_int!(
+    reduce_bool_scalar,
+    DType::Bool,
+    u8,
+    data_ptr_u8,
+    data_ptr_u8_mut,
+    0u8,
+    1u8
+);
 
 /// AVX2 F32 reduction
 #[cfg(target_arch = "x86_64")]
@@ -4150,7 +4293,10 @@ pub fn reduce_f32_avx2(
     }
 
     // AVX2 optimized ops: Sum, Mean, Max, Min
-    if !matches!(op, TensorReduceOp::Sum | TensorReduceOp::Mean | TensorReduceOp::Max | TensorReduceOp::Min) {
+    if !matches!(
+        op,
+        TensorReduceOp::Sum | TensorReduceOp::Mean | TensorReduceOp::Max | TensorReduceOp::Min
+    ) {
         return reduce_f32_scalar(a, op, axis);
     }
 
@@ -4234,7 +4380,9 @@ pub fn reduce_f32_avx2(
     let mut output = TensorHandle::zeros(&[], DType::F32)?;
     let out_ptr = output.data_ptr_f32_mut();
     if !out_ptr.is_null() {
-        unsafe { *out_ptr = result; }
+        unsafe {
+            *out_ptr = result;
+        }
     }
 
     Some(output)
@@ -4264,7 +4412,10 @@ pub fn reduce_f32_avx512(
     }
 
     // AVX-512 optimized ops
-    if !matches!(op, TensorReduceOp::Sum | TensorReduceOp::Max | TensorReduceOp::Min | TensorReduceOp::Mean) {
+    if !matches!(
+        op,
+        TensorReduceOp::Sum | TensorReduceOp::Max | TensorReduceOp::Min | TensorReduceOp::Mean
+    ) {
         return reduce_f32_avx2(a, op, axis);
     }
 
@@ -4332,7 +4483,9 @@ pub fn reduce_f32_avx512(
     let mut output = TensorHandle::zeros(&[], DType::F32)?;
     let out_ptr = output.data_ptr_f32_mut();
     if !out_ptr.is_null() {
-        unsafe { *out_ptr = result; }
+        unsafe {
+            *out_ptr = result;
+        }
     }
 
     Some(output)
@@ -4358,7 +4511,10 @@ pub fn reduce_f32_neon(
     use std::arch::aarch64::*;
 
     // NEON optimized ops: Sum, Mean, Max, Min
-    if !matches!(op, TensorReduceOp::Sum | TensorReduceOp::Mean | TensorReduceOp::Max | TensorReduceOp::Min) {
+    if !matches!(
+        op,
+        TensorReduceOp::Sum | TensorReduceOp::Mean | TensorReduceOp::Max | TensorReduceOp::Min
+    ) {
         return reduce_f32_scalar(a, op, axis);
     }
 
@@ -4428,7 +4584,9 @@ pub fn reduce_f32_neon(
     let mut output = TensorHandle::zeros(&[], DType::F32)?;
     let out_ptr = output.data_ptr_f32_mut();
     if !out_ptr.is_null() {
-        unsafe { *out_ptr = result; }
+        unsafe {
+            *out_ptr = result;
+        }
     }
 
     Some(output)
@@ -4448,10 +4606,7 @@ pub fn reduce_f32_neon(
 // ============================================================================
 
 /// Scalar F32 matrix multiplication
-pub fn matmul_f32_scalar(
-    a: &TensorHandle,
-    b: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn matmul_f32_scalar(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     if a.dtype != DType::F32 || b.dtype != DType::F32 {
         return None;
     }
@@ -4496,10 +4651,7 @@ pub fn matmul_f32_scalar(
 }
 
 /// Scalar F64 matrix multiplication
-pub fn matmul_f64_scalar(
-    a: &TensorHandle,
-    b: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn matmul_f64_scalar(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     if a.dtype != DType::F64 || b.dtype != DType::F64 {
         return None;
     }
@@ -4544,10 +4696,7 @@ pub fn matmul_f64_scalar(
 }
 
 /// Tiled F32 matrix multiplication (cache-optimized)
-pub fn matmul_f32_tiled(
-    a: &TensorHandle,
-    b: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn matmul_f32_tiled(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     if a.dtype != DType::F32 || b.dtype != DType::F32 {
         return None;
     }
@@ -4625,10 +4774,7 @@ pub fn matmul_f32_tiled(
 /// - Cache blocking with 64x64x64 tiles tuned for L2 cache
 /// - Register blocking with 6x16 microkernel
 #[cfg(target_arch = "x86_64")]
-pub fn matmul_f32_avx512(
-    a: &TensorHandle,
-    b: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn matmul_f32_avx512(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     use std::arch::x86_64::*;
 
     if !std::arch::is_x86_feature_detected!("avx512f") {
@@ -4770,10 +4916,7 @@ pub fn matmul_f32_avx512(
 /// - Cache blocking with 48x48x48 tiles tuned for L1/L2 cache
 /// - Register blocking with 4x8 microkernel
 #[cfg(target_arch = "x86_64")]
-pub fn matmul_f32_avx2(
-    a: &TensorHandle,
-    b: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn matmul_f32_avx2(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     use std::arch::x86_64::*;
 
     if !std::arch::is_x86_feature_detected!("avx2") || !std::arch::is_x86_feature_detected!("fma") {
@@ -4905,10 +5048,7 @@ pub fn matmul_f32_avx2(
 /// - Cache blocking with 48x48x48 tiles
 /// - Register blocking with 4x8 microkernel
 #[cfg(target_arch = "x86_64")]
-pub fn matmul_f64_avx512(
-    a: &TensorHandle,
-    b: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn matmul_f64_avx512(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     use std::arch::x86_64::*;
 
     if !std::arch::is_x86_feature_detected!("avx512f") {
@@ -5035,10 +5175,7 @@ pub fn matmul_f64_avx512(
 /// - Cache blocking with 32x32x32 tiles
 /// - Register blocking with 4x4 microkernel
 #[cfg(target_arch = "x86_64")]
-pub fn matmul_f64_avx2(
-    a: &TensorHandle,
-    b: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn matmul_f64_avx2(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     use std::arch::x86_64::*;
 
     if !std::arch::is_x86_feature_detected!("avx2") || !std::arch::is_x86_feature_detected!("fma") {
@@ -5877,10 +6014,7 @@ pub fn fill_f32_scalar(output: &mut TensorHandle, value: f32) -> bool {
 
 /// Computes L such that A = L * L^T (lower=true) or U such that A = U^T * U (lower=false).
 /// Returns None if the matrix is not positive-definite or not square.
-pub fn cholesky_f32_scalar(
-    a: &TensorHandle,
-    upper: bool,
-) -> Option<TensorHandle> {
+pub fn cholesky_f32_scalar(a: &TensorHandle, upper: bool) -> Option<TensorHandle> {
     if a.dtype != DType::F32 {
         return None;
     }
@@ -5961,10 +6095,7 @@ pub fn cholesky_f32_scalar(
 }
 
 /// Cholesky decomposition for F64 symmetric positive-definite matrix.
-pub fn cholesky_f64_scalar(
-    a: &TensorHandle,
-    upper: bool,
-) -> Option<TensorHandle> {
+pub fn cholesky_f64_scalar(a: &TensorHandle, upper: bool) -> Option<TensorHandle> {
     if a.dtype != DType::F64 {
         return None;
     }
@@ -6432,11 +6563,7 @@ pub fn trisolve_f64_scalar(
 /// - ord=f64::INFINITY: Max norm (L∞)
 /// - ord=f64::NEG_INFINITY: Min absolute value
 /// - For matrices: Frobenius norm when axis=None, else column/row norms
-pub fn norm_f32_scalar(
-    a: &TensorHandle,
-    ord: f64,
-    axis: Option<i8>,
-) -> Option<TensorHandle> {
+pub fn norm_f32_scalar(a: &TensorHandle, ord: f64, axis: Option<i8>) -> Option<TensorHandle> {
     if a.dtype != DType::F32 {
         return None;
     }
@@ -6600,11 +6727,7 @@ pub fn norm_f32_scalar(
 }
 
 /// Vector/Matrix norm for F64.
-pub fn norm_f64_scalar(
-    a: &TensorHandle,
-    ord: f64,
-    axis: Option<i8>,
-) -> Option<TensorHandle> {
+pub fn norm_f64_scalar(a: &TensorHandle, ord: f64, axis: Option<i8>) -> Option<TensorHandle> {
     if a.dtype != DType::F64 {
         return None;
     }
@@ -6764,10 +6887,7 @@ pub fn norm_f64_scalar(
 /// - `a`: Matrix [m, n]
 /// - `x`: Vector [n]
 /// Returns: Vector [m]
-pub fn mv_f32_scalar(
-    a: &TensorHandle,
-    x: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn mv_f32_scalar(a: &TensorHandle, x: &TensorHandle) -> Option<TensorHandle> {
     if a.dtype != DType::F32 || x.dtype != DType::F32 {
         return None;
     }
@@ -6807,10 +6927,7 @@ pub fn mv_f32_scalar(
 }
 
 /// Matrix-vector multiplication for F64.
-pub fn mv_f64_scalar(
-    a: &TensorHandle,
-    x: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn mv_f64_scalar(a: &TensorHandle, x: &TensorHandle) -> Option<TensorHandle> {
     if a.dtype != DType::F64 || x.dtype != DType::F64 {
         return None;
     }
@@ -6857,10 +6974,7 @@ pub fn mv_f64_scalar(
 ///
 
 /// `k` parameter: diagonal offset (0=main, >0=above, <0=below)
-pub fn diag_f32_scalar(
-    a: &TensorHandle,
-    k: i32,
-) -> Option<TensorHandle> {
+pub fn diag_f32_scalar(a: &TensorHandle, k: i32) -> Option<TensorHandle> {
     if a.dtype != DType::F32 {
         return None;
     }
@@ -6878,11 +6992,15 @@ pub fn diag_f32_scalar(
         // Compute diagonal length considering offset
         let diag_len = if k >= 0 {
             let k = k as usize;
-            if k >= n { return TensorHandle::zeros(&[0], DType::F32); }
+            if k >= n {
+                return TensorHandle::zeros(&[0], DType::F32);
+            }
             (m).min(n - k)
         } else {
             let k = (-k) as usize;
-            if k >= m { return TensorHandle::zeros(&[0], DType::F32); }
+            if k >= m {
+                return TensorHandle::zeros(&[0], DType::F32);
+            }
             (m - k).min(n)
         };
 
@@ -6933,10 +7051,7 @@ pub fn diag_f32_scalar(
 }
 
 /// Diagonal extraction/creation for F64.
-pub fn diag_f64_scalar(
-    a: &TensorHandle,
-    k: i32,
-) -> Option<TensorHandle> {
+pub fn diag_f64_scalar(a: &TensorHandle, k: i32) -> Option<TensorHandle> {
     if a.dtype != DType::F64 {
         return None;
     }
@@ -6952,11 +7067,15 @@ pub fn diag_f64_scalar(
 
         let diag_len = if k >= 0 {
             let k = k as usize;
-            if k >= n { return TensorHandle::zeros(&[0], DType::F64); }
+            if k >= n {
+                return TensorHandle::zeros(&[0], DType::F64);
+            }
             (m).min(n - k)
         } else {
             let k = (-k) as usize;
-            if k >= m { return TensorHandle::zeros(&[0], DType::F64); }
+            if k >= m {
+                return TensorHandle::zeros(&[0], DType::F64);
+            }
             (m - k).min(n)
         };
 
@@ -7010,10 +7129,7 @@ pub fn diag_f64_scalar(
 
 /// - `k`: diagonal offset (0=main diagonal, >0=above, <0=below)
 /// Returns: matrix with zeros below the k-th diagonal
-pub fn triu_f32_scalar(
-    a: &TensorHandle,
-    k: i32,
-) -> Option<TensorHandle> {
+pub fn triu_f32_scalar(a: &TensorHandle, k: i32) -> Option<TensorHandle> {
     if a.dtype != DType::F32 || a.ndim != 2 {
         return None;
     }
@@ -7046,10 +7162,7 @@ pub fn triu_f32_scalar(
 }
 
 /// Upper triangular for F64.
-pub fn triu_f64_scalar(
-    a: &TensorHandle,
-    k: i32,
-) -> Option<TensorHandle> {
+pub fn triu_f64_scalar(a: &TensorHandle, k: i32) -> Option<TensorHandle> {
     if a.dtype != DType::F64 || a.ndim != 2 {
         return None;
     }
@@ -7084,10 +7197,7 @@ pub fn triu_f64_scalar(
 
 /// - `k`: diagonal offset (0=main diagonal, >0=above, <0=below)
 /// Returns: matrix with zeros above the k-th diagonal
-pub fn tril_f32_scalar(
-    a: &TensorHandle,
-    k: i32,
-) -> Option<TensorHandle> {
+pub fn tril_f32_scalar(a: &TensorHandle, k: i32) -> Option<TensorHandle> {
     if a.dtype != DType::F32 || a.ndim != 2 {
         return None;
     }
@@ -7119,10 +7229,7 @@ pub fn tril_f32_scalar(
 }
 
 /// Lower triangular for F64.
-pub fn tril_f64_scalar(
-    a: &TensorHandle,
-    k: i32,
-) -> Option<TensorHandle> {
+pub fn tril_f64_scalar(a: &TensorHandle, k: i32) -> Option<TensorHandle> {
     if a.dtype != DType::F64 || a.ndim != 2 {
         return None;
     }
@@ -7160,9 +7267,7 @@ pub fn tril_f64_scalar(
 ///
 
 /// Returns None if matrix is singular (non-invertible).
-pub fn inverse_f32_scalar(
-    a: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn inverse_f32_scalar(a: &TensorHandle) -> Option<TensorHandle> {
     if a.dtype != DType::F32 || a.ndim != 2 {
         return None;
     }
@@ -7250,9 +7355,7 @@ pub fn inverse_f32_scalar(
 }
 
 /// Matrix inverse for F64.
-pub fn inverse_f64_scalar(
-    a: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn inverse_f64_scalar(a: &TensorHandle) -> Option<TensorHandle> {
     if a.dtype != DType::F64 || a.ndim != 2 {
         return None;
     }
@@ -7507,14 +7610,10 @@ impl EinsumEquation {
         }
         shape
     }
-
 }
 
 /// Einstein summation for F32 tensors.
-pub fn einsum_f32_scalar(
-    equation: &str,
-    operands: &[&TensorHandle],
-) -> Option<TensorHandle> {
+pub fn einsum_f32_scalar(equation: &str, operands: &[&TensorHandle]) -> Option<TensorHandle> {
     // Verify all operands are F32
     for op in operands {
         if op.dtype != DType::F32 {
@@ -7607,132 +7706,146 @@ unsafe fn einsum_2op_f32(
     // SAFETY: All pointer operations are valid as guaranteed by callers who construct
     // valid tensor handles with proper bounds checking.
     unsafe {
-    // Common case: matrix multiplication "ij,jk->ik"
-    if out_ndim == 2 && num_contracted == 1 {
-        let i_max = out_shape[0];
-        let k_max = out_shape[1];
-        let j_idx = contracted_idx_list[0];
-        let j_max = eq.index_sizes[j_idx];
+        // Common case: matrix multiplication "ij,jk->ik"
+        if out_ndim == 2 && num_contracted == 1 {
+            let i_max = out_shape[0];
+            let k_max = out_shape[1];
+            let j_idx = contracted_idx_list[0];
+            let j_max = eq.index_sizes[j_idx];
 
-        // Determine strides in A and B for the contracted index
-        // For "ij,jk->ik": A is [i,j], B is [j,k]
-        let a_j_stride = find_stride_for_index(eq, 0, j_idx, a);
-        let b_j_stride = find_stride_for_index(eq, 1, j_idx, b);
+            // Determine strides in A and B for the contracted index
+            // For "ij,jk->ik": A is [i,j], B is [j,k]
+            let a_j_stride = find_stride_for_index(eq, 0, j_idx, a);
+            let b_j_stride = find_stride_for_index(eq, 1, j_idx, b);
 
-        // Find output index positions in each operand
-        let out_idx_0 = eq.output_subscripts[0] as usize;
-        let out_idx_1 = eq.output_subscripts[1] as usize;
+            // Find output index positions in each operand
+            let out_idx_0 = eq.output_subscripts[0] as usize;
+            let out_idx_1 = eq.output_subscripts[1] as usize;
 
-        let a_i_stride = find_stride_for_index(eq, 0, out_idx_0, a);
-        let b_k_stride = find_stride_for_index(eq, 1, out_idx_1, b);
+            let a_i_stride = find_stride_for_index(eq, 0, out_idx_0, a);
+            let b_k_stride = find_stride_for_index(eq, 1, out_idx_1, b);
 
-        for i in 0..i_max {
-            for k in 0..k_max {
-                let mut sum = 0.0f32;
+            for i in 0..i_max {
+                for k in 0..k_max {
+                    let mut sum = 0.0f32;
+                    for j in 0..j_max {
+                        // Use signed arithmetic for strides
+                        let a_offset = (i as isize) * a_i_stride + (j as isize) * a_j_stride;
+                        let b_offset = (j as isize) * b_j_stride + (k as isize) * b_k_stride;
+                        sum += *a_ptr.offset(a_offset) * *b_ptr.offset(b_offset);
+                    }
+                    *out_ptr.add(i * k_max + k) = sum;
+                }
+            }
+        } else if out_ndim == 2 && num_contracted == 0 {
+            // Outer product "i,j->ij"
+            let i_max = out_shape[0];
+            let j_max = out_shape[1];
+
+            for i in 0..i_max {
                 for j in 0..j_max {
+                    *out_ptr.add(i * j_max + j) = *a_ptr.add(i) * *b_ptr.add(j);
+                }
+            }
+        } else if out_ndim == 1 && num_contracted == 1 {
+            // Vector-matrix or matrix-vector
+            let out_max = out_shape[0];
+            let contract_idx = contracted_idx_list[0];
+            let contract_max = eq.index_sizes[contract_idx];
+
+            let out_idx = eq.output_subscripts[0] as usize;
+            let a_out_stride = find_stride_for_index(eq, 0, out_idx, a);
+            let b_out_stride = find_stride_for_index(eq, 1, out_idx, b);
+            let a_contract_stride = find_stride_for_index(eq, 0, contract_idx, a);
+            let b_contract_stride = find_stride_for_index(eq, 1, contract_idx, b);
+
+            for i in 0..out_max {
+                let mut sum = 0.0f32;
+                for c in 0..contract_max {
                     // Use signed arithmetic for strides
-                    let a_offset = (i as isize) * a_i_stride + (j as isize) * a_j_stride;
-                    let b_offset = (j as isize) * b_j_stride + (k as isize) * b_k_stride;
+                    let a_offset = (i as isize) * a_out_stride + (c as isize) * a_contract_stride;
+                    let b_offset = (i as isize) * b_out_stride + (c as isize) * b_contract_stride;
                     sum += *a_ptr.offset(a_offset) * *b_ptr.offset(b_offset);
                 }
-                *out_ptr.add(i * k_max + k) = sum;
+                *out_ptr.add(i) = sum;
             }
-        }
-    } else if out_ndim == 2 && num_contracted == 0 {
-        // Outer product "i,j->ij"
-        let i_max = out_shape[0];
-        let j_max = out_shape[1];
-
-        for i in 0..i_max {
-            for j in 0..j_max {
-                *out_ptr.add(i * j_max + j) = *a_ptr.add(i) * *b_ptr.add(j);
-            }
-        }
-    } else if out_ndim == 1 && num_contracted == 1 {
-        // Vector-matrix or matrix-vector
-        let out_max = out_shape[0];
-        let contract_idx = contracted_idx_list[0];
-        let contract_max = eq.index_sizes[contract_idx];
-
-        let out_idx = eq.output_subscripts[0] as usize;
-        let a_out_stride = find_stride_for_index(eq, 0, out_idx, a);
-        let b_out_stride = find_stride_for_index(eq, 1, out_idx, b);
-        let a_contract_stride = find_stride_for_index(eq, 0, contract_idx, a);
-        let b_contract_stride = find_stride_for_index(eq, 1, contract_idx, b);
-
-        for i in 0..out_max {
+        } else if out_ndim == 0 && num_contracted >= 1 {
+            // Full contraction (e.g., dot product "i,i->", trace "ii->")
             let mut sum = 0.0f32;
-            for c in 0..contract_max {
-                // Use signed arithmetic for strides
-                let a_offset = (i as isize) * a_out_stride + (c as isize) * a_contract_stride;
-                let b_offset = (i as isize) * b_out_stride + (c as isize) * b_contract_stride;
-                sum += *a_ptr.offset(a_offset) * *b_ptr.offset(b_offset);
-            }
-            *out_ptr.add(i) = sum;
-        }
-    } else if out_ndim == 0 && num_contracted >= 1 {
-        // Full contraction (e.g., dot product "i,i->", trace "ii->")
-        let mut sum = 0.0f32;
 
-        // Total contraction elements
-        let total_contracted: usize = (0..num_contracted)
-            .map(|i| eq.index_sizes[contracted_idx_list[i]])
-            .product();
+            // Total contraction elements
+            let total_contracted: usize = (0..num_contracted)
+                .map(|i| eq.index_sizes[contracted_idx_list[i]])
+                .product();
 
-        // Simple iteration for small contractions
-        if num_contracted == 1 {
-            let c_idx = contracted_idx_list[0];
-            let c_max = eq.index_sizes[c_idx];
-            let a_stride = find_stride_for_index(eq, 0, c_idx, a);
-            let b_stride = find_stride_for_index(eq, 1, c_idx, b);
+            // Simple iteration for small contractions
+            if num_contracted == 1 {
+                let c_idx = contracted_idx_list[0];
+                let c_max = eq.index_sizes[c_idx];
+                let a_stride = find_stride_for_index(eq, 0, c_idx, a);
+                let b_stride = find_stride_for_index(eq, 1, c_idx, b);
 
-            for c in 0..c_max {
-                // Use signed arithmetic for strides
-                sum += *a_ptr.offset((c as isize) * a_stride) * *b_ptr.offset((c as isize) * b_stride);
-            }
-        } else {
-            // Multi-index contraction
-            let mut indices = [0usize; EINSUM_MAX_INDICES];
-            for _ in 0..total_contracted {
-                let a_offset = compute_offset(eq, 0, a, &indices);
-                let b_offset = compute_offset(eq, 1, b, &indices);
-                sum += *a_ptr.offset(a_offset) * *b_ptr.offset(b_offset);
+                for c in 0..c_max {
+                    // Use signed arithmetic for strides
+                    sum += *a_ptr.offset((c as isize) * a_stride)
+                        * *b_ptr.offset((c as isize) * b_stride);
+                }
+            } else {
+                // Multi-index contraction
+                let mut indices = [0usize; EINSUM_MAX_INDICES];
+                for _ in 0..total_contracted {
+                    let a_offset = compute_offset(eq, 0, a, &indices);
+                    let b_offset = compute_offset(eq, 1, b, &indices);
+                    sum += *a_ptr.offset(a_offset) * *b_ptr.offset(b_offset);
 
-                // Increment contracted indices
-                for ci in 0..num_contracted {
-                    let idx = contracted_idx_list[ci];
-                    indices[idx] += 1;
-                    if indices[idx] < eq.index_sizes[idx] {
-                        break;
+                    // Increment contracted indices
+                    for ci in 0..num_contracted {
+                        let idx = contracted_idx_list[ci];
+                        indices[idx] += 1;
+                        if indices[idx] < eq.index_sizes[idx] {
+                            break;
+                        }
+                        indices[idx] = 0;
                     }
-                    indices[idx] = 0;
                 }
             }
+            *out_ptr = sum;
+        } else {
+            // Fall back to generic
+            let ptrs = [
+                a_ptr,
+                b_ptr,
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+                std::ptr::null(),
+            ];
+            let operands = [a, b];
+            einsum_generic_f32(
+                eq,
+                &operands,
+                &ptrs,
+                out_ptr,
+                out_shape,
+                out_ndim,
+                num_contracted,
+                contracted_idx_list,
+            );
         }
-        *out_ptr = sum;
-    } else {
-        // Fall back to generic
-        let ptrs = [a_ptr, b_ptr, std::ptr::null(), std::ptr::null(),
-                    std::ptr::null(), std::ptr::null(), std::ptr::null(), std::ptr::null()];
-        let operands = [a, b];
-        einsum_generic_f32(
-            eq,
-            &operands,
-            &ptrs,
-            out_ptr,
-            out_shape,
-            out_ndim,
-            num_contracted,
-            contracted_idx_list,
-        );
-    }
     } // end unsafe block
 }
 
 /// Find the stride for a given index in an operand.
 /// Returns signed stride to support negative strides for reverse iteration.
 #[inline]
-fn find_stride_for_index(eq: &EinsumEquation, op_idx: usize, target_idx: usize, t: &TensorHandle) -> isize {
+fn find_stride_for_index(
+    eq: &EinsumEquation,
+    op_idx: usize,
+    target_idx: usize,
+    t: &TensorHandle,
+) -> isize {
     for dim in 0..eq.input_ndims[op_idx] as usize {
         if eq.input_subscripts[op_idx][dim] as usize == target_idx {
             return t.strides[dim];
@@ -7744,7 +7857,12 @@ fn find_stride_for_index(eq: &EinsumEquation, op_idx: usize, target_idx: usize, 
 /// Compute offset into tensor for given multi-index values.
 /// Returns signed offset to support negative strides for reverse iteration.
 #[inline]
-fn compute_offset(eq: &EinsumEquation, op_idx: usize, t: &TensorHandle, indices: &[usize; EINSUM_MAX_INDICES]) -> isize {
+fn compute_offset(
+    eq: &EinsumEquation,
+    op_idx: usize,
+    t: &TensorHandle,
+    indices: &[usize; EINSUM_MAX_INDICES],
+) -> isize {
     let mut offset = 0isize;
     for dim in 0..eq.input_ndims[op_idx] as usize {
         let idx = eq.input_subscripts[op_idx][dim] as usize;
@@ -7768,82 +7886,79 @@ unsafe fn einsum_generic_f32(
     // SAFETY: All pointer operations are valid as guaranteed by callers who construct
     // valid tensor handles with proper bounds checking.
     unsafe {
-    // Multi-index for all indices
-    let mut indices = [0usize; EINSUM_MAX_INDICES];
+        // Multi-index for all indices
+        let mut indices = [0usize; EINSUM_MAX_INDICES];
 
-    // Calculate total output elements
-    let out_numel: usize = if out_ndim == 0 {
-        1
-    } else {
-        out_shape[..out_ndim].iter().product()
-    };
+        // Calculate total output elements
+        let out_numel: usize = if out_ndim == 0 {
+            1
+        } else {
+            out_shape[..out_ndim].iter().product()
+        };
 
-    // Build output index list
-    let mut output_idx_list: [usize; 8] = [0; 8];
-    for dim in 0..out_ndim {
-        output_idx_list[dim] = eq.output_subscripts[dim] as usize;
-    }
-
-    // Calculate total contracted elements
-    let contracted_numel: usize = if num_contracted == 0 {
-        1
-    } else {
-        (0..num_contracted)
-            .map(|i| eq.index_sizes[contracted_idx_list[i]])
-            .product()
-    };
-
-    // Iterate over output positions
-    for out_flat in 0..out_numel {
-        // Decode output flat index to multi-index
-        let mut remaining = out_flat;
-        for dim in (0..out_ndim).rev() {
-            let idx = output_idx_list[dim];
-            let size = out_shape[dim];
-            if size > 0 {
-                indices[idx] = remaining % size;
-                remaining /= size;
-            }
+        // Build output index list
+        let mut output_idx_list: [usize; 8] = [0; 8];
+        for dim in 0..out_ndim {
+            output_idx_list[dim] = eq.output_subscripts[dim] as usize;
         }
 
-        // Sum over contracted indices
-        let mut sum = 0.0f32;
+        // Calculate total contracted elements
+        let contracted_numel: usize = if num_contracted == 0 {
+            1
+        } else {
+            (0..num_contracted)
+                .map(|i| eq.index_sizes[contracted_idx_list[i]])
+                .product()
+        };
 
-        // Reset contracted indices
-        for ci in 0..num_contracted {
-            indices[contracted_idx_list[ci]] = 0;
-        }
-
-        for _ in 0..contracted_numel {
-            // Compute product of all operands at current multi-index
-            let mut product = 1.0f32;
-            for (op_idx, op) in operands.iter().enumerate() {
-                let offset = compute_offset(eq, op_idx, op, &indices);
-                product *= *ptrs[op_idx].offset(offset);
-            }
-            sum += product;
-
-            // Increment contracted indices
-            for ci in 0..num_contracted {
-                let idx = contracted_idx_list[ci];
-                indices[idx] += 1;
-                if indices[idx] < eq.index_sizes[idx] {
-                    break;
+        // Iterate over output positions
+        for out_flat in 0..out_numel {
+            // Decode output flat index to multi-index
+            let mut remaining = out_flat;
+            for dim in (0..out_ndim).rev() {
+                let idx = output_idx_list[dim];
+                let size = out_shape[dim];
+                if size > 0 {
+                    indices[idx] = remaining % size;
+                    remaining /= size;
                 }
-                indices[idx] = 0;
             }
-        }
 
-        *out_ptr.add(out_flat) = sum;
-    }
+            // Sum over contracted indices
+            let mut sum = 0.0f32;
+
+            // Reset contracted indices
+            for ci in 0..num_contracted {
+                indices[contracted_idx_list[ci]] = 0;
+            }
+
+            for _ in 0..contracted_numel {
+                // Compute product of all operands at current multi-index
+                let mut product = 1.0f32;
+                for (op_idx, op) in operands.iter().enumerate() {
+                    let offset = compute_offset(eq, op_idx, op, &indices);
+                    product *= *ptrs[op_idx].offset(offset);
+                }
+                sum += product;
+
+                // Increment contracted indices
+                for ci in 0..num_contracted {
+                    let idx = contracted_idx_list[ci];
+                    indices[idx] += 1;
+                    if indices[idx] < eq.index_sizes[idx] {
+                        break;
+                    }
+                    indices[idx] = 0;
+                }
+            }
+
+            *out_ptr.add(out_flat) = sum;
+        }
     } // end unsafe block
 }
 
 /// Einstein summation for F64 tensors.
-pub fn einsum_f64_scalar(
-    equation: &str,
-    operands: &[&TensorHandle],
-) -> Option<TensorHandle> {
+pub fn einsum_f64_scalar(equation: &str, operands: &[&TensorHandle]) -> Option<TensorHandle> {
     // Verify all operands are F64
     for op in operands {
         if op.dtype != DType::F64 {
@@ -7916,64 +8031,64 @@ unsafe fn einsum_generic_f64(
     // SAFETY: All pointer operations are valid as guaranteed by callers who construct
     // valid tensor handles with proper bounds checking.
     unsafe {
-    let mut indices = [0usize; EINSUM_MAX_INDICES];
+        let mut indices = [0usize; EINSUM_MAX_INDICES];
 
-    let out_numel: usize = if out_ndim == 0 {
-        1
-    } else {
-        out_shape[..out_ndim].iter().product()
-    };
+        let out_numel: usize = if out_ndim == 0 {
+            1
+        } else {
+            out_shape[..out_ndim].iter().product()
+        };
 
-    let mut output_idx_list: [usize; 8] = [0; 8];
-    for dim in 0..out_ndim {
-        output_idx_list[dim] = eq.output_subscripts[dim] as usize;
-    }
-
-    let contracted_numel: usize = if num_contracted == 0 {
-        1
-    } else {
-        (0..num_contracted)
-            .map(|i| eq.index_sizes[contracted_idx_list[i]])
-            .product()
-    };
-
-    for out_flat in 0..out_numel {
-        let mut remaining = out_flat;
-        for dim in (0..out_ndim).rev() {
-            let idx = output_idx_list[dim];
-            let size = out_shape[dim];
-            if size > 0 {
-                indices[idx] = remaining % size;
-                remaining /= size;
-            }
+        let mut output_idx_list: [usize; 8] = [0; 8];
+        for dim in 0..out_ndim {
+            output_idx_list[dim] = eq.output_subscripts[dim] as usize;
         }
 
-        let mut sum = 0.0f64;
+        let contracted_numel: usize = if num_contracted == 0 {
+            1
+        } else {
+            (0..num_contracted)
+                .map(|i| eq.index_sizes[contracted_idx_list[i]])
+                .product()
+        };
 
-        for ci in 0..num_contracted {
-            indices[contracted_idx_list[ci]] = 0;
-        }
-
-        for _ in 0..contracted_numel {
-            let mut product = 1.0f64;
-            for (op_idx, op) in operands.iter().enumerate() {
-                let offset = compute_offset(eq, op_idx, op, &indices);
-                product *= *ptrs[op_idx].offset(offset);
+        for out_flat in 0..out_numel {
+            let mut remaining = out_flat;
+            for dim in (0..out_ndim).rev() {
+                let idx = output_idx_list[dim];
+                let size = out_shape[dim];
+                if size > 0 {
+                    indices[idx] = remaining % size;
+                    remaining /= size;
+                }
             }
-            sum += product;
+
+            let mut sum = 0.0f64;
 
             for ci in 0..num_contracted {
-                let idx = contracted_idx_list[ci];
-                indices[idx] += 1;
-                if indices[idx] < eq.index_sizes[idx] {
-                    break;
-                }
-                indices[idx] = 0;
+                indices[contracted_idx_list[ci]] = 0;
             }
-        }
 
-        *out_ptr.add(out_flat) = sum;
-    }
+            for _ in 0..contracted_numel {
+                let mut product = 1.0f64;
+                for (op_idx, op) in operands.iter().enumerate() {
+                    let offset = compute_offset(eq, op_idx, op, &indices);
+                    product *= *ptrs[op_idx].offset(offset);
+                }
+                sum += product;
+
+                for ci in 0..num_contracted {
+                    let idx = contracted_idx_list[ci];
+                    indices[idx] += 1;
+                    if indices[idx] < eq.index_sizes[idx] {
+                        break;
+                    }
+                    indices[idx] = 0;
+                }
+            }
+
+            *out_ptr.add(out_flat) = sum;
+        }
     } // end unsafe block
 }
 
@@ -8086,11 +8201,7 @@ fn fft_radix2_inplace(data: &mut [f64], n: usize, inverse: bool) {
 
 /// `dim` specifies which dimension to transform (-1 = last dimension).
 /// `inverse` specifies forward or inverse transform.
-pub fn fft_complex64_1d(
-    input: &TensorHandle,
-    dim: i8,
-    inverse: bool,
-) -> Option<TensorHandle> {
+pub fn fft_complex64_1d(input: &TensorHandle, dim: i8, inverse: bool) -> Option<TensorHandle> {
     // Only support C64 (complex64, stored as pairs of f64)
     if input.dtype != DType::Complex64 {
         return None;
@@ -8187,11 +8298,7 @@ pub fn fft_complex64_1d(
 ///
 
 /// Converts real input to complex, performs FFT, returns C64 result.
-pub fn fft_f64_1d(
-    input: &TensorHandle,
-    dim: i8,
-    inverse: bool,
-) -> Option<TensorHandle> {
+pub fn fft_f64_1d(input: &TensorHandle, dim: i8, inverse: bool) -> Option<TensorHandle> {
     if input.dtype != DType::F64 {
         return None;
     }
@@ -8399,30 +8506,31 @@ pub fn attention_f32_scalar(
 
                 // Apply mask if provided (additive mask, e.g., -inf for masked positions)
                 if let Some(m_ptr) = mask_ptr
-                    && !m_ptr.is_null() {
-                        for i in 0..seq_len_q {
-                            for j in 0..seq_len_k {
-                                // Support various mask shapes
-                                let mask_val = if let Some(m) = mask {
-                                    let m_idx = match m.ndim {
-                                        2 => i * seq_len_k + j,
-                                        3 => b * (seq_len_q * seq_len_k) + i * seq_len_k + j,
-                                        4 => {
-                                            b * (num_heads * seq_len_q * seq_len_k)
-                                                + h * (seq_len_q * seq_len_k)
-                                                + i * seq_len_k
-                                                + j
-                                        }
-                                        _ => 0,
-                                    };
-                                    *m_ptr.add(m_idx)
-                                } else {
-                                    0.0
+                    && !m_ptr.is_null()
+                {
+                    for i in 0..seq_len_q {
+                        for j in 0..seq_len_k {
+                            // Support various mask shapes
+                            let mask_val = if let Some(m) = mask {
+                                let m_idx = match m.ndim {
+                                    2 => i * seq_len_k + j,
+                                    3 => b * (seq_len_q * seq_len_k) + i * seq_len_k + j,
+                                    4 => {
+                                        b * (num_heads * seq_len_q * seq_len_k)
+                                            + h * (seq_len_q * seq_len_k)
+                                            + i * seq_len_k
+                                            + j
+                                    }
+                                    _ => 0,
                                 };
-                                scores[i * seq_len_k + j] += mask_val;
-                            }
+                                *m_ptr.add(m_idx)
+                            } else {
+                                0.0
+                            };
+                            scores[i * seq_len_k + j] += mask_val;
                         }
                     }
+                }
 
                 // Softmax along the last dimension (j axis)
                 for i in 0..seq_len_q {
@@ -8575,29 +8683,30 @@ pub fn attention_f64_scalar(
                 }
 
                 if let Some(m_ptr) = mask_ptr
-                    && !m_ptr.is_null() {
-                        for i in 0..seq_len_q {
-                            for j in 0..seq_len_k {
-                                let mask_val = if let Some(m) = mask {
-                                    let m_idx = match m.ndim {
-                                        2 => i * seq_len_k + j,
-                                        3 => b * (seq_len_q * seq_len_k) + i * seq_len_k + j,
-                                        4 => {
-                                            b * (num_heads * seq_len_q * seq_len_k)
-                                                + h * (seq_len_q * seq_len_k)
-                                                + i * seq_len_k
-                                                + j
-                                        }
-                                        _ => 0,
-                                    };
-                                    *m_ptr.add(m_idx)
-                                } else {
-                                    0.0
+                    && !m_ptr.is_null()
+                {
+                    for i in 0..seq_len_q {
+                        for j in 0..seq_len_k {
+                            let mask_val = if let Some(m) = mask {
+                                let m_idx = match m.ndim {
+                                    2 => i * seq_len_k + j,
+                                    3 => b * (seq_len_q * seq_len_k) + i * seq_len_k + j,
+                                    4 => {
+                                        b * (num_heads * seq_len_q * seq_len_k)
+                                            + h * (seq_len_q * seq_len_k)
+                                            + i * seq_len_k
+                                            + j
+                                    }
+                                    _ => 0,
                                 };
-                                scores[i * seq_len_k + j] += mask_val;
-                            }
+                                *m_ptr.add(m_idx)
+                            } else {
+                                0.0
+                            };
+                            scores[i * seq_len_k + j] += mask_val;
                         }
                     }
+                }
 
                 for i in 0..seq_len_q {
                     let mut max_val = f64::NEG_INFINITY;
@@ -8667,10 +8776,7 @@ pub fn attention_f64_scalar(
 ///
 
 /// Output: [batch, M, N]
-pub fn bmm_f32_scalar(
-    a: &TensorHandle,
-    b: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn bmm_f32_scalar(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     if a.dtype != DType::F32 || b.dtype != DType::F32 {
         return None;
     }
@@ -8722,10 +8828,7 @@ pub fn bmm_f32_scalar(
 }
 
 /// Batched matrix multiplication for F64 tensors.
-pub fn bmm_f64_scalar(
-    a: &TensorHandle,
-    b: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn bmm_f64_scalar(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     if a.dtype != DType::F64 || b.dtype != DType::F64 {
         return None;
     }
@@ -8790,9 +8893,7 @@ pub fn bmm_f64_scalar(
 ///
 
 /// Returns None if M < N or matrix is singular.
-pub fn qr_f32_householder(
-    a: &TensorHandle,
-) -> Option<(TensorHandle, TensorHandle)> {
+pub fn qr_f32_householder(a: &TensorHandle) -> Option<(TensorHandle, TensorHandle)> {
     if a.dtype != DType::F32 {
         return None;
     }
@@ -8914,9 +9015,7 @@ pub fn qr_f32_householder(
 }
 
 /// QR decomposition via Householder reflections for F64 matrices.
-pub fn qr_f64_householder(
-    a: &TensorHandle,
-) -> Option<(TensorHandle, TensorHandle)> {
+pub fn qr_f64_householder(a: &TensorHandle) -> Option<(TensorHandle, TensorHandle)> {
     if a.dtype != DType::F64 {
         return None;
     }
@@ -9033,9 +9132,7 @@ pub fn qr_f64_householder(
 
 /// Input: A [M, N]
 /// Output: (U [M, M], S [min(M,N)], Vt [N, N]) where Vt = V^T
-pub fn svd_f32_jacobi(
-    a: &TensorHandle,
-) -> Option<(TensorHandle, TensorHandle, TensorHandle)> {
+pub fn svd_f32_jacobi(a: &TensorHandle) -> Option<(TensorHandle, TensorHandle, TensorHandle)> {
     if a.dtype != DType::F32 {
         return None;
     }
@@ -9067,8 +9164,12 @@ pub fn svd_f32_jacobi(
     let work_ptr = work.data_ptr_f32_mut();
     let v_ptr = v_work.data_ptr_f32_mut();
 
-    if a_ptr.is_null() || u_ptr.is_null() || s_ptr.is_null() || vt_ptr.is_null()
-        || work_ptr.is_null() || v_ptr.is_null()
+    if a_ptr.is_null()
+        || u_ptr.is_null()
+        || s_ptr.is_null()
+        || vt_ptr.is_null()
+        || work_ptr.is_null()
+        || v_ptr.is_null()
     {
         return None;
     }
@@ -9149,8 +9250,10 @@ pub fn svd_f32_jacobi(
                     }
 
                     // Update diagonal and off-diagonal elements
-                    *work_ptr.add(p * work_n + p) = c * c * b_pp - 2.0 * c * s * b_pq + s * s * b_qq;
-                    *work_ptr.add(q * work_n + q) = s * s * b_pp + 2.0 * c * s * b_pq + c * c * b_qq;
+                    *work_ptr.add(p * work_n + p) =
+                        c * c * b_pp - 2.0 * c * s * b_pq + s * s * b_qq;
+                    *work_ptr.add(q * work_n + q) =
+                        s * s * b_pp + 2.0 * c * s * b_pq + c * c * b_qq;
                     *work_ptr.add(p * work_n + q) = 0.0;
                     *work_ptr.add(q * work_n + p) = 0.0;
 
@@ -9283,9 +9386,7 @@ pub fn svd_f32_jacobi(
 }
 
 /// SVD decomposition using Jacobi algorithm for F64 matrices.
-pub fn svd_f64_jacobi(
-    a: &TensorHandle,
-) -> Option<(TensorHandle, TensorHandle, TensorHandle)> {
+pub fn svd_f64_jacobi(a: &TensorHandle) -> Option<(TensorHandle, TensorHandle, TensorHandle)> {
     if a.dtype != DType::F64 {
         return None;
     }
@@ -9314,8 +9415,12 @@ pub fn svd_f64_jacobi(
     let work_ptr = work.data_ptr_f64_mut();
     let v_ptr = v_work.data_ptr_f64_mut();
 
-    if a_ptr.is_null() || u_ptr.is_null() || s_ptr.is_null() || vt_ptr.is_null()
-        || work_ptr.is_null() || v_ptr.is_null()
+    if a_ptr.is_null()
+        || u_ptr.is_null()
+        || s_ptr.is_null()
+        || vt_ptr.is_null()
+        || work_ptr.is_null()
+        || v_ptr.is_null()
     {
         return None;
     }
@@ -9386,8 +9491,10 @@ pub fn svd_f64_jacobi(
                         }
                     }
 
-                    *work_ptr.add(p * work_n + p) = c * c * b_pp - 2.0 * c * s * b_pq + s * s * b_qq;
-                    *work_ptr.add(q * work_n + q) = s * s * b_pp + 2.0 * c * s * b_pq + c * c * b_qq;
+                    *work_ptr.add(p * work_n + p) =
+                        c * c * b_pp - 2.0 * c * s * b_pq + s * s * b_qq;
+                    *work_ptr.add(q * work_n + q) =
+                        s * s * b_pp + 2.0 * c * s * b_pq + c * c * b_qq;
                     *work_ptr.add(p * work_n + q) = 0.0;
                     *work_ptr.add(q * work_n + p) = 0.0;
 
@@ -9519,9 +9626,7 @@ pub fn svd_f64_jacobi(
 
 /// Input: A [N, N] (must be symmetric)
 /// Output: (eigenvalues [N], eigenvectors [N, N])
-pub fn eig_symmetric_f32_jacobi(
-    a: &TensorHandle,
-) -> Option<(TensorHandle, TensorHandle)> {
+pub fn eig_symmetric_f32_jacobi(a: &TensorHandle) -> Option<(TensorHandle, TensorHandle)> {
     if a.dtype != DType::F32 {
         return None;
     }
@@ -9626,10 +9731,13 @@ pub fn eig_symmetric_f32_jacobi(
         }
 
         // Extract eigenvalues and sort by magnitude (descending)
-        let mut eig_pairs: Vec<(f32, usize)> = (0..n)
-            .map(|i| (*work_ptr.add(i * n + i), i))
-            .collect();
-        eig_pairs.sort_by(|a, b| b.0.abs().partial_cmp(&a.0.abs()).unwrap_or(std::cmp::Ordering::Equal));
+        let mut eig_pairs: Vec<(f32, usize)> =
+            (0..n).map(|i| (*work_ptr.add(i * n + i), i)).collect();
+        eig_pairs.sort_by(|a, b| {
+            b.0.abs()
+                .partial_cmp(&a.0.abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Reorder eigenvalues and eigenvectors
         let mut sorted_eig = vec![0.0f32; n];
@@ -9655,9 +9763,7 @@ pub fn eig_symmetric_f32_jacobi(
 }
 
 /// Eigenvalue decomposition for symmetric F64 matrices using Jacobi method.
-pub fn eig_symmetric_f64_jacobi(
-    a: &TensorHandle,
-) -> Option<(TensorHandle, TensorHandle)> {
+pub fn eig_symmetric_f64_jacobi(a: &TensorHandle) -> Option<(TensorHandle, TensorHandle)> {
     if a.dtype != DType::F64 {
         return None;
     }
@@ -9753,10 +9859,13 @@ pub fn eig_symmetric_f64_jacobi(
             }
         }
 
-        let mut eig_pairs: Vec<(f64, usize)> = (0..n)
-            .map(|i| (*work_ptr.add(i * n + i), i))
-            .collect();
-        eig_pairs.sort_by(|a, b| b.0.abs().partial_cmp(&a.0.abs()).unwrap_or(std::cmp::Ordering::Equal));
+        let mut eig_pairs: Vec<(f64, usize)> =
+            (0..n).map(|i| (*work_ptr.add(i * n + i), i)).collect();
+        eig_pairs.sort_by(|a, b| {
+            b.0.abs()
+                .partial_cmp(&a.0.abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         let mut sorted_eig = vec![0.0f64; n];
         let mut sorted_vec = vec![0.0f64; n * n];
@@ -9795,10 +9904,7 @@ pub fn eig_symmetric_f64_jacobi(
 ///
 
 /// Output: x [N] or [N, K]
-pub fn lstsq_f32_qr(
-    a: &TensorHandle,
-    b: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn lstsq_f32_qr(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     if a.dtype != DType::F32 || b.dtype != DType::F32 {
         return None;
     }
@@ -9898,10 +10004,7 @@ pub fn lstsq_f32_qr(
 }
 
 /// Least squares solve using QR decomposition for F64 matrices.
-pub fn lstsq_f64_qr(
-    a: &TensorHandle,
-    b: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn lstsq_f64_qr(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     if a.dtype != DType::F64 || b.dtype != DType::F64 {
         return None;
     }
@@ -10009,10 +10112,7 @@ pub fn lstsq_f64_qr(
 
 /// Input: tensor of any shape
 /// Output: tensor with same shape, containing cumulative sums
-pub fn cumsum_f32_scalar(
-    input: &TensorHandle,
-    axis: i8,
-) -> Option<TensorHandle> {
+pub fn cumsum_f32_scalar(input: &TensorHandle, axis: i8) -> Option<TensorHandle> {
     if input.dtype != DType::F32 {
         return None;
     }
@@ -10071,10 +10171,7 @@ pub fn cumsum_f32_scalar(
 }
 
 /// Cumulative sum along an axis for F64 tensors.
-pub fn cumsum_f64_scalar(
-    input: &TensorHandle,
-    axis: i8,
-) -> Option<TensorHandle> {
+pub fn cumsum_f64_scalar(input: &TensorHandle, axis: i8) -> Option<TensorHandle> {
     if input.dtype != DType::F64 {
         return None;
     }
@@ -10138,10 +10235,7 @@ pub fn cumsum_f64_scalar(
 
 /// Input: tensor of any shape
 /// Output: tensor with same shape, containing cumulative products
-pub fn cumprod_f32_scalar(
-    input: &TensorHandle,
-    axis: i8,
-) -> Option<TensorHandle> {
+pub fn cumprod_f32_scalar(input: &TensorHandle, axis: i8) -> Option<TensorHandle> {
     if input.dtype != DType::F32 {
         return None;
     }
@@ -10197,10 +10291,7 @@ pub fn cumprod_f32_scalar(
 }
 
 /// Cumulative product along an axis for F64 tensors.
-pub fn cumprod_f64_scalar(
-    input: &TensorHandle,
-    axis: i8,
-) -> Option<TensorHandle> {
+pub fn cumprod_f64_scalar(input: &TensorHandle, axis: i8) -> Option<TensorHandle> {
     if input.dtype != DType::F64 {
         return None;
     }
@@ -10771,10 +10862,7 @@ pub fn scatter_f64_scalar(
 ///
 
 /// Output: x [N] or [N, K]
-pub fn solve_f32_lu(
-    a: &TensorHandle,
-    b: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn solve_f32_lu(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     if a.dtype != DType::F32 || b.dtype != DType::F32 {
         return None;
     }
@@ -10915,10 +11003,7 @@ pub fn solve_f32_lu(
 }
 
 /// Solve linear system Ax = b for F64 tensors using LU decomposition with partial pivoting.
-pub fn solve_f64_lu(
-    a: &TensorHandle,
-    b: &TensorHandle,
-) -> Option<TensorHandle> {
+pub fn solve_f64_lu(a: &TensorHandle, b: &TensorHandle) -> Option<TensorHandle> {
     if a.dtype != DType::F64 || b.dtype != DType::F64 {
         return None;
     }
@@ -11058,10 +11143,7 @@ pub fn solve_f64_lu(
 
 /// Input: tensor of any shape
 /// Output: tensor with axis dimension removed, dtype I64
-pub fn argmax_f32_scalar(
-    input: &TensorHandle,
-    axis: i8,
-) -> Option<TensorHandle> {
+pub fn argmax_f32_scalar(input: &TensorHandle, axis: i8) -> Option<TensorHandle> {
     if input.dtype != DType::F32 {
         return None;
     }
@@ -11144,10 +11226,7 @@ pub fn argmax_f32_scalar(
 }
 
 /// Argmax along an axis for F64 tensors.
-pub fn argmax_f64_scalar(
-    input: &TensorHandle,
-    axis: i8,
-) -> Option<TensorHandle> {
+pub fn argmax_f64_scalar(input: &TensorHandle, axis: i8) -> Option<TensorHandle> {
     if input.dtype != DType::F64 {
         return None;
     }
@@ -11228,10 +11307,7 @@ pub fn argmax_f64_scalar(
 }
 
 /// Argmin along an axis for F32 tensors.
-pub fn argmin_f32_scalar(
-    input: &TensorHandle,
-    axis: i8,
-) -> Option<TensorHandle> {
+pub fn argmin_f32_scalar(input: &TensorHandle, axis: i8) -> Option<TensorHandle> {
     if input.dtype != DType::F32 {
         return None;
     }
@@ -11312,10 +11388,7 @@ pub fn argmin_f32_scalar(
 }
 
 /// Argmin along an axis for F64 tensors.
-pub fn argmin_f64_scalar(
-    input: &TensorHandle,
-    axis: i8,
-) -> Option<TensorHandle> {
+pub fn argmin_f64_scalar(input: &TensorHandle, axis: i8) -> Option<TensorHandle> {
     if input.dtype != DType::F64 {
         return None;
     }
@@ -11519,8 +11592,10 @@ pub fn index_select_f32_scalar(
                     continue; // Skip invalid indices
                 }
                 for inner in 0..inner_size {
-                    let in_flat = outer * (axis_size * inner_size) + in_axis_idx * inner_size + inner;
-                    let out_flat = outer * (num_indices * inner_size) + out_axis_idx * inner_size + inner;
+                    let in_flat =
+                        outer * (axis_size * inner_size) + in_axis_idx * inner_size + inner;
+                    let out_flat =
+                        outer * (num_indices * inner_size) + out_axis_idx * inner_size + inner;
                     *out_ptr.add(out_flat) = *in_ptr.add(in_flat);
                 }
             }
@@ -11619,8 +11694,10 @@ pub fn index_select_f64_scalar(
                     continue;
                 }
                 for inner in 0..inner_size {
-                    let in_flat = outer * (axis_size * inner_size) + in_axis_idx * inner_size + inner;
-                    let out_flat = outer * (num_indices * inner_size) + out_axis_idx * inner_size + inner;
+                    let in_flat =
+                        outer * (axis_size * inner_size) + in_axis_idx * inner_size + inner;
+                    let out_flat =
+                        outer * (num_indices * inner_size) + out_axis_idx * inner_size + inner;
                     *out_ptr.add(out_flat) = *in_ptr.add(in_flat);
                 }
             }
@@ -11631,11 +11708,7 @@ pub fn index_select_f64_scalar(
 }
 
 /// 1D FFT for real F32 tensor, producing complex output.
-pub fn fft_f32_1d(
-    input: &TensorHandle,
-    dim: i8,
-    inverse: bool,
-) -> Option<TensorHandle> {
+pub fn fft_f32_1d(input: &TensorHandle, dim: i8, inverse: bool) -> Option<TensorHandle> {
     if input.dtype != DType::F32 {
         return None;
     }
@@ -11954,7 +12027,11 @@ pub fn nanmean_f32_scalar(
                 }
             }
         }
-        let mean = if count > 0 { sum / count as f32 } else { f32::NAN };
+        let mean = if count > 0 {
+            sum / count as f32
+        } else {
+            f32::NAN
+        };
         let out_shape = if keepdim {
             vec![1usize; input.ndim as usize]
         } else {
@@ -12022,7 +12099,11 @@ pub fn nanmean_f32_scalar(
                         count += 1;
                     }
                 }
-                let mean = if count > 0 { sum / count as f32 } else { f32::NAN };
+                let mean = if count > 0 {
+                    sum / count as f32
+                } else {
+                    f32::NAN
+                };
                 let out_offset = b * after_size + a;
                 *out_ptr.add(out_offset) = mean;
             }
@@ -12061,7 +12142,11 @@ pub fn nanmean_f64_scalar(
                 }
             }
         }
-        let mean = if count > 0 { sum / count as f64 } else { f64::NAN };
+        let mean = if count > 0 {
+            sum / count as f64
+        } else {
+            f64::NAN
+        };
         let out_shape = if keepdim {
             vec![1usize; input.ndim as usize]
         } else {
@@ -12129,7 +12214,11 @@ pub fn nanmean_f64_scalar(
                         count += 1;
                     }
                 }
-                let mean = if count > 0 { sum / count as f64 } else { f64::NAN };
+                let mean = if count > 0 {
+                    sum / count as f64
+                } else {
+                    f64::NAN
+                };
                 let out_offset = b * after_size + a;
                 *out_ptr.add(out_offset) = mean;
             }
@@ -13832,7 +13921,8 @@ pub fn expm_f32_scalar(input: &TensorHandle) -> Option<TensorHandle> {
         let a4_ptr = a4.data_ptr_f32();
         unsafe {
             for i in 0..n * n {
-                *u_ptr.add(i) = b[1] * *u_ptr.add(i) + b[3] * *a2_ptr.add(i) + b[5] * *a4_ptr.add(i);
+                *u_ptr.add(i) =
+                    b[1] * *u_ptr.add(i) + b[3] * *a2_ptr.add(i) + b[5] * *a4_ptr.add(i);
             }
         }
     }
@@ -13845,7 +13935,10 @@ pub fn expm_f32_scalar(input: &TensorHandle) -> Option<TensorHandle> {
         let a6_ptr = a6.data_ptr_f32();
         unsafe {
             for i in 0..n * n {
-                *v_ptr.add(i) = b[0] * *v_ptr.add(i) + b[2] * *a2_ptr.add(i) + b[4] * *a4_ptr.add(i) + b[6] * *a6_ptr.add(i);
+                *v_ptr.add(i) = b[0] * *v_ptr.add(i)
+                    + b[2] * *a2_ptr.add(i)
+                    + b[4] * *a4_ptr.add(i)
+                    + b[6] * *a6_ptr.add(i);
             }
         }
     }
@@ -13934,7 +14027,8 @@ pub fn expm_f64_scalar(input: &TensorHandle) -> Option<TensorHandle> {
         let a4_ptr = a4.data_ptr_f64();
         unsafe {
             for i in 0..n * n {
-                *u_ptr.add(i) = b[1] * *u_ptr.add(i) + b[3] * *a2_ptr.add(i) + b[5] * *a4_ptr.add(i);
+                *u_ptr.add(i) =
+                    b[1] * *u_ptr.add(i) + b[3] * *a2_ptr.add(i) + b[5] * *a4_ptr.add(i);
             }
         }
     }
@@ -13946,7 +14040,10 @@ pub fn expm_f64_scalar(input: &TensorHandle) -> Option<TensorHandle> {
         let a6_ptr = a6.data_ptr_f64();
         unsafe {
             for i in 0..n * n {
-                *v_ptr.add(i) = b[0] * *v_ptr.add(i) + b[2] * *a2_ptr.add(i) + b[4] * *a4_ptr.add(i) + b[6] * *a6_ptr.add(i);
+                *v_ptr.add(i) = b[0] * *v_ptr.add(i)
+                    + b[2] * *a2_ptr.add(i)
+                    + b[4] * *a4_ptr.add(i)
+                    + b[6] * *a6_ptr.add(i);
             }
         }
     }
@@ -14392,9 +14489,9 @@ pub fn ssm_scan_f32(
                     let idx = base + i * stride;
                     let val = *out_ptr.add(idx);
                     acc = match op {
-                        0 => acc + val,          // add
-                        1 => acc * val,          // mul
-                        _ => acc + val,          // default to add
+                        0 => acc + val, // add
+                        1 => acc * val, // mul
+                        _ => acc + val, // default to add
                     };
                     *out_ptr.add(idx) = acc;
                 }
@@ -14537,7 +14634,8 @@ pub fn rfft_f32(input: &TensorHandle, n: usize) -> Option<TensorHandle> {
             let mut re = 0.0f32;
             let mut im = 0.0f32;
             for t in 0..fft_len.min(input_len) {
-                let angle = -2.0 * std::f32::consts::PI * (k as f32) * (t as f32) / (fft_len as f32);
+                let angle =
+                    -2.0 * std::f32::consts::PI * (k as f32) * (t as f32) / (fft_len as f32);
                 let x = *in_ptr.add(t);
                 re += x * angle.cos();
                 im += x * angle.sin();
@@ -14565,7 +14663,8 @@ pub fn rfft_f64(input: &TensorHandle, n: usize) -> Option<TensorHandle> {
             let mut re = 0.0f64;
             let mut im = 0.0f64;
             for t in 0..fft_len.min(input_len) {
-                let angle = -2.0 * std::f64::consts::PI * (k as f64) * (t as f64) / (fft_len as f64);
+                let angle =
+                    -2.0 * std::f64::consts::PI * (k as f64) * (t as f64) / (fft_len as f64);
                 let x = *in_ptr.add(t);
                 re += x * angle.cos();
                 im += x * angle.sin();
@@ -14603,7 +14702,8 @@ pub fn irfft_f32(input: &TensorHandle, n: usize) -> Option<TensorHandle> {
         for t in 0..output_len {
             let mut sum = 0.0f32;
             for k in 0..complex_len {
-                let angle = 2.0 * std::f32::consts::PI * (k as f32) * (t as f32) / (output_len as f32);
+                let angle =
+                    2.0 * std::f32::consts::PI * (k as f32) * (t as f32) / (output_len as f32);
                 let re = *in_ptr.add(k * 2);
                 let im = *in_ptr.add(k * 2 + 1);
                 sum += re * angle.cos() - im * angle.sin();
@@ -14628,7 +14728,8 @@ pub fn irfft_f64(input: &TensorHandle, n: usize) -> Option<TensorHandle> {
         for t in 0..output_len {
             let mut sum = 0.0f64;
             for k in 0..complex_len {
-                let angle = 2.0 * std::f64::consts::PI * (k as f64) * (t as f64) / (output_len as f64);
+                let angle =
+                    2.0 * std::f64::consts::PI * (k as f64) * (t as f64) / (output_len as f64);
                 let re = *in_ptr.add(k * 2);
                 let im = *in_ptr.add(k * 2 + 1);
                 sum += re * angle.cos() - im * angle.sin();
@@ -14821,10 +14922,12 @@ pub fn uniform_f32(shape: &[usize], low: f32, high: f32) -> Option<TensorHandle>
         for i in 0..numel {
             let mut hasher = state.build_hasher();
             hasher.write_usize(i);
-            hasher.write_u64(std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos() as u64)
-                .unwrap_or(0));
+            hasher.write_u64(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos() as u64)
+                    .unwrap_or(0),
+            );
             let random_bits = hasher.finish();
             let random_01 = (random_bits as f32) / (u64::MAX as f32);
             *out_ptr.add(i) = low + random_01 * range;
@@ -14850,10 +14953,12 @@ pub fn uniform_f64(shape: &[usize], low: f64, high: f64) -> Option<TensorHandle>
         for i in 0..numel {
             let mut hasher = state.build_hasher();
             hasher.write_usize(i);
-            hasher.write_u64(std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos() as u64)
-                .unwrap_or(0));
+            hasher.write_u64(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos() as u64)
+                    .unwrap_or(0),
+            );
             let random_bits = hasher.finish();
             let random_01 = (random_bits as f64) / (u64::MAX as f64);
             *out_ptr.add(i) = low + random_01 * range;

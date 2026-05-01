@@ -17,8 +17,8 @@
 
 use tower_lsp::lsp_types::*;
 use verum_ast::FileId;
-use verum_parser::syntax_bridge::LosslessParser;
 use verum_common::List;
+use verum_parser::syntax_bridge::LosslessParser;
 use verum_syntax::{SyntaxElement, SyntaxKind, SyntaxNode};
 
 // ==================== Configuration ====================
@@ -103,7 +103,9 @@ impl TriviaPreservingFormatter {
             match child {
                 SyntaxElement::Token(token) => {
                     let kind = token.kind();
-                    if kind.is_trivia() && !matches!(kind, SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE) {
+                    if kind.is_trivia()
+                        && !matches!(kind, SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE)
+                    {
                         // This is a comment - preserve it
                         let range = token.text_range();
                         trivia.push(TriviaInfo {
@@ -251,28 +253,26 @@ impl TriviaPreservingFormatter {
                         }
                     }
                 }
-                SyntaxElement::Node(child_node) => {
-                    match child_node.kind() {
-                        SyntaxKind::PARAM_LIST => {
-                            result.push_str(&self.format_param_list(&child_node));
-                        }
-                        SyntaxKind::GENERIC_PARAMS => {
-                            result.push_str(&self.format_generic_params(&child_node));
-                        }
-                        SyntaxKind::BLOCK => {
-                            if has_body {
-                                result.push('\n');
-                                result.push_str(&self.format_block(&child_node, indent));
-                            }
-                        }
-                        SyntaxKind::WHERE_CLAUSE => {
-                            result.push_str(&self.format_where_clause(&child_node, indent));
-                        }
-                        _ => {
-                            result.push_str(&self.format_tokens(&child_node));
+                SyntaxElement::Node(child_node) => match child_node.kind() {
+                    SyntaxKind::PARAM_LIST => {
+                        result.push_str(&self.format_param_list(&child_node));
+                    }
+                    SyntaxKind::GENERIC_PARAMS => {
+                        result.push_str(&self.format_generic_params(&child_node));
+                    }
+                    SyntaxKind::BLOCK => {
+                        if has_body {
+                            result.push('\n');
+                            result.push_str(&self.format_block(&child_node, indent));
                         }
                     }
-                }
+                    SyntaxKind::WHERE_CLAUSE => {
+                        result.push_str(&self.format_where_clause(&child_node, indent));
+                    }
+                    _ => {
+                        result.push_str(&self.format_tokens(&child_node));
+                    }
+                },
             }
         }
 
@@ -328,22 +328,20 @@ impl TriviaPreservingFormatter {
                         }
                     }
                 }
-                SyntaxElement::Node(child_node) => {
-                    match child_node.kind() {
-                        SyntaxKind::GENERIC_PARAMS => {
-                            result.push_str(&self.format_generic_params(&child_node));
-                        }
-                        SyntaxKind::FIELD_LIST => {
-                            result.push_str(&self.format_field_list(&child_node, indent + 1));
-                        }
-                        SyntaxKind::VARIANT_LIST => {
-                            result.push_str(&self.format_variant_list(&child_node));
-                        }
-                        _ => {
-                            result.push_str(&self.format_tokens(&child_node));
-                        }
+                SyntaxElement::Node(child_node) => match child_node.kind() {
+                    SyntaxKind::GENERIC_PARAMS => {
+                        result.push_str(&self.format_generic_params(&child_node));
                     }
-                }
+                    SyntaxKind::FIELD_LIST => {
+                        result.push_str(&self.format_field_list(&child_node, indent + 1));
+                    }
+                    SyntaxKind::VARIANT_LIST => {
+                        result.push_str(&self.format_variant_list(&child_node));
+                    }
+                    _ => {
+                        result.push_str(&self.format_tokens(&child_node));
+                    }
+                },
             }
         }
 
@@ -384,21 +382,19 @@ impl TriviaPreservingFormatter {
                         }
                     }
                 }
-                SyntaxElement::Node(child_node) => {
-                    match child_node.kind() {
-                        SyntaxKind::GENERIC_PARAMS => {
-                            result.push_str(&self.format_generic_params(&child_node));
-                        }
-                        SyntaxKind::PROTOCOL_ITEM | SyntaxKind::PROTOCOL_FN => {
-                            result.push_str(&" ".repeat(self.config.indent_size * (indent + 1)));
-                            result.push_str(&self.format_tokens(&child_node));
-                            result.push('\n');
-                        }
-                        _ => {
-                            result.push_str(&self.format_tokens(&child_node));
-                        }
+                SyntaxElement::Node(child_node) => match child_node.kind() {
+                    SyntaxKind::GENERIC_PARAMS => {
+                        result.push_str(&self.format_generic_params(&child_node));
                     }
-                }
+                    SyntaxKind::PROTOCOL_ITEM | SyntaxKind::PROTOCOL_FN => {
+                        result.push_str(&" ".repeat(self.config.indent_size * (indent + 1)));
+                        result.push_str(&self.format_tokens(&child_node));
+                        result.push('\n');
+                    }
+                    _ => {
+                        result.push_str(&self.format_tokens(&child_node));
+                    }
+                },
             }
         }
 
@@ -432,16 +428,14 @@ impl TriviaPreservingFormatter {
                         }
                     }
                 }
-                SyntaxElement::Node(child_node) => {
-                    match child_node.kind() {
-                        SyntaxKind::IMPL_FN | SyntaxKind::FN_DEF => {
-                            result.push_str(&self.format_function(&child_node, indent + 1));
-                        }
-                        _ => {
-                            result.push_str(&self.format_tokens(&child_node));
-                        }
+                SyntaxElement::Node(child_node) => match child_node.kind() {
+                    SyntaxKind::IMPL_FN | SyntaxKind::FN_DEF => {
+                        result.push_str(&self.format_function(&child_node, indent + 1));
                     }
-                }
+                    _ => {
+                        result.push_str(&self.format_tokens(&child_node));
+                    }
+                },
             }
         }
 
@@ -562,18 +556,16 @@ impl TriviaPreservingFormatter {
         let mut first = true;
         for child in node.children() {
             match child {
-                SyntaxElement::Token(token) => {
-                    match token.kind() {
-                        SyntaxKind::L_PAREN | SyntaxKind::R_PAREN => {}
-                        SyntaxKind::COMMA => {
-                            result.push_str(", ");
-                        }
-                        k if k.is_trivia() => {}
-                        _ => {
-                            result.push_str(token.text());
-                        }
+                SyntaxElement::Token(token) => match token.kind() {
+                    SyntaxKind::L_PAREN | SyntaxKind::R_PAREN => {}
+                    SyntaxKind::COMMA => {
+                        result.push_str(", ");
                     }
-                }
+                    k if k.is_trivia() => {}
+                    _ => {
+                        result.push_str(token.text());
+                    }
+                },
                 SyntaxElement::Node(child_node) if child_node.kind() == SyntaxKind::PARAM => {
                     if !first {
                         result.push_str(", ");
@@ -635,23 +627,21 @@ impl TriviaPreservingFormatter {
         let mut first = true;
         for child in node.children() {
             match child {
-                SyntaxElement::Token(token) => {
-                    match token.kind() {
-                        SyntaxKind::L_ANGLE | SyntaxKind::R_ANGLE => {}
-                        SyntaxKind::COMMA => {}
-                        SyntaxKind::IDENT => {
-                            if !first {
-                                result.push_str(", ");
-                            }
-                            result.push_str(token.text());
-                            first = false;
+                SyntaxElement::Token(token) => match token.kind() {
+                    SyntaxKind::L_ANGLE | SyntaxKind::R_ANGLE => {}
+                    SyntaxKind::COMMA => {}
+                    SyntaxKind::IDENT => {
+                        if !first {
+                            result.push_str(", ");
                         }
-                        k if k.is_trivia() => {}
-                        _ => {
-                            result.push_str(token.text());
-                        }
+                        result.push_str(token.text());
+                        first = false;
                     }
-                }
+                    k if k.is_trivia() => {}
+                    _ => {
+                        result.push_str(token.text());
+                    }
+                },
                 SyntaxElement::Node(child_node) => {
                     if !first {
                         result.push_str(", ");
@@ -673,18 +663,16 @@ impl TriviaPreservingFormatter {
 
         for child in node.children() {
             match child {
-                SyntaxElement::Token(token) => {
-                    match token.kind() {
-                        SyntaxKind::WHERE_KW => {}
-                        SyntaxKind::COMMA => {
-                            result.push_str(",\n");
-                        }
-                        k if k.is_trivia() => {}
-                        _ => {
-                            result.push_str(token.text());
-                        }
+                SyntaxElement::Token(token) => match token.kind() {
+                    SyntaxKind::WHERE_KW => {}
+                    SyntaxKind::COMMA => {
+                        result.push_str(",\n");
                     }
-                }
+                    k if k.is_trivia() => {}
+                    _ => {
+                        result.push_str(token.text());
+                    }
+                },
                 SyntaxElement::Node(child_node) => {
                     result.push_str("    ");
                     result.push_str(&self.format_tokens(&child_node));
@@ -742,19 +730,17 @@ impl TriviaPreservingFormatter {
 
         for child in node.children() {
             match child {
-                SyntaxElement::Token(token) => {
-                    match token.kind() {
-                        SyntaxKind::PIPE => {
-                            if !first {
-                                result.push_str(" | ");
-                            }
-                        }
-                        k if k.is_trivia() => {}
-                        _ => {
-                            result.push_str(token.text());
+                SyntaxElement::Token(token) => match token.kind() {
+                    SyntaxKind::PIPE => {
+                        if !first {
+                            result.push_str(" | ");
                         }
                     }
-                }
+                    k if k.is_trivia() => {}
+                    _ => {
+                        result.push_str(token.text());
+                    }
+                },
                 SyntaxElement::Node(child_node) => {
                     if !first {
                         result.push_str(" | ");
@@ -814,9 +800,7 @@ impl TriviaPreservingFormatter {
                         | SyntaxKind::L_BRACE
                         | SyntaxKind::AMP
                         | SyntaxKind::STAR => {
-                            if need_space
-                                && !matches!(kind, SyntaxKind::AMP | SyntaxKind::STAR)
-                            {
+                            if need_space && !matches!(kind, SyntaxKind::AMP | SyntaxKind::STAR) {
                                 result.push(' ');
                             }
                             result.push_str(text);
@@ -952,10 +936,7 @@ pub fn format_document(text: &str) -> List<TextEdit> {
 /// options into a `VerumFormatConfig` and have them actually
 /// propagate through both the trivia-preserving and basic
 /// formatter paths.
-pub fn format_document_with_config(
-    text: &str,
-    config: VerumFormatConfig,
-) -> List<TextEdit> {
+pub fn format_document_with_config(text: &str, config: VerumFormatConfig) -> List<TextEdit> {
     // Phase-not-realised tracing: three VerumFormatConfig fields
     // (`max_line_width`, `align_assignments`, `preserve_blank_lines`)
     // are forward-looking — they land on the config from editor
@@ -968,10 +949,7 @@ pub fn format_document_with_config(
     // any of these to a non-default value, so a `[fmt] max_line_width
     // = 80` setting in verum.toml doesn't silently produce
     // 100-column output.
-    if config.max_line_width != 100
-        || config.align_assignments
-        || !config.preserve_blank_lines
-    {
+    if config.max_line_width != 100 || config.align_assignments || !config.preserve_blank_lines {
         tracing::warn!(
             "VerumFormatConfig surface: max_line_width={}, \
              align_assignments={}, preserve_blank_lines={} (these \
@@ -1725,11 +1703,17 @@ mod tests {
             // structural claim.
             let basic2 = format_verum_source(
                 input,
-                &VerumFormatConfig { indent_size: 2, ..Default::default() },
+                &VerumFormatConfig {
+                    indent_size: 2,
+                    ..Default::default()
+                },
             );
             let basic4 = format_verum_source(
                 input,
-                &VerumFormatConfig { indent_size: 4, ..Default::default() },
+                &VerumFormatConfig {
+                    indent_size: 4,
+                    ..Default::default()
+                },
             );
             assert_ne!(
                 basic2, basic4,
@@ -1780,7 +1764,10 @@ mod tests {
         let text = "    let result = data\n|> transform";
         let edits = format_pipeline_operator(
             text,
-            Position { line: 1, character: 12 },
+            Position {
+                line: 1,
+                character: 12,
+            },
         );
         if !edits.is_empty() {
             let edit = &edits[0];
@@ -1821,8 +1808,14 @@ mod tests {
     fn test_format_range() {
         let input = "fn foo() {\n    let x = 1;\n}";
         let range = Range {
-            start: Position { line: 1, character: 0 },
-            end: Position { line: 1, character: 100 },
+            start: Position {
+                line: 1,
+                character: 0,
+            },
+            end: Position {
+                line: 1,
+                character: 100,
+            },
         };
         let edits = format_range(input, range);
         // May or may not have edits depending on if the line needs formatting

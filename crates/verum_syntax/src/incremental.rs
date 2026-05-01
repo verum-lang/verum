@@ -113,7 +113,11 @@ impl TextEdit {
         let start = self.range.start() as usize;
         let end = self.range.end() as usize;
 
-        let mut result = String::with_capacity(source.len().saturating_add_signed(self.len_delta() as isize));
+        let mut result = String::with_capacity(
+            source
+                .len()
+                .saturating_add_signed(self.len_delta() as isize),
+        );
         result.push_str(&source[..start.min(source.len())]);
         result.push_str(&self.new_text);
         if end <= source.len() {
@@ -196,9 +200,9 @@ impl ReparseContext {
             | SyntaxKind::COROLLARY_DEF => ReparseContext::Item,
 
             // Blocks
-            SyntaxKind::BLOCK
-            | SyntaxKind::BLOCK_EXPR
-            | SyntaxKind::PROOF_BLOCK => ReparseContext::Block,
+            SyntaxKind::BLOCK | SyntaxKind::BLOCK_EXPR | SyntaxKind::PROOF_BLOCK => {
+                ReparseContext::Block
+            }
 
             // Statements
             SyntaxKind::LET_STMT
@@ -435,7 +439,9 @@ impl IncrementalStats {
 
     /// Calculate the average incremental parse time.
     pub fn avg_incremental_time_us(&self) -> u64 {
-        self.incremental_time_us.checked_div(self.incremental_parses).unwrap_or(0)
+        self.incremental_time_us
+            .checked_div(self.incremental_parses)
+            .unwrap_or(0)
     }
 }
 
@@ -557,7 +563,8 @@ impl IncrementalEngine {
 
         // Determine reparse context
         let context = ReparseContext::for_kind(final_node.kind());
-        let is_stable = NodeStabilityAnalyzer::is_stable(final_node.kind()) == NodeStability::Stable;
+        let is_stable =
+            NodeStabilityAnalyzer::is_stable(final_node.kind()) == NodeStability::Stable;
 
         // Determine if this is content-only change
         let content_only = self.is_content_only_change(final_node, edit, final_offset);
@@ -573,7 +580,12 @@ impl IncrementalEngine {
     }
 
     /// Check if an edit only changes content without affecting structure.
-    fn is_content_only_change(&self, node: &GreenNode, edit: &TextEdit, node_offset: TextSize) -> bool {
+    fn is_content_only_change(
+        &self,
+        node: &GreenNode,
+        edit: &TextEdit,
+        node_offset: TextSize,
+    ) -> bool {
         // Adjust edit range to be relative to node
         let local_start = edit.range.start().saturating_sub(node_offset);
         let local_end = edit.range.end().saturating_sub(node_offset);
@@ -585,11 +597,12 @@ impl IncrementalEngine {
             let child_range = TextRange::at(child_offset, child.width());
 
             if child_range.contains_range(local_range)
-                && let GreenChild::Token(token) = child {
-                    // Edit is within a token - check if it's a content token
-                    return matches!(
-                        token.kind(),
-                        SyntaxKind::STRING_LITERAL
+                && let GreenChild::Token(token) = child
+            {
+                // Edit is within a token - check if it's a content token
+                return matches!(
+                    token.kind(),
+                    SyntaxKind::STRING_LITERAL
                         | SyntaxKind::INT_LITERAL
                         | SyntaxKind::FLOAT_LITERAL
                         | SyntaxKind::CHAR_LITERAL
@@ -600,8 +613,8 @@ impl IncrementalEngine {
                         | SyntaxKind::DOC_COMMENT
                         | SyntaxKind::WHITESPACE
                         | SyntaxKind::NEWLINE
-                    );
-                }
+                );
+            }
 
             child_offset += child.width();
         }
@@ -693,9 +706,10 @@ impl IncrementalEngine {
             // Count siblings that are not on the path
             for (i, child) in current.children().iter().enumerate() {
                 if i != idx
-                    && let GreenChild::Node(node) = child {
-                        count += self.count_nodes(node);
-                    }
+                    && let GreenChild::Node(node) = child
+                {
+                    count += self.count_nodes(node);
+                }
             }
 
             // Move to next level
@@ -739,7 +753,8 @@ impl IncrementalEngine {
         } else {
             match &root.children()[idx] {
                 GreenChild::Node(child_node) => {
-                    let rebuilt = self.rebuild_with_replacement(child_node, remaining_path, replacement);
+                    let rebuilt =
+                        self.rebuild_with_replacement(child_node, remaining_path, replacement);
                     GreenChild::Node(rebuilt)
                 }
                 GreenChild::Token(_) => {
@@ -874,7 +889,8 @@ impl ChangeTracker {
         }
 
         // Sort by position (descending) so we apply later edits first
-        self.pending_edits.sort_by_key(|e| std::cmp::Reverse(e.range.start()));
+        self.pending_edits
+            .sort_by_key(|e| std::cmp::Reverse(e.range.start()));
 
         let mut merged = Vec::new();
         let mut current = self.pending_edits[0].clone();
@@ -949,7 +965,8 @@ impl ChangeTracker {
 
         // Compose into single edit
         let range = TextRange::new(first.range.start(), last.range.end());
-        let new_text = edits.iter()
+        let new_text = edits
+            .iter()
             .map(|e| e.new_text.as_str())
             .collect::<Vec<_>>()
             .join("");
@@ -1060,10 +1077,7 @@ pub fn lsp_change_to_edit(change: LspChange, source: &str) -> TextEdit {
         }
         None => {
             // Full document sync
-            TextEdit::replace(
-                TextRange::new(0, source.len() as TextSize),
-                change.text,
-            )
+            TextEdit::replace(TextRange::new(0, source.len() as TextSize), change.text)
         }
     }
 }
@@ -1235,14 +1249,8 @@ mod tests {
         let mut tracker = ChangeTracker::new();
 
         // Add overlapping edits
-        tracker.record_edit(TextEdit::replace(
-            TextRange::new(0, 5),
-            "hello",
-        ));
-        tracker.record_edit(TextEdit::replace(
-            TextRange::new(3, 8),
-            "world",
-        ));
+        tracker.record_edit(TextEdit::replace(TextRange::new(0, 5), "hello"));
+        tracker.record_edit(TextEdit::replace(TextRange::new(3, 8), "world"));
 
         tracker.merge_edits();
 
@@ -1316,7 +1324,7 @@ mod tests {
 
         let text_range = lsp_range_to_text_range(range, source);
         assert_eq!(text_range.start(), 6); // After "line1\n"
-        assert_eq!(text_range.end(), 11);  // End of "line2"
+        assert_eq!(text_range.end(), 11); // End of "line2"
     }
 
     #[test]
@@ -1391,10 +1399,7 @@ mod tests {
             builder.finish()
         };
 
-        let edit = TextEdit::replace(
-            TextRange::new(3, 6),
-            "bar",
-        );
+        let edit = TextEdit::replace(TextRange::new(3, 6), "bar");
 
         let new_tree = engine.apply_edit(&tree, &edit, reparse_fn, source);
 

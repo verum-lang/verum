@@ -103,20 +103,20 @@ pub fn execute(
     // cli accepts the lowercase identifier matching `serde(rename_all)`.
     let verification = if let Some(v) = verify {
         match v.as_str() {
-            "none"             => VerificationLevel::None,
-            "runtime"          => VerificationLevel::Runtime,
-            "static"           => VerificationLevel::Static,
-            "fast"             => VerificationLevel::Fast,
-            "formal"           => VerificationLevel::Formal,
-            "proof"            => VerificationLevel::Proof,
-            "thorough"         => VerificationLevel::Thorough,
-            "reliable"         => VerificationLevel::Reliable,
-            "certified"        => VerificationLevel::Certified,
-            "synthesize"       => VerificationLevel::Synthesize,
-            "complexitytyped"  => VerificationLevel::ComplexityTyped,
-            "coherentstatic"   => VerificationLevel::CoherentStatic,
-            "coherentruntime"  => VerificationLevel::CoherentRuntime,
-            "coherent"         => VerificationLevel::Coherent,
+            "none" => VerificationLevel::None,
+            "runtime" => VerificationLevel::Runtime,
+            "static" => VerificationLevel::Static,
+            "fast" => VerificationLevel::Fast,
+            "formal" => VerificationLevel::Formal,
+            "proof" => VerificationLevel::Proof,
+            "thorough" => VerificationLevel::Thorough,
+            "reliable" => VerificationLevel::Reliable,
+            "certified" => VerificationLevel::Certified,
+            "synthesize" => VerificationLevel::Synthesize,
+            "complexitytyped" => VerificationLevel::ComplexityTyped,
+            "coherentstatic" => VerificationLevel::CoherentStatic,
+            "coherentruntime" => VerificationLevel::CoherentRuntime,
+            "coherent" => VerificationLevel::Coherent,
             _ => {
                 return Err(CliError::InvalidArgument(format!(
                     "Invalid verification level '{}'. \
@@ -329,8 +329,7 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
     if let Some(ref s) = windows_subsystem_cli {
         match crate::config::WindowsSubsystem::parse(s.as_str()) {
             Some(sub) => {
-                options.windows_subsystem =
-                    Some(verum_common::Text::from(sub.as_link_flag()));
+                options.windows_subsystem = Some(verum_common::Text::from(sub.as_link_flag()));
             }
             None => {
                 return Err(CliError::InvalidArgument(format!(
@@ -342,8 +341,7 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
     } else if let Some(manifest_sub) = manifest.build.windows_subsystem {
         // Manifest-explicit value (Some(Console) / Some(Gui)) wins
         // over the source attribute.
-        options.windows_subsystem =
-            Some(verum_common::Text::from(manifest_sub.as_link_flag()));
+        options.windows_subsystem = Some(verum_common::Text::from(manifest_sub.as_link_flag()));
     } else {
         // Source-attribute resolution. Scan the entry source file
         // for `@gui` / `@console` attached to `fn main`. The scan is
@@ -461,7 +459,10 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
     // was inert for the build path; the unified dispatch makes
     // `options.check_only = true` skip codegen + linking.
     // Note: Stdlib is now embedded directly from source files in verum_compiler
-    ui::status("Codegen", &format!("{} via LLVM", manifest.cog.name.as_str()));
+    ui::status(
+        "Codegen",
+        &format!("{} via LLVM", manifest.cog.name.as_str()),
+    );
     let run_result = pipeline
         .run()
         .map_err(|e| CliError::CompilationFailed(e.to_string()))?;
@@ -485,8 +486,8 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
     // pipeline.run_native_compilation() automatically invokes run_mlir_aot()
     // to produce GPU kernel binaries alongside the CPU binary.
     // No explicit --gpu flag is required.
-    let files_compiled = count_vr_files(&manifest_dir.join("src"))?
-        + count_vr_files(&manifest_dir.join("core"))?;
+    let files_compiled =
+        count_vr_files(&manifest_dir.join("src"))? + count_vr_files(&manifest_dir.join("core"))?;
     let output_path = output;
 
     // Get metrics from session - real timings tracked during compilation
@@ -530,10 +531,7 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
             if let Err(e) = crate::commands::smt_stats::persist_stats(&json) {
                 ui::warn(&format!("Failed to persist SMT stats: {}", e));
             } else {
-                ui::detail(
-                    "SMT stats",
-                    "written — run `verum smt-stats` to view",
-                );
+                ui::detail("SMT stats", "written — run `verum smt-stats` to view");
             }
         }
         SmtStatsDecision::CliOverridden => {
@@ -550,8 +548,11 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
 
     // Print warnings (display count since new compiler doesn't provide individual warnings)
     if result.warnings > 0 {
-        ui::warn(&format!("{} warning{} emitted", result.warnings,
-            if result.warnings == 1 { "" } else { "s" }));
+        ui::warn(&format!(
+            "{} warning{} emitted",
+            result.warnings,
+            if result.warnings == 1 { "" } else { "s" }
+        ));
         // Display diagnostics from session
         if let Err(e) = session.display_diagnostics() {
             ui::debug(&format!("Failed to display diagnostics: {}", e));
@@ -560,10 +561,15 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
 
     // Cargo-style finish line
     let profile_name = if using_release { "release" } else { "dev" };
-    let opt_tag = if using_release { "optimized" } else { "unoptimized + debuginfo" };
+    let opt_tag = if using_release {
+        "optimized"
+    } else {
+        "unoptimized + debuginfo"
+    };
     ui::success(&format!(
         "{} [{}] target(s) in {}",
-        profile_name, opt_tag,
+        profile_name,
+        opt_tag,
         ui::format_duration(start_time.elapsed())
     ));
 
@@ -572,11 +578,10 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
         let binary_size = std::fs::metadata(&result.output_path)
             .map(|m| ui::format_size(m.len()))
             .unwrap_or_else(|_| "unknown".to_string());
-        ui::detail("Binary", &format!(
-            "{} ({})",
-            result.output_path.display(),
-            binary_size
-        ));
+        ui::detail(
+            "Binary",
+            &format!("{} ({})", result.output_path.display(), binary_size),
+        );
     }
 
     // Show phase timings if available
@@ -607,7 +612,6 @@ Must be one of: none, runtime, static, fast, formal, proof, thorough, reliable, 
 
     Ok(())
 }
-
 
 // ============================================================================
 // Helper Types and Functions (for compatibility with existing UI)
@@ -797,8 +801,7 @@ fn find_fn_main_token(src: &str) -> Option<usize> {
     while i + 6 < bytes.len() {
         // Look for "fn" preceded by start-of-source / non-ident.
         if bytes[i] == b'f' && bytes[i + 1] == b'n' {
-            let prev_ok = i == 0
-                || !(bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_');
+            let prev_ok = i == 0 || !(bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_');
             if prev_ok {
                 // Skip whitespace after `fn`.
                 let mut j = i + 2;

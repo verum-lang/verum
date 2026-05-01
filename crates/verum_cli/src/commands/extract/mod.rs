@@ -26,20 +26,18 @@ use crate::config::Manifest;
 use crate::error::{CliError, Result};
 use crate::ui;
 
-use verum_ast::attr::{
-    ExtractAttr, ExtractContractAttr, ExtractTarget, ExtractWitnessAttr,
-};
-use verum_ast::decl::ItemKind;
 use verum_ast::Item;
+use verum_ast::attr::{ExtractAttr, ExtractContractAttr, ExtractTarget, ExtractWitnessAttr};
+use verum_ast::decl::ItemKind;
 use verum_common::{Maybe, Text};
 
 // per-target Verum AST →
 // target-language lowerers. Each module exposes `lower_block` /
 // `lower_expr` returning `Option<String>` (None on unsupported
 // constructs → caller falls back to the V12.1 metadata comment).
-mod ocaml_lower;
-mod lean_lower;
 mod coq_lower;
+mod lean_lower;
+mod ocaml_lower;
 
 /// Options for `verum extract`.
 pub struct ExtractOptions {
@@ -187,25 +185,17 @@ pub fn run(options: ExtractOptions) -> Result<()> {
         .unwrap_or_else(|| manifest_dir.join("extracted"));
     fs::create_dir_all(&output_dir).map_err(|e| {
         CliError::Custom(
-            format!("creating output directory {}: {}", output_dir.display(), e)
-                .into(),
+            format!("creating output directory {}: {}", output_dir.display(), e).into(),
         )
     })?;
 
     let mut emitted = 0usize;
     for req in &requests {
         let body = emit_scaffold(req);
-        let file_name = format!(
-            "{}.{}",
-            req.name.as_str(),
-            extension_for(req.target)
-        );
+        let file_name = format!("{}.{}", req.name.as_str(), extension_for(req.target));
         let path = output_dir.join(&file_name);
-        fs::write(&path, &body).map_err(|e| {
-            CliError::Custom(
-                format!("writing {}: {}", path.display(), e).into(),
-            )
-        })?;
+        fs::write(&path, &body)
+            .map_err(|e| CliError::Custom(format!("writing {}: {}", path.display(), e).into()))?;
         emitted += 1;
     }
 
@@ -232,9 +222,7 @@ fn discover_vr_files(root: &std::path::Path) -> Vec<PathBuf> {
             Ok(e) => e,
             Err(_) => continue,
         };
-        if entry.file_type().is_file()
-            && entry.path().extension().map_or(false, |e| e == "vr")
-        {
+        if entry.file_type().is_file() && entry.path().extension().map_or(false, |e| e == "vr") {
             out.push(entry.into_path());
         }
     }
@@ -242,9 +230,9 @@ fn discover_vr_files(root: &std::path::Path) -> Vec<PathBuf> {
 }
 
 fn parse_file(path: &std::path::Path) -> std::result::Result<verum_ast::Module, String> {
+    use verum_compiler::CompilerOptions;
     use verum_compiler::pipeline::CompilationPipeline;
     use verum_compiler::session::Session;
-    use verum_compiler::CompilerOptions;
     let mut options = CompilerOptions::default();
     options.input = path.to_path_buf();
     let mut session = Session::new(options);
@@ -271,9 +259,9 @@ fn collect_extract_requests(
     let item_start = item.span.start;
     let visibility_keyword: Option<&'static str> = match &item.kind {
         ItemKind::Function(decl) => visibility_keyword_for(&decl.visibility),
-        ItemKind::Theorem(decl)
-        | ItemKind::Lemma(decl)
-        | ItemKind::Corollary(decl) => visibility_keyword_for(&decl.visibility),
+        ItemKind::Theorem(decl) | ItemKind::Lemma(decl) | ItemKind::Corollary(decl) => {
+            visibility_keyword_for(&decl.visibility)
+        }
         _ => None,
     };
     let (item_name, decl_attrs, body_source, signature_source, body_ast): (
@@ -320,15 +308,9 @@ fn collect_extract_requests(
                 body_ast,
             )
         }
-        ItemKind::Theorem(decl)
-        | ItemKind::Lemma(decl)
-        | ItemKind::Corollary(decl) => {
+        ItemKind::Theorem(decl) | ItemKind::Lemma(decl) | ItemKind::Corollary(decl) => {
             let body_src = span_slice(source_text, decl.proposition.span);
-            let sig_src = span_slice_range(
-                source_text,
-                item_start,
-                decl.proposition.span.start,
-            );
+            let sig_src = span_slice_range(source_text, item_start, decl.proposition.span.start);
             // Theorem proposition is a single Expr (carried via Heap).
             let body_ast = Some(BodyAst::Expr((*decl.proposition).clone()));
             (
@@ -361,9 +343,7 @@ fn collect_extract_requests(
                     body_ast: body_ast.clone(),
                     realize,
                 });
-            } else if let Maybe::Some(witness) =
-                ExtractWitnessAttr::from_attribute(attr)
-            {
+            } else if let Maybe::Some(witness) = ExtractWitnessAttr::from_attribute(attr) {
                 let realize = match &witness.realize {
                     Maybe::Some(t) => Some(t.as_str().to_string()),
                     Maybe::None => None,
@@ -379,9 +359,7 @@ fn collect_extract_requests(
                     body_ast: body_ast.clone(),
                     realize,
                 });
-            } else if let Maybe::Some(contract) =
-                ExtractContractAttr::from_attribute(attr)
-            {
+            } else if let Maybe::Some(contract) = ExtractContractAttr::from_attribute(attr) {
                 let realize = match &contract.realize {
                     Maybe::Some(t) => Some(t.as_str().to_string()),
                     Maybe::None => None,
@@ -430,9 +408,7 @@ fn mangle_ocaml_ident(name: &str) -> String {
 /// the visibility modifier is parsed separately and stored on the
 /// decl. We splice it back at emit time. `None` for `Private`
 /// (default — no keyword in source).
-fn visibility_keyword_for(
-    vis: &verum_ast::decl::Visibility,
-) -> Option<&'static str> {
+fn visibility_keyword_for(vis: &verum_ast::decl::Visibility) -> Option<&'static str> {
     use verum_ast::decl::Visibility;
     match vis {
         Visibility::Public => Some("public"),

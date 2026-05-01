@@ -34,32 +34,33 @@ pub use crate::types::ptr_type::PointerType;
 pub use crate::types::scalable_vec_type::ScalableVectorType;
 pub use crate::types::struct_type::FieldTypesIter;
 pub use crate::types::struct_type::StructType;
-pub use crate::types::traits::{AnyType, AsTypeRef, BasicType, FloatMathType, IntMathType, PointerMathType};
+pub use crate::types::traits::{
+    AnyType, AsTypeRef, BasicType, FloatMathType, IntMathType, PointerMathType,
+};
 pub use crate::types::vec_type::VectorType;
 pub use crate::types::void_type::VoidType;
 
-
 use verum_llvm_sys::core::LLVMScalableVectorType;
-
 
 use verum_llvm_sys::core::LLVMGetPoison;
 
+use verum_llvm_sys::LLVMTypeKind;
 #[allow(deprecated)]
 use verum_llvm_sys::core::LLVMArrayType;
 use verum_llvm_sys::core::{
-    LLVMAlignOf, LLVMConstNull, LLVMConstPointerNull, LLVMFunctionType, LLVMGetElementType, LLVMGetTypeContext,
-    LLVMGetTypeKind, LLVMGetUndef, LLVMPointerType, LLVMPrintTypeToString, LLVMSizeOf, LLVMTypeIsSized, LLVMVectorType,
+    LLVMAlignOf, LLVMConstNull, LLVMConstPointerNull, LLVMFunctionType, LLVMGetElementType,
+    LLVMGetTypeContext, LLVMGetTypeKind, LLVMGetUndef, LLVMPointerType, LLVMPrintTypeToString,
+    LLVMSizeOf, LLVMTypeIsSized, LLVMVectorType,
 };
 use verum_llvm_sys::prelude::{LLVMTypeRef, LLVMValueRef};
-use verum_llvm_sys::LLVMTypeKind;
 
 use std::fmt;
 use std::marker::PhantomData;
 
+use crate::AddressSpace;
 use crate::context::ContextRef;
 use crate::support::LLVMString;
 use crate::values::IntValue;
-use crate::AddressSpace;
 
 // Worth noting that types seem to be singletons. At the very least, primitives are.
 // Though this is likely only true per thread since LLVM claims to not be very thread-safe.
@@ -99,7 +100,6 @@ impl<'ctx> Type<'ctx> {
         unsafe { VectorType::new(LLVMVectorType(self.ty, size)) }
     }
 
-    
     fn scalable_vec_type(self, size: u32) -> ScalableVectorType<'ctx> {
         assert!(size != 0, "Vectors of size zero are not allowed.");
         // -- https://llvm.org/docs/LangRef.html#vector-type
@@ -107,8 +107,13 @@ impl<'ctx> Type<'ctx> {
         unsafe { ScalableVectorType::new(LLVMScalableVectorType(self.ty, size)) }
     }
 
-    fn fn_type(self, param_types: &[BasicMetadataTypeEnum<'ctx>], is_var_args: bool) -> FunctionType<'ctx> {
-        let mut param_type_refs: Vec<LLVMTypeRef> = param_types.iter().map(|p| p.as_type_ref()).collect();
+    fn fn_type(
+        self,
+        param_types: &[BasicMetadataTypeEnum<'ctx>],
+        is_var_args: bool,
+    ) -> FunctionType<'ctx> {
+        let mut param_type_refs: Vec<LLVMTypeRef> =
+            param_types.iter().map(|p| p.as_type_ref()).collect();
 
         unsafe {
             FunctionType::new(LLVMFunctionType(
@@ -129,7 +134,6 @@ impl<'ctx> Type<'ctx> {
         unsafe { LLVMGetUndef(self.ty) }
     }
 
-    
     fn get_poison(&self) -> LLVMValueRef {
         unsafe { LLVMGetPoison(self.ty) }
     }

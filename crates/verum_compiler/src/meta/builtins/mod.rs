@@ -94,8 +94,8 @@ pub mod type_props;
 
 use verum_common::Text;
 
-use super::context::{ConstValue, MetaContext};
 use super::MetaError;
+use super::context::{ConstValue, MetaContext};
 
 // Re-export context requirement types
 pub use context_requirements::{
@@ -110,7 +110,8 @@ pub use context_requirements::{
 ///
 
 /// Returns a Result with either the computed ConstValue or a MetaError.
-pub type BuiltinMetaFn = fn(&mut MetaContext, verum_common::List<ConstValue>) -> Result<ConstValue, MetaError>;
+pub type BuiltinMetaFn =
+    fn(&mut MetaContext, verum_common::List<ConstValue>) -> Result<ConstValue, MetaError>;
 
 impl MetaContext {
     /// Get all built-in meta functions with their context requirements
@@ -326,11 +327,17 @@ mod tests {
 
         // Runtime functions require MetaRuntime
         let target_os_info = builtins.get(&Text::from("target_os")).unwrap();
-        assert_eq!(target_os_info.required_context, RequiredContext::MetaRuntime);
+        assert_eq!(
+            target_os_info.required_context,
+            RequiredContext::MetaRuntime
+        );
 
         // Diagnostic functions require CompileDiag
         let compile_error_info = builtins.get(&Text::from("compile_error")).unwrap();
-        assert_eq!(compile_error_info.required_context, RequiredContext::CompileDiag);
+        assert_eq!(
+            compile_error_info.required_context,
+            RequiredContext::CompileDiag
+        );
     }
 
     #[test]
@@ -339,8 +346,16 @@ mod tests {
         let builtins = ctx.builtins();
 
         for (name, info) in builtins.iter() {
-            assert!(!info.description.is_empty(), "Builtin '{}' has no description", name);
-            assert!(!info.signature.is_empty(), "Builtin '{}' has no signature", name);
+            assert!(
+                !info.description.is_empty(),
+                "Builtin '{}' has no description",
+                name
+            );
+            assert!(
+                !info.signature.is_empty(),
+                "Builtin '{}' has no signature",
+                name
+            );
         }
     }
 
@@ -411,10 +426,16 @@ mod tests {
 
         // BuildAssets functions require BuildAssets context
         let load_text_info = builtins.get(&Text::from("load_text")).unwrap();
-        assert_eq!(load_text_info.required_context, RequiredContext::BuildAssets);
+        assert_eq!(
+            load_text_info.required_context,
+            RequiredContext::BuildAssets
+        );
 
         let include_bytes_info = builtins.get(&Text::from("include_bytes")).unwrap();
-        assert_eq!(include_bytes_info.required_context, RequiredContext::BuildAssets);
+        assert_eq!(
+            include_bytes_info.required_context,
+            RequiredContext::BuildAssets
+        );
     }
 
     #[test]
@@ -443,13 +464,34 @@ mod tests {
         let builtins = ctx.builtins();
 
         // Debugging builtins should be registered as Tier 0
-        assert!(builtins.contains_key(&Text::from("meta_trace_on")), "meta_trace_on not found");
-        assert!(builtins.contains_key(&Text::from("meta_trace_off")), "meta_trace_off not found");
-        assert!(builtins.contains_key(&Text::from("meta_trace_log")), "meta_trace_log not found");
-        assert!(builtins.contains_key(&Text::from("meta_trace_dump")), "meta_trace_dump not found");
-        assert!(builtins.contains_key(&Text::from("meta_trace_clear")), "meta_trace_clear not found");
-        assert!(builtins.contains_key(&Text::from("meta_trace_is_enabled")), "meta_trace_is_enabled not found");
-        assert!(builtins.contains_key(&Text::from("meta_trace_depth")), "meta_trace_depth not found");
+        assert!(
+            builtins.contains_key(&Text::from("meta_trace_on")),
+            "meta_trace_on not found"
+        );
+        assert!(
+            builtins.contains_key(&Text::from("meta_trace_off")),
+            "meta_trace_off not found"
+        );
+        assert!(
+            builtins.contains_key(&Text::from("meta_trace_log")),
+            "meta_trace_log not found"
+        );
+        assert!(
+            builtins.contains_key(&Text::from("meta_trace_dump")),
+            "meta_trace_dump not found"
+        );
+        assert!(
+            builtins.contains_key(&Text::from("meta_trace_clear")),
+            "meta_trace_clear not found"
+        );
+        assert!(
+            builtins.contains_key(&Text::from("meta_trace_is_enabled")),
+            "meta_trace_is_enabled not found"
+        );
+        assert!(
+            builtins.contains_key(&Text::from("meta_trace_depth")),
+            "meta_trace_depth not found"
+        );
     }
 
     #[test]
@@ -457,8 +499,14 @@ mod tests {
         let ctx = MetaContext::new();
         let builtins = ctx.builtins();
 
-        let trace_on_info = builtins.get(&Text::from("meta_trace_on")).expect("meta_trace_on not found");
-        assert_eq!(trace_on_info.required_context, RequiredContext::None, "meta_trace_on should be Tier 0");
+        let trace_on_info = builtins
+            .get(&Text::from("meta_trace_on"))
+            .expect("meta_trace_on not found");
+        assert_eq!(
+            trace_on_info.required_context,
+            RequiredContext::None,
+            "meta_trace_on should be Tier 0"
+        );
 
         // Should be callable without any context enabled
         assert!(ctx.can_call_builtin(&Text::from("meta_trace_on")));
@@ -472,10 +520,18 @@ mod tests {
 
         // get_builtin should return Ok for tier 0 debugging builtins
         let result = ctx.get_builtin(&Text::from("meta_trace_on"));
-        assert!(result.is_ok(), "get_builtin(meta_trace_on) failed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "get_builtin(meta_trace_on) failed: {:?}",
+            result
+        );
 
         let result = ctx.get_builtin(&Text::from("meta_trace_log"));
-        assert!(result.is_ok(), "get_builtin(meta_trace_log) failed: {:?}", result);
+        assert!(
+            result.is_ok(),
+            "get_builtin(meta_trace_log) failed: {:?}",
+            result
+        );
     }
 
     /// Pin: `[meta] reflection = false` — reflection-tagged contexts

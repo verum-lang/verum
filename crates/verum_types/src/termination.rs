@@ -68,7 +68,11 @@ fn path_to_text(path: &Path) -> Text {
             PathSegment::Relative => None,
         })
         .collect();
-    let joined: String = parts.iter().map(|t| t.as_str()).collect::<Vec<_>>().join(".");
+    let joined: String = parts
+        .iter()
+        .map(|t| t.as_str())
+        .collect::<Vec<_>>()
+        .join(".");
     joined.into()
 }
 
@@ -265,7 +269,11 @@ impl TerminationChecker {
     }
 
     /// Check if a function body contains `self.func_name(...)` method calls (true recursion for methods)
-    fn has_self_recursive_method_call(&self, body: &verum_ast::decl::FunctionBody, func_name: &Text) -> bool {
+    fn has_self_recursive_method_call(
+        &self,
+        body: &verum_ast::decl::FunctionBody,
+        func_name: &Text,
+    ) -> bool {
         match body {
             verum_ast::decl::FunctionBody::Block(block) => {
                 for stmt in &block.stmts {
@@ -275,7 +283,9 @@ impl TerminationChecker {
                                 return true;
                             }
                         }
-                        verum_ast::stmt::StmtKind::Let { value: Some(init), .. } => {
+                        verum_ast::stmt::StmtKind::Let {
+                            value: Some(init), ..
+                        } => {
                             if self.expr_has_self_method_call(init, func_name) {
                                 return true;
                             }
@@ -297,7 +307,12 @@ impl TerminationChecker {
     /// Check if an expression contains `self.func_name(...)` method calls
     fn expr_has_self_method_call(&self, expr: &Expr, func_name: &Text) -> bool {
         match &expr.kind {
-            ExprKind::MethodCall { receiver, method, args, .. } => {
+            ExprKind::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } => {
                 // Check if this is self.func_name(...)
                 let is_self_call = matches!(&receiver.kind, ExprKind::Path(p) if p.as_ident().is_some_and(|i| i.name.as_str() == "self"))
                     && method.name.as_str() == func_name.as_str();
@@ -326,31 +341,47 @@ impl TerminationChecker {
                 }
                 false
             }
-            ExprKind::If { condition, then_branch, else_branch } => {
+            ExprKind::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
                 match &**condition {
                     verum_ast::expr::IfCondition { conditions, .. } => {
                         for cond in conditions {
                             match cond {
                                 verum_ast::expr::ConditionKind::Expr(e) => {
-                                    if self.expr_has_self_method_call(e, func_name) { return true; }
+                                    if self.expr_has_self_method_call(e, func_name) {
+                                        return true;
+                                    }
                                 }
                                 verum_ast::expr::ConditionKind::Let { value, .. } => {
-                                    if self.expr_has_self_method_call(value, func_name) { return true; }
+                                    if self.expr_has_self_method_call(value, func_name) {
+                                        return true;
+                                    }
                                 }
                             }
                         }
                     }
                 }
-                if self.block_has_self_method_call(then_branch, func_name) { return true; }
+                if self.block_has_self_method_call(then_branch, func_name) {
+                    return true;
+                }
                 if let Some(e) = else_branch {
-                    if self.expr_has_self_method_call(e, func_name) { return true; }
+                    if self.expr_has_self_method_call(e, func_name) {
+                        return true;
+                    }
                 }
                 false
             }
             ExprKind::Match { expr, arms } => {
-                if self.expr_has_self_method_call(expr, func_name) { return true; }
+                if self.expr_has_self_method_call(expr, func_name) {
+                    return true;
+                }
                 for arm in arms {
-                    if self.expr_has_self_method_call(&arm.body, func_name) { return true; }
+                    if self.expr_has_self_method_call(&arm.body, func_name) {
+                        return true;
+                    }
                 }
                 false
             }
@@ -364,16 +395,24 @@ impl TerminationChecker {
         for stmt in &block.stmts {
             match &stmt.kind {
                 verum_ast::stmt::StmtKind::Expr { expr: e, .. } => {
-                    if self.expr_has_self_method_call(e, func_name) { return true; }
+                    if self.expr_has_self_method_call(e, func_name) {
+                        return true;
+                    }
                 }
-                verum_ast::stmt::StmtKind::Let { value: Some(init), .. } => {
-                    if self.expr_has_self_method_call(init, func_name) { return true; }
+                verum_ast::stmt::StmtKind::Let {
+                    value: Some(init), ..
+                } => {
+                    if self.expr_has_self_method_call(init, func_name) {
+                        return true;
+                    }
                 }
                 _ => {}
             }
         }
         if let Some(e) = &block.expr {
-            if self.expr_has_self_method_call(e, func_name) { return true; }
+            if self.expr_has_self_method_call(e, func_name) {
+                return true;
+            }
         }
         false
     }
@@ -498,7 +537,11 @@ impl TerminationChecker {
     /// Check if an expression is an if/match with at least one non-recursive branch
     fn expr_has_guarded_recursion(&self, expr: &Expr, func_name: &Text) -> bool {
         match &expr.kind {
-            ExprKind::If { then_branch, else_branch, .. } => {
+            ExprKind::If {
+                then_branch,
+                else_branch,
+                ..
+            } => {
                 let then_calls = self.block_has_recursive_calls(then_branch, func_name);
                 let else_calls = if let Some(else_expr) = else_branch {
                     !self.find_recursive_calls(else_expr, func_name).is_empty()
@@ -532,7 +575,12 @@ impl TerminationChecker {
     /// followed by recursive code
     fn expr_is_early_return_guard(&self, expr: &Expr, func_name: &Text) -> bool {
         // Check if this is an if-expression with a return in the then-branch
-        if let ExprKind::If { then_branch, else_branch, .. } = &expr.kind {
+        if let ExprKind::If {
+            then_branch,
+            else_branch,
+            ..
+        } = &expr.kind
+        {
             let then_has_return = self.block_has_return(then_branch);
             let then_has_recursion = self.block_has_recursive_calls(then_branch, func_name);
             // If then-branch returns early without recursion, it's a guard
@@ -579,7 +627,9 @@ impl TerminationChecker {
                         return true;
                     }
                 }
-                verum_ast::stmt::StmtKind::Let { value: Some(init), .. } => {
+                verum_ast::stmt::StmtKind::Let {
+                    value: Some(init), ..
+                } => {
                     if !self.find_recursive_calls(init, func_name).is_empty() {
                         return true;
                     }
@@ -924,7 +974,9 @@ impl TerminationChecker {
         use verum_ast::pattern::{PatternKind, VariantPatternData};
         let mut bindings = List::new();
         match &pattern.kind {
-            PatternKind::Ident { name, subpattern, .. } => {
+            PatternKind::Ident {
+                name, subpattern, ..
+            } => {
                 bindings.push(name.name.clone());
                 if let verum_common::Maybe::Some(sub) = subpattern {
                     bindings.extend(Self::extract_pattern_bindings(sub));
@@ -975,7 +1027,10 @@ impl TerminationChecker {
                     bindings.extend(Self::extract_pattern_bindings(first));
                 }
             }
-            PatternKind::Wildcard | PatternKind::Literal(_) | PatternKind::Rest | PatternKind::Range { .. } => {}
+            PatternKind::Wildcard
+            | PatternKind::Literal(_)
+            | PatternKind::Rest
+            | PatternKind::Range { .. } => {}
             _ => {}
         }
         bindings
@@ -1007,7 +1062,10 @@ impl TerminationChecker {
                     self.find_recursive_calls_impl(arg, func_name, calls, match_bindings);
                 }
             }
-            ExprKind::Match { expr: scrutinee, arms } => {
+            ExprKind::Match {
+                expr: scrutinee,
+                arms,
+            } => {
                 self.find_recursive_calls_impl(scrutinee, func_name, calls, match_bindings);
 
                 // Determine the "root parameter" the scrutinee decomposes. We
@@ -1044,10 +1102,20 @@ impl TerminationChecker {
                         for cond in conditions {
                             match cond {
                                 verum_ast::expr::ConditionKind::Expr(e) => {
-                                    self.find_recursive_calls_impl(e, func_name, calls, match_bindings);
+                                    self.find_recursive_calls_impl(
+                                        e,
+                                        func_name,
+                                        calls,
+                                        match_bindings,
+                                    );
                                 }
                                 verum_ast::expr::ConditionKind::Let { pattern: _, value } => {
-                                    self.find_recursive_calls_impl(value, func_name, calls, match_bindings);
+                                    self.find_recursive_calls_impl(
+                                        value,
+                                        func_name,
+                                        calls,
+                                        match_bindings,
+                                    );
                                 }
                             }
                         }
@@ -1069,7 +1137,12 @@ impl TerminationChecker {
                             value,
                         } => {
                             if let Some(init) = value {
-                                self.find_recursive_calls_impl(init, func_name, calls, match_bindings);
+                                self.find_recursive_calls_impl(
+                                    init,
+                                    func_name,
+                                    calls,
+                                    match_bindings,
+                                );
                             }
                         }
                         _ => {}
@@ -1099,7 +1172,12 @@ impl TerminationChecker {
                             value,
                         } => {
                             if let Some(init) = value {
-                                self.find_recursive_calls_impl(init, func_name, calls, match_bindings);
+                                self.find_recursive_calls_impl(
+                                    init,
+                                    func_name,
+                                    calls,
+                                    match_bindings,
+                                );
                             }
                         }
                         _ => {}
@@ -1162,7 +1240,12 @@ impl TerminationChecker {
                     }
                 }
                 if let verum_common::Maybe::Some(base_expr) = base {
-                    self.find_recursive_calls_impl(base_expr.as_ref(), func_name, calls, match_bindings);
+                    self.find_recursive_calls_impl(
+                        base_expr.as_ref(),
+                        func_name,
+                        calls,
+                        match_bindings,
+                    );
                 }
             }
             // Range expressions: a..b, a..=b, etc.
@@ -1262,7 +1345,12 @@ impl TerminationChecker {
                     value, else_block, ..
                 } => {
                     self.find_recursive_calls_impl(value, func_name, calls, match_bindings);
-                    self.find_recursive_calls_in_block(else_block, func_name, calls, match_bindings);
+                    self.find_recursive_calls_in_block(
+                        else_block,
+                        func_name,
+                        calls,
+                        match_bindings,
+                    );
                 }
                 verum_ast::stmt::StmtKind::Defer(expr) => {
                     self.find_recursive_calls_impl(expr, func_name, calls, match_bindings);
@@ -1395,22 +1483,29 @@ impl TerminationChecker {
         match &expr.kind {
             ExprKind::Path(path) => Some(path_to_text(path)),
             ExprKind::Field { expr: inner, .. } => Self::extract_root_param_name(inner),
-            ExprKind::Unary { op, expr: inner } if matches!(op,
-                verum_ast::expr::UnOp::Deref |
-                verum_ast::expr::UnOp::Ref |
-                verum_ast::expr::UnOp::RefMut |
-                verum_ast::expr::UnOp::RefChecked |
-                verum_ast::expr::UnOp::RefCheckedMut |
-                verum_ast::expr::UnOp::RefUnsafe |
-                verum_ast::expr::UnOp::RefUnsafeMut
-            ) => {
+            ExprKind::Unary { op, expr: inner }
+                if matches!(
+                    op,
+                    verum_ast::expr::UnOp::Deref
+                        | verum_ast::expr::UnOp::Ref
+                        | verum_ast::expr::UnOp::RefMut
+                        | verum_ast::expr::UnOp::RefChecked
+                        | verum_ast::expr::UnOp::RefCheckedMut
+                        | verum_ast::expr::UnOp::RefUnsafe
+                        | verum_ast::expr::UnOp::RefUnsafeMut
+                ) =>
+            {
                 Self::extract_root_param_name(inner)
             }
             // `receiver.as_ref()` / `receiver.as_mut()` — reference-view
             // accessors that preserve structural identity.
-            ExprKind::MethodCall { receiver, method, args, .. }
-                if args.is_empty()
-                    && matches!(method.name.as_str(), "as_ref" | "as_mut" | "clone") =>
+            ExprKind::MethodCall {
+                receiver,
+                method,
+                args,
+                ..
+            } if args.is_empty()
+                && matches!(method.name.as_str(), "as_ref" | "as_mut" | "clone") =>
             {
                 Self::extract_root_param_name(receiver)
             }
@@ -1426,14 +1521,17 @@ impl TerminationChecker {
             }
             // Strip reference operators (&, &mut, etc.) — taking a reference
             // doesn't change the structural relationship
-            ExprKind::Unary { op, expr: operand } if matches!(op,
-                verum_ast::expr::UnOp::Ref |
-                verum_ast::expr::UnOp::RefMut |
-                verum_ast::expr::UnOp::RefChecked |
-                verum_ast::expr::UnOp::RefCheckedMut |
-                verum_ast::expr::UnOp::RefUnsafe |
-                verum_ast::expr::UnOp::RefUnsafeMut
-            ) => {
+            ExprKind::Unary { op, expr: operand }
+                if matches!(
+                    op,
+                    verum_ast::expr::UnOp::Ref
+                        | verum_ast::expr::UnOp::RefMut
+                        | verum_ast::expr::UnOp::RefChecked
+                        | verum_ast::expr::UnOp::RefCheckedMut
+                        | verum_ast::expr::UnOp::RefUnsafe
+                        | verum_ast::expr::UnOp::RefUnsafeMut
+                ) =>
+            {
                 Self::extract_inner_var_name(operand)
             }
             _ => None,
@@ -1478,12 +1576,18 @@ impl TerminationChecker {
         }
 
         // Check for method calls that return smaller values: n.pred()
-        if let ExprKind::MethodCall { receiver, method, .. } = &arg.kind {
+        if let ExprKind::MethodCall {
+            receiver, method, ..
+        } = &arg.kind
+        {
             if let ExprKind::Path(path) = &receiver.kind {
                 let receiver_name = path_to_text(path);
                 if receiver_name == *param_name {
                     // Common decrement methods
-                    if matches!(method.name.as_str(), "pred" | "saturating_sub" | "wrapping_sub") {
+                    if matches!(
+                        method.name.as_str(),
+                        "pred" | "saturating_sub" | "wrapping_sub"
+                    ) {
                         return true;
                     }
                 }

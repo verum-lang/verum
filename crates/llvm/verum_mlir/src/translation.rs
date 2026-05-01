@@ -115,7 +115,9 @@ impl LlvmModule {
         };
         if result != 0 && !error_msg.is_null() {
             let msg = unsafe {
-                let s = std::ffi::CStr::from_ptr(error_msg).to_string_lossy().into_owned();
+                let s = std::ffi::CStr::from_ptr(error_msg)
+                    .to_string_lossy()
+                    .into_owned();
                 verum_mlir_sys::LLVMDisposeMessage(error_msg);
                 s
             };
@@ -159,9 +161,9 @@ mod tests {
     use super::*;
     use crate::{
         context::Context,
+        dialect::DialectRegistry,
         ir::Location,
         utility::{register_all_dialects, register_all_llvm_translations},
-        dialect::DialectRegistry,
     };
 
     #[test]
@@ -184,10 +186,16 @@ mod tests {
 
         // Empty module should translate successfully
         let llvm_mod = LlvmModule::from_mlir(&module, &llvm_ctx);
-        assert!(llvm_mod.is_some(), "Empty MLIR module should translate to LLVM IR");
+        assert!(
+            llvm_mod.is_some(),
+            "Empty MLIR module should translate to LLVM IR"
+        );
 
         let llvm_mod = llvm_mod.unwrap();
         let ir = llvm_mod.print_to_string();
-        assert!(ir.contains("source_filename"), "LLVM IR should contain source_filename");
+        assert!(
+            ir.contains("source_filename"),
+            "LLVM IR should contain source_filename"
+        );
     }
 }

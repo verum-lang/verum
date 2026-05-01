@@ -195,7 +195,9 @@ impl ReferenceTier {
 
 impl Default for ReferenceTier {
     fn default() -> Self {
-        Self::Tier0 { reason: Tier0Reason::NotAnalyzed }
+        Self::Tier0 {
+            reason: Tier0Reason::NotAnalyzed,
+        }
     }
 }
 
@@ -415,7 +417,11 @@ impl fmt::Display for TierStatistics {
         writeln!(f, "  Tier 0 (managed):    {}", self.tier0_count)?;
         writeln!(f, "  Tier 1 (promoted):   {}", self.tier1_count)?;
         writeln!(f, "  Tier 2 (unsafe):     {}", self.tier2_count)?;
-        writeln!(f, "  Promotion rate:      {:.1}%", self.promotion_rate() * 100.0)?;
+        writeln!(
+            f,
+            "  Promotion rate:      {:.1}%",
+            self.promotion_rate() * 100.0
+        )?;
         writeln!(f, "  Est. savings/exec:   ~{}ns", self.estimated_savings_ns)?;
         writeln!(f, "  Analysis time:       {}μs", self.analysis_duration_us)?;
 

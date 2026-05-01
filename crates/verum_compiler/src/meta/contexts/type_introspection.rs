@@ -89,34 +89,26 @@ impl TypeIntrospection {
 
     /// Register a struct type
     pub fn register_struct(&mut self, name: Text, fields: List<(Text, Type)>) {
-        self.type_definitions.insert(
-            name.clone(),
-            TypeDefinition::simple_struct(name, fields),
-        );
+        self.type_definitions
+            .insert(name.clone(), TypeDefinition::simple_struct(name, fields));
     }
 
     /// Register an enum type
     pub fn register_enum(&mut self, name: Text, variants: List<(Text, Type)>) {
-        self.type_definitions.insert(
-            name.clone(),
-            TypeDefinition::simple_enum(name, variants),
-        );
+        self.type_definitions
+            .insert(name.clone(), TypeDefinition::simple_enum(name, variants));
     }
 
     /// Register a protocol type
     pub fn register_protocol(&mut self, name: Text, methods: List<Text>) {
-        self.type_definitions.insert(
-            name.clone(),
-            TypeDefinition::simple_protocol(name, methods),
-        );
+        self.type_definitions
+            .insert(name.clone(), TypeDefinition::simple_protocol(name, methods));
     }
 
     /// Register a full type definition
     pub fn register_type_definition(&mut self, type_def: TypeDefinition) {
-        self.type_definitions.insert(
-            type_def.name().clone(),
-            type_def,
-        );
+        self.type_definitions
+            .insert(type_def.name().clone(), type_def);
     }
 
     /// Get a type definition
@@ -146,7 +138,7 @@ impl TypeIntrospection {
         match self.type_definitions.get(name) {
             Some(TypeDefinition::Protocol { methods, .. }) => {
                 Some(methods.iter().map(|m| m.name.clone()).collect())
-            },
+            }
             _ => None,
         }
     }
@@ -299,7 +291,12 @@ impl TypeIntrospection {
     // ======== Associated Types ========
 
     /// Register an associated type
-    pub fn register_associated_type(&mut self, type_name: Text, assoc_name: Text, assoc_type: Type) {
+    pub fn register_associated_type(
+        &mut self,
+        type_name: Text,
+        assoc_name: Text,
+        assoc_type: Type,
+    ) {
         self.associated_types
             .insert((type_name, assoc_name), assoc_type);
     }
@@ -322,10 +319,7 @@ impl TypeIntrospection {
 
     /// Get super types for a type/protocol
     pub fn get_super_types(&self, type_name: &Text) -> List<Text> {
-        self.super_types
-            .get(type_name)
-            .cloned()
-            .unwrap_or_default()
+        self.super_types.get(type_name).cloned().unwrap_or_default()
     }
 
     // ======== Code Search Operations ========

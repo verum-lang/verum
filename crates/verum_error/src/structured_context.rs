@@ -176,7 +176,10 @@ impl ContextValue {
             }
             ContextValue::Bool(b) => b.to_string().into(),
             ContextValue::List(items) => {
-                let items_json: Vec<String> = items.iter().map(|v| v.to_json_compact().into_string()).collect();
+                let items_json: Vec<String> = items
+                    .iter()
+                    .map(|v| v.to_json_compact().into_string())
+                    .collect();
                 format!("[{}]", items_json.join(",")).into()
             }
             ContextValue::Map(map) => {
@@ -214,7 +217,9 @@ impl ContextValue {
                 } else {
                     let items_json: Vec<String> = items
                         .iter()
-                        .map(|v| format!("{}{}", next_indent_str, v.to_json_impl(indent + 1).as_str()))
+                        .map(|v| {
+                            format!("{}{}", next_indent_str, v.to_json_impl(indent + 1).as_str())
+                        })
                         .collect();
                     format!("[\n{}\n{}]", items_json.join(",\n"), indent_str).into()
                 }
@@ -230,8 +235,12 @@ impl ContextValue {
                         if let Some(value) = map.get(key) {
                             let key_json = ContextValue::Text(key.clone()).to_json_compact();
                             let value_json = value.to_json_impl(indent + 1);
-                            entries
-                                .push(format!("{}{}: {}", next_indent_str, key_json.as_str(), value_json.as_str()));
+                            entries.push(format!(
+                                "{}{}: {}",
+                                next_indent_str,
+                                key_json.as_str(),
+                                value_json.as_str()
+                            ));
                         }
                     }
                     format!("{{\n{}\n{}}}", entries.join(",\n"), indent_str).into()
@@ -251,7 +260,11 @@ impl ContextValue {
         match self {
             ContextValue::Text(s) => {
                 // Quote strings with special characters
-                if s.contains("\n") || s.contains(":") || s.contains("#") || s.as_str().starts_with(' ') {
+                if s.contains("\n")
+                    || s.contains(":")
+                    || s.contains("#")
+                    || s.as_str().starts_with(' ')
+                {
                     let escaped = s.as_str().replace('\\', "\\\\").replace('"', "\\\"");
                     format!("\"{}\"", escaped).into()
                 } else {
@@ -360,7 +373,10 @@ impl ContextValue {
             ContextValue::Float(f) => f.to_string().into(),
             ContextValue::Bool(b) => b.to_string().into(),
             ContextValue::List(items) => {
-                let items_str: Vec<String> = items.iter().map(|v| v.to_display_string().into_string()).collect();
+                let items_str: Vec<String> = items
+                    .iter()
+                    .map(|v| v.to_display_string().into_string())
+                    .collect();
                 format!("[{}]", items_str.join(", ")).into()
             }
             ContextValue::Map(m) => {
@@ -598,11 +614,14 @@ mod tests {
 
     #[test]
     fn test_json_list() {
-        let value = ContextValue::List(vec![
-            ContextValue::Int(1),
-            ContextValue::Int(2),
-            ContextValue::Int(3),
-        ].into());
+        let value = ContextValue::List(
+            vec![
+                ContextValue::Int(1),
+                ContextValue::Int(2),
+                ContextValue::Int(3),
+            ]
+            .into(),
+        );
         assert_eq!(value.to_json(false), Text::from("[1,2,3]"));
     }
 
@@ -620,7 +639,10 @@ mod tests {
 
     #[test]
     fn test_yaml_primitives() {
-        assert_eq!(ContextValue::Text(Text::from("hello")).to_yaml(0), Text::from("hello"));
+        assert_eq!(
+            ContextValue::Text(Text::from("hello")).to_yaml(0),
+            Text::from("hello")
+        );
         assert_eq!(ContextValue::Int(42).to_yaml(0), Text::from("42"));
         assert_eq!(ContextValue::Bool(true).to_yaml(0), Text::from("true"));
         assert_eq!(ContextValue::Null.to_yaml(0), Text::from("null"));
@@ -635,7 +657,10 @@ mod tests {
 
     #[test]
     fn test_logfmt_primitives() {
-        assert_eq!(ContextValue::Text(Text::from("hello")).to_logfmt(), Text::from("hello"));
+        assert_eq!(
+            ContextValue::Text(Text::from("hello")).to_logfmt(),
+            Text::from("hello")
+        );
         assert_eq!(ContextValue::Int(42).to_logfmt(), Text::from("42"));
         assert_eq!(ContextValue::Bool(true).to_logfmt(), Text::from("true"));
     }

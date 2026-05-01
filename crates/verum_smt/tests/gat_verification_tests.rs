@@ -26,12 +26,12 @@
 
 use verum_ast::span::Span;
 use verum_ast::ty::Type;
+use verum_common::{List, Maybe, Text};
 use verum_protocol_types::gat_types::{AssociatedTypeGAT, GATTypeParam, GATWhereClause, Variance};
 use verum_protocol_types::protocol_base::ProtocolBound;
 use verum_smt::gat_verification::{
     GATError, GATVerifier, is_well_formed, suggest_fixes, verify_gat, verify_gats,
 };
-use verum_common::{List, Maybe, Text};
 
 #[test]
 fn test_simple_gat_verification() {

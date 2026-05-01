@@ -514,7 +514,8 @@ impl FunctionHashBuilder {
         self.sig_hasher.update_str(name);
         self.sig_hasher.update(b":");
         self.sig_hasher.update_str(type_str);
-        self.sig_hasher.update(if is_mut { b":mut" } else { b":imm" });
+        self.sig_hasher
+            .update(if is_mut { b":mut" } else { b":imm" });
         self.sig_hasher.update(b"\x00");
         self
     }
@@ -667,13 +668,11 @@ impl ItemHashes {
         // Check functions
         for (name, hashes) in &self.functions {
             match other.functions.get(name) {
-                Some(other_hashes) => {
-                    match hashes.compare(other_hashes) {
-                        ChangeKind::Signature => return ChangeKind::Signature,
-                        ChangeKind::BodyOnly => has_body_change = true,
-                        ChangeKind::NoChange => {}
-                    }
-                }
+                Some(other_hashes) => match hashes.compare(other_hashes) {
+                    ChangeKind::Signature => return ChangeKind::Signature,
+                    ChangeKind::BodyOnly => has_body_change = true,
+                    ChangeKind::NoChange => {}
+                },
                 None => return ChangeKind::Signature, // New function added
             }
         }
@@ -747,12 +746,12 @@ impl Default for ItemHashes {
 // ============================================================================
 
 use verum_ast::{
+    Module,
     decl::{
         ConstDecl, FunctionBody, FunctionDecl, FunctionParam, FunctionParamKind, ItemKind,
         TypeDecl, TypeDeclBody,
     },
     ty::{GenericParam, GenericParamKind, Type},
-    Module,
 };
 use verum_common::Maybe;
 
@@ -886,12 +885,20 @@ fn compute_function_hashes(func: &FunctionDecl) -> FunctionHashes {
 /// Hash a generic parameter into the signature hasher.
 fn hash_generic_param(builder: FunctionHashBuilder, param: &GenericParam) -> FunctionHashBuilder {
     match &param.kind {
-        GenericParamKind::Type { name, bounds, default: _ } => {
+        GenericParamKind::Type {
+            name,
+            bounds,
+            default: _,
+        } => {
             let bounds_strs: Vec<String> = bounds.iter().map(|b| format!("{:?}", b)).collect();
             let bounds_refs: Vec<&str> = bounds_strs.iter().map(|s| s.as_str()).collect();
             builder.with_type_param(name.name.as_str(), &bounds_refs)
         }
-        GenericParamKind::HigherKinded { name, arity, bounds } => {
+        GenericParamKind::HigherKinded {
+            name,
+            arity,
+            bounds,
+        } => {
             let mut bounds_strs: Vec<String> = bounds.iter().map(|b| format!("{:?}", b)).collect();
             bounds_strs.push(format!("arity:{}", arity));
             let bounds_refs: Vec<&str> = bounds_strs.iter().map(|s| s.as_str()).collect();
@@ -900,7 +907,11 @@ fn hash_generic_param(builder: FunctionHashBuilder, param: &GenericParam) -> Fun
         GenericParamKind::Const { name, ty } => {
             builder.with_type_param(name.name.as_str(), &[&format!("const:{:?}", ty)])
         }
-        GenericParamKind::Meta { name, ty, refinement } => {
+        GenericParamKind::Meta {
+            name,
+            ty,
+            refinement,
+        } => {
             let refinement_str = match refinement {
                 Maybe::Some(r) => format!("meta:{:?} where {:?}", ty, r),
                 Maybe::None => format!("meta:{:?}", ty),
@@ -929,28 +940,54 @@ fn hash_generic_param(builder: FunctionHashBuilder, param: &GenericParam) -> Fun
 /// Returns a string representation of the generic parameter for hashing.
 fn generic_param_to_string(param: &GenericParam) -> String {
     match &param.kind {
-        GenericParamKind::Type { name, bounds, default: _ } => {
-            let bounds_str: String = bounds.iter().map(|b| format!("{:?}", b)).collect::<Vec<_>>().join("+");
+        GenericParamKind::Type {
+            name,
+            bounds,
+            default: _,
+        } => {
+            let bounds_str: String = bounds
+                .iter()
+                .map(|b| format!("{:?}", b))
+                .collect::<Vec<_>>()
+                .join("+");
             if bounds_str.is_empty() {
                 name.name.to_string()
             } else {
                 format!("{}: {}", name.name, bounds_str)
             }
         }
-        GenericParamKind::HigherKinded { name, arity, bounds } => {
-            let bounds_str: String = bounds.iter().map(|b| format!("{:?}", b)).collect::<Vec<_>>().join("+");
-            format!("{}<{}>{}", name.name, "_,".repeat(*arity).trim_end_matches(','),
-                    if bounds_str.is_empty() { String::new() } else { format!(": {}", bounds_str) })
+        GenericParamKind::HigherKinded {
+            name,
+            arity,
+            bounds,
+        } => {
+            let bounds_str: String = bounds
+                .iter()
+                .map(|b| format!("{:?}", b))
+                .collect::<Vec<_>>()
+                .join("+");
+            format!(
+                "{}<{}>{}",
+                name.name,
+                "_,".repeat(*arity).trim_end_matches(','),
+                if bounds_str.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {}", bounds_str)
+                }
+            )
         }
         GenericParamKind::Const { name, ty } => {
             format!("const {}: {:?}", name.name, ty)
         }
-        GenericParamKind::Meta { name, ty, refinement } => {
-            match refinement {
-                Maybe::Some(r) => format!("{}: meta {:?} where {:?}", name.name, ty, r),
-                Maybe::None => format!("{}: meta {:?}", name.name, ty),
-            }
-        }
+        GenericParamKind::Meta {
+            name,
+            ty,
+            refinement,
+        } => match refinement {
+            Maybe::Some(r) => format!("{}: meta {:?} where {:?}", name.name, ty, r),
+            Maybe::None => format!("{}: meta {:?}", name.name, ty),
+        },
         GenericParamKind::Lifetime { name } => {
             format!("'{}", name.name)
         }
@@ -969,7 +1006,11 @@ fn generic_param_to_string(param: &GenericParam) -> String {
 /// Hash a function parameter into the signature hasher.
 fn hash_function_param(builder: FunctionHashBuilder, param: &FunctionParam) -> FunctionHashBuilder {
     match &param.kind {
-        FunctionParamKind::Regular { pattern, ty, default_value } => {
+        FunctionParamKind::Regular {
+            pattern,
+            ty,
+            default_value,
+        } => {
             let is_mut = false; // Regular params determine mutability from type
             let type_str = type_to_string(ty);
             let name = format!("{:?}", pattern);
@@ -985,9 +1026,13 @@ fn hash_function_param(builder: FunctionHashBuilder, param: &FunctionParam) -> F
         FunctionParamKind::SelfRef => builder.with_param("self", "&Self"),
         FunctionParamKind::SelfRefMut => builder.with_param_mut("self", "&mut Self", true),
         FunctionParamKind::SelfRefChecked => builder.with_param("self", "&checked Self"),
-        FunctionParamKind::SelfRefCheckedMut => builder.with_param_mut("self", "&checked mut Self", true),
+        FunctionParamKind::SelfRefCheckedMut => {
+            builder.with_param_mut("self", "&checked mut Self", true)
+        }
         FunctionParamKind::SelfRefUnsafe => builder.with_param("self", "&unsafe Self"),
-        FunctionParamKind::SelfRefUnsafeMut => builder.with_param_mut("self", "&unsafe mut Self", true),
+        FunctionParamKind::SelfRefUnsafeMut => {
+            builder.with_param_mut("self", "&unsafe mut Self", true)
+        }
         FunctionParamKind::SelfOwn => builder.with_param("self", "%Self"),
         FunctionParamKind::SelfOwnMut => builder.with_param_mut("self", "%mut Self", true),
     }
@@ -1184,7 +1229,9 @@ fn compute_impl_hash(impl_decl: &verum_ast::decl::ImplDecl) -> HashValue {
 fn format_impl_name(impl_decl: &verum_ast::decl::ImplDecl) -> String {
     match &impl_decl.kind {
         verum_ast::decl::ImplKind::Inherent(ty) => format!("impl_{:?}", ty),
-        verum_ast::decl::ImplKind::Protocol { protocol, for_type, .. } => {
+        verum_ast::decl::ImplKind::Protocol {
+            protocol, for_type, ..
+        } => {
             format!("impl_{}_{:?}", protocol, for_type)
         }
     }
@@ -1500,23 +1547,17 @@ mod tests {
         let mut items1 = ItemHashes::new();
         items1.add_function(
             "func_a".to_string(),
-            FunctionHashBuilder::new()
-                .with_name("func_a")
-                .finish(),
+            FunctionHashBuilder::new().with_name("func_a").finish(),
         );
         items1.add_function(
             "func_b".to_string(), // New function!
-            FunctionHashBuilder::new()
-                .with_name("func_b")
-                .finish(),
+            FunctionHashBuilder::new().with_name("func_b").finish(),
         );
 
         let mut items2 = ItemHashes::new();
         items2.add_function(
             "func_a".to_string(),
-            FunctionHashBuilder::new()
-                .with_name("func_a")
-                .finish(),
+            FunctionHashBuilder::new().with_name("func_a").finish(),
         );
 
         assert_eq!(items1.compare(&items2), ChangeKind::Signature);
@@ -1538,9 +1579,7 @@ mod tests {
         let mut items = ItemHashes::new();
         items.add_function(
             "func_a".to_string(),
-            FunctionHashBuilder::new()
-                .with_name("func_a")
-                .finish(),
+            FunctionHashBuilder::new().with_name("func_a").finish(),
         );
         items.add_type("MyType".to_string(), hash_str("type_def"));
 

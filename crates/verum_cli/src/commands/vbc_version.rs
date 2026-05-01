@@ -15,9 +15,7 @@ use colored::Colorize;
 use std::fs::File;
 use std::io::Read;
 use std::path::Path;
-use verum_vbc::format::{
-    VbcFlags, VbcHeader, HEADER_SIZE, MAGIC, VERSION_MAJOR, VERSION_MINOR,
-};
+use verum_vbc::format::{HEADER_SIZE, MAGIC, VERSION_MAJOR, VERSION_MINOR, VbcFlags, VbcHeader};
 
 /// Decode just the fixed-size header (96 bytes) from the front of an
 /// archive. Avoids full module deserialisation so this works on
@@ -109,16 +107,13 @@ fn decode_header_only(data: &[u8]) -> Result<VbcHeader> {
 
 pub fn execute(archive: &Path, raw: bool) -> Result<()> {
     let mut buf = Vec::with_capacity(HEADER_SIZE * 2);
-    let mut f = File::open(archive).map_err(|e| {
-        CliError::Custom(format!("cannot open {}: {}", archive.display(), e))
-    })?;
+    let mut f = File::open(archive)
+        .map_err(|e| CliError::Custom(format!("cannot open {}: {}", archive.display(), e)))?;
     let _ = f
         .by_ref()
         .take(HEADER_SIZE as u64 * 16)
         .read_to_end(&mut buf)
-        .map_err(|e| {
-            CliError::Custom(format!("read error on {}: {}", archive.display(), e))
-        })?;
+        .map_err(|e| CliError::Custom(format!("read error on {}: {}", archive.display(), e)))?;
     let header = decode_header_only(&buf)?;
 
     if raw {
@@ -233,10 +228,7 @@ pub fn execute(archive: &Path, raw: bool) -> Result<()> {
     }
     println!();
     println!("  Content hash:         {:#018x}", header.content_hash);
-    println!(
-        "  Dependency hash:      {:#018x}",
-        header.dependency_hash
-    );
+    println!("  Dependency hash:      {:#018x}", header.dependency_hash);
     println!();
     if !header.is_magic_valid() {
         println!("{}", "FAIL: magic mismatch".red().bold());

@@ -1,11 +1,11 @@
 //! Log and memory extended opcode handlers for VBC interpreter dispatch.
 
-use crate::instruction::{Opcode, LogSubOpcode};
-use crate::value::Value;
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
+use crate::instruction::{LogSubOpcode, Opcode};
+use crate::value::Value;
 
 /// LogExtended (0xBE) - Structured logging operations.
 ///
@@ -26,7 +26,9 @@ use super::bytecode_io::*;
 /// Extended logging opcode (0xCB + sub-opcode): structured logging with levels (Debug, Info,
 /// Warn, Error, Fatal), structured fields, and context integration. ~50ns runtime overhead
 /// is negligible vs I/O cost.
-pub(in super::super) fn handle_log_extended(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_log_extended(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let sub_op_byte = read_u8(state)?;
     let sub_op = LogSubOpcode::from_byte(sub_op_byte);
 
@@ -119,12 +121,10 @@ pub(in super::super) fn handle_log_extended(state: &mut InterpreterState) -> Int
         // ================================================================
         // Unimplemented sub-opcodes
         // ================================================================
-        None => {
-            Err(InterpreterError::NotImplemented {
-                feature: "log_extended sub-opcode",
-                opcode: Some(Opcode::LogExtended),
-            })
-        }
+        None => Err(InterpreterError::NotImplemented {
+            feature: "log_extended sub-opcode",
+            opcode: Some(Opcode::LogExtended),
+        }),
     }
 }
 
@@ -138,7 +138,9 @@ pub(in super::super) fn handle_log_extended(state: &mut InterpreterState) -> Int
 /// - 0x03: Realloc - reallocate heap memory
 /// - 0x04: Swap - swap two values in place
 /// - 0x05: Replace - replace value and return old
-pub(in super::super) fn handle_mem_extended(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_mem_extended(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let sub_op = read_u8(state)?;
 
     match sub_op {
@@ -151,10 +153,11 @@ pub(in super::super) fn handle_mem_extended(state: &mut InterpreterState) -> Int
             let size = state.get_reg(size_reg).as_i64() as usize;
 
             // Allocate memory using system allocator
-            let layout = std::alloc::Layout::from_size_align(size.max(1), 8)
-                .map_err(|_| InterpreterError::Panic {
+            let layout = std::alloc::Layout::from_size_align(size.max(1), 8).map_err(|_| {
+                InterpreterError::Panic {
                     message: "invalid allocation layout".into(),
-                })?;
+                }
+            })?;
             let ptr = unsafe { std::alloc::alloc(layout) };
             if ptr.is_null() {
                 return Err(InterpreterError::Panic {
@@ -175,10 +178,11 @@ pub(in super::super) fn handle_mem_extended(state: &mut InterpreterState) -> Int
             let size = state.get_reg(size_reg).as_i64() as usize;
 
             // Allocate zeroed memory using system allocator
-            let layout = std::alloc::Layout::from_size_align(size.max(1), 8)
-                .map_err(|_| InterpreterError::Panic {
+            let layout = std::alloc::Layout::from_size_align(size.max(1), 8).map_err(|_| {
+                InterpreterError::Panic {
                     message: "invalid allocation layout".into(),
-                })?;
+                }
+            })?;
             let ptr = unsafe { std::alloc::alloc_zeroed(layout) };
             if ptr.is_null() {
                 return Err(InterpreterError::Panic {
@@ -200,10 +204,11 @@ pub(in super::super) fn handle_mem_extended(state: &mut InterpreterState) -> Int
             let size = state.get_reg(size_reg).as_i64() as usize;
 
             if !ptr.is_null() && size > 0 {
-                let layout = std::alloc::Layout::from_size_align(size, 8)
-                    .map_err(|_| InterpreterError::Panic {
+                let layout = std::alloc::Layout::from_size_align(size, 8).map_err(|_| {
+                    InterpreterError::Panic {
                         message: "invalid deallocation layout".into(),
-                    })?;
+                    }
+                })?;
                 unsafe { std::alloc::dealloc(ptr, layout) };
             }
 
@@ -226,9 +231,11 @@ pub(in super::super) fn handle_mem_extended(state: &mut InterpreterState) -> Int
                 if a == 0 { 8 } else { a }
             };
 
-            let new_layout = std::alloc::Layout::from_size_align(new_size.max(1), align)
-                .map_err(|_| InterpreterError::Panic {
-                    message: "invalid reallocation layout".into(),
+            let new_layout =
+                std::alloc::Layout::from_size_align(new_size.max(1), align).map_err(|_| {
+                    InterpreterError::Panic {
+                        message: "invalid reallocation layout".into(),
+                    }
                 })?;
             let new_ptr = unsafe { std::alloc::alloc(new_layout) };
             if new_ptr.is_null() {
@@ -248,7 +255,8 @@ pub(in super::super) fn handle_mem_extended(state: &mut InterpreterState) -> Int
                     }
                 }
                 // Free old allocation
-                if let Ok(old_layout) = std::alloc::Layout::from_size_align(old_size.max(1), align) {
+                if let Ok(old_layout) = std::alloc::Layout::from_size_align(old_size.max(1), align)
+                {
                     unsafe { std::alloc::dealloc(ptr, old_layout) };
                 }
             }
@@ -318,9 +326,10 @@ pub(in super::super) fn format_value_for_log(value: &Value) -> String {
         // Try to interpret as char if it looks like a valid code point
         let raw = value.as_ptr::<()>() as u64;
         if raw < 0x110000
-            && let Some(c) = char::from_u32(raw as u32) {
-                return format!("{}", c);
-            }
+            && let Some(c) = char::from_u32(raw as u32)
+        {
+            return format!("{}", c);
+        }
         format!("<ptr:{:p}>", value.as_ptr::<()>())
     } else {
         format!("{:?}", value)

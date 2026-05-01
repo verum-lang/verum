@@ -67,9 +67,7 @@
 //! 4. Compute `NoEscape` set (references that never leave scope)
 //! 5. Integrate with codegen to skip CBGR checks for `NoEscape` refs
 
-use crate::analysis::{
-    BlockId, ControlFlowGraph, DefSite, EscapeResult, RefId, UseeSite,
-};
+use crate::analysis::{BlockId, ControlFlowGraph, DefSite, EscapeResult, RefId, UseeSite};
 use crate::call_graph::CallGraph;
 use crate::ssa::SsaFunction;
 use std::fmt;
@@ -700,7 +698,9 @@ impl EnhancedEscapeAnalyzer {
                 reference: ref_id,
                 block: block_id,
                 escape_kind: EscapeKind::ReturnEscape,
-                description: "Reference used in exit block (may be returned)".to_string().into(),
+                description: "Reference used in exit block (may be returned)"
+                    .to_string()
+                    .into(),
                 source_location: Maybe::None,
             });
             return true;
@@ -712,7 +712,9 @@ impl EnhancedEscapeAnalyzer {
                 reference: ref_id,
                 block: block_id,
                 escape_kind: EscapeKind::HeapStore,
-                description: "Reference stored to heap-allocated structure".to_string().into(),
+                description: "Reference stored to heap-allocated structure"
+                    .to_string()
+                    .into(),
                 source_location: Maybe::None,
             });
             return true;
@@ -726,7 +728,9 @@ impl EnhancedEscapeAnalyzer {
                 reference: ref_id,
                 block: block_id,
                 escape_kind: EscapeKind::ParameterEscape,
-                description: "Reference passed to function that may retain it".to_string().into(),
+                description: "Reference passed to function that may retain it"
+                    .to_string()
+                    .into(),
                 source_location: Maybe::None,
             });
             return true;

@@ -24,8 +24,8 @@
 
 use std::path::PathBuf;
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use verum_cli::commands::lint::{lint_source, LintConfig};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use verum_cli::commands::lint::{LintConfig, lint_source};
 
 fn make_kloc_source() -> String {
     // Synthesise a ~1000-line Verum file mixing every text-scan

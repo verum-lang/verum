@@ -1,6 +1,7 @@
 use verum_llvm_sys::core::{
-    LLVMConstNamedStruct, LLVMCountStructElementTypes, LLVMGetStructElementTypes, LLVMGetStructName,
-    LLVMIsOpaqueStruct, LLVMIsPackedStruct, LLVMStructGetTypeAtIndex, LLVMStructSetBody,
+    LLVMConstNamedStruct, LLVMCountStructElementTypes, LLVMGetStructElementTypes,
+    LLVMGetStructName, LLVMIsOpaqueStruct, LLVMIsPackedStruct, LLVMStructGetTypeAtIndex,
+    LLVMStructSetBody,
 };
 use verum_llvm_sys::prelude::{LLVMTypeRef, LLVMValueRef};
 
@@ -8,13 +9,13 @@ use std::ffi::CStr;
 use std::fmt::{self, Display};
 use std::mem::forget;
 
+use crate::AddressSpace;
 use crate::context::ContextRef;
 use crate::support::LLVMString;
 use crate::types::enums::BasicMetadataTypeEnum;
 use crate::types::traits::AsTypeRef;
 use crate::types::{ArrayType, BasicTypeEnum, FunctionType, PointerType, Type};
 use crate::values::{ArrayValue, AsValueRef, BasicValueEnum, IntValue, StructValue};
-use crate::AddressSpace;
 
 /// A `StructType` is the type of a heterogeneous container of types.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -235,7 +236,11 @@ impl<'ctx> StructType<'ctx> {
     /// let struct_type = context.struct_type(&[f32_type.into(), f32_type.into()], false);
     /// let fn_type = struct_type.fn_type(&[], false);
     /// ```
-    pub fn fn_type(self, param_types: &[BasicMetadataTypeEnum<'ctx>], is_var_args: bool) -> FunctionType<'ctx> {
+    pub fn fn_type(
+        self,
+        param_types: &[BasicMetadataTypeEnum<'ctx>],
+        is_var_args: bool,
+    ) -> FunctionType<'ctx> {
         self.struct_type.fn_type(param_types, is_var_args)
     }
 
@@ -357,7 +362,10 @@ impl<'ctx> StructType<'ctx> {
             Vec::from_raw_parts(ptr, count as usize, count as usize)
         };
 
-        raw_vec.iter().map(|val| unsafe { BasicTypeEnum::new(*val) }).collect()
+        raw_vec
+            .iter()
+            .map(|val| unsafe { BasicTypeEnum::new(*val) })
+            .collect()
     }
 
     /// Get a struct field iterator.
@@ -365,7 +373,11 @@ impl<'ctx> StructType<'ctx> {
         FieldTypesIter {
             st: self,
             i: 0,
-            count: if self.is_opaque() { 0 } else { self.count_fields() },
+            count: if self.is_opaque() {
+                0
+            } else {
+                self.count_fields()
+            },
         }
     }
 
@@ -449,7 +461,8 @@ impl<'ctx> StructType<'ctx> {
     /// ```
     pub fn set_body(self, field_types: &[BasicTypeEnum<'ctx>], packed: bool) -> bool {
         let is_opaque = self.is_opaque();
-        let mut field_types: Vec<LLVMTypeRef> = field_types.iter().map(|val| val.as_type_ref()).collect();
+        let mut field_types: Vec<LLVMTypeRef> =
+            field_types.iter().map(|val| val.as_type_ref()).collect();
         unsafe {
             LLVMStructSetBody(
                 self.as_type_ref(),

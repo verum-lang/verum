@@ -73,7 +73,9 @@ pub fn m_depth(term: &CoreTerm) -> usize {
             UniverseLevel::Succ(l) => 1 + m_depth_level(l),
             UniverseLevel::Max(a, b) => m_depth_level(a).max(m_depth_level(b)),
         },
-        CoreTerm::Pi { domain, codomain, .. } => m_depth(domain).max(m_depth(codomain)),
+        CoreTerm::Pi {
+            domain, codomain, ..
+        } => m_depth(domain).max(m_depth(codomain)),
         CoreTerm::Lam { domain, body, .. } => m_depth(domain).max(m_depth(body)),
         CoreTerm::App(f, a) => m_depth(f).max(m_depth(a)),
         CoreTerm::Sigma { fst_ty, snd_ty, .. } => m_depth(fst_ty).max(m_depth(snd_ty)),
@@ -86,29 +88,43 @@ pub fn m_depth(term: &CoreTerm) -> usize {
         // 4-child generalisation of `PathTy` whose extra component is
         // the constructor-path `path`. M-depth is the max over all four
         // children, identical to the homogeneous case extended.
-        CoreTerm::PathOver { motive, path, lhs, rhs } => m_depth(motive)
+        CoreTerm::PathOver {
+            motive,
+            path,
+            lhs,
+            rhs,
+        } => m_depth(motive)
             .max(m_depth(path))
             .max(m_depth(lhs))
             .max(m_depth(rhs)),
         CoreTerm::Refl(a) => m_depth(a),
-        CoreTerm::HComp { phi, walls, base } => {
-            m_depth(phi).max(m_depth(walls)).max(m_depth(base))
-        }
-        CoreTerm::Transp { path, regular, value } => {
-            m_depth(path).max(m_depth(regular)).max(m_depth(value))
-        }
-        CoreTerm::Glue { carrier, phi, fiber, equiv } => m_depth(carrier)
+        CoreTerm::HComp { phi, walls, base } => m_depth(phi).max(m_depth(walls)).max(m_depth(base)),
+        CoreTerm::Transp {
+            path,
+            regular,
+            value,
+        } => m_depth(path).max(m_depth(regular)).max(m_depth(value)),
+        CoreTerm::Glue {
+            carrier,
+            phi,
+            fiber,
+            equiv,
+        } => m_depth(carrier)
             .max(m_depth(phi))
             .max(m_depth(fiber))
             .max(m_depth(equiv)),
-        CoreTerm::Refine { base, predicate, .. } => m_depth(base).max(m_depth(predicate)),
+        CoreTerm::Refine {
+            base, predicate, ..
+        } => m_depth(base).max(m_depth(predicate)),
         // Inductive: declared type constructors live one level above
         // their instantiation arguments (the schema is a meta-statement
         // about the arguments).
-        CoreTerm::Inductive { args, .. } => {
-            1 + args.iter().map(m_depth).max().unwrap_or(0)
-        }
-        CoreTerm::Elim { scrutinee, motive, cases } => {
+        CoreTerm::Inductive { args, .. } => 1 + args.iter().map(m_depth).max().unwrap_or(0),
+        CoreTerm::Elim {
+            scrutinee,
+            motive,
+            cases,
+        } => {
             let case_max = cases.iter().map(m_depth).max().unwrap_or(0);
             m_depth(scrutinee).max(m_depth(motive)).max(case_max)
         }
@@ -141,24 +157,22 @@ pub fn m_depth(term: &CoreTerm) -> usize {
         // structure; the modal-depth (used by K-Refine-omega) is a
         // *separate* ordinal-valued quantity computed by `m_depth_omega`.
         CoreTerm::ModalBox(t) | CoreTerm::ModalDiamond(t) => m_depth(t),
-        CoreTerm::ModalBigAnd(args) => {
-            args.iter().map(|t| m_depth(t)).max().unwrap_or(0)
-        }
+        CoreTerm::ModalBigAnd(args) => args.iter().map(|t| m_depth(t)).max().unwrap_or(0),
         // cohesive modalities are not in the M-iteration
         // family; m_depth descends without modal increment, leaving
         // ordinal-modal-depth tracking to `m_depth_omega`.
-        CoreTerm::Shape(t) | CoreTerm::Flat(t) | CoreTerm::Sharp(t) => {
-            m_depth(t)
-        }
+        CoreTerm::Shape(t) | CoreTerm::Flat(t) | CoreTerm::Sharp(t) => m_depth(t),
         // quotient types: max over base + equiv
         // (the constructor's structural depth).
         CoreTerm::Quotient { base, equiv } => m_depth(base).max(m_depth(equiv)),
         CoreTerm::QuotIntro { value, base, equiv } => {
             m_depth(value).max(m_depth(base)).max(m_depth(equiv))
         }
-        CoreTerm::QuotElim { scrutinee, motive, case } => {
-            m_depth(scrutinee).max(m_depth(motive)).max(m_depth(case))
-        }
+        CoreTerm::QuotElim {
+            scrutinee,
+            motive,
+            case,
+        } => m_depth(scrutinee).max(m_depth(motive)).max(m_depth(case)),
     }
 }
 
@@ -192,18 +206,28 @@ pub struct OrdinalDepth {
 impl OrdinalDepth {
     /// Pure-finite depth — encoding of a usize.
     pub const fn finite(n: u32) -> Self {
-        Self { omega_coeff: 0, finite_offset: n }
+        Self {
+            omega_coeff: 0,
+            finite_offset: n,
+        }
     }
 
     /// `ω`.
     pub const fn omega() -> Self {
-        Self { omega_coeff: 1, finite_offset: 0 }
+        Self {
+            omega_coeff: 1,
+            finite_offset: 0,
+        }
     }
 
     /// Lex ordering: `(omega_coeff, finite_offset)` lex.
     pub fn lt(&self, other: &Self) -> bool {
-        if self.omega_coeff < other.omega_coeff { return true; }
-        if self.omega_coeff > other.omega_coeff { return false; }
+        if self.omega_coeff < other.omega_coeff {
+            return true;
+        }
+        if self.omega_coeff > other.omega_coeff {
+            return false;
+        }
         self.finite_offset < other.finite_offset
     }
 
@@ -314,9 +338,7 @@ pub fn m_depth_omega(term: &CoreTerm) -> OrdinalDepth {
         CoreTerm::Universe(_) => OrdinalDepth::finite(0),
 
         // Modal operators — the load-bearing recursion.
-        CoreTerm::ModalBox(phi) | CoreTerm::ModalDiamond(phi) => {
-            m_depth_omega(phi).succ()
-        }
+        CoreTerm::ModalBox(phi) | CoreTerm::ModalDiamond(phi) => m_depth_omega(phi).succ(),
         CoreTerm::ModalBigAnd(args) => {
             // sup_i md^ω(P_i). For finite arity the supremum is the
             // pointwise max under the lex ordering. Empty conjunction
@@ -332,28 +354,29 @@ pub fn m_depth_omega(term: &CoreTerm) -> OrdinalDepth {
         }
 
         // Structural — descend into immediate children, take max.
-        CoreTerm::Pi { domain, codomain, .. } => {
-            ord_max(m_depth_omega(domain), m_depth_omega(codomain))
-        }
-        CoreTerm::Lam { domain, body, .. } => {
-            ord_max(m_depth_omega(domain), m_depth_omega(body))
-        }
+        CoreTerm::Pi {
+            domain, codomain, ..
+        } => ord_max(m_depth_omega(domain), m_depth_omega(codomain)),
+        CoreTerm::Lam { domain, body, .. } => ord_max(m_depth_omega(domain), m_depth_omega(body)),
         CoreTerm::App(f, a) => ord_max(m_depth_omega(f), m_depth_omega(a)),
         CoreTerm::Sigma { fst_ty, snd_ty, .. } => {
             ord_max(m_depth_omega(fst_ty), m_depth_omega(snd_ty))
         }
         CoreTerm::Pair(a, b) => ord_max(m_depth_omega(a), m_depth_omega(b)),
         CoreTerm::Fst(p) | CoreTerm::Snd(p) => m_depth_omega(p),
-        CoreTerm::PathTy { carrier, lhs, rhs } => {
-            ord_max(
-                m_depth_omega(carrier),
-                ord_max(m_depth_omega(lhs), m_depth_omega(rhs)),
-            )
-        }
+        CoreTerm::PathTy { carrier, lhs, rhs } => ord_max(
+            m_depth_omega(carrier),
+            ord_max(m_depth_omega(lhs), m_depth_omega(rhs)),
+        ),
         // §7.4 V3 — heterogeneous path-over: 4-child
         // generalisation of `PathTy`. Modal-depth ordinal is the
         // pairwise max over motive / path / lhs / rhs.
-        CoreTerm::PathOver { motive, path, lhs, rhs } => ord_max(
+        CoreTerm::PathOver {
+            motive,
+            path,
+            lhs,
+            rhs,
+        } => ord_max(
             ord_max(m_depth_omega(motive), m_depth_omega(path)),
             ord_max(m_depth_omega(lhs), m_depth_omega(rhs)),
         ),
@@ -362,26 +385,37 @@ pub fn m_depth_omega(term: &CoreTerm) -> OrdinalDepth {
             m_depth_omega(phi),
             ord_max(m_depth_omega(walls), m_depth_omega(base)),
         ),
-        CoreTerm::Transp { path, regular, value } => ord_max(
+        CoreTerm::Transp {
+            path,
+            regular,
+            value,
+        } => ord_max(
             m_depth_omega(path),
             ord_max(m_depth_omega(regular), m_depth_omega(value)),
         ),
-        CoreTerm::Glue { carrier, phi, fiber, equiv } => ord_max(
+        CoreTerm::Glue {
+            carrier,
+            phi,
+            fiber,
+            equiv,
+        } => ord_max(
             ord_max(m_depth_omega(carrier), m_depth_omega(phi)),
             ord_max(m_depth_omega(fiber), m_depth_omega(equiv)),
         ),
-        CoreTerm::Refine { base, predicate, .. } => {
-            ord_max(m_depth_omega(base), m_depth_omega(predicate))
-        }
+        CoreTerm::Refine {
+            base, predicate, ..
+        } => ord_max(m_depth_omega(base), m_depth_omega(predicate)),
         // quotient types under modal-depth ordinal.
-        CoreTerm::Quotient { base, equiv } => {
-            ord_max(m_depth_omega(base), m_depth_omega(equiv))
-        }
+        CoreTerm::Quotient { base, equiv } => ord_max(m_depth_omega(base), m_depth_omega(equiv)),
         CoreTerm::QuotIntro { value, base, equiv } => ord_max(
             m_depth_omega(value),
             ord_max(m_depth_omega(base), m_depth_omega(equiv)),
         ),
-        CoreTerm::QuotElim { scrutinee, motive, case } => ord_max(
+        CoreTerm::QuotElim {
+            scrutinee,
+            motive,
+            case,
+        } => ord_max(
             m_depth_omega(scrutinee),
             ord_max(m_depth_omega(motive), m_depth_omega(case)),
         ),
@@ -395,7 +429,11 @@ pub fn m_depth_omega(term: &CoreTerm) -> OrdinalDepth {
             }
             sup
         }
-        CoreTerm::Elim { scrutinee, motive, cases } => {
+        CoreTerm::Elim {
+            scrutinee,
+            motive,
+            cases,
+        } => {
             let mut sup = ord_max(m_depth_omega(scrutinee), m_depth_omega(motive));
             for case in cases.iter() {
                 let r = m_depth_omega(case);
@@ -413,9 +451,7 @@ pub fn m_depth_omega(term: &CoreTerm) -> OrdinalDepth {
         // by 1 (per Definition 136.D1's modality-as-Galois-connection
         // generalisation). The K-Refine-omega rule routes the result
         // through the same gate as ModalBox / ModalDiamond.
-        CoreTerm::Shape(t) | CoreTerm::Flat(t) | CoreTerm::Sharp(t) => {
-            m_depth_omega(t).succ()
-        }
+        CoreTerm::Shape(t) | CoreTerm::Flat(t) | CoreTerm::Sharp(t) => m_depth_omega(t).succ(),
     }
 }
 

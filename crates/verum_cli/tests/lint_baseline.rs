@@ -18,7 +18,11 @@ fn binary() -> &'static str {
 
 fn make_fixture(name: &str, body: &str) -> PathBuf {
     let mut dir = std::env::temp_dir();
-    dir.push(format!("verum_lint_baseline_{}_{}", name, std::process::id()));
+    dir.push(format!(
+        "verum_lint_baseline_{}_{}",
+        name,
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(dir.join("src")).expect("create src");
     std::fs::write(
@@ -52,7 +56,10 @@ fn write_baseline_creates_default_path() {
     let path = dir.join(".verum").join("lint-baseline.json");
     assert!(path.exists(), "default baseline path should be created");
     let content = std::fs::read_to_string(&path).expect("read");
-    assert!(content.contains("todo-in-code"), "baseline should snapshot the issue");
+    assert!(
+        content.contains("todo-in-code"),
+        "baseline should snapshot the issue"
+    );
     let _ = std::fs::remove_dir_all(&dir);
 }
 

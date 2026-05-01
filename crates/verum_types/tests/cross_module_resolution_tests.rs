@@ -29,9 +29,9 @@
 // Name resolution: deterministic lookup through module hierarchy, import resolution, re-exports — , 4
 
 use std::fs;
+use tempfile::TempDir;
 use verum_common::{List, Map};
 use verum_modules::{ModuleId, ModuleLoader, ModulePath, NameResolver, ResolvedName};
-use tempfile::TempDir;
 
 // ============================================================================
 // HELPER UTILITIES

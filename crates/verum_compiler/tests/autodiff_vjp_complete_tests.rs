@@ -48,11 +48,11 @@ use verum_ast::pattern::{Pattern, PatternKind};
 use verum_ast::span::{FileId, Span};
 use verum_ast::ty::{Ident, Path, Type};
 use verum_ast::{Item, ItemKind, Module};
+use verum_common::{Heap, List, Maybe, Text};
 use verum_compiler::phases::autodiff_compilation::{
     AutodiffCompilationPhase, DifferentiableConfig, DifferentiationMode, GraphBuilder,
 };
 use verum_compiler::phases::{CompilationPhase, PhaseContext, PhaseData, PhaseInput};
-use verum_common::{Heap, List, Maybe, Text};
 
 // ============================================================================
 // Test Utilities
@@ -245,9 +245,10 @@ fn test_simple_addition_vjp() {
         // Find VJP function
         let vjp_func = items.iter().find_map(|item| {
             if let ItemKind::Function(f) = &item.kind
-                && f.name.as_str() == "add_vjp" {
-                    return Some(f);
-                }
+                && f.name.as_str() == "add_vjp"
+            {
+                return Some(f);
+            }
             None
         });
 
@@ -608,10 +609,11 @@ fn test_gradient_accumulation() {
 
     // Verify that generated VJP properly accumulates gradients from multiple uses
     if let Ok(output) = result
-        && let PhaseData::AstModules(modules) = output.data {
-            let items = &modules[0].items;
-            assert!(items.len() >= 2, "Should have original + VJP functions");
-        }
+        && let PhaseData::AstModules(modules) = output.data
+    {
+        let items = &modules[0].items;
+        assert!(items.len() >= 2, "Should have original + VJP functions");
+    }
 }
 
 // ============================================================================
@@ -671,23 +673,25 @@ fn test_multivariate_vjp() {
 
     // Check VJP returns tuple of 3 gradients
     if let Ok(output) = result
-        && let PhaseData::AstModules(modules) = output.data {
-            let vjp_func = modules[0].items.iter().find_map(|item| {
-                if let ItemKind::Function(f) = &item.kind
-                    && f.name.as_str() == "f_vjp" {
-                        return Some(f);
-                    }
-                None
-            });
-
-            if let Some(vjp) = vjp_func {
-                assert_eq!(
-                    vjp.params.len(),
-                    4,
-                    "VJP should have 4 params (x, y, z, grad_out)"
-                );
+        && let PhaseData::AstModules(modules) = output.data
+    {
+        let vjp_func = modules[0].items.iter().find_map(|item| {
+            if let ItemKind::Function(f) = &item.kind
+                && f.name.as_str() == "f_vjp"
+            {
+                return Some(f);
             }
+            None
+        });
+
+        if let Some(vjp) = vjp_func {
+            assert_eq!(
+                vjp.params.len(),
+                4,
+                "VJP should have 4 params (x, y, z, grad_out)"
+            );
         }
+    }
 }
 
 // ============================================================================
@@ -726,35 +730,37 @@ fn test_vjp_type_correctness() {
     assert!(result.is_ok());
 
     if let Ok(output) = result
-        && let PhaseData::AstModules(modules) = output.data {
-            let vjp_func = modules[0].items.iter().find_map(|item| {
-                if let ItemKind::Function(f) = &item.kind
-                    && f.name.as_str() == "test_fn_vjp" {
-                        return Some(f);
-                    }
-                None
-            });
-
-            assert!(vjp_func.is_some(), "VJP function must be generated");
-            let vjp = vjp_func.unwrap();
-
-            // Verify parameter count
-            assert_eq!(vjp.params.len(), 3, "VJP params: (a, b, grad_out)");
-
-            // Verify parameters are Float type
-            for (i, param) in vjp.params.iter().enumerate() {
-                if let FunctionParamKind::Regular { ty, .. } = &param.kind {
-                    // All should be Float
-                    println!("VJP param {} type: {:?}", i, ty.kind);
-                }
+        && let PhaseData::AstModules(modules) = output.data
+    {
+        let vjp_func = modules[0].items.iter().find_map(|item| {
+            if let ItemKind::Function(f) = &item.kind
+                && f.name.as_str() == "test_fn_vjp"
+            {
+                return Some(f);
             }
+            None
+        });
 
-            // Verify return type is tuple of gradients
-            if let Maybe::Some(ret_ty) = &vjp.return_type {
-                println!("VJP return type: {:?}", ret_ty.kind);
-                // Should be Tuple or single Float
+        assert!(vjp_func.is_some(), "VJP function must be generated");
+        let vjp = vjp_func.unwrap();
+
+        // Verify parameter count
+        assert_eq!(vjp.params.len(), 3, "VJP params: (a, b, grad_out)");
+
+        // Verify parameters are Float type
+        for (i, param) in vjp.params.iter().enumerate() {
+            if let FunctionParamKind::Regular { ty, .. } = &param.kind {
+                // All should be Float
+                println!("VJP param {} type: {:?}", i, ty.kind);
             }
         }
+
+        // Verify return type is tuple of gradients
+        if let Maybe::Some(ret_ty) = &vjp.return_type {
+            println!("VJP return type: {:?}", ret_ty.kind);
+            // Should be Tuple or single Float
+        }
+    }
 }
 
 // ============================================================================
@@ -918,41 +924,42 @@ fn test_full_autodiff_pipeline() {
     assert!(result.is_ok(), "Pipeline execution failed");
 
     if let Ok(output) = result
-        && let PhaseData::AstModules(modules) = output.data {
-            // Verify generated functions
-            let items = &modules[0].items;
+        && let PhaseData::AstModules(modules) = output.data
+    {
+        // Verify generated functions
+        let items = &modules[0].items;
 
-            let has_original = items.iter().any(|item| {
-                if let ItemKind::Function(f) = &item.kind {
-                    f.name.as_str() == "polynomial"
-                } else {
-                    false
-                }
-            });
+        let has_original = items.iter().any(|item| {
+            if let ItemKind::Function(f) = &item.kind {
+                f.name.as_str() == "polynomial"
+            } else {
+                false
+            }
+        });
 
-            let has_vjp = items.iter().any(|item| {
-                if let ItemKind::Function(f) = &item.kind {
-                    f.name.as_str() == "polynomial_vjp"
-                } else {
-                    false
-                }
-            });
+        let has_vjp = items.iter().any(|item| {
+            if let ItemKind::Function(f) = &item.kind {
+                f.name.as_str() == "polynomial_vjp"
+            } else {
+                false
+            }
+        });
 
-            let has_grad = items.iter().any(|item| {
-                if let ItemKind::Function(f) = &item.kind {
-                    f.name.as_str() == "polynomial_grad"
-                } else {
-                    false
-                }
-            });
+        let has_grad = items.iter().any(|item| {
+            if let ItemKind::Function(f) = &item.kind {
+                f.name.as_str() == "polynomial_grad"
+            } else {
+                false
+            }
+        });
 
-            assert!(has_original, "Original function must be present");
-            assert!(has_vjp, "VJP function must be generated");
-            assert!(has_grad, "Gradient function must be generated");
+        assert!(has_original, "Original function must be present");
+        assert!(has_vjp, "VJP function must be generated");
+        assert!(has_grad, "Gradient function must be generated");
 
-            println!("✓ Full autodiff pipeline completed successfully");
-            println!("  - Original function: polynomial");
-            println!("  - Generated VJP: polynomial_vjp");
-            println!("  - Generated gradient: polynomial_grad");
-        }
+        println!("✓ Full autodiff pipeline completed successfully");
+        println!("  - Original function: polynomial");
+        println!("  - Generated VJP: polynomial_vjp");
+        println!("  - Generated gradient: polynomial_grad");
+    }
 }

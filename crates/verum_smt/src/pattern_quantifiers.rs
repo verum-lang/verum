@@ -160,9 +160,13 @@ pub fn type_to_sort(ty: &Type) -> Sort {
         TypeKind::Universe { .. } => Sort::uninterpreted(Symbol::String("Type".to_string())),
         // Meta types and type lambdas - modeled as uninterpreted
         TypeKind::Meta { .. } => Sort::uninterpreted(Symbol::String("Meta".to_string())),
-        TypeKind::TypeLambda { .. } => Sort::uninterpreted(Symbol::String("TypeLambda".to_string())),
+        TypeKind::TypeLambda { .. } => {
+            Sort::uninterpreted(Symbol::String("TypeLambda".to_string()))
+        }
         // Path equality type: use carrier type's sort
-        TypeKind::PathType { carrier, .. } | TypeKind::DependentApp { carrier, .. } => type_to_sort(carrier),
+        TypeKind::PathType { carrier, .. } | TypeKind::DependentApp { carrier, .. } => {
+            type_to_sort(carrier)
+        }
         // Dependent type application `T<A>(v..)`: use carrier sort,
         // value indices do not affect Z3 sort translation.
         TypeKind::DependentApp { carrier, .. } => type_to_sort(carrier),
@@ -1202,7 +1206,6 @@ impl PatternTermCollector {
         }
     }
 
-
     /// Collect pattern terms from an expression
     fn collect(&mut self, expr: &Expr) {
         self.current_depth += 1;
@@ -1293,7 +1296,13 @@ impl PatternTermCollector {
                 }
             }
 
-            ExprKind::Nursery { body, on_cancel, recover, options, .. } => {
+            ExprKind::Nursery {
+                body,
+                on_cancel,
+                recover,
+                options,
+                ..
+            } => {
                 // Visit timeout expression if present
                 if let verum_common::Maybe::Some(timeout) = &options.timeout {
                     self.visit_expr(timeout);
@@ -1814,21 +1823,19 @@ impl PatternTermCollector {
 
             // Stream literal: stream[1, 2, 3, ...] or stream[0..100]
             // Stream literal expressions: `stream[1, 2, 3, ...]` or `stream[0..100]`
-            ExprKind::StreamLiteral(stream_lit) => {
-                match &stream_lit.kind {
-                    verum_ast::expr::StreamLiteralKind::Elements { elements, .. } => {
-                        for elem in elements {
-                            self.visit_expr(elem);
-                        }
-                    }
-                    verum_ast::expr::StreamLiteralKind::Range { start, end, .. } => {
-                        self.visit_expr(start);
-                        if let verum_common::Maybe::Some(end_expr) = end {
-                            self.visit_expr(end_expr);
-                        }
+            ExprKind::StreamLiteral(stream_lit) => match &stream_lit.kind {
+                verum_ast::expr::StreamLiteralKind::Elements { elements, .. } => {
+                    for elem in elements {
+                        self.visit_expr(elem);
                     }
                 }
-            }
+                verum_ast::expr::StreamLiteralKind::Range { start, end, .. } => {
+                    self.visit_expr(start);
+                    if let verum_common::Maybe::Some(end_expr) = end {
+                        self.visit_expr(end_expr);
+                    }
+                }
+            },
 
             // Inline assembly - visit operand expressions (PatternTermExtractor)
             ExprKind::InlineAsm { operands, .. } => {
@@ -1843,7 +1850,9 @@ impl PatternTermCollector {
                         verum_ast::expr::AsmOperandKind::InOut { place, .. } => {
                             self.visit_expr(place);
                         }
-                        verum_ast::expr::AsmOperandKind::InLateOut { in_expr, out_place, .. } => {
+                        verum_ast::expr::AsmOperandKind::InLateOut {
+                            in_expr, out_place, ..
+                        } => {
                             self.visit_expr(in_expr);
                             self.visit_expr(out_place);
                         }
@@ -2284,7 +2293,10 @@ impl ComplexityAnalyzer {
                 self.analyze(inner);
             }
 
-            ExprKind::Try(inner) | ExprKind::Await(inner) | ExprKind::Yield(inner) | ExprKind::TryBlock(inner) => {
+            ExprKind::Try(inner)
+            | ExprKind::Await(inner)
+            | ExprKind::Yield(inner)
+            | ExprKind::TryBlock(inner) => {
                 self.analyze(inner);
             }
 
@@ -2478,7 +2490,13 @@ impl ComplexityAnalyzer {
                 }
             }
 
-            ExprKind::Nursery { body, on_cancel, recover, options, .. } => {
+            ExprKind::Nursery {
+                body,
+                on_cancel,
+                recover,
+                options,
+                ..
+            } => {
                 // Nursery adds structured concurrency complexity
                 self.higher_order_count += 1;
                 // Analyze options
@@ -2531,21 +2549,19 @@ impl ComplexityAnalyzer {
 
             // Stream literal: stream[1, 2, 3, ...] or stream[0..100]
             // Stream literal expressions: `stream[1, 2, 3, ...]` or `stream[0..100]` (ComplexityAnalyzer)
-            ExprKind::StreamLiteral(stream_lit) => {
-                match &stream_lit.kind {
-                    verum_ast::expr::StreamLiteralKind::Elements { elements, .. } => {
-                        for elem in elements {
-                            self.analyze(elem);
-                        }
-                    }
-                    verum_ast::expr::StreamLiteralKind::Range { start, end, .. } => {
-                        self.analyze(start);
-                        if let verum_common::Maybe::Some(end_expr) = end {
-                            self.analyze(end_expr);
-                        }
+            ExprKind::StreamLiteral(stream_lit) => match &stream_lit.kind {
+                verum_ast::expr::StreamLiteralKind::Elements { elements, .. } => {
+                    for elem in elements {
+                        self.analyze(elem);
                     }
                 }
-            }
+                verum_ast::expr::StreamLiteralKind::Range { start, end, .. } => {
+                    self.analyze(start);
+                    if let verum_common::Maybe::Some(end_expr) = end {
+                        self.analyze(end_expr);
+                    }
+                }
+            },
 
             // Inline assembly - analyze operand expressions for complexity
             ExprKind::InlineAsm { operands, .. } => {
@@ -2561,7 +2577,9 @@ impl ComplexityAnalyzer {
                         verum_ast::expr::AsmOperandKind::InOut { place, .. } => {
                             self.analyze(place);
                         }
-                        verum_ast::expr::AsmOperandKind::InLateOut { in_expr, out_place, .. } => {
+                        verum_ast::expr::AsmOperandKind::InLateOut {
+                            in_expr, out_place, ..
+                        } => {
                             self.analyze(in_expr);
                             self.analyze(out_place);
                         }
@@ -2730,7 +2748,13 @@ impl FunctionApplicationCollector {
                 }
             }
 
-            ExprKind::Nursery { body, on_cancel, recover, options, .. } => {
+            ExprKind::Nursery {
+                body,
+                on_cancel,
+                recover,
+                options,
+                ..
+            } => {
                 // Visit timeout expression if present
                 if let verum_common::Maybe::Some(timeout) = &options.timeout {
                     self.visit_expr(timeout);
@@ -2952,7 +2976,10 @@ impl FunctionApplicationCollector {
                 self.visit_expr(inner);
             }
 
-            ExprKind::Try(inner) | ExprKind::Await(inner) | ExprKind::Yield(inner) | ExprKind::TryBlock(inner) => {
+            ExprKind::Try(inner)
+            | ExprKind::Await(inner)
+            | ExprKind::Yield(inner)
+            | ExprKind::TryBlock(inner) => {
                 self.visit_expr(inner);
             }
 
@@ -3212,21 +3239,19 @@ impl FunctionApplicationCollector {
 
             // Stream literal: stream[1, 2, 3, ...] or stream[0..100]
             // Stream literal expressions: `stream[1, 2, 3, ...]` or `stream[0..100]`
-            ExprKind::StreamLiteral(stream_lit) => {
-                match &stream_lit.kind {
-                    verum_ast::expr::StreamLiteralKind::Elements { elements, .. } => {
-                        for elem in elements {
-                            self.visit_expr(elem);
-                        }
-                    }
-                    verum_ast::expr::StreamLiteralKind::Range { start, end, .. } => {
-                        self.visit_expr(start);
-                        if let verum_common::Maybe::Some(end_expr) = end {
-                            self.visit_expr(end_expr);
-                        }
+            ExprKind::StreamLiteral(stream_lit) => match &stream_lit.kind {
+                verum_ast::expr::StreamLiteralKind::Elements { elements, .. } => {
+                    for elem in elements {
+                        self.visit_expr(elem);
                     }
                 }
-            }
+                verum_ast::expr::StreamLiteralKind::Range { start, end, .. } => {
+                    self.visit_expr(start);
+                    if let verum_common::Maybe::Some(end_expr) = end {
+                        self.visit_expr(end_expr);
+                    }
+                }
+            },
 
             // Inline assembly - visit operand expressions (TriggerExtractor)
             ExprKind::InlineAsm { operands, .. } => {
@@ -3241,7 +3266,9 @@ impl FunctionApplicationCollector {
                         verum_ast::expr::AsmOperandKind::InOut { place, .. } => {
                             self.visit_expr(place);
                         }
-                        verum_ast::expr::AsmOperandKind::InLateOut { in_expr, out_place, .. } => {
+                        verum_ast::expr::AsmOperandKind::InLateOut {
+                            in_expr, out_place, ..
+                        } => {
                             self.visit_expr(in_expr);
                             self.visit_expr(out_place);
                         }

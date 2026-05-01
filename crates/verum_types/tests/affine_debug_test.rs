@@ -31,10 +31,14 @@ fn main() {
     let mut handle_has_affine = false;
     for item in &module.items {
         if let verum_ast::ItemKind::Type(type_decl) = &item.kind
-            && type_decl.name.name.as_str() == "Handle" {
-                println!("DEBUG: Handle resource_modifier = {:?}", type_decl.resource_modifier);
-                handle_has_affine = type_decl.resource_modifier.is_some();
-            }
+            && type_decl.name.name.as_str() == "Handle"
+        {
+            println!(
+                "DEBUG: Handle resource_modifier = {:?}",
+                type_decl.resource_modifier
+            );
+            handle_has_affine = type_decl.resource_modifier.is_some();
+        }
     }
     assert!(handle_has_affine, "Parser should capture affine modifier");
 
@@ -49,8 +53,10 @@ fn main() {
     }
 
     // Verify Handle is registered as affine
-    assert!(checker.is_type_affine_by_name("Handle"),
-            "Handle should be registered as affine type");
+    assert!(
+        checker.is_type_affine_by_name("Handle"),
+        "Handle should be registered as affine type"
+    );
 
     // Phase 1: Register function signatures
     for item in &module.items {
@@ -70,14 +76,18 @@ fn main() {
     }
 
     // The check SHOULD fail due to use after move
-    assert!(result.is_err(), "Type check should fail due to use-after-move of h1");
+    assert!(
+        result.is_err(),
+        "Type check should fail due to use-after-move of h1"
+    );
 
     let err = result.unwrap_err();
     let err_msg = format!("{}", err);
     println!("DEBUG: Error message = {}", err_msg);
     assert!(
         err_msg.contains("moved") || err_msg.contains("use after") || err_msg.contains("already"),
-        "Expected move-related error, got: {}", err_msg
+        "Expected move-related error, got: {}",
+        err_msg
     );
 }
 
@@ -130,5 +140,8 @@ fn main() {
     }
 
     // Field access borrows, doesn't consume - so this should pass
-    assert!(result.is_ok(), "Double field access on affine type should succeed (field access borrows)");
+    assert!(
+        result.is_ok(),
+        "Double field access on affine type should succeed (field access borrows)"
+    );
 }

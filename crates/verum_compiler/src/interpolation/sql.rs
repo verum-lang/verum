@@ -17,8 +17,8 @@
 //! ```
 
 use verum_ast::{Expr, Span};
-use verum_diagnostics::{Diagnostic, DiagnosticBuilder};
 use verum_common::{List, Text};
+use verum_diagnostics::{Diagnostic, DiagnosticBuilder};
 
 /// SQL interpolation handler
 ///

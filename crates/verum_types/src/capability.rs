@@ -1131,17 +1131,24 @@ mod tests {
     fn test_capability_subtyping_via_type_system() {
         use crate::subtype::Subtyping;
         use crate::ty::Type;
-        use verum_ast::ty::{Ident, Path, PathSegment};
         use verum_ast::span::Span;
+        use verum_ast::ty::{Ident, Path, PathSegment};
 
         let subtyping = Subtyping::new();
 
         // Create base type: Database
         let db_path = Path {
-            segments: vec![PathSegment::Name(Ident::new("Database".to_string(), Span::default()))].into(),
+            segments: vec![PathSegment::Name(Ident::new(
+                "Database".to_string(),
+                Span::default(),
+            ))]
+            .into(),
             span: Span::default(),
         };
-        let db_type = Type::Named { path: db_path, args: List::new() };
+        let db_type = Type::Named {
+            path: db_path,
+            args: List::new(),
+        };
 
         // T with [Read, Write, Admin] should be subtype of T with [Read]
         let mut full_caps = TypeCapabilitySet::empty();
@@ -1163,23 +1170,31 @@ mod tests {
         };
 
         // More capabilities => subtype (monotonic attenuation is safe)
-        assert!(subtyping.is_subtype(&full_type, &read_type),
-            "T with [Read, Write, Admin] should be subtype of T with [Read]");
+        assert!(
+            subtyping.is_subtype(&full_type, &read_type),
+            "T with [Read, Write, Admin] should be subtype of T with [Read]"
+        );
 
         // Fewer capabilities => NOT subtype (can't gain capabilities)
-        assert!(!subtyping.is_subtype(&read_type, &full_type),
-            "T with [Read] should NOT be subtype of T with [Read, Write, Admin]");
+        assert!(
+            !subtyping.is_subtype(&read_type, &full_type),
+            "T with [Read] should NOT be subtype of T with [Read, Write, Admin]"
+        );
 
         // T with [Caps] should be subtype of T (forgetful upcast)
-        assert!(subtyping.is_subtype(&full_type, &db_type),
-            "T with [Read, Write, Admin] should be subtype of T");
+        assert!(
+            subtyping.is_subtype(&full_type, &db_type),
+            "T with [Read, Write, Admin] should be subtype of T"
+        );
 
         // Same capabilities => subtype (reflexive)
         let read_type2 = Type::CapabilityRestricted {
             base: Box::new(db_type.clone()),
             capabilities: read_only_caps.clone(),
         };
-        assert!(subtyping.is_subtype(&read_type, &read_type2),
-            "T with [Read] should be subtype of T with [Read]");
+        assert!(
+            subtyping.is_subtype(&read_type, &read_type2),
+            "T with [Read] should be subtype of T with [Read]"
+        );
     }
 }

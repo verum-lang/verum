@@ -70,11 +70,11 @@ pub mod runtime;
 pub mod trampolines;
 
 // Re-exports
-pub use platform::{FfiPlatform, FfiPlatformError, LibraryHandle};
-#[cfg(feature = "ffi")]
-pub use platform::create_platform;
 #[cfg(feature = "ffi")]
 pub use marshal::{ArrayBufferInfo, MarshalError, Marshaller};
+#[cfg(feature = "ffi")]
+pub use platform::create_platform;
+pub use platform::{FfiPlatform, FfiPlatformError, LibraryHandle};
 #[cfg(feature = "ffi")]
 pub use runtime::{FfiError, FfiRuntime, ResolvedSymbol};
 
@@ -196,9 +196,7 @@ impl CTypeRuntime {
     /// Fallible conversion that returns a typed error for struct
     /// variants instead of panicking. Prefer this over the infallible
     /// [`From`] impl when the caller has an error channel.
-    pub fn try_from_ctype(
-        ct: crate::module::CType,
-    ) -> Result<Self, CTypeConvertError> {
+    pub fn try_from_ctype(ct: crate::module::CType) -> Result<Self, CTypeConvertError> {
         Ok(match ct {
             crate::module::CType::Void => Self::Void,
             crate::module::CType::I8 => Self::I8,
@@ -248,4 +246,3 @@ impl From<crate::module::CType> for CTypeRuntime {
         }
     }
 }
-

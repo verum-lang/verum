@@ -128,29 +128,35 @@ fn test_strategy_params_conservative() {
 
 #[test]
 fn test_case_split_strategies() {
-    let strategies = [CaseSplitStrategy::Sequential,
+    let strategies = [
+        CaseSplitStrategy::Sequential,
         CaseSplitStrategy::Random,
-        CaseSplitStrategy::Dynamic];
+        CaseSplitStrategy::Dynamic,
+    ];
 
     assert_eq!(strategies.len(), 3);
 }
 
 #[test]
 fn test_restart_strategies() {
-    let strategies = [RestartStrategy::None,
+    let strategies = [
+        RestartStrategy::None,
         RestartStrategy::Linear,
         RestartStrategy::Geometric,
-        RestartStrategy::Luby];
+        RestartStrategy::Luby,
+    ];
 
     assert_eq!(strategies.len(), 4);
 }
 
 #[test]
 fn test_phase_selection_strategies() {
-    let strategies = [PhaseSelection::Always(true),
+    let strategies = [
+        PhaseSelection::Always(true),
         PhaseSelection::Always(false),
         PhaseSelection::Random,
-        PhaseSelection::Caching];
+        PhaseSelection::Caching,
+    ];
 
     assert_eq!(strategies.len(), 4);
 }
@@ -159,12 +165,14 @@ fn test_phase_selection_strategies() {
 
 #[test]
 fn test_portfolio_strategy_enumeration() {
-    let strategies = [SolvingStrategy::Default,
+    let strategies = [
+        SolvingStrategy::Default,
         SolvingStrategy::BitBlasting,
         SolvingStrategy::LinearArithmetic,
         SolvingStrategy::NonLinearArithmetic,
         SolvingStrategy::Quantifiers,
-        SolvingStrategy::Arrays];
+        SolvingStrategy::Arrays,
+    ];
 
     assert_eq!(strategies.len(), 6);
 }

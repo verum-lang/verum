@@ -25,11 +25,7 @@ fn make_fixture(name: &str) -> PathBuf {
     )
     .expect("manifest");
     // Mix one valid file with one that's syntactically broken.
-    std::fs::write(
-        dir.join("src").join("good.vr"),
-        "fn main() {}\n",
-    )
-    .expect("good");
+    std::fs::write(dir.join("src").join("good.vr"), "fn main() {}\n").expect("good");
     std::fs::write(
         dir.join("src").join("bad.vr"),
         "this is not @@@ valid verum source\n",

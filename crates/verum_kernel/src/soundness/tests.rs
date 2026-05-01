@@ -15,8 +15,8 @@
 use super::coq::CoqBackend;
 use super::lean::LeanBackend;
 use super::{
-    EXPECTED_KERNEL_RULE_COUNT, LemmaStatus, RuleSpec,
-    SoundnessBackend, SoundnessExporter, canonical_rules,
+    EXPECTED_KERNEL_RULE_COUNT, LemmaStatus, RuleSpec, SoundnessBackend, SoundnessExporter,
+    canonical_rules,
 };
 
 #[test]
@@ -72,7 +72,12 @@ fn every_admitted_lemma_has_non_empty_reason() {
 fn every_discharged_lemma_has_non_empty_citation() {
     let rules = canonical_rules();
     for r in &rules {
-        if let LemmaStatus::DischargedByFramework { lemma_path, framework, citation } = &r.status {
+        if let LemmaStatus::DischargedByFramework {
+            lemma_path,
+            framework,
+            citation,
+        } = &r.status
+        {
             assert!(
                 !lemma_path.trim().is_empty(),
                 "rule {} discharged-by-framework but lemma_path is empty",
@@ -272,7 +277,9 @@ fn drift_check_passes_for_canonical_rules() {
 fn drift_check_rejects_short_list() {
     let short_rules: Vec<RuleSpec> = canonical_rules().into_iter().take(10).collect();
     let exporter = SoundnessExporter::with_rules(short_rules);
-    let err = exporter.drift_check().expect_err("short list must fail drift check");
+    let err = exporter
+        .drift_check()
+        .expect_err("short list must fail drift check");
     assert!(err.contains("10 rules"));
     assert!(err.contains(&format!("expected {}", EXPECTED_KERNEL_RULE_COUNT)));
 }
@@ -314,7 +321,11 @@ fn admitted_iou_list_enumerates_every_admit() {
         "the IOU list must enumerate every admitted + discharged-by-framework lemma",
     );
     for (rule_name, reason) in ious {
-        assert!(!reason.is_empty(), "IOU for {} has empty reason/citation", rule_name);
+        assert!(
+            !reason.is_empty(),
+            "IOU for {} has empty reason/citation",
+            rule_name
+        );
     }
 }
 

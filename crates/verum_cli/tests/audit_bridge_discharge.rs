@@ -174,10 +174,7 @@ public theorem example_theorem()
     };
 "#;
     let (_temp, dir) = create_project("bd_unknown", body);
-    let out = run_verum(
-        &["audit", "--bridge-discharge", "--format", "json"],
-        &dir,
-    );
+    let out = run_verum(&["audit", "--bridge-discharge", "--format", "json"], &dir);
     // The JSON output is on stdout; the gate exits non-zero on unknown
     // bridges (verified by checking the stderr path's error chain).
     let stdout = String::from_utf8_lossy(&out.stdout);

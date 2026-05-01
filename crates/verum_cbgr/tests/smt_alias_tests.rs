@@ -36,7 +36,10 @@ fn test_stack_allocation_constraint() {
     assert!(constraint.is_stack_alloc());
     assert!(!constraint.is_heap_alloc());
     assert!(!constraint.is_unknown());
-    assert_eq!(constraint.base_allocation_id(), verum_common::Maybe::Some(42));
+    assert_eq!(
+        constraint.base_allocation_id(),
+        verum_common::Maybe::Some(42)
+    );
 }
 
 #[test]

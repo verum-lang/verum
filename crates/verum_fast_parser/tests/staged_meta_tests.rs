@@ -37,8 +37,8 @@
 
 use verum_ast::{FileId, ItemKind, Module};
 use verum_common::List;
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 /// Helper to parse a module from source.
 fn parse_module(source: &str) -> Result<Module, String> {

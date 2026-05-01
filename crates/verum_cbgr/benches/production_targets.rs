@@ -9,7 +9,7 @@
 //! The actual runtime check is emitted as inline LLVM IR (load gen, cmp, branch),
 //! so we measure the equivalent operations here.
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use std::sync::atomic::{AtomicU32, Ordering};
 use verum_cbgr::{CbgrTier, ReferenceTier, Tier0Reason, TierStatistics};

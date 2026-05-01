@@ -280,11 +280,7 @@ impl ReplStateSnapshot {
             .focused_goal()
             .map(|g| g.proposition.clone())
             .unwrap_or_else(|| Text::from(""));
-        let open_goals: Vec<Text> = stack
-            .goals
-            .iter()
-            .map(|g| g.proposition.clone())
-            .collect();
+        let open_goals: Vec<Text> = stack.goals.iter().map(|g| g.proposition.clone()).collect();
         Self {
             theorem_name,
             goals: stack.goals.clone(),
@@ -326,9 +322,7 @@ pub enum ReplResponse {
     /// Plain status / show-goals / show-context output.
     Status { snapshot: ReplStateSnapshot },
     /// Goal-shape hints from the suggestion engine.
-    Hints {
-        suggestions: Vec<HintSuggestion>,
-    },
+    Hints { suggestions: Vec<HintSuggestion> },
     /// Graphviz DOT for the current proof tree.
     Tree { dot: Text },
     /// A no-op command (e.g. `Undo` on empty history).
@@ -351,7 +345,9 @@ impl ReplResponse {
     pub fn is_state_mutation(&self) -> bool {
         matches!(
             self,
-            ReplResponse::Accepted { .. } | ReplResponse::Undone { .. } | ReplResponse::Redone { .. }
+            ReplResponse::Accepted { .. }
+                | ReplResponse::Undone { .. }
+                | ReplResponse::Redone { .. }
         )
     }
 
@@ -417,7 +413,10 @@ impl ProofTree {
         }
         // Edges: root → step1, step1 → step2, …
         if !self.nodes.is_empty() {
-            s.push_str(&format!("  goal_root -> step_{};\n", self.nodes[0].step_index));
+            s.push_str(&format!(
+                "  goal_root -> step_{};\n",
+                self.nodes[0].step_index
+            ));
             for w in self.nodes.windows(2) {
                 s.push_str(&format!(
                     "  step_{} -> step_{};\n",
@@ -521,7 +520,7 @@ impl GoalRewriter for DefaultGoalRewriter {
             None => {
                 return GoalRewriteOutcome::Error {
                     reason: Text::from("empty tactic"),
-                }
+                };
             }
         };
 
@@ -585,10 +584,11 @@ impl GoalRewriter for DefaultGoalRewriter {
             // (#109) — surface aligned with verum_verification::llm_tactic
             // CANONICAL_TACTICS so every tactic the kernel-checker
             // admits also has a matching state-mutation outcome.
-            "auto" | "simp" | "ring" | "nlinarith" | "linarith" | "lia" | "nlia"
-            | "lra" | "nra" | "decide" | "congruence" | "eauto" | "smt" | "trivial"
-            | "reflexivity" | "refl" | "assumption." | "tauto" | "omega"
-            | "field" | "blast" | "norm_num" => close_focused(stack),
+            "auto" | "simp" | "ring" | "nlinarith" | "linarith" | "lia" | "nlia" | "lra"
+            | "nra" | "decide" | "congruence" | "eauto" | "smt" | "trivial" | "reflexivity"
+            | "refl" | "assumption." | "tauto" | "omega" | "field" | "blast" | "norm_num" => {
+                close_focused(stack)
+            }
 
             // ----- contradiction family — closes the focused goal -----
             "contradiction" | "by_contradiction" | "exfalso" => close_focused(stack),
@@ -616,8 +616,9 @@ impl GoalRewriter for DefaultGoalRewriter {
             // some hypothesis but don't close the goal. We mark the
             // outcome Rewritten so consumers know the typed view
             // changed; an actual symbolic substitution is future work.
-            "unfold" | "fold" | "subst" | "rewrite" | "rw"
-            | "simplify" | "compute" => GoalRewriteOutcome::Rewritten,
+            "unfold" | "fold" | "subst" | "rewrite" | "rw" | "simplify" | "compute" => {
+                GoalRewriteOutcome::Rewritten
+            }
 
             // ----- inductive / case analysis -----
             // `cases h` / `induction n` would normally produce
@@ -674,10 +675,7 @@ fn rewrite_split_conjunction(stack: &mut GoalStack) -> GoalRewriteOutcome {
 /// `assumption [h]` — close the focused goal when a hypothesis
 /// (named `h` if supplied, else any) matches the proposition by
 /// textual equality.
-fn rewrite_assumption(
-    stack: &mut GoalStack,
-    name_filter: Option<&str>,
-) -> GoalRewriteOutcome {
+fn rewrite_assumption(stack: &mut GoalStack, name_filter: Option<&str>) -> GoalRewriteOutcome {
     let Some(focused) = stack.focused_goal() else {
         return GoalRewriteOutcome::Error {
             reason: Text::from("no focused goal"),
@@ -1074,7 +1072,9 @@ impl DefaultReplSession {
                 category: Text::from(s.category.name()),
             })
             .collect();
-        ReplResponse::Hints { suggestions: mapped }
+        ReplResponse::Hints {
+            suggestions: mapped,
+        }
     }
 
     fn handle_visualise(&self) -> ReplResponse {
@@ -1118,10 +1118,7 @@ impl ReplSession for DefaultReplSession {
 
 /// Run a sequence of commands against a session and return every
 /// response in order. Used by the CLI's batch mode + tests.
-pub fn run_batch<S: ReplSession>(
-    session: &mut S,
-    commands: Vec<ReplCommand>,
-) -> Vec<ReplResponse> {
+pub fn run_batch<S: ReplSession>(session: &mut S, commands: Vec<ReplCommand>) -> Vec<ReplResponse> {
     commands.into_iter().map(|c| session.step(c)).collect()
 }
 
@@ -1179,7 +1176,10 @@ mod tests {
             redo_depth: 0,
         };
         assert_eq!(
-            ReplResponse::Status { snapshot: s.clone() }.name(),
+            ReplResponse::Status {
+                snapshot: s.clone()
+            }
+            .name(),
             "Status"
         );
         assert_eq!(
@@ -1292,7 +1292,10 @@ mod tests {
         s.step(ReplCommand::Undo);
         let r = s.step(ReplCommand::Redo);
         match r {
-            ReplResponse::Redone { reapplied, snapshot } => {
+            ReplResponse::Redone {
+                reapplied,
+                snapshot,
+            } => {
                 assert_eq!(reapplied.as_str(), "intro");
                 assert_eq!(snapshot.history_depth, 1);
                 assert_eq!(snapshot.redo_depth, 0);
@@ -1665,8 +1668,15 @@ mod tests {
     fn rewriter_extended_decision_procedures_close() {
         // Aligned with verum_verification::llm_tactic::CANONICAL_TACTICS.
         for tac in [
-            "linarith", "nlia", "lra", "nra", "field", "blast",
-            "norm_num", "tauto", "reflexivity",
+            "linarith",
+            "nlia",
+            "lra",
+            "nra",
+            "field",
+            "blast",
+            "norm_num",
+            "tauto",
+            "reflexivity",
         ] {
             let mut s = GoalStack::singleton("P");
             let r = DefaultGoalRewriter::new();
@@ -1720,8 +1730,13 @@ mod tests {
     #[test]
     fn rewriter_equality_manipulation_yields_rewritten() {
         for tac in [
-            "rewrite h", "rw eq", "subst x", "unfold foo",
-            "fold bar", "simplify", "compute",
+            "rewrite h",
+            "rw eq",
+            "subst x",
+            "unfold foo",
+            "fold bar",
+            "simplify",
+            "compute",
         ] {
             let mut s = GoalStack::singleton("x = y");
             let r = DefaultGoalRewriter::new();
@@ -1758,8 +1773,7 @@ mod tests {
         //  higher layer (no single-goal semantic).
         //  * `split` — strict on top-level conjunctions; tested
         //  with a conjunction goal.
-        let exempt: std::collections::BTreeSet<&str> =
-            ["skip", "fail"].iter().copied().collect();
+        let exempt: std::collections::BTreeSet<&str> = ["skip", "fail"].iter().copied().collect();
         for tac in crate::llm_tactic::canonical_tactics() {
             if exempt.contains(tac) {
                 continue;
@@ -1790,11 +1804,7 @@ mod tests {
 
     #[test]
     fn session_intro_records_typed_hypothesis_in_focused_goal() {
-        let mut s = DefaultReplSession::new(
-            "thm",
-            "P -> Q",
-            lemmas_with(&[("foo_lemma", "P")]),
-        );
+        let mut s = DefaultReplSession::new("thm", "P -> Q", lemmas_with(&[("foo_lemma", "P")]));
         s.step(ReplCommand::Apply {
             tactic: Text::from("intro h"),
         });
@@ -1807,11 +1817,7 @@ mod tests {
 
     #[test]
     fn session_undo_restores_pre_application_stack_byte_exact() {
-        let mut s = DefaultReplSession::new(
-            "thm",
-            "P -> Q",
-            lemmas_with(&[("foo_lemma", "Q")]),
-        );
+        let mut s = DefaultReplSession::new("thm", "P -> Q", lemmas_with(&[("foo_lemma", "Q")]));
         let before = s.goal_stack().clone();
         s.step(ReplCommand::Apply {
             tactic: Text::from("intro h"),
@@ -1825,11 +1831,7 @@ mod tests {
 
     #[test]
     fn session_apply_then_undo_then_redo_re_runs_rewriter() {
-        let mut s = DefaultReplSession::new(
-            "thm",
-            "A -> B",
-            lemmas_with(&[("foo", "B")]),
-        );
+        let mut s = DefaultReplSession::new("thm", "A -> B", lemmas_with(&[("foo", "B")]));
         s.step(ReplCommand::Apply {
             tactic: Text::from("intro h"),
         });
@@ -1858,11 +1860,7 @@ mod tests {
 
     #[test]
     fn session_snapshot_after_close_reports_proof_complete() {
-        let mut s = DefaultReplSession::new(
-            "thm",
-            "P",
-            lemmas_with(&[("foo", "P")]),
-        );
+        let mut s = DefaultReplSession::new("thm", "P", lemmas_with(&[("foo", "P")]));
         s.step(ReplCommand::Apply {
             tactic: Text::from("apply foo"),
         });

@@ -89,13 +89,17 @@ pub struct DepGraph {
 
 impl DepGraph {
     fn from_compressed(compressed: &[u8]) -> Option<Self> {
-        if compressed.is_empty() { return None; }
+        if compressed.is_empty() {
+            return None;
+        }
         let raw = zstd::decode_all(compressed).ok()?;
         Self::parse_archive(&raw)
     }
 
     fn parse_archive(data: &[u8]) -> Option<Self> {
-        if data.len() < 4 { return None; }
+        if data.len() < 4 {
+            return None;
+        }
         let module_count = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
         let mut cursor = 4usize;
         let mut edges: HashMap<String, Edges> = HashMap::with_capacity(module_count);
@@ -104,21 +108,29 @@ impl DepGraph {
             // Module name
             let module = read_str(data, &mut cursor)?;
             // Edge count
-            if cursor + 2 > data.len() { return None; }
+            if cursor + 2 > data.len() {
+                return None;
+            }
             let edge_count = u16::from_le_bytes([data[cursor], data[cursor + 1]]) as usize;
             cursor += 2;
 
-            let mut e = Edges { path: Vec::new(), glob: Vec::new(), nested: Vec::new() };
+            let mut e = Edges {
+                path: Vec::new(),
+                glob: Vec::new(),
+                nested: Vec::new(),
+            };
             for _ in 0..edge_count {
-                if cursor >= data.len() { return None; }
+                if cursor >= data.len() {
+                    return None;
+                }
                 let kind = data[cursor];
                 cursor += 1;
                 let target = read_str(data, &mut cursor)?;
                 match kind {
-                    EDGE_PATH   => e.path.push(target),
-                    EDGE_GLOB   => e.glob.push(target),
+                    EDGE_PATH => e.path.push(target),
+                    EDGE_GLOB => e.glob.push(target),
                     EDGE_NESTED => e.nested.push(target),
-                    _           => return None,   // unknown kind → bail
+                    _ => return None, // unknown kind → bail
                 }
             }
             edges.insert(module, e);
@@ -170,9 +182,13 @@ impl DepGraph {
                     if visited.insert(current.to_string()) {
                         queue.push_back(current.to_string());
                     }
-                    let Some(dot) = current.rfind('.') else { break; };
+                    let Some(dot) = current.rfind('.') else {
+                        break;
+                    };
                     let parent = &current[..dot];
-                    if parent == "core" { break; }
+                    if parent == "core" {
+                        break;
+                    }
                     current = parent;
                 }
             };
@@ -182,7 +198,9 @@ impl DepGraph {
         }
 
         while let Some(current) = queue.pop_front() {
-            let Some(e) = self.edges.get(&current) else { continue };
+            let Some(e) = self.edges.get(&current) else {
+                continue;
+            };
 
             // Direct + nested edges: enqueue the target plus its parent
             // chain (same logic as seeds — nested mounts may name items).
@@ -203,10 +221,14 @@ impl DepGraph {
 }
 
 fn read_str(data: &[u8], cursor: &mut usize) -> Option<String> {
-    if *cursor + 2 > data.len() { return None; }
+    if *cursor + 2 > data.len() {
+        return None;
+    }
     let len = u16::from_le_bytes([data[*cursor], data[*cursor + 1]]) as usize;
     *cursor += 2;
-    if *cursor + len > data.len() { return None; }
+    if *cursor + len > data.len() {
+        return None;
+    }
     let s = String::from_utf8(data[*cursor..*cursor + len].to_vec()).ok()?;
     *cursor += len;
     Some(s)
@@ -232,13 +254,20 @@ mod tests {
 
     #[test]
     fn graph_loads_from_embedded_archive() {
-        let Some(g) = get_dep_graph() else { return; };
-        assert!(g.module_count() > 0, "embedded graph should contain >0 modules");
+        let Some(g) = get_dep_graph() else {
+            return;
+        };
+        assert!(
+            g.module_count() > 0,
+            "embedded graph should contain >0 modules"
+        );
     }
 
     #[test]
     fn shell_reachability_is_a_subset() {
-        let Some(g) = get_dep_graph() else { return; };
+        let Some(g) = get_dep_graph() else {
+            return;
+        };
         // `core.shell.exec` should be reachable from itself.
         let seeds = vec!["core.shell.exec".to_string()];
         let reachable = g.reachable_from(&seeds, |_| Vec::new());
@@ -251,19 +280,27 @@ mod tests {
         // actually present in the embedded graph (real modules).
         let real_count = reachable.iter().filter(|m| g.edges_of(m).is_some()).count();
         assert!(real_count > 0, "should reach at least one real module");
-        assert!(real_count < g.module_count(),
-            "real reachable {} should be < total {}", real_count, g.module_count());
+        assert!(
+            real_count < g.module_count(),
+            "real reachable {} should be < total {}",
+            real_count,
+            g.module_count()
+        );
     }
 
     #[test]
     fn reachability_is_conservative_through_parents() {
-        let Some(g) = get_dep_graph() else { return; };
+        let Some(g) = get_dep_graph() else {
+            return;
+        };
         // Importing a leaf item (e.g. `mount core.shell.exec.{run}`) is
         // recorded as a nested edge to `core.shell.exec.run`. The walker
         // must climb to the parent module `core.shell.exec`.
         let seeds = vec!["core.shell.exec.run".to_string()];
         let reachable = g.reachable_from(&seeds, |_| Vec::new());
-        assert!(reachable.contains("core.shell.exec"),
-            "parent module should be reached via nested-leaf seed");
+        assert!(
+            reachable.contains("core.shell.exec"),
+            "parent module should be reached via nested-leaf seed"
+        );
     }
 }

@@ -25,11 +25,11 @@ use verum_ast::decl::{TypeDecl, TypeDeclBody, Visibility};
 use verum_ast::span::Span;
 use verum_ast::ty::{Ident, Path, Type as AstType, TypeKind};
 use verum_ast::{FileId, Item, ItemKind, Module};
+use verum_common::{List, Maybe, Shared};
 use verum_modules::{
     ModuleId, ModulePath, ModuleRegistry, NameResolver,
     resolver::{NameKind, ResolvedName},
 };
-use verum_common::{List, Maybe, Shared};
 use verum_types::TypeChecker;
 
 /// Helper to create a simple module for testing

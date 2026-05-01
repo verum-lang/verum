@@ -83,7 +83,7 @@ pub mod lossless;
 pub mod token;
 
 pub use error::{LexResult, VerumError};
-pub use lexer::{Lexer, LookaheadLexer, strip_shebang, strip_utf8_bom, UTF8_BOM};
+pub use lexer::{Lexer, LookaheadLexer, UTF8_BOM, strip_shebang, strip_utf8_bom};
 pub use lossless::{LosslessLexer, RichToken, Trivia, TriviaItem, TriviaKind};
 pub use token::{
     FloatLiteral, IntegerLiteral, InterpolatedStringLiteral, TaggedLiteralData,
@@ -292,7 +292,10 @@ mod shebang_tests {
         assert!(lex.had_shebang());
         assert_eq!(lex.shebang_text(), Some("#!/usr/bin/env verum\n"));
         // Offset = BOM (3 bytes) + shebang (21 bytes) = 24.
-        assert_eq!(lex.shebang_offset(), 3 + "#!/usr/bin/env verum\n".len() as u32);
+        assert_eq!(
+            lex.shebang_offset(),
+            3 + "#!/usr/bin/env verum\n".len() as u32
+        );
     }
 
     #[test]
@@ -397,7 +400,9 @@ mod shebang_tests {
     #[test]
     fn lexer_shebang_stripped_does_not_emit_extra_tokens() {
         // Without shebang.
-        let bare = Lexer::new("fn main() {}", fid()).filter_map(|t| t.ok()).count();
+        let bare = Lexer::new("fn main() {}", fid())
+            .filter_map(|t| t.ok())
+            .count();
         // With shebang.
         let with_sb = Lexer::new("#!/usr/bin/env verum\nfn main() {}", fid())
             .filter_map(|t| t.ok())
@@ -453,14 +458,19 @@ mod shebang_tests {
             .expect("fn token must be present");
         let kinds: Vec<TriviaKind> = first.leading_trivia.items.iter().map(|t| t.kind).collect();
         // BOM must come strictly before Shebang.
-        let bom_idx = kinds.iter().position(|k| matches!(k, TriviaKind::ByteOrderMark));
-        let sb_idx  = kinds.iter().position(|k| matches!(k, TriviaKind::Shebang));
+        let bom_idx = kinds
+            .iter()
+            .position(|k| matches!(k, TriviaKind::ByteOrderMark));
+        let sb_idx = kinds.iter().position(|k| matches!(k, TriviaKind::Shebang));
         assert!(bom_idx.is_some(), "BOM trivia missing");
-        assert!(sb_idx.is_some(),  "Shebang trivia missing");
-        assert!(bom_idx < sb_idx, "BOM must precede shebang in leading_trivia");
+        assert!(sb_idx.is_some(), "Shebang trivia missing");
+        assert!(
+            bom_idx < sb_idx,
+            "BOM must precede shebang in leading_trivia"
+        );
         // Spans on the BOM and shebang must be in original-source coordinates.
         let bom = &first.leading_trivia.items[bom_idx.unwrap()];
-        let sb  = &first.leading_trivia.items[sb_idx.unwrap()];
+        let sb = &first.leading_trivia.items[sb_idx.unwrap()];
         assert_eq!(bom.text.as_bytes(), UTF8_BOM);
         assert_eq!(bom.span.start, 0);
         assert_eq!(bom.span.end, 3);
@@ -487,11 +497,13 @@ mod shebang_tests {
         assert_eq!(bom.span.start, 0);
         assert_eq!(bom.span.end, 3);
         // No shebang.
-        assert!(!first
-            .leading_trivia
-            .items
-            .iter()
-            .any(|t| matches!(t.kind, TriviaKind::Shebang)));
+        assert!(
+            !first
+                .leading_trivia
+                .items
+                .iter()
+                .any(|t| matches!(t.kind, TriviaKind::Shebang))
+        );
     }
 
     #[test]

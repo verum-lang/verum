@@ -231,9 +231,7 @@ impl ItemKind {
     /// `AxiomDecl`) and non-proof items.
     pub fn as_theorem_decl(&self) -> Option<&TheoremDecl> {
         match self {
-            ItemKind::Theorem(d) | ItemKind::Lemma(d) | ItemKind::Corollary(d) => {
-                Some(d)
-            }
+            ItemKind::Theorem(d) | ItemKind::Lemma(d) | ItemKind::Corollary(d) => Some(d),
             _ => None,
         }
     }
@@ -252,9 +250,7 @@ impl ItemKind {
     /// `None` for non-proof items.
     pub fn proof_item_name(&self) -> Option<&Ident> {
         match self {
-            ItemKind::Theorem(d) | ItemKind::Lemma(d) | ItemKind::Corollary(d) => {
-                Some(&d.name)
-            }
+            ItemKind::Theorem(d) | ItemKind::Lemma(d) | ItemKind::Corollary(d) => Some(&d.name),
             ItemKind::Axiom(a) => Some(&a.name),
             _ => None,
         }
@@ -1048,12 +1044,18 @@ impl TypeDeclBodyKind {
     /// Whether this body shape introduces a protocol surface
     /// (Protocol or Coinductive — both contain method signatures).
     pub fn is_protocol_like(self) -> bool {
-        matches!(self, TypeDeclBodyKind::Protocol | TypeDeclBodyKind::Coinductive)
+        matches!(
+            self,
+            TypeDeclBodyKind::Protocol | TypeDeclBodyKind::Coinductive
+        )
     }
 
     /// Whether this body shape is a sum type (Variant or Inductive).
     pub fn is_sum_type(self) -> bool {
-        matches!(self, TypeDeclBodyKind::Variant | TypeDeclBodyKind::Inductive)
+        matches!(
+            self,
+            TypeDeclBodyKind::Variant | TypeDeclBodyKind::Inductive
+        )
     }
 
     /// Whether this body shape is a product type (Record / Tuple /
@@ -1061,9 +1063,7 @@ impl TypeDeclBodyKind {
     pub fn is_product_type(self) -> bool {
         matches!(
             self,
-            TypeDeclBodyKind::Record
-                | TypeDeclBodyKind::Tuple
-                | TypeDeclBodyKind::SigmaTuple
+            TypeDeclBodyKind::Record | TypeDeclBodyKind::Tuple | TypeDeclBodyKind::SigmaTuple
         )
     }
 }
@@ -1136,10 +1136,7 @@ pub enum TypeDeclBody {
     /// The quotient-type parser is the ergonomic surface; the type
     /// system lowers Q into the HIT form for universal-property
     /// purposes (map-out-of-Q requires respecting the equivalence).
-    Quotient {
-        base: Type,
-        relation: Heap<Expr>,
-    },
+    Quotient { base: Type, relation: Heap<Expr> },
 }
 
 impl TypeDeclBody {
@@ -2490,7 +2487,10 @@ impl TheoremDecl {
     ) -> Self {
         // Synthesize proposition from ensures clauses
         let proposition = if ensures.is_empty() {
-            Expr::new(crate::ExprKind::Literal(crate::Literal::bool(true, span)), span)
+            Expr::new(
+                crate::ExprKind::Literal(crate::Literal::bool(true, span)),
+                span,
+            )
         } else if ensures.len() == 1 {
             ensures.iter().next().unwrap().clone()
         } else {
@@ -3684,7 +3684,6 @@ impl Spanned for PatternDecl {
     }
 }
 
-
 #[cfg(test)]
 mod proof_body_kind_tests {
     use super::*;
@@ -3795,59 +3794,58 @@ mod proof_item_kind_tests {
     }
 
     fn dummy_ident(name: &str) -> Ident {
-        Ident { name: name.into(), span: span() }
+        Ident {
+            name: name.into(),
+            span: span(),
+        }
     }
 
     fn theorem_item(name: &str) -> Item {
         Item::new(
-            ItemKind::Theorem(TheoremDecl::new(
-                dummy_ident(name),
-                dummy_expr(),
-                span(),
-            )),
+            ItemKind::Theorem(TheoremDecl::new(dummy_ident(name), dummy_expr(), span())),
             span(),
         )
     }
 
     fn lemma_item(name: &str) -> Item {
         Item::new(
-            ItemKind::Lemma(TheoremDecl::new(
-                dummy_ident(name),
-                dummy_expr(),
-                span(),
-            )),
+            ItemKind::Lemma(TheoremDecl::new(dummy_ident(name), dummy_expr(), span())),
             span(),
         )
     }
 
     fn corollary_item(name: &str) -> Item {
         Item::new(
-            ItemKind::Corollary(TheoremDecl::new(
-                dummy_ident(name),
-                dummy_expr(),
-                span(),
-            )),
+            ItemKind::Corollary(TheoremDecl::new(dummy_ident(name), dummy_expr(), span())),
             span(),
         )
     }
 
     fn axiom_item(name: &str) -> Item {
         Item::new(
-            ItemKind::Axiom(AxiomDecl::new(
-                dummy_ident(name),
-                dummy_expr(),
-                span(),
-            )),
+            ItemKind::Axiom(AxiomDecl::new(dummy_ident(name), dummy_expr(), span())),
             span(),
         )
     }
 
     #[test]
     fn proof_item_kind_classifies_each_variant() {
-        assert_eq!(theorem_item("t").kind.proof_item_kind(), Some(ProofItemKind::Theorem));
-        assert_eq!(lemma_item("l").kind.proof_item_kind(), Some(ProofItemKind::Lemma));
-        assert_eq!(corollary_item("c").kind.proof_item_kind(), Some(ProofItemKind::Corollary));
-        assert_eq!(axiom_item("a").kind.proof_item_kind(), Some(ProofItemKind::Axiom));
+        assert_eq!(
+            theorem_item("t").kind.proof_item_kind(),
+            Some(ProofItemKind::Theorem)
+        );
+        assert_eq!(
+            lemma_item("l").kind.proof_item_kind(),
+            Some(ProofItemKind::Lemma)
+        );
+        assert_eq!(
+            corollary_item("c").kind.proof_item_kind(),
+            Some(ProofItemKind::Corollary)
+        );
+        assert_eq!(
+            axiom_item("a").kind.proof_item_kind(),
+            Some(ProofItemKind::Axiom)
+        );
     }
 
     #[test]
@@ -3892,10 +3890,42 @@ mod proof_item_kind_tests {
 
     #[test]
     fn proof_item_name_works_uniformly() {
-        assert_eq!(theorem_item("thm1").kind.proof_item_name().unwrap().name.as_str(), "thm1");
-        assert_eq!(lemma_item("lem1").kind.proof_item_name().unwrap().name.as_str(), "lem1");
-        assert_eq!(corollary_item("cor1").kind.proof_item_name().unwrap().name.as_str(), "cor1");
-        assert_eq!(axiom_item("ax1").kind.proof_item_name().unwrap().name.as_str(), "ax1");
+        assert_eq!(
+            theorem_item("thm1")
+                .kind
+                .proof_item_name()
+                .unwrap()
+                .name
+                .as_str(),
+            "thm1"
+        );
+        assert_eq!(
+            lemma_item("lem1")
+                .kind
+                .proof_item_name()
+                .unwrap()
+                .name
+                .as_str(),
+            "lem1"
+        );
+        assert_eq!(
+            corollary_item("cor1")
+                .kind
+                .proof_item_name()
+                .unwrap()
+                .name
+                .as_str(),
+            "cor1"
+        );
+        assert_eq!(
+            axiom_item("ax1")
+                .kind
+                .proof_item_name()
+                .unwrap()
+                .name
+                .as_str(),
+            "ax1"
+        );
     }
 
     #[test]
@@ -3961,14 +3991,35 @@ mod type_decl_body_kind_tests {
             kind: crate::ty::TypeKind::Bool,
             span: Span::dummy(),
         };
-        assert_eq!(TypeDeclBody::Alias(t.clone()).kind(), TypeDeclBodyKind::Alias);
-        assert_eq!(TypeDeclBody::Record(List::new()).kind(), TypeDeclBodyKind::Record);
-        assert_eq!(TypeDeclBody::Variant(List::new()).kind(), TypeDeclBodyKind::Variant);
-        assert_eq!(TypeDeclBody::Newtype(t.clone()).kind(), TypeDeclBodyKind::Newtype);
-        assert_eq!(TypeDeclBody::Tuple(List::new()).kind(), TypeDeclBodyKind::Tuple);
-        assert_eq!(TypeDeclBody::SigmaTuple(List::new()).kind(), TypeDeclBodyKind::SigmaTuple);
+        assert_eq!(
+            TypeDeclBody::Alias(t.clone()).kind(),
+            TypeDeclBodyKind::Alias
+        );
+        assert_eq!(
+            TypeDeclBody::Record(List::new()).kind(),
+            TypeDeclBodyKind::Record
+        );
+        assert_eq!(
+            TypeDeclBody::Variant(List::new()).kind(),
+            TypeDeclBodyKind::Variant
+        );
+        assert_eq!(
+            TypeDeclBody::Newtype(t.clone()).kind(),
+            TypeDeclBodyKind::Newtype
+        );
+        assert_eq!(
+            TypeDeclBody::Tuple(List::new()).kind(),
+            TypeDeclBodyKind::Tuple
+        );
+        assert_eq!(
+            TypeDeclBody::SigmaTuple(List::new()).kind(),
+            TypeDeclBodyKind::SigmaTuple
+        );
         assert_eq!(TypeDeclBody::Unit.kind(), TypeDeclBodyKind::Unit);
-        assert_eq!(TypeDeclBody::Inductive(List::new()).kind(), TypeDeclBodyKind::Inductive);
+        assert_eq!(
+            TypeDeclBody::Inductive(List::new()).kind(),
+            TypeDeclBodyKind::Inductive
+        );
     }
 
     #[test]

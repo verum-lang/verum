@@ -157,7 +157,13 @@ impl<'a> RecursiveParser<'a> {
                         self.stream.advance(); // consume `ghost`
                         let block = self.parse_block()?;
                         let span = self.stream.make_span(start_pos);
-                        Stmt::new(StmtKind::Expr { expr: Expr::new(ExprKind::Block(block), span), has_semi: false }, span)
+                        Stmt::new(
+                            StmtKind::Expr {
+                                expr: Expr::new(ExprKind::Block(block), span),
+                                has_semi: false,
+                            },
+                            span,
+                        )
                     }
                     Some(TokenKind::Invariant) => {
                         // ghost invariant { ... }
@@ -306,10 +312,13 @@ impl<'a> RecursiveParser<'a> {
         if !self.stream.check(&TokenKind::RBrace) {
             return Err(ParseError::stmt_unclosed_block(
                 self.stream.make_span(start_span.start as usize),
-            ).with_help("missing closing '}' for block"));
+            )
+            .with_help("missing closing '}' for block"));
         }
         // SAFETY: check() above confirmed RBrace exists, so advance() succeeds
-        let end_token = self.stream.advance()
+        let end_token = self
+            .stream
+            .advance()
             .expect("RBrace check above guarantees token exists"); // consume }
         let end_span = end_token.span;
         let span = Span::new(start_span.start, end_span.end, start_span.file_id);
@@ -360,7 +369,10 @@ impl<'a> RecursiveParser<'a> {
                 ));
             }
             // E043: Check for invalid type (let x: 123 = 5;)
-            if matches!(self.stream.peek_kind(), Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_))) {
+            if matches!(
+                self.stream.peek_kind(),
+                Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_))
+            ) {
                 return Err(ParseError::let_invalid_type_or_pattern(
                     "literals cannot be used as types",
                     self.stream.current_span(),
@@ -448,11 +460,16 @@ impl<'a> RecursiveParser<'a> {
         } else if self.stream.check(&TokenKind::Semicolon) {
             // Semicolon present
             // SAFETY: check() above confirmed Semicolon exists
-            self.stream.advance()
-                .expect("Semicolon check above guarantees token exists").span
+            self.stream
+                .advance()
+                .expect("Semicolon check above guarantees token exists")
+                .span
         } else {
             // E010: Missing semicolon - another statement/expression follows
-            return Err(ParseError::missing_semicolon(self.stream.current_span(), "let statement"));
+            return Err(ParseError::missing_semicolon(
+                self.stream.current_span(),
+                "let statement",
+            ));
         };
 
         let span = Span::new(start_span.start, end_span.end, start_span.file_id);
@@ -669,7 +686,10 @@ impl<'a> RecursiveParser<'a> {
         }
 
         // E044: Check for invalid context (provide 123 = value;)
-        if matches!(self.stream.peek_kind(), Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_))) {
+        if matches!(
+            self.stream.peek_kind(),
+            Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_))
+        ) {
             return Err(ParseError::provide_invalid(
                 "provide requires an identifier as context name, not a literal",
                 self.stream.current_span(),
@@ -736,10 +756,7 @@ impl<'a> RecursiveParser<'a> {
             self.stream.advance(); // consume semicolon
             let span = Span::new(start_span.start, semi_span.end, start_span.file_id);
             // Use empty tuple () as sentinel value for layer expansion
-            let unit_value = Expr::new(
-                verum_ast::ExprKind::Tuple(verum_common::List::new()),
-                span,
-            );
+            let unit_value = Expr::new(verum_ast::ExprKind::Tuple(verum_common::List::new()), span);
             return Ok(Stmt::new(
                 StmtKind::Provide {
                     context,
@@ -767,7 +784,10 @@ impl<'a> RecursiveParser<'a> {
         }
 
         // E044: Check for missing equals (provide Database db; - identifier after context without =)
-        if !self.stream.check(&TokenKind::Eq) && !self.stream.check(&TokenKind::As) && !self.stream.check(&TokenKind::Dot) {
+        if !self.stream.check(&TokenKind::Eq)
+            && !self.stream.check(&TokenKind::As)
+            && !self.stream.check(&TokenKind::Dot)
+        {
             // Not =, not 'as', not '.' - this is an error unless it's the alias or equals
             if let Some(TokenKind::Ident(_)) = self.stream.peek_kind() {
                 return Err(ParseError::provide_invalid(
@@ -821,8 +841,10 @@ impl<'a> RecursiveParser<'a> {
         // we need to allow struct literal parsing. But if there's no identifier before '{',
         // the '{' is a scope block.
         let value = if matches!(self.stream.peek_kind(), Some(TokenKind::Ident(_)))
-            || matches!(self.stream.peek_kind(), Some(TokenKind::Some | TokenKind::None | TokenKind::Ok | TokenKind::Err))
-        {
+            || matches!(
+                self.stream.peek_kind(),
+                Some(TokenKind::Some | TokenKind::None | TokenKind::Ok | TokenKind::Err)
+            ) {
             // Identifier-led expression: allow struct literal parsing
             self.parse_expr_bp(7)?
         } else {
@@ -898,7 +920,10 @@ impl<'a> RecursiveParser<'a> {
 
             let span = Span::new(start_span.start, inner.span.end, start_span.file_id);
             return Ok(Stmt::new(
-                StmtKind::Expr { expr: inner, has_semi: false },
+                StmtKind::Expr {
+                    expr: inner,
+                    has_semi: false,
+                },
                 span,
             ));
         }
@@ -976,26 +1001,43 @@ impl<'a> RecursiveParser<'a> {
                 TokenKind::Slash => (true, "standalone '/' operator is not a valid expression"),
                 TokenKind::Caret => (true, "standalone '^' operator is not a valid expression"),
                 // Assignment operators
-                TokenKind::Eq => (true, "standalone '=' is not a valid expression; use 'let' for bindings"),
+                TokenKind::Eq => (
+                    true,
+                    "standalone '=' is not a valid expression; use 'let' for bindings",
+                ),
                 TokenKind::PlusEq | TokenKind::MinusEq | TokenKind::StarEq | TokenKind::SlashEq => {
                     (true, "assignment operator is not a valid expression start")
                 }
                 // Comparison operators
-                TokenKind::EqEq | TokenKind::BangEq => (true, "standalone comparison operator is not a valid expression"),
-                TokenKind::Lt | TokenKind::Gt | TokenKind::LtEq | TokenKind::GtEq => {
-                    (true, "standalone comparison operator is not a valid expression")
-                }
+                TokenKind::EqEq | TokenKind::BangEq => (
+                    true,
+                    "standalone comparison operator is not a valid expression",
+                ),
+                TokenKind::Lt | TokenKind::Gt | TokenKind::LtEq | TokenKind::GtEq => (
+                    true,
+                    "standalone comparison operator is not a valid expression",
+                ),
                 // Logical operators (PipePipe is NOT included: || starts an empty closure)
-                TokenKind::AmpersandAmpersand => {
-                    (true, "standalone logical operator is not a valid expression")
-                }
+                TokenKind::AmpersandAmpersand => (
+                    true,
+                    "standalone logical operator is not a valid expression",
+                ),
                 // Punctuation that can't start expressions
                 TokenKind::Comma => (true, "unexpected comma; not a valid expression start"),
-                TokenKind::Dot => (true, "unexpected '.'; field access requires a preceding expression"),
+                TokenKind::Dot => (
+                    true,
+                    "unexpected '.'; field access requires a preceding expression",
+                ),
                 TokenKind::Colon => (true, "unexpected ':'; type annotations require a binding"),
-                TokenKind::ColonColon => (true, "unexpected '::'; path requires a preceding identifier"),
+                TokenKind::ColonColon => (
+                    true,
+                    "unexpected '::'; path requires a preceding identifier",
+                ),
                 TokenKind::FatArrow => (true, "unexpected '=>'; match arms require 'match'"),
-                TokenKind::RArrow => (true, "unexpected '->'; return types require function signature"),
+                TokenKind::RArrow => (
+                    true,
+                    "unexpected '->'; return types require function signature",
+                ),
                 _ => (false, ""),
             };
             if is_invalid {
@@ -1121,8 +1163,16 @@ impl<'a> RecursiveParser<'a> {
         // because in that case, @cfg is at expression position (handled by expr parser).
         let is_known_meta = matches!(
             name.as_str(),
-            "file" | "line" | "column" | "module" | "function"
-                | "const" | "error" | "warning" | "stringify" | "concat"
+            "file"
+                | "line"
+                | "column"
+                | "module"
+                | "function"
+                | "const"
+                | "error"
+                | "warning"
+                | "stringify"
+                | "concat"
         );
         if is_known_meta {
             return true; // Let expression parser handle it
@@ -1693,16 +1743,28 @@ mod tests {
     fn test_let_else_basic() {
         // Basic let-else statement
         let result = parse_stmt("let Some(value) = maybe else { return; };");
-        assert!(result.is_ok(), "Failed to parse let-else: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to parse let-else: {:?}",
+            result.err()
+        );
         if let Ok(stmt) = result {
-            assert!(matches!(stmt.kind, StmtKind::LetElse { .. }), "Expected LetElse, got {:?}", stmt.kind);
+            assert!(
+                matches!(stmt.kind, StmtKind::LetElse { .. }),
+                "Expected LetElse, got {:?}",
+                stmt.kind
+            );
         }
     }
 
     #[test]
     fn test_let_else_ok_pattern() {
         let result = parse_stmt("let Ok(data) = result else { return default(); };");
-        assert!(result.is_ok(), "Failed to parse let-else: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Failed to parse let-else: {:?}",
+            result.err()
+        );
         if let Ok(stmt) = result {
             assert!(matches!(stmt.kind, StmtKind::LetElse { .. }));
         }
@@ -1710,8 +1772,14 @@ mod tests {
 
     #[test]
     fn test_let_else_complex_pattern() {
-        let result = parse_stmt(r#"let Some(Point { x, y }) = maybe_point else { panic("Expected point"); };"#);
-        assert!(result.is_ok(), "Failed to parse let-else: {:?}", result.err());
+        let result = parse_stmt(
+            r#"let Some(Point { x, y }) = maybe_point else { panic("Expected point"); };"#,
+        );
+        assert!(
+            result.is_ok(),
+            "Failed to parse let-else: {:?}",
+            result.err()
+        );
         if let Ok(stmt) = result {
             assert!(matches!(stmt.kind, StmtKind::LetElse { .. }));
         }

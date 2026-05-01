@@ -1,13 +1,13 @@
 //! GPU extended opcode handlers for VBC interpreter dispatch.
 
-use crate::instruction::Reg;
-use crate::module::FunctionId;
-use crate::value::Value;
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::super::dispatch_loop_table_with_entry_depth;
 use super::bytecode_io::*;
+use crate::instruction::Reg;
+use crate::module::FunctionId;
+use crate::value::Value;
 
 // ============================================================================
 // GPU Extended Handler (0xF8)
@@ -18,9 +18,11 @@ use super::bytecode_io::*;
 
 /// This dispatches to GPU operations based on the GpuSubOpcode byte.
 /// Most operations return stubs since the interpreter uses CPU fallbacks.
-pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_gpu_extended(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
+    use super::super::super::kernel::device::{Vendor, get_registry};
     use crate::instruction::GpuSubOpcode;
-    use super::super::super::kernel::device::{get_registry, Vendor};
 
     let sub_op_byte = read_u8(state)?;
     let sub_op = GpuSubOpcode::from_byte(sub_op_byte);
@@ -43,7 +45,8 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             // Return detected Metal devices on macOS
             let dst = read_reg(state)?;
             let registry = get_registry();
-            let metal_devices: Vec<Value> = registry.gpus()
+            let metal_devices: Vec<Value> = registry
+                .gpus()
                 .filter(|(_, info)| info.vendor == Vendor::Apple)
                 .map(|(id, _)| Value::from_i64(id.0 as i64))
                 .collect();
@@ -106,7 +109,8 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             // the absence of a usable GPU instead of assuming 8GB exists.
             let device_id = state.get_reg(device_reg).as_i64() as u16;
             let registry = get_registry();
-            let mem_info: (u64, u64) = registry.gpus()
+            let mem_info: (u64, u64) = registry
+                .gpus()
                 .find(|(id, _)| id.0 == device_id)
                 .map(|(_, info)| (info.memory_bytes as u64, info.memory_bytes as u64))
                 .unwrap_or((0, 0));
@@ -237,7 +241,10 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             let _stream_reg = read_reg(state)?;
             let event_id = state.get_reg(event_reg).as_i64() as u32;
             // Record current timestamp for this event
-            state.gpu_context.events.insert(event_id, std::time::Instant::now());
+            state
+                .gpu_context
+                .events
+                .insert(event_id, std::time::Instant::now());
             state.set_reg(dst, Value::from_i64(0)); // success
             Ok(DispatchResult::Continue)
         }
@@ -248,7 +255,10 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             let _stream_reg = read_reg(state)?;
             let _flags = read_u8(state)?;
             let event_id = state.get_reg(event_reg).as_i64() as u32;
-            state.gpu_context.events.insert(event_id, std::time::Instant::now());
+            state
+                .gpu_context
+                .events
+                .insert(event_id, std::time::Instant::now());
             state.set_reg(dst, Value::from_i64(0)); // success
             Ok(DispatchResult::Continue)
         }
@@ -275,7 +285,10 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             let start_id = state.get_reg(start_reg).as_i64() as u32;
             let end_id = state.get_reg(end_reg).as_i64() as u32;
             // Compute real elapsed time between events in milliseconds
-            let elapsed_ms = match (state.gpu_context.events.get(&start_id), state.gpu_context.events.get(&end_id)) {
+            let elapsed_ms = match (
+                state.gpu_context.events.get(&start_id),
+                state.gpu_context.events.get(&end_id),
+            ) {
                 (Some(start), Some(end)) => {
                     let duration = end.duration_since(*start);
                     duration.as_secs_f64() * 1000.0
@@ -312,7 +325,10 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             };
             let ptr = unsafe { std::alloc::alloc(layout) };
             if !ptr.is_null() {
-                state.gpu_context.allocated_buffers.insert(ptr as usize, alloc_size);
+                state
+                    .gpu_context
+                    .allocated_buffers
+                    .insert(ptr as usize, alloc_size);
             }
             state.set_reg(dst, Value::from_ptr(ptr));
             Ok(DispatchResult::Continue)
@@ -334,7 +350,10 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             };
             let ptr = unsafe { std::alloc::alloc(layout) };
             if !ptr.is_null() {
-                state.gpu_context.allocated_buffers.insert(ptr as usize, alloc_size);
+                state
+                    .gpu_context
+                    .allocated_buffers
+                    .insert(ptr as usize, alloc_size);
             }
             state.set_reg(dst, Value::from_ptr(ptr));
             Ok(DispatchResult::Continue)
@@ -358,9 +377,12 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             // in std::alloc; the leak is strictly the safer
             // failure mode.
             if let Some(size) = state.gpu_context.allocated_buffers.remove(&ptr_addr)
-                && let Ok(layout) = std::alloc::Layout::from_size_align(size, 8) {
-                    unsafe { std::alloc::dealloc(ptr, layout); }
+                && let Ok(layout) = std::alloc::Layout::from_size_align(size, 8)
+            {
+                unsafe {
+                    std::alloc::dealloc(ptr, layout);
                 }
+            }
             state.set_reg(dst, Value::from_i64(0)); // success
             Ok(DispatchResult::Continue)
         }
@@ -391,8 +413,10 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             Ok(DispatchResult::Continue)
         }
 
-        Some(GpuSubOpcode::Memcpy) | Some(GpuSubOpcode::MemcpyAsync) |
-        Some(GpuSubOpcode::Memcpy2D) | Some(GpuSubOpcode::Memcpy2DAsync) => {
+        Some(GpuSubOpcode::Memcpy)
+        | Some(GpuSubOpcode::MemcpyAsync)
+        | Some(GpuSubOpcode::Memcpy2D)
+        | Some(GpuSubOpcode::Memcpy2DAsync) => {
             let dst = read_reg(state)?;
             let dst_ptr_reg = read_reg(state)?;
             let src_ptr_reg = read_reg(state)?;
@@ -410,8 +434,9 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
         }
 
         // Dedicated direction-specific memcpy (synchronous)
-        Some(GpuSubOpcode::MemcpyH2D) | Some(GpuSubOpcode::MemcpyD2H) |
-        Some(GpuSubOpcode::MemcpyD2D) => {
+        Some(GpuSubOpcode::MemcpyH2D)
+        | Some(GpuSubOpcode::MemcpyD2H)
+        | Some(GpuSubOpcode::MemcpyD2D) => {
             // In interpreter, all memory is CPU-accessible, so these are equivalent
             let dst = read_reg(state)?;
             let dst_ptr_reg = read_reg(state)?;
@@ -495,7 +520,10 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             let dst = read_reg(state)?;
             let _stream = read_reg(state)?;
             state.gpu_context.graph_capturing = true;
-            state.gpu_context.graph_ops.push((0, "begin_capture".to_string()));
+            state
+                .gpu_context
+                .graph_ops
+                .push((0, "begin_capture".to_string()));
             state.set_reg(dst, Value::from_i64(0)); // success
             Ok(DispatchResult::Continue)
         }
@@ -504,7 +532,10 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             let dst = read_reg(state)?;
             let _stream = read_reg(state)?;
             state.gpu_context.graph_capturing = false;
-            state.gpu_context.graph_ops.push((0, "end_capture".to_string()));
+            state
+                .gpu_context
+                .graph_ops
+                .push((0, "end_capture".to_string()));
             state.set_reg(dst, Value::from_i64(0)); // success
             Ok(DispatchResult::Continue)
         }
@@ -513,7 +544,10 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             let dst = read_reg(state)?;
             let _graph_exec = read_reg(state)?;
             let _stream = read_reg(state)?;
-            state.gpu_context.graph_ops.push((0, "graph_launch".to_string()));
+            state
+                .gpu_context
+                .graph_ops
+                .push((0, "graph_launch".to_string()));
             state.set_reg(dst, Value::from_i64(0)); // success
             Ok(DispatchResult::Continue)
         }
@@ -529,7 +563,10 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             let dst = read_reg(state)?;
             let _graph_exec = read_reg(state)?;
             let _graph = read_reg(state)?;
-            state.gpu_context.graph_ops.push((0, "graph_exec_update".to_string()));
+            state
+                .gpu_context
+                .graph_ops
+                .push((0, "graph_exec_update".to_string()));
             state.set_reg(dst, Value::from_i64(0)); // success
             Ok(DispatchResult::Continue)
         }
@@ -577,7 +614,9 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
         // Shared memory is allocated per-block and shared across threads.
         // __syncthreads() is a no-op since threads execute in order.
         Some(GpuSubOpcode::Launch) | Some(GpuSubOpcode::LaunchCooperative) => {
-            use super::super::super::gpu_simulator::{GpuThreadContext, SharedMemoryBlock, KernelLaunchParams};
+            use super::super::super::gpu_simulator::{
+                GpuThreadContext, KernelLaunchParams, SharedMemoryBlock,
+            };
 
             // Read kernel_id (varint)
             let kernel_id = read_varint(state)? as u32;
@@ -608,11 +647,27 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
                 state.registers.get(caller_base, grid_z_reg).as_i64().max(1) as u32,
             ];
             let block_dim = [
-                state.registers.get(caller_base, block_x_reg).as_i64().max(1) as u32,
-                state.registers.get(caller_base, block_y_reg).as_i64().max(1) as u32,
-                state.registers.get(caller_base, block_z_reg).as_i64().max(1) as u32,
+                state
+                    .registers
+                    .get(caller_base, block_x_reg)
+                    .as_i64()
+                    .max(1) as u32,
+                state
+                    .registers
+                    .get(caller_base, block_y_reg)
+                    .as_i64()
+                    .max(1) as u32,
+                state
+                    .registers
+                    .get(caller_base, block_z_reg)
+                    .as_i64()
+                    .max(1) as u32,
             ];
-            let shared_mem_size = state.registers.get(caller_base, shared_mem_reg).as_i64().max(0) as usize;
+            let shared_mem_size = state
+                .registers
+                .get(caller_base, shared_mem_reg)
+                .as_i64()
+                .max(0) as usize;
 
             // Collect argument values before modifying state
             let mut arg_values = Vec::with_capacity(arg_count);
@@ -656,9 +711,12 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
                 // Set thread context for this thread
                 let smem = match state.gpu_shared_memory.as_ref() {
                     Some(m) => m,
-                    None => return Err(InterpreterError::InvalidOperand {
-                        message: "GPU shared memory not initialized for kernel launch".to_string(),
-                    }),
+                    None => {
+                        return Err(InterpreterError::InvalidOperand {
+                            message: "GPU shared memory not initialized for kernel launch"
+                                .to_string(),
+                        });
+                    }
                 };
                 state.gpu_thread_ctx = Some(GpuThreadContext::new(
                     thread_id, block_id, block_dim, grid_dim, smem,
@@ -666,7 +724,10 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
 
                 // Push a new frame for the kernel function
                 let entry_depth = state.call_stack.depth();
-                let new_base = state.call_stack.push_frame(func_id, reg_count, return_pc, Reg(0))?;
+                let new_base =
+                    state
+                        .call_stack
+                        .push_frame(func_id, reg_count, return_pc, Reg(0))?;
                 state.registers.push_frame(reg_count);
 
                 // Copy arguments to callee registers
@@ -693,7 +754,9 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
         }
 
         Some(GpuSubOpcode::LaunchMultiDevice) => {
-            use super::super::super::gpu_simulator::{GpuThreadContext, SharedMemoryBlock, KernelLaunchParams};
+            use super::super::super::gpu_simulator::{
+                GpuThreadContext, KernelLaunchParams, SharedMemoryBlock,
+            };
 
             // Read kernel_id (varint)
             let kernel_id = read_varint(state)? as u32;
@@ -724,11 +787,27 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
                 state.registers.get(caller_base, grid_z_reg).as_i64().max(1) as u32,
             ];
             let block_dim = [
-                state.registers.get(caller_base, block_x_reg).as_i64().max(1) as u32,
-                state.registers.get(caller_base, block_y_reg).as_i64().max(1) as u32,
-                state.registers.get(caller_base, block_z_reg).as_i64().max(1) as u32,
+                state
+                    .registers
+                    .get(caller_base, block_x_reg)
+                    .as_i64()
+                    .max(1) as u32,
+                state
+                    .registers
+                    .get(caller_base, block_y_reg)
+                    .as_i64()
+                    .max(1) as u32,
+                state
+                    .registers
+                    .get(caller_base, block_z_reg)
+                    .as_i64()
+                    .max(1) as u32,
             ];
-            let shared_mem_size = state.registers.get(caller_base, shared_mem_reg).as_i64().max(0) as usize;
+            let shared_mem_size = state
+                .registers
+                .get(caller_base, shared_mem_reg)
+                .as_i64()
+                .max(0) as usize;
 
             let mut arg_values = Vec::with_capacity(arg_count);
             for &reg in &arg_regs {
@@ -765,16 +844,22 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
 
                 let smem = match state.gpu_shared_memory.as_ref() {
                     Some(m) => m,
-                    None => return Err(InterpreterError::InvalidOperand {
-                        message: "GPU shared memory not initialized for kernel launch".to_string(),
-                    }),
+                    None => {
+                        return Err(InterpreterError::InvalidOperand {
+                            message: "GPU shared memory not initialized for kernel launch"
+                                .to_string(),
+                        });
+                    }
                 };
                 state.gpu_thread_ctx = Some(GpuThreadContext::new(
                     thread_id, block_id, block_dim, grid_dim, smem,
                 ));
 
                 let entry_depth = state.call_stack.depth();
-                let new_base = state.call_stack.push_frame(func_id, reg_count, return_pc, Reg(0))?;
+                let new_base =
+                    state
+                        .call_stack
+                        .push_frame(func_id, reg_count, return_pc, Reg(0))?;
                 state.registers.push_frame(reg_count);
 
                 for (i, val) in arg_values.iter().enumerate() {
@@ -798,73 +883,109 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
         // ================================================================
         Some(GpuSubOpcode::ThreadIdX) => {
             let dst = read_reg(state)?;
-            let val = state.gpu_thread_ctx.as_ref().map_or(0, |ctx| ctx.thread_id[0] as i64);
+            let val = state
+                .gpu_thread_ctx
+                .as_ref()
+                .map_or(0, |ctx| ctx.thread_id[0] as i64);
             state.set_reg(dst, Value::from_i64(val));
             Ok(DispatchResult::Continue)
         }
         Some(GpuSubOpcode::ThreadIdY) => {
             let dst = read_reg(state)?;
-            let val = state.gpu_thread_ctx.as_ref().map_or(0, |ctx| ctx.thread_id[1] as i64);
+            let val = state
+                .gpu_thread_ctx
+                .as_ref()
+                .map_or(0, |ctx| ctx.thread_id[1] as i64);
             state.set_reg(dst, Value::from_i64(val));
             Ok(DispatchResult::Continue)
         }
         Some(GpuSubOpcode::ThreadIdZ) => {
             let dst = read_reg(state)?;
-            let val = state.gpu_thread_ctx.as_ref().map_or(0, |ctx| ctx.thread_id[2] as i64);
+            let val = state
+                .gpu_thread_ctx
+                .as_ref()
+                .map_or(0, |ctx| ctx.thread_id[2] as i64);
             state.set_reg(dst, Value::from_i64(val));
             Ok(DispatchResult::Continue)
         }
         Some(GpuSubOpcode::BlockIdX) => {
             let dst = read_reg(state)?;
-            let val = state.gpu_thread_ctx.as_ref().map_or(0, |ctx| ctx.block_id[0] as i64);
+            let val = state
+                .gpu_thread_ctx
+                .as_ref()
+                .map_or(0, |ctx| ctx.block_id[0] as i64);
             state.set_reg(dst, Value::from_i64(val));
             Ok(DispatchResult::Continue)
         }
         Some(GpuSubOpcode::BlockIdY) => {
             let dst = read_reg(state)?;
-            let val = state.gpu_thread_ctx.as_ref().map_or(0, |ctx| ctx.block_id[1] as i64);
+            let val = state
+                .gpu_thread_ctx
+                .as_ref()
+                .map_or(0, |ctx| ctx.block_id[1] as i64);
             state.set_reg(dst, Value::from_i64(val));
             Ok(DispatchResult::Continue)
         }
         Some(GpuSubOpcode::BlockIdZ) => {
             let dst = read_reg(state)?;
-            let val = state.gpu_thread_ctx.as_ref().map_or(0, |ctx| ctx.block_id[2] as i64);
+            let val = state
+                .gpu_thread_ctx
+                .as_ref()
+                .map_or(0, |ctx| ctx.block_id[2] as i64);
             state.set_reg(dst, Value::from_i64(val));
             Ok(DispatchResult::Continue)
         }
         Some(GpuSubOpcode::BlockDimX) => {
             let dst = read_reg(state)?;
-            let val = state.gpu_thread_ctx.as_ref().map_or(1, |ctx| ctx.block_dim[0] as i64);
+            let val = state
+                .gpu_thread_ctx
+                .as_ref()
+                .map_or(1, |ctx| ctx.block_dim[0] as i64);
             state.set_reg(dst, Value::from_i64(val));
             Ok(DispatchResult::Continue)
         }
         Some(GpuSubOpcode::BlockDimY) => {
             let dst = read_reg(state)?;
-            let val = state.gpu_thread_ctx.as_ref().map_or(1, |ctx| ctx.block_dim[1] as i64);
+            let val = state
+                .gpu_thread_ctx
+                .as_ref()
+                .map_or(1, |ctx| ctx.block_dim[1] as i64);
             state.set_reg(dst, Value::from_i64(val));
             Ok(DispatchResult::Continue)
         }
         Some(GpuSubOpcode::BlockDimZ) => {
             let dst = read_reg(state)?;
-            let val = state.gpu_thread_ctx.as_ref().map_or(1, |ctx| ctx.block_dim[2] as i64);
+            let val = state
+                .gpu_thread_ctx
+                .as_ref()
+                .map_or(1, |ctx| ctx.block_dim[2] as i64);
             state.set_reg(dst, Value::from_i64(val));
             Ok(DispatchResult::Continue)
         }
         Some(GpuSubOpcode::GridDimX) => {
             let dst = read_reg(state)?;
-            let val = state.gpu_thread_ctx.as_ref().map_or(1, |ctx| ctx.grid_dim[0] as i64);
+            let val = state
+                .gpu_thread_ctx
+                .as_ref()
+                .map_or(1, |ctx| ctx.grid_dim[0] as i64);
             state.set_reg(dst, Value::from_i64(val));
             Ok(DispatchResult::Continue)
         }
         Some(GpuSubOpcode::GridDimY) => {
             let dst = read_reg(state)?;
-            let val = state.gpu_thread_ctx.as_ref().map_or(1, |ctx| ctx.grid_dim[1] as i64);
+            let val = state
+                .gpu_thread_ctx
+                .as_ref()
+                .map_or(1, |ctx| ctx.grid_dim[1] as i64);
             state.set_reg(dst, Value::from_i64(val));
             Ok(DispatchResult::Continue)
         }
         Some(GpuSubOpcode::GridDimZ) => {
             let dst = read_reg(state)?;
-            let val = state.gpu_thread_ctx.as_ref().map_or(1, |ctx| ctx.grid_dim[2] as i64);
+            let val = state
+                .gpu_thread_ctx
+                .as_ref()
+                .map_or(1, |ctx| ctx.grid_dim[2] as i64);
             state.set_reg(dst, Value::from_i64(val));
             Ok(DispatchResult::Continue)
         }
@@ -885,7 +1006,10 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
         }
         Some(GpuSubOpcode::LinearThreadId) => {
             let dst = read_reg(state)?;
-            let val = state.gpu_thread_ctx.as_ref().map_or(0, |ctx| ctx.linear_thread_id() as i64);
+            let val = state
+                .gpu_thread_ctx
+                .as_ref()
+                .map_or(0, |ctx| ctx.linear_thread_id() as i64);
             state.set_reg(dst, Value::from_i64(val));
             Ok(DispatchResult::Continue)
         }
@@ -908,7 +1032,9 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             let offset_reg = read_reg(state)?;
             let caller_base = state.reg_base();
             let offset = state.registers.get(caller_base, offset_reg).as_i64() as usize;
-            let val = state.gpu_shared_memory.as_ref()
+            let val = state
+                .gpu_shared_memory
+                .as_ref()
                 .and_then(|smem| smem.read_i64(offset))
                 .unwrap_or(0);
             state.set_reg(dst, Value::from_i64(val));
@@ -930,7 +1056,9 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             let offset_reg = read_reg(state)?;
             let caller_base = state.reg_base();
             let offset = state.registers.get(caller_base, offset_reg).as_i64() as usize;
-            let val = state.gpu_shared_memory.as_ref()
+            let val = state
+                .gpu_shared_memory
+                .as_ref()
                 .and_then(|smem| smem.read_f64(offset))
                 .unwrap_or(0.0);
             state.set_reg(dst, Value::from_f64(val));
@@ -954,7 +1082,9 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             let caller_base = state.reg_base();
             let offset = state.registers.get(caller_base, offset_reg).as_i64() as usize;
             let value = state.registers.get(caller_base, value_reg).as_i64();
-            let old = state.gpu_shared_memory.as_mut()
+            let old = state
+                .gpu_shared_memory
+                .as_mut()
                 .and_then(|smem| smem.atomic_add_i64(offset, value))
                 .unwrap_or(0);
             state.set_reg(dst, Value::from_i64(old));
@@ -967,7 +1097,9 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             let caller_base = state.reg_base();
             let offset = state.registers.get(caller_base, offset_reg).as_i64() as usize;
             let value = state.registers.get(caller_base, value_reg).as_f64();
-            let old = state.gpu_shared_memory.as_mut()
+            let old = state
+                .gpu_shared_memory
+                .as_mut()
                 .and_then(|smem| smem.atomic_add_f64(offset, value))
                 .unwrap_or(0.0);
             state.set_reg(dst, Value::from_f64(old));
@@ -982,7 +1114,9 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             let offset = state.registers.get(caller_base, offset_reg).as_i64() as usize;
             let expected = state.registers.get(caller_base, expected_reg).as_i64();
             let desired = state.registers.get(caller_base, desired_reg).as_i64();
-            let old = state.gpu_shared_memory.as_mut()
+            let old = state
+                .gpu_shared_memory
+                .as_mut()
                 .and_then(|smem| smem.atomic_cas_i64(offset, expected, desired))
                 .unwrap_or(0);
             state.set_reg(dst, Value::from_i64(old));
@@ -995,7 +1129,9 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             let caller_base = state.reg_base();
             let offset = state.registers.get(caller_base, offset_reg).as_i64() as usize;
             let value = state.registers.get(caller_base, value_reg).as_i64();
-            let old = state.gpu_shared_memory.as_mut()
+            let old = state
+                .gpu_shared_memory
+                .as_mut()
                 .and_then(|smem| smem.atomic_max_i64(offset, value))
                 .unwrap_or(0);
             state.set_reg(dst, Value::from_i64(old));
@@ -1008,7 +1144,9 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             let caller_base = state.reg_base();
             let offset = state.registers.get(caller_base, offset_reg).as_i64() as usize;
             let value = state.registers.get(caller_base, value_reg).as_i64();
-            let old = state.gpu_shared_memory.as_mut()
+            let old = state
+                .gpu_shared_memory
+                .as_mut()
                 .and_then(|smem| smem.atomic_min_i64(offset, value))
                 .unwrap_or(0);
             state.set_reg(dst, Value::from_i64(old));
@@ -1019,7 +1157,9 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             let offset_reg = read_reg(state)?;
             let caller_base = state.reg_base();
             let offset = state.registers.get(caller_base, offset_reg).as_i64() as usize;
-            let val = state.gpu_shared_memory.as_ref()
+            let val = state
+                .gpu_shared_memory
+                .as_ref()
                 .and_then(|smem| smem.read_u32(offset))
                 .unwrap_or(0);
             state.set_reg(dst, Value::from_i64(val as i64));
@@ -1062,12 +1202,10 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
             Ok(DispatchResult::Continue)
         }
 
-        None => {
-            Err(InterpreterError::NotImplemented {
-                feature: "unknown GPU sub-opcode",
-                opcode: Some(crate::instruction::Opcode::GpuExtended),
-            })
-        }
+        None => Err(InterpreterError::NotImplemented {
+            feature: "unknown GPU sub-opcode",
+            opcode: Some(crate::instruction::Opcode::GpuExtended),
+        }),
     }
 }
 
@@ -1078,7 +1216,9 @@ pub(in super::super) fn handle_gpu_extended(state: &mut InterpreterState) -> Int
 ///
 
 /// Format: `stream:reg`
-pub(in super::super) fn handle_gpu_sync(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_gpu_sync(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let _stream = read_reg(state)?;
     // No-op in interpreter - all operations are synchronous
     Ok(DispatchResult::Continue)
@@ -1089,7 +1229,9 @@ pub(in super::super) fn handle_gpu_sync(state: &mut InterpreterState) -> Interpr
 ///
 
 /// Format: `dst:reg, src:reg, direction:u8`
-pub(in super::super) fn handle_gpu_memcpy(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_gpu_memcpy(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst_reg = read_reg(state)?;
     let src_reg = read_reg(state)?;
     let _direction = read_u8(state)?; // 0=H2D, 1=D2H, 2=D2D - ignored, all CPU memory
@@ -1105,7 +1247,9 @@ pub(in super::super) fn handle_gpu_memcpy(state: &mut InterpreterState) -> Inter
 ///
 
 /// Format: `dst:reg, size:reg, device:reg`
-pub(in super::super) fn handle_gpu_alloc(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_gpu_alloc(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let size_reg = read_reg(state)?;
     let _device_reg = read_reg(state)?; // Ignored in CPU fallback
@@ -1126,7 +1270,10 @@ pub(in super::super) fn handle_gpu_alloc(state: &mut InterpreterState) -> Interp
     };
     let ptr = unsafe { std::alloc::alloc(layout) };
     if !ptr.is_null() {
-        state.gpu_context.allocated_buffers.insert(ptr as usize, alloc_size);
+        state
+            .gpu_context
+            .allocated_buffers
+            .insert(ptr as usize, alloc_size);
     }
     state.set_reg(dst, Value::from_ptr(ptr));
     Ok(DispatchResult::Continue)

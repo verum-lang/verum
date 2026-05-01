@@ -1,5 +1,6 @@
 use verum_llvm_sys::core::{
-    LLVMConstAllOnes, LLVMConstInt, LLVMConstIntOfArbitraryPrecision, LLVMConstIntOfStringAndSize, LLVMGetIntTypeWidth,
+    LLVMConstAllOnes, LLVMConstInt, LLVMConstIntOfArbitraryPrecision, LLVMConstIntOfStringAndSize,
+    LLVMGetIntTypeWidth,
 };
 use verum_llvm_sys::execution_engine::LLVMCreateGenericValueOfInt;
 use verum_llvm_sys::prelude::LLVMTypeRef;
@@ -8,10 +9,10 @@ use crate::context::ContextRef;
 use crate::support::LLVMString;
 use crate::types::traits::AsTypeRef;
 
+use crate::AddressSpace;
 use crate::types::ScalableVectorType;
 use crate::types::{ArrayType, FunctionType, PointerType, Type, VectorType};
 use crate::values::{ArrayValue, GenericValue, IntValue};
-use crate::AddressSpace;
 
 use crate::types::enums::BasicMetadataTypeEnum;
 use std::convert::TryFrom;
@@ -51,7 +52,9 @@ impl StringRadix {
     /// Is the string valid for the given radix?
     pub fn matches_str(&self, slice: &str) -> bool {
         // drop 1 optional + or -
-        let slice = slice.strip_prefix(|c| c == '+' || c == '-').unwrap_or(slice);
+        let slice = slice
+            .strip_prefix(|c| c == '+' || c == '-')
+            .unwrap_or(slice);
 
         // there must be at least 1 actual digit
         if slice.is_empty() {
@@ -231,7 +234,11 @@ impl<'ctx> IntType<'ctx> {
     /// let i8_type = context.i8_type();
     /// let fn_type = i8_type.fn_type(&[], false);
     /// ```
-    pub fn fn_type(self, param_types: &[BasicMetadataTypeEnum<'ctx>], is_var_args: bool) -> FunctionType<'ctx> {
+    pub fn fn_type(
+        self,
+        param_types: &[BasicMetadataTypeEnum<'ctx>],
+        is_var_args: bool,
+    ) -> FunctionType<'ctx> {
         self.int_type.fn_type(param_types, is_var_args)
     }
 
@@ -430,7 +437,13 @@ impl<'ctx> IntType<'ctx> {
 
     /// Creates a `GenericValue` for use with `ExecutionEngine`s.
     pub fn create_generic_value(self, value: u64, is_signed: bool) -> GenericValue<'ctx> {
-        unsafe { GenericValue::new(LLVMCreateGenericValueOfInt(self.as_type_ref(), value, is_signed as i32)) }
+        unsafe {
+            GenericValue::new(LLVMCreateGenericValueOfInt(
+                self.as_type_ref(),
+                value,
+                is_signed as i32,
+            ))
+        }
     }
 
     /// Creates a constant `ArrayValue`.

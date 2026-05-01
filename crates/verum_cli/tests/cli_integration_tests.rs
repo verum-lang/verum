@@ -101,7 +101,6 @@ fn assert_output_contains(output: &Output, expected: &str) {
 // ============================================================================
 
 mod tier_tests {
-    
 
     /// Test that all tier names are parsed correctly (2-tier model)
     #[test]

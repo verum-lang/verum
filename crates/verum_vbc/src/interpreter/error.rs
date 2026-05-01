@@ -385,7 +385,11 @@ impl fmt::Display for InterpreterError {
                 write!(f, "Invalid opcode {:#04x} at pc {}", opcode, pc)
             }
             Self::InvalidSubOpcode { opcode, sub_opcode } => {
-                write!(f, "Invalid sub-opcode {:#04x} for opcode {:#04x}", sub_opcode, opcode)
+                write!(
+                    f,
+                    "Invalid sub-opcode {:#04x} for opcode {:#04x}",
+                    sub_opcode, opcode
+                )
             }
             Self::FunctionNotFound(id) => {
                 write!(f, "Function {} not found", id.0)
@@ -429,10 +433,9 @@ impl fmt::Display for InterpreterError {
                 write!(f, "Integer overflow in {}", operation)
             }
             Self::NullPointer => write!(f, "Null pointer dereference"),
-            Self::NullPointerAt { op, site, pc } => write!(
-                f,
-                "Null pointer dereference: op={op} at {site} (pc={pc})"
-            ),
+            Self::NullPointerAt { op, site, pc } => {
+                write!(f, "Null pointer dereference: op={op} at {site} (pc={pc})")
+            }
             Self::InvalidFieldIndex {
                 type_id,
                 field,
@@ -499,7 +502,10 @@ impl fmt::Display for InterpreterError {
                     requested, available
                 )
             }
-            Self::Timeout { elapsed_ms, limit_ms } => {
+            Self::Timeout {
+                elapsed_ms,
+                limit_ms,
+            } => {
                 write!(
                     f,
                     "Execution timeout: {}ms elapsed (limit: {}ms)",
@@ -509,16 +515,10 @@ impl fmt::Display for InterpreterError {
             Self::InvalidBytecode { pc, message } => {
                 write!(f, "Invalid bytecode at pc {}: {}", pc, message)
             }
-            Self::NotImplemented { feature, opcode } => {
-                match opcode {
-                    Some(op) => write!(
-                        f,
-                        "Not implemented: {} (opcode {:?})",
-                        feature, op
-                    ),
-                    None => write!(f, "Not implemented: {}", feature),
-                }
-            }
+            Self::NotImplemented { feature, opcode } => match opcode {
+                Some(op) => write!(f, "Not implemented: {} (opcode {:?})", feature, op),
+                None => write!(f, "Not implemented: {}", feature),
+            },
             Self::TaskFailed { task_id } => {
                 write!(f, "Async task {} failed", task_id.0)
             }
@@ -531,7 +531,10 @@ impl fmt::Display for InterpreterError {
             Self::InvalidGeneratorId { generator_id } => {
                 write!(f, "Invalid generator ID {}", generator_id.0)
             }
-            Self::GeneratorNotResumable { generator_id, status } => {
+            Self::GeneratorNotResumable {
+                generator_id,
+                status,
+            } => {
                 write!(
                     f,
                     "Generator {} is not resumable (status: {})",
@@ -561,21 +564,30 @@ impl fmt::Display for InterpreterError {
                     count, limit
                 )
             }
-            Self::ModuleNotInterpretable { module_name, reason } => {
+            Self::ModuleNotInterpretable {
+                module_name,
+                reason,
+            } => {
                 write!(
                     f,
                     "Module '{}' is not interpretable: {}. VBC is intermediate IR only - AOT compilation required.",
                     module_name, reason
                 )
             }
-            Self::AllocationTooLarge { requested, max_allowed } => {
+            Self::AllocationTooLarge {
+                requested,
+                max_allowed,
+            } => {
                 write!(
                     f,
                     "Allocation too large: requested {} bytes (max allowed: {} bytes)",
                     requested, max_allowed
                 )
             }
-            Self::ValidationFailed { module_name, reason } => {
+            Self::ValidationFailed {
+                module_name,
+                reason,
+            } => {
                 write!(
                     f,
                     "Module '{}' failed bytecode validation: {}",
@@ -623,7 +635,10 @@ mod tests {
         let err = InterpreterError::DivisionByZero;
         assert_eq!(err.to_string(), "Division by zero");
 
-        let err = InterpreterError::InvalidOpcode { opcode: 0xFF, pc: 42 };
+        let err = InterpreterError::InvalidOpcode {
+            opcode: 0xFF,
+            pc: 42,
+        };
         assert!(err.to_string().contains("0xff"));
         assert!(err.to_string().contains("42"));
     }
@@ -643,26 +658,66 @@ mod tests {
         let errors: Vec<InterpreterError> = vec![
             InterpreterError::InvalidOpcode { opcode: 0, pc: 0 },
             InterpreterError::FunctionNotFound(FunctionId(0)),
-            InterpreterError::InvalidRegister { reg: Reg(0), frame_size: 10 },
-            InterpreterError::StackOverflow { depth: 100, max_depth: 50 },
+            InterpreterError::InvalidRegister {
+                reg: Reg(0),
+                frame_size: 10,
+            },
+            InterpreterError::StackOverflow {
+                depth: 100,
+                max_depth: 50,
+            },
             InterpreterError::StackUnderflow,
-            InterpreterError::TypeMismatch { expected: "int", got: "float", operation: "add" },
+            InterpreterError::TypeMismatch {
+                expected: "int",
+                got: "float",
+                operation: "add",
+            },
             InterpreterError::DivisionByZero,
             InterpreterError::IntegerOverflow { operation: "mul" },
             InterpreterError::NullPointer,
-            InterpreterError::InvalidFieldIndex { type_id: TypeId::INT, field: 5, num_fields: 3 },
-            InterpreterError::IndexOutOfBounds { index: 10, length: 5 },
+            InterpreterError::InvalidFieldIndex {
+                type_id: TypeId::INT,
+                field: 5,
+                num_fields: 3,
+            },
+            InterpreterError::IndexOutOfBounds {
+                index: 10,
+                length: 5,
+            },
             InterpreterError::InvalidConstant(42),
             InterpreterError::InvalidType(TypeId(999)),
-            InterpreterError::CbgrViolation { kind: CbgrViolationKind::UseAfterFree, ptr: 0 },
-            InterpreterError::AssertionFailed { message: "test".to_string(), pc: 0 },
-            InterpreterError::Panic { message: "test".to_string() },
+            InterpreterError::CbgrViolation {
+                kind: CbgrViolationKind::UseAfterFree,
+                ptr: 0,
+            },
+            InterpreterError::AssertionFailed {
+                message: "test".to_string(),
+                pc: 0,
+            },
+            InterpreterError::Panic {
+                message: "test".to_string(),
+            },
             InterpreterError::Unreachable { pc: 0 },
-            InterpreterError::OutOfMemory { requested: 1000, available: 100 },
-            InterpreterError::Timeout { elapsed_ms: 5000, limit_ms: 1000 },
-            InterpreterError::InvalidBytecode { pc: 0, message: "test".to_string() },
-            InterpreterError::NotImplemented { feature: "test", opcode: None },
-            InterpreterError::NotImplemented { feature: "test", opcode: Some(Opcode::Mov) },
+            InterpreterError::OutOfMemory {
+                requested: 1000,
+                available: 100,
+            },
+            InterpreterError::Timeout {
+                elapsed_ms: 5000,
+                limit_ms: 1000,
+            },
+            InterpreterError::InvalidBytecode {
+                pc: 0,
+                message: "test".to_string(),
+            },
+            InterpreterError::NotImplemented {
+                feature: "test",
+                opcode: None,
+            },
+            InterpreterError::NotImplemented {
+                feature: "test",
+                opcode: Some(Opcode::Mov),
+            },
             InterpreterError::ModuleNotInterpretable {
                 module_name: "test_module".to_string(),
                 reason: "Systems profile code is AOT-only",

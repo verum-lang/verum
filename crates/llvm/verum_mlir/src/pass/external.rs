@@ -6,11 +6,11 @@ use crate::{
     dialect::DialectHandle,
     ir::{OperationRef, r#type::TypeId},
 };
+use std::{ffi::c_void, marker::PhantomData, mem::transmute, ptr::drop_in_place};
 use verum_mlir_sys::{
     MlirContext, MlirExternalPass, MlirExternalPassCallbacks, MlirLogicalResult, MlirOperation,
     mlirCreateExternalPass, mlirExternalPassSignalFailure,
 };
-use std::{ffi::c_void, marker::PhantomData, mem::transmute, ptr::drop_in_place};
 
 #[derive(Clone, Copy, Debug)]
 pub struct ExternalPass<'a> {

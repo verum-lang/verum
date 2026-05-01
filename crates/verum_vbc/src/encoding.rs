@@ -188,7 +188,8 @@ pub fn decode_u16(data: &[u8], offset: &mut usize) -> VbcResult<u16> {
     if *offset + 2 > data.len() {
         return Err(VbcError::eof(*offset, 2));
     }
-    let bytes: [u8; 2] = data[*offset..*offset + 2].try_into()
+    let bytes: [u8; 2] = data[*offset..*offset + 2]
+        .try_into()
         .map_err(|_| VbcError::eof(*offset, 2))?;
     *offset += 2;
     Ok(u16::from_le_bytes(bytes))
@@ -206,7 +207,8 @@ pub fn decode_u32(data: &[u8], offset: &mut usize) -> VbcResult<u32> {
     if *offset + 4 > data.len() {
         return Err(VbcError::eof(*offset, 4));
     }
-    let bytes: [u8; 4] = data[*offset..*offset + 4].try_into()
+    let bytes: [u8; 4] = data[*offset..*offset + 4]
+        .try_into()
         .map_err(|_| VbcError::eof(*offset, 4))?;
     *offset += 4;
     Ok(u32::from_le_bytes(bytes))
@@ -224,7 +226,8 @@ pub fn decode_u64(data: &[u8], offset: &mut usize) -> VbcResult<u64> {
     if *offset + 8 > data.len() {
         return Err(VbcError::eof(*offset, 8));
     }
-    let bytes: [u8; 8] = data[*offset..*offset + 8].try_into()
+    let bytes: [u8; 8] = data[*offset..*offset + 8]
+        .try_into()
         .map_err(|_| VbcError::eof(*offset, 8))?;
     *offset += 8;
     Ok(u64::from_le_bytes(bytes))
@@ -242,7 +245,8 @@ pub fn decode_i64(data: &[u8], offset: &mut usize) -> VbcResult<i64> {
     if *offset + 8 > data.len() {
         return Err(VbcError::eof(*offset, 8));
     }
-    let bytes: [u8; 8] = data[*offset..*offset + 8].try_into()
+    let bytes: [u8; 8] = data[*offset..*offset + 8]
+        .try_into()
         .map_err(|_| VbcError::eof(*offset, 8))?;
     *offset += 8;
     Ok(i64::from_le_bytes(bytes))
@@ -260,7 +264,8 @@ pub fn decode_f64(data: &[u8], offset: &mut usize) -> VbcResult<f64> {
     if *offset + 8 > data.len() {
         return Err(VbcError::eof(*offset, 8));
     }
-    let bytes: [u8; 8] = data[*offset..*offset + 8].try_into()
+    let bytes: [u8; 8] = data[*offset..*offset + 8]
+        .try_into()
         .map_err(|_| VbcError::eof(*offset, 8))?;
     *offset += 8;
     Ok(f64::from_le_bytes(bytes))
@@ -272,7 +277,8 @@ pub fn decode_f32(data: &[u8], offset: &mut usize) -> VbcResult<f32> {
     if *offset + 4 > data.len() {
         return Err(VbcError::eof(*offset, 4));
     }
-    let bytes: [u8; 4] = data[*offset..*offset + 4].try_into()
+    let bytes: [u8; 4] = data[*offset..*offset + 4]
+        .try_into()
         .map_err(|_| VbcError::eof(*offset, 4))?;
     *offset += 4;
     Ok(f32::from_le_bytes(bytes))
@@ -359,7 +365,9 @@ pub fn decode_string(data: &[u8], offset: &mut usize) -> VbcResult<String> {
     // from the wrong region (or, for a wrap that lands on a
     // valid offset, alias previously-read bytes). Use
     // `checked_add` to surface the overflow as `eof`.
-    let end = offset.checked_add(len).ok_or_else(|| VbcError::eof(*offset, len))?;
+    let end = offset
+        .checked_add(len)
+        .ok_or_else(|| VbcError::eof(*offset, len))?;
     if end > data.len() {
         return Err(VbcError::eof(*offset, len));
     }
@@ -377,7 +385,9 @@ pub fn decode_string(data: &[u8], offset: &mut usize) -> VbcResult<String> {
 pub fn decode_bytes(data: &[u8], offset: &mut usize) -> VbcResult<Vec<u8>> {
     let len = decode_varint(data, offset)? as usize;
     // Same overflow defense as `decode_string` above.
-    let end = offset.checked_add(len).ok_or_else(|| VbcError::eof(*offset, len))?;
+    let end = offset
+        .checked_add(len)
+        .ok_or_else(|| VbcError::eof(*offset, len))?;
     if end > data.len() {
         return Err(VbcError::eof(*offset, len));
     }
@@ -410,11 +420,7 @@ pub fn signed_varint_size(value: i64) -> usize {
 /// Returns the encoded size of a register.
 #[inline]
 pub fn reg_size(reg: Reg) -> usize {
-    if reg.0 < 128 {
-        1
-    } else {
-        2
-    }
+    if reg.0 < 128 { 1 } else { 2 }
 }
 
 // ============================================================================
@@ -627,11 +633,17 @@ mod tests {
         data.push(b'X');
         let mut offset = 1;
         let r = decode_string(&data, &mut offset);
-        assert!(r.is_err(), "decode_string must reject overflow-claiming length");
+        assert!(
+            r.is_err(),
+            "decode_string must reject overflow-claiming length"
+        );
 
         let mut offset = 1;
         let r = decode_bytes(&data, &mut offset);
-        assert!(r.is_err(), "decode_bytes must reject overflow-claiming length");
+        assert!(
+            r.is_err(),
+            "decode_bytes must reject overflow-claiming length"
+        );
     }
 
     #[test]
@@ -645,7 +657,16 @@ mod tests {
         // the varint and silently drop the high bits).
         for invalid_byte9 in [0x02u8, 0x04, 0x08, 0x10, 0x20, 0x40, 0x7F] {
             let data: [u8; 10] = [
-                0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, invalid_byte9,
+                0xFF,
+                0xFF,
+                0xFF,
+                0xFF,
+                0xFF,
+                0xFF,
+                0xFF,
+                0xFF,
+                0xFF,
+                invalid_byte9,
             ];
             let mut offset = 0;
             assert!(

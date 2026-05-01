@@ -82,11 +82,7 @@ fn box_diamond_alternation_has_md_omega_three() {
 #[test]
 fn big_and_takes_supremum_of_components() {
     // ⋀ {p, □p, □□p} has md^ω = 2 (max of 0, 1, 2).
-    let phi = big_and(vec![
-        tvar("p"),
-        box_(tvar("p")),
-        box_(box_(tvar("p"))),
-    ]);
+    let phi = big_and(vec![tvar("p"), box_(tvar("p")), box_(box_(tvar("p")))]);
     assert_eq!(m_depth_omega(&phi), OrdinalDepth::finite(2));
 }
 
@@ -110,16 +106,33 @@ fn ordinal_depth_lex_ordering_holds() {
     // ω·1 < ω·1 + k < ω·2.
     assert!(OrdinalDepth::finite(0).lt(&OrdinalDepth::finite(1)));
     assert!(OrdinalDepth::finite(5).lt(&OrdinalDepth::omega()));
-    assert!(OrdinalDepth::omega().lt(&OrdinalDepth { omega_coeff: 1, finite_offset: 1 }));
-    assert!(OrdinalDepth { omega_coeff: 1, finite_offset: 99 }
-        .lt(&OrdinalDepth { omega_coeff: 2, finite_offset: 0 }));
+    assert!(OrdinalDepth::omega().lt(&OrdinalDepth {
+        omega_coeff: 1,
+        finite_offset: 1
+    }));
+    assert!(
+        OrdinalDepth {
+            omega_coeff: 1,
+            finite_offset: 99
+        }
+        .lt(&OrdinalDepth {
+            omega_coeff: 2,
+            finite_offset: 0
+        })
+    );
 }
 
 #[test]
 fn ordinal_depth_succ_increments_finite_component() {
     let d = OrdinalDepth::omega();
     let s = d.succ();
-    assert_eq!(s, OrdinalDepth { omega_coeff: 1, finite_offset: 1 });
+    assert_eq!(
+        s,
+        OrdinalDepth {
+            omega_coeff: 1,
+            finite_offset: 1
+        }
+    );
 }
 
 // =============================================================================
@@ -132,17 +145,35 @@ fn b4_succ_at_max_finite_carries_to_next_omega_tier() {
     // bit and the lex ordering said `MAX < ω` is true, so the
     // K-rule accepted maximally-nested predicates over omega-bases.
     // V2 fix (this test): (0, MAX).succ() == (1, 0).
-    let max_finite = OrdinalDepth { omega_coeff: 0, finite_offset: u32::MAX };
+    let max_finite = OrdinalDepth {
+        omega_coeff: 0,
+        finite_offset: u32::MAX,
+    };
     let s = max_finite.succ();
-    assert_eq!(s, OrdinalDepth { omega_coeff: 1, finite_offset: 0 });
+    assert_eq!(
+        s,
+        OrdinalDepth {
+            omega_coeff: 1,
+            finite_offset: 0
+        }
+    );
 }
 
 #[test]
 fn b4_succ_at_omega_plus_max_carries_to_omega_two() {
     // (1, MAX).succ() == (2, 0).
-    let omega_plus_max = OrdinalDepth { omega_coeff: 1, finite_offset: u32::MAX };
+    let omega_plus_max = OrdinalDepth {
+        omega_coeff: 1,
+        finite_offset: u32::MAX,
+    };
     let s = omega_plus_max.succ();
-    assert_eq!(s, OrdinalDepth { omega_coeff: 2, finite_offset: 0 });
+    assert_eq!(
+        s,
+        OrdinalDepth {
+            omega_coeff: 2,
+            finite_offset: 0
+        }
+    );
 }
 
 #[test]
@@ -152,9 +183,18 @@ fn b4_succ_at_top_saturates_safely() {
     // `pred.lt(&base.succ()) == (MAX,MAX).lt(&(MAX,0)) == false`
     // (lex: MAX > 0 in second component when first ties), correctly
     // REJECTING rather than accepting via wraparound.
-    let top = OrdinalDepth { omega_coeff: u32::MAX, finite_offset: u32::MAX };
+    let top = OrdinalDepth {
+        omega_coeff: u32::MAX,
+        finite_offset: u32::MAX,
+    };
     let s = top.succ();
-    assert_eq!(s, OrdinalDepth { omega_coeff: u32::MAX, finite_offset: 0 });
+    assert_eq!(
+        s,
+        OrdinalDepth {
+            omega_coeff: u32::MAX,
+            finite_offset: 0
+        }
+    );
     assert!(!top.lt(&s), "saturated top must not lt its successor");
 }
 
@@ -176,8 +216,14 @@ fn b4_max_finite_predicate_over_max_finite_minus_1_base_rejected() {
     // pred at (1, 0) IS lt (1, 1), so ACCEPTED. The fix preserves
     // correctness on the omega-base case while plugging the
     // saturation hole.
-    let near_max_finite = OrdinalDepth { omega_coeff: 0, finite_offset: u32::MAX - 1 };
-    let max_finite = OrdinalDepth { omega_coeff: 0, finite_offset: u32::MAX };
+    let near_max_finite = OrdinalDepth {
+        omega_coeff: 0,
+        finite_offset: u32::MAX - 1,
+    };
+    let max_finite = OrdinalDepth {
+        omega_coeff: 0,
+        finite_offset: u32::MAX,
+    };
     let upper_at_near_max = near_max_finite.succ();
     assert_eq!(upper_at_near_max, max_finite);
     assert!(

@@ -15,11 +15,11 @@
 
 #![allow(dead_code)]
 
+use verum_ast::Stmt;
 use verum_ast::expr::Expr;
 use verum_ast::span::Span;
 use verum_ast::stmt::StmtKind;
 use verum_ast::ty::{Ident, Path};
-use verum_ast::Stmt;
 
 use verum_verification::vcgen::{Formula, VCGenerator};
 

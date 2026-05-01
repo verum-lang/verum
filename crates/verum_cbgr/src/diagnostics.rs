@@ -345,7 +345,10 @@ impl CbgrDiagnostics {
         let mut builder = DiagnosticBuilder::warning()
             .code(codes::MEMORY_LEAK)
             .message("potential memory leak detected")
-            .span_label(primary_span.clone(), "memory allocated here may not be freed")
+            .span_label(
+                primary_span.clone(),
+                "memory allocated here may not be freed",
+            )
             .add_note(reason_msg);
 
         if self.config.include_help {
@@ -413,7 +416,10 @@ impl CbgrDiagnostics {
                 "potential data race: {} and {} to same memory location without synchronization",
                 access1_kind, access2_kind
             ))
-            .span_label(primary_span.clone(), format!("{} access here", access1_kind));
+            .span_label(
+                primary_span.clone(),
+                format!("{} access here", access1_kind),
+            );
 
         // Secondary span for the other access
         if let Some(span2) = warning.access2.span {
@@ -500,8 +506,12 @@ impl CbgrDiagnostics {
             .unwrap_or_else(|| block_id_span(violation.block, file));
 
         let kind_msg = match violation.kind {
-            ThreadSafetyKind::NotSend => "type is not Send: cannot be safely transferred between threads",
-            ThreadSafetyKind::NotSync => "type is not Sync: cannot be safely shared between threads",
+            ThreadSafetyKind::NotSend => {
+                "type is not Send: cannot be safely transferred between threads"
+            }
+            ThreadSafetyKind::NotSync => {
+                "type is not Sync: cannot be safely shared between threads"
+            }
             ThreadSafetyKind::UnsafeMutableAlias => "unsafe mutable aliasing across threads",
         };
 
@@ -632,9 +642,7 @@ impl CbgrDiagnostics {
             NllViolationKind::MutationWhileBorrowed { .. } => "mutation while value is borrowed",
             NllViolationKind::MoveWhileBorrowed { .. } => "value moved while borrowed",
             NllViolationKind::BorrowOutlivesData { .. } => "borrow outlives the borrowed data",
-            NllViolationKind::ReturnLocalRef { .. } => {
-                "cannot return reference to local variable"
-            }
+            NllViolationKind::ReturnLocalRef { .. } => "cannot return reference to local variable",
         };
 
         let mut builder = DiagnosticBuilder::error()

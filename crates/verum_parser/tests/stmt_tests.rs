@@ -42,25 +42,26 @@ fn parse_stmt(source: &str) -> List<Stmt> {
     // Extract the function body statements
     if let Some(item) = module.items.get(0)
         && let ItemKind::Function(func) = &item.kind
-            && let Some(FunctionBody::Block(block)) = &func.body {
-                let mut stmts = block.stmts.clone();
+        && let Some(FunctionBody::Block(block)) = &func.body
+    {
+        let mut stmts = block.stmts.clone();
 
-                // If there's a trailing expression (no semicolon), add it as an expression statement
-                if let Maybe::Some(expr) = &block.expr {
-                    let span = expr.span();
-                    let expr_stmt = Stmt {
-                        kind: StmtKind::Expr {
-                            expr: (**expr).clone(),
-                            has_semi: false,
-                        },
-                        span,
-                        attributes: Vec::new(),
-                    };
-                    stmts.push(expr_stmt);
-                }
+        // If there's a trailing expression (no semicolon), add it as an expression statement
+        if let Maybe::Some(expr) = &block.expr {
+            let span = expr.span();
+            let expr_stmt = Stmt {
+                kind: StmtKind::Expr {
+                    expr: (**expr).clone(),
+                    has_semi: false,
+                },
+                span,
+                attributes: Vec::new(),
+            };
+            stmts.push(expr_stmt);
+        }
 
-                return stmts;
-            }
+        return stmts;
+    }
 
     panic!("Failed to extract statements from function body");
 }

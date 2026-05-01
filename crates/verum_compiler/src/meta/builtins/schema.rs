@@ -198,7 +198,7 @@ fn meta_schema_validate(
             return Err(MetaError::TypeMismatch {
                 expected: Text::from("Text"),
                 found: args[0].type_name(),
-            })
+            });
         }
     };
 
@@ -208,7 +208,7 @@ fn meta_schema_validate(
             return Err(MetaError::TypeMismatch {
                 expected: Text::from("Map"),
                 found: args[1].type_name(),
-            })
+            });
         }
     };
 
@@ -218,14 +218,8 @@ fn meta_schema_validate(
         .into_iter()
         .map(|err| {
             let mut error_map = OrderedMap::new();
-            error_map.insert(
-                Text::from("message"),
-                ConstValue::Text(err.message),
-            );
-            error_map.insert(
-                Text::from("kind"),
-                ConstValue::Text(err.kind),
-            );
+            error_map.insert(Text::from("message"), ConstValue::Text(err.message));
+            error_map.insert(Text::from("kind"), ConstValue::Text(err.kind));
             ConstValue::Map(error_map)
         })
         .collect();
@@ -251,7 +245,7 @@ fn meta_schema_is_function(
             return Err(MetaError::TypeMismatch {
                 expected: Text::from("Text"),
                 found: args[0].type_name(),
-            })
+            });
         }
     };
 
@@ -280,7 +274,7 @@ fn meta_schema_is_type(
             return Err(MetaError::TypeMismatch {
                 expected: Text::from("Text"),
                 found: args[0].type_name(),
-            })
+            });
         }
     };
 
@@ -308,7 +302,7 @@ fn meta_schema_is_expression(
             return Err(MetaError::TypeMismatch {
                 expected: Text::from("Text"),
                 found: args[0].type_name(),
-            })
+            });
         }
     };
 
@@ -486,9 +480,7 @@ fn validate_function_schema(
     let stripped = skip_visibility(stripped);
 
     // Check async constraint
-    if let Some(ConstValue::Bool(expected_async)) =
-        schema.get(&Text::from(CONSTRAINT_IS_ASYNC))
-    {
+    if let Some(ConstValue::Bool(expected_async)) = schema.get(&Text::from(CONSTRAINT_IS_ASYNC)) {
         let is_async = stripped.starts_with("async fn ");
         if *expected_async != is_async {
             if *expected_async {
@@ -506,9 +498,7 @@ fn validate_function_schema(
     }
 
     // Check public constraint
-    if let Some(ConstValue::Bool(expected_pub)) =
-        schema.get(&Text::from(CONSTRAINT_IS_PUBLIC))
-    {
+    if let Some(ConstValue::Bool(expected_pub)) = schema.get(&Text::from(CONSTRAINT_IS_PUBLIC)) {
         let is_pub = code.trim_start().starts_with("pub ");
         if *expected_pub != is_pub {
             if *expected_pub {
@@ -526,9 +516,7 @@ fn validate_function_schema(
     }
 
     // Check name pattern constraint
-    if let Some(ConstValue::Text(pattern)) =
-        schema.get(&Text::from(CONSTRAINT_NAME_PATTERN))
-    {
+    if let Some(ConstValue::Text(pattern)) = schema.get(&Text::from(CONSTRAINT_NAME_PATTERN)) {
         let fn_name = extract_function_name(stripped);
         if let Some(name) = fn_name {
             if !name.contains(pattern.as_str()) {
@@ -544,9 +532,7 @@ fn validate_function_schema(
     }
 
     // Check has_attribute constraint
-    if let Some(ConstValue::Text(attr_name)) =
-        schema.get(&Text::from(CONSTRAINT_HAS_ATTR))
-    {
+    if let Some(ConstValue::Text(attr_name)) = schema.get(&Text::from(CONSTRAINT_HAS_ATTR)) {
         let has_attr = code.contains(&format!("@{}", attr_name));
         if !has_attr {
             errors.push(SchemaError::new(
@@ -559,9 +545,7 @@ fn validate_function_schema(
     // Check parameter count constraints
     let param_count = count_function_params(stripped);
 
-    if let Some(ConstValue::Int(min)) =
-        schema.get(&Text::from(CONSTRAINT_MIN_PARAMS))
-    {
+    if let Some(ConstValue::Int(min)) = schema.get(&Text::from(CONSTRAINT_MIN_PARAMS)) {
         if (param_count as i128) < *min {
             errors.push(SchemaError::new(
                 "too_few_params",
@@ -573,9 +557,7 @@ fn validate_function_schema(
         }
     }
 
-    if let Some(ConstValue::Int(max)) =
-        schema.get(&Text::from(CONSTRAINT_MAX_PARAMS))
-    {
+    if let Some(ConstValue::Int(max)) = schema.get(&Text::from(CONSTRAINT_MAX_PARAMS)) {
         if (param_count as i128) > *max {
             errors.push(SchemaError::new(
                 "too_many_params",
@@ -588,9 +570,7 @@ fn validate_function_schema(
     }
 
     // Check return type constraint
-    if let Some(ConstValue::Text(expected_ret)) =
-        schema.get(&Text::from(CONSTRAINT_RETURN_TYPE))
-    {
+    if let Some(ConstValue::Text(expected_ret)) = schema.get(&Text::from(CONSTRAINT_RETURN_TYPE)) {
         let actual_ret = extract_return_type(stripped);
         if let Some(ret) = actual_ret {
             if ret != expected_ret.as_str() {
@@ -623,27 +603,20 @@ fn validate_type_schema(
     }
 
     // Check name pattern
-    if let Some(ConstValue::Text(pattern)) =
-        schema.get(&Text::from(CONSTRAINT_NAME_PATTERN))
-    {
+    if let Some(ConstValue::Text(pattern)) = schema.get(&Text::from(CONSTRAINT_NAME_PATTERN)) {
         let type_name = extract_type_name(code);
         if let Some(name) = type_name {
             if !name.contains(pattern.as_str()) {
                 errors.push(SchemaError::new(
                     "name_mismatch",
-                    format!(
-                        "Type name '{}' does not match pattern '{}'",
-                        name, pattern
-                    ),
+                    format!("Type name '{}' does not match pattern '{}'", name, pattern),
                 ));
             }
         }
     }
 
     // Check has_attribute
-    if let Some(ConstValue::Text(attr_name)) =
-        schema.get(&Text::from(CONSTRAINT_HAS_ATTR))
-    {
+    if let Some(ConstValue::Text(attr_name)) = schema.get(&Text::from(CONSTRAINT_HAS_ATTR)) {
         let has_attr = code.contains(&format!("@{}", attr_name));
         if !has_attr {
             errors.push(SchemaError::new(
@@ -654,9 +627,7 @@ fn validate_type_schema(
     }
 
     // Check is_record constraint
-    if let Some(ConstValue::Bool(true)) =
-        schema.get(&Text::from(CONSTRAINT_IS_RECORD))
-    {
+    if let Some(ConstValue::Bool(true)) = schema.get(&Text::from(CONSTRAINT_IS_RECORD)) {
         // Record types have "is {" in their definition
         if !code.contains("is {") && !code.contains("is{") {
             errors.push(SchemaError::new(
@@ -667,9 +638,7 @@ fn validate_type_schema(
     }
 
     // Check is_sum constraint
-    if let Some(ConstValue::Bool(true)) =
-        schema.get(&Text::from(CONSTRAINT_IS_SUM))
-    {
+    if let Some(ConstValue::Bool(true)) = schema.get(&Text::from(CONSTRAINT_IS_SUM)) {
         // Sum types use | to separate variants
         let after_is = code.split_once(" is ");
         if let Some((_, body)) = after_is {
@@ -683,9 +652,7 @@ fn validate_type_schema(
     }
 
     // Check is_protocol constraint
-    if let Some(ConstValue::Bool(true)) =
-        schema.get(&Text::from(CONSTRAINT_IS_PROTOCOL))
-    {
+    if let Some(ConstValue::Bool(true)) = schema.get(&Text::from(CONSTRAINT_IS_PROTOCOL)) {
         if !code.contains("is protocol") {
             errors.push(SchemaError::new(
                 "kind_mismatch",
@@ -695,9 +662,7 @@ fn validate_type_schema(
     }
 
     // Check required fields constraint
-    if let Some(ConstValue::Array(required)) =
-        schema.get(&Text::from(CONSTRAINT_REQUIRED_FIELDS))
-    {
+    if let Some(ConstValue::Array(required)) = schema.get(&Text::from(CONSTRAINT_REQUIRED_FIELDS)) {
         for field_val in required.iter() {
             if let ConstValue::Text(field_name) = field_val {
                 // Simple check: field name followed by colon in the body
@@ -714,9 +679,7 @@ fn validate_type_schema(
     }
 
     // Check is_public
-    if let Some(ConstValue::Bool(expected_pub)) =
-        schema.get(&Text::from(CONSTRAINT_IS_PUBLIC))
-    {
+    if let Some(ConstValue::Bool(expected_pub)) = schema.get(&Text::from(CONSTRAINT_IS_PUBLIC)) {
         let is_pub = code.trim_start().starts_with("pub ");
         if *expected_pub != is_pub {
             if *expected_pub {
@@ -751,11 +714,7 @@ fn extract_function_name(code: &str) -> Option<&str> {
     let end = rest
         .find(|c: char| c == '(' || c == '<' || c.is_whitespace())
         .unwrap_or(rest.len());
-    if end == 0 {
-        None
-    } else {
-        Some(&rest[..end])
-    }
+    if end == 0 { None } else { Some(&rest[..end]) }
 }
 
 /// Count function parameters (simple heuristic: count commas in first paren group + 1)
@@ -800,11 +759,7 @@ fn extract_return_type(code: &str) -> Option<&str> {
     let sig = &code[..body_start];
     let arrow = sig.rfind("->")?;
     let ret = sig[arrow + 2..].trim();
-    if ret.is_empty() {
-        None
-    } else {
-        Some(ret)
-    }
+    if ret.is_empty() { None } else { Some(ret) }
 }
 
 /// Extract type name from "type Name is ..."
@@ -817,14 +772,8 @@ fn extract_type_name(code: &str) -> Option<&str> {
     }
 
     let rest = &stripped[5..];
-    let end = rest
-        .find(['<', ' ', ';', '{'])
-        .unwrap_or(rest.len());
-    if end == 0 {
-        None
-    } else {
-        Some(&rest[..end])
-    }
+    let end = rest.find(['<', ' ', ';', '{']).unwrap_or(rest.len());
+    if end == 0 { None } else { Some(&rest[..end]) }
 }
 
 #[cfg(test)]
@@ -862,7 +811,9 @@ mod tests {
     #[test]
     fn test_is_function_positive() {
         let mut ctx = MetaContext::new();
-        let args = List::from(vec![ConstValue::Text(Text::from("fn foo(x: Int) -> Int { x }"))]);
+        let args = List::from(vec![ConstValue::Text(Text::from(
+            "fn foo(x: Int) -> Int { x }",
+        ))]);
         let result = meta_schema_is_function(&mut ctx, args).unwrap();
         assert_eq!(result, ConstValue::Bool(true));
     }
@@ -878,7 +829,9 @@ mod tests {
     #[test]
     fn test_is_function_negative() {
         let mut ctx = MetaContext::new();
-        let args = List::from(vec![ConstValue::Text(Text::from("type Foo is { x: Int };"))]);
+        let args = List::from(vec![ConstValue::Text(Text::from(
+            "type Foo is { x: Int };",
+        ))]);
         let result = meta_schema_is_function(&mut ctx, args).unwrap();
         assert_eq!(result, ConstValue::Bool(false));
     }
@@ -886,7 +839,9 @@ mod tests {
     #[test]
     fn test_is_type_positive() {
         let mut ctx = MetaContext::new();
-        let args = List::from(vec![ConstValue::Text(Text::from("type Point is { x: Float, y: Float };"))]);
+        let args = List::from(vec![ConstValue::Text(Text::from(
+            "type Point is { x: Float, y: Float };",
+        ))]);
         let result = meta_schema_is_type(&mut ctx, args).unwrap();
         assert_eq!(result, ConstValue::Bool(true));
     }
@@ -972,13 +927,22 @@ mod tests {
 
     #[test]
     fn test_extract_type_name() {
-        assert_eq!(extract_type_name("type Point is { x: Float };"), Some("Point"));
-        assert_eq!(extract_type_name("type Option<T> is None | Some(T);"), Some("Option"));
+        assert_eq!(
+            extract_type_name("type Point is { x: Float };"),
+            Some("Point")
+        );
+        assert_eq!(
+            extract_type_name("type Option<T> is None | Some(T);"),
+            Some("Option")
+        );
     }
 
     #[test]
     fn test_skip_attributes() {
-        assert_eq!(skip_attributes("@derive(Eq)\nfn foo() {}").trim_start(), "fn foo() {}");
+        assert_eq!(
+            skip_attributes("@derive(Eq)\nfn foo() {}").trim_start(),
+            "fn foo() {}"
+        );
         assert_eq!(skip_attributes("fn foo() {}"), "fn foo() {}");
     }
 }

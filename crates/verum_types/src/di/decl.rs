@@ -209,7 +209,8 @@ impl ContextDecl {
     pub fn get_operation(&self, name: &str) -> Maybe<&ContextOperation> {
         self.operations
             .iter()
-            .find(|op| op.name.as_str() == name).and_then(Maybe::Some)
+            .find(|op| op.name.as_str() == name)
+            .and_then(Maybe::Some)
     }
 
     /// Validate this context declaration

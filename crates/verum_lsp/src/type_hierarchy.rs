@@ -24,8 +24,7 @@ pub fn prepare_type_hierarchy(
         match &item.kind {
             ItemKind::Type(type_decl) if type_decl.name.as_str() == word => {
                 let range = ast_span_to_range(&type_decl.span, &document.text);
-                let selection_range =
-                    ast_span_to_range(&type_decl.name.span, &document.text);
+                let selection_range = ast_span_to_range(&type_decl.name.span, &document.text);
                 return Some(vec![TypeHierarchyItem {
                     name: word.clone(),
                     kind: SymbolKind::STRUCT,
@@ -39,8 +38,7 @@ pub fn prepare_type_hierarchy(
             }
             ItemKind::Protocol(protocol) if protocol.name.as_str() == word => {
                 let range = ast_span_to_range(&protocol.span, &document.text);
-                let selection_range =
-                    ast_span_to_range(&protocol.name.span, &document.text);
+                let selection_range = ast_span_to_range(&protocol.name.span, &document.text);
                 return Some(vec![TypeHierarchyItem {
                     name: word.clone(),
                     kind: SymbolKind::INTERFACE,
@@ -81,9 +79,7 @@ pub fn supertypes(
     for ast_item in module.items.iter() {
         if let ItemKind::Impl(impl_block) = &ast_item.kind {
             if let verum_ast::decl::ImplKind::Protocol {
-                protocol,
-                for_type,
-                ..
+                protocol, for_type, ..
             } = &impl_block.kind
             {
                 let type_name = extract_ast_type_name(&for_type.kind);
@@ -92,8 +88,7 @@ pub fn supertypes(
                     if let Some(protocol_name) = extract_path_name(protocol) {
                         // Find the protocol definition to get its range
                         if let Some(protocol_item) = find_protocol(module, &protocol_name) {
-                            let range =
-                                ast_span_to_range(&protocol_item.span, &document.text);
+                            let range = ast_span_to_range(&protocol_item.span, &document.text);
                             let selection_range =
                                 ast_span_to_range(&protocol_item.name.span, &document.text);
                             result.push(TypeHierarchyItem {
@@ -138,9 +133,7 @@ pub fn subtypes(
     for ast_item in module.items.iter() {
         if let ItemKind::Impl(impl_block) = &ast_item.kind {
             if let verum_ast::decl::ImplKind::Protocol {
-                protocol,
-                for_type,
-                ..
+                protocol, for_type, ..
             } = &impl_block.kind
             {
                 let protocol_name = extract_path_name(protocol);
@@ -149,8 +142,7 @@ pub fn subtypes(
                     if let Some(type_name) = extract_ast_type_name(&for_type.kind) {
                         // Find the type definition to get its range
                         if let Some(type_decl) = find_type(module, &type_name) {
-                            let range =
-                                ast_span_to_range(&type_decl.span, &document.text);
+                            let range = ast_span_to_range(&type_decl.span, &document.text);
                             let selection_range =
                                 ast_span_to_range(&type_decl.name.span, &document.text);
                             result.push(TypeHierarchyItem {
@@ -191,10 +183,7 @@ fn extract_path_name(path: &verum_ast::ty::Path) -> Option<String> {
     None
 }
 
-fn find_protocol<'a>(
-    module: &'a Module,
-    name: &str,
-) -> Option<&'a verum_ast::decl::ProtocolDecl> {
+fn find_protocol<'a>(module: &'a Module, name: &str) -> Option<&'a verum_ast::decl::ProtocolDecl> {
     for item in module.items.iter() {
         if let ItemKind::Protocol(protocol) = &item.kind {
             if protocol.name.as_str() == name {

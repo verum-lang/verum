@@ -22,11 +22,11 @@
 //! is one of: literal `true`, reflexive equality, a registered axiom,
 //! or a hypothesis currently in scope.
 
+use verum_ast::LiteralKind;
 use verum_ast::expr::{BinOp, Expr, ExprKind};
 use verum_ast::literal::Literal;
 use verum_ast::span::Span;
 use verum_ast::ty::{Ident, Path};
-use verum_ast::LiteralKind;
 use verum_common::{Heap, List, Text};
 
 use verum_verification::proof_validator::{ProofValidator, RewriteRule};
@@ -75,10 +75,7 @@ fn rule_with_condition(name: &str, condition: Expr) -> RewriteRule {
 /// Drive the rewrite-application path through the public surface. Uses
 /// `try_rewrite` via a `ProofTerm::Rewrite` to invoke
 /// `validate_rewrite_rule_application` with a registered rule.
-fn try_apply_rewrite(
-    validator: &mut ProofValidator,
-    rule: RewriteRule,
-) -> Result<(), Text> {
+fn try_apply_rewrite(validator: &mut ProofValidator, rule: RewriteRule) -> Result<(), Text> {
     use verum_smt::proof_term_unified::ProofTerm;
 
     let body = ident_expr("x");
@@ -137,8 +134,7 @@ fn condition_literal_false_is_rejected() {
 fn condition_reflexive_equality_is_accepted() {
     let mut validator = ProofValidator::new();
     let cond = eq_expr(ident_expr("y"), ident_expr("y"));
-    let result =
-        try_apply_rewrite(&mut validator, rule_with_condition("refl_y", cond));
+    let result = try_apply_rewrite(&mut validator, rule_with_condition("refl_y", cond));
     assert!(
         result.is_ok(),
         "reflexive equality `y == y` must discharge cleanly: {:?}",
@@ -154,14 +150,16 @@ fn unverified_condition_is_rejected() {
     // silently passed; post-fix the validator must reject because none
     // of the four soundness gates apply.
     let cond = eq_expr(ident_expr("y"), ident_expr("z"));
-    let result =
-        try_apply_rewrite(&mut validator, rule_with_condition("y_eq_z", cond));
+    let result = try_apply_rewrite(&mut validator, rule_with_condition("y_eq_z", cond));
     assert!(
         result.is_err(),
         "unverified condition must NOT silently pass — soundness leak"
     );
     assert!(
-        result.unwrap_err().as_str().contains("unverified condition"),
+        result
+            .unwrap_err()
+            .as_str()
+            .contains("unverified condition"),
         "error must name the failure mode"
     );
 }
@@ -174,8 +172,7 @@ fn condition_matching_registered_axiom_is_accepted() {
     // rejected in the previous test now passes through this gate.
     validator.register_axiom("y_eq_z_axiom", cond.clone());
 
-    let result =
-        try_apply_rewrite(&mut validator, rule_with_condition("uses_y_eq_z", cond));
+    let result = try_apply_rewrite(&mut validator, rule_with_condition("uses_y_eq_z", cond));
     assert!(
         result.is_ok(),
         "condition matching a registered axiom must discharge: {:?}",

@@ -69,7 +69,9 @@ pub enum KernelError {
     /// `position` is a human-readable description of where the
     /// violation occurs — e.g. `"left of arrow inside constructor 'Wrap'
     /// arg #1"` — for diagnostic copy.
-    #[error("strict positivity violation in inductive '{type_name}': constructor '{constructor}' has '{type_name}' in {position}")]
+    #[error(
+        "strict positivity violation in inductive '{type_name}': constructor '{constructor}' has '{type_name}' in {position}"
+    )]
     PositivityViolation {
         /// Name of the inductive being declared.
         type_name: Text,
@@ -146,7 +148,9 @@ pub enum KernelError {
     /// preserve HoTT soundness (rule 10 in the trusted-kernel
     /// spec). Use `PathTy` and cubical rules for nontrivial
     /// equality proofs instead.
-    #[error("kernel: axiom '{0}' is equivalent to UIP and is rejected (rule 10); use Path types instead")]
+    #[error(
+        "kernel: axiom '{0}' is equivalent to UIP and is rejected (rule 10); use Path types instead"
+    )]
     UipForbidden(Text),
 
     /// A refinement type `{x : base | P(x)}` violates Diakrisis T-2f*

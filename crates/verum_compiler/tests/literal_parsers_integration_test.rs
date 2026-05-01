@@ -22,11 +22,11 @@
 //! Per CLAUDE.md: Tests in tests/ directory, not in src/ with #[cfg(test)]
 
 use verum_ast::{FileId, Span};
+use verum_common::{Maybe, Text};
 use verum_compiler::literal_parsers::{
     parse_email, parse_interval, parse_matrix, parse_uri, parse_xml, parse_yaml,
 };
 use verum_compiler::literal_registry::{LiteralRegistry, ParsedLiteral};
-use verum_common::{Maybe, Text};
 
 fn test_span() -> Span {
     Span::new(0, 100, FileId::new(0))

@@ -80,7 +80,6 @@
 //! ```
 //!
 
-
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -454,10 +453,7 @@ fn parse_lto_config(s: &str) -> Result<LTOConfig> {
         "none" | "off" | "false" | "0" => Ok(LTOConfig::None),
         "thin" | "thinlto" => Ok(LTOConfig::Thin),
         "full" | "lto" | "true" | "1" => Ok(LTOConfig::Full),
-        _ => anyhow::bail!(
-            "Invalid LTO mode '{}'. Expected: none, thin, or full",
-            s
-        ),
+        _ => anyhow::bail!("Invalid LTO mode '{}'. Expected: none, thin, or full", s),
     }
 }
 
@@ -586,11 +582,7 @@ impl ProjectConfig {
     }
 
     /// Convert to LinkingConfig for a specific profile and output path
-    pub fn to_linking_config(
-        &self,
-        profile: &str,
-        output_path: PathBuf,
-    ) -> Result<LinkingConfig> {
+    pub fn to_linking_config(&self, profile: &str, output_path: PathBuf) -> Result<LinkingConfig> {
         let section = self.linker_config_for_profile(profile);
         let toml_config = LinkerTomlConfig { linker: section };
         toml_config.to_linking_config(output_path)
@@ -634,7 +626,10 @@ fn merge_linker_sections(base: &LinkerSection, profile: &LinkerSection) -> Linke
         debug_info: profile.debug_info && base.debug_info,
         static_link: profile.static_link || base.static_link,
         strip_debug_only: profile.strip_debug_only || base.strip_debug_only,
-        entry_point: profile.entry_point.clone().or_else(|| base.entry_point.clone()),
+        entry_point: profile
+            .entry_point
+            .clone()
+            .or_else(|| base.entry_point.clone()),
         target: profile.target.clone().or_else(|| base.target.clone()),
         library_paths,
         libraries,
@@ -698,11 +693,23 @@ mod tests {
 
     #[test]
     fn test_parse_output_kind() {
-        assert_eq!(parse_output_kind("executable").unwrap(), OutputKind::Executable);
+        assert_eq!(
+            parse_output_kind("executable").unwrap(),
+            OutputKind::Executable
+        );
         assert_eq!(parse_output_kind("exe").unwrap(), OutputKind::Executable);
-        assert_eq!(parse_output_kind("shared").unwrap(), OutputKind::SharedLibrary);
-        assert_eq!(parse_output_kind("dylib").unwrap(), OutputKind::SharedLibrary);
-        assert_eq!(parse_output_kind("static").unwrap(), OutputKind::StaticLibrary);
+        assert_eq!(
+            parse_output_kind("shared").unwrap(),
+            OutputKind::SharedLibrary
+        );
+        assert_eq!(
+            parse_output_kind("dylib").unwrap(),
+            OutputKind::SharedLibrary
+        );
+        assert_eq!(
+            parse_output_kind("static").unwrap(),
+            OutputKind::StaticLibrary
+        );
         assert_eq!(parse_output_kind("object").unwrap(), OutputKind::ObjectFile);
         assert!(parse_output_kind("invalid").is_err());
     }
@@ -786,9 +793,7 @@ libraries = ["pthread", "m"]
 "#;
 
         let config: LinkerTomlConfig = toml::from_str(toml_str).unwrap();
-        let linking_config = config
-            .to_linking_config(PathBuf::from("output"))
-            .unwrap();
+        let linking_config = config.to_linking_config(PathBuf::from("output")).unwrap();
 
         assert_eq!(linking_config.output_kind, OutputKind::Executable);
         assert_eq!(linking_config.lto, LTOConfig::Thin);

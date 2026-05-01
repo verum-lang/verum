@@ -401,9 +401,7 @@ impl PromotionDecisionEngine {
         // visibility now without rebuilding the analyzer when that
         // wiring lands.
         let defaults = PromotionConfig::default();
-        if (self.config.confidence_threshold - defaults.confidence_threshold).abs()
-            > f64::EPSILON
-        {
+        if (self.config.confidence_threshold - defaults.confidence_threshold).abs() > f64::EPSILON {
             tracing::debug!(
                 target: "verum_cbgr::promotion_decision",
                 confidence_threshold = self.config.confidence_threshold,
@@ -997,15 +995,18 @@ impl CodegenDirective {
     /// Create directive from promotion decision
     #[must_use]
     pub fn from_decision(ref_id: RefId, decision: PromotionDecision) -> Self {
-        let annotation = Some(format!(
-            "cbgr.promotion.{} ref_{}",
-            if decision.should_promote() {
-                "checked"
-            } else {
-                "managed"
-            },
-            ref_id.0
-        ).into());
+        let annotation = Some(
+            format!(
+                "cbgr.promotion.{} ref_{}",
+                if decision.should_promote() {
+                    "checked"
+                } else {
+                    "managed"
+                },
+                ref_id.0
+            )
+            .into(),
+        );
 
         Self {
             ref_id,

@@ -13,7 +13,8 @@ fn verum_bin() -> PathBuf {
     p.push("target");
     p.push("release");
     p.push("verum");
-    fs::canonicalize(p).expect("target/release/verum missing; run `cargo build --release --bin verum`")
+    fs::canonicalize(p)
+        .expect("target/release/verum missing; run `cargo build --release --bin verum`")
 }
 
 struct Scratch {
@@ -60,9 +61,8 @@ impl Scratch {
 
     fn read_export(&self, target: &str, file: &str) -> String {
         let path = self.dir.join("certificates").join(target).join(file);
-        fs::read_to_string(&path).unwrap_or_else(|e| {
-            panic!("could not read {}: {e}", path.display())
-        })
+        fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("could not read {}: {e}", path.display()))
     }
 }
 

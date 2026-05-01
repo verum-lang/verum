@@ -33,9 +33,9 @@ use verum_ast::{
     span::Span,
     ty::{Ident, Path},
 };
+use verum_common::Map;
 use verum_smt::solver::{SmtBackend, SmtContext, SmtResult, Z3Backend};
 use verum_smt::z3_backend::Z3Config;
-use verum_common::Map;
 
 fn dummy_span() -> Span {
     Span::default()

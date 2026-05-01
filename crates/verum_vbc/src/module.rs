@@ -266,17 +266,48 @@ impl VbcModule {
                 let args_str: Vec<String> = args.iter().map(|a| self.display_type_ref(a)).collect();
                 format!("{}<{}>", base_name, args_str.join(", "))
             }
-            TypeRef::Function { params, return_type, .. } => {
-                let params_str: Vec<String> = params.iter().map(|p| self.display_type_ref(p)).collect();
-                format!("fn({}) -> {}", params_str.join(", "), self.display_type_ref(return_type))
+            TypeRef::Function {
+                params,
+                return_type,
+                ..
+            } => {
+                let params_str: Vec<String> =
+                    params.iter().map(|p| self.display_type_ref(p)).collect();
+                format!(
+                    "fn({}) -> {}",
+                    params_str.join(", "),
+                    self.display_type_ref(return_type)
+                )
             }
-            TypeRef::Rank2Function { type_param_count, params, return_type, .. } => {
-                let params_str: Vec<String> = params.iter().map(|p| self.display_type_ref(p)).collect();
-                format!("fn<{}>({}) -> {}", type_param_count, params_str.join(", "), self.display_type_ref(return_type))
+            TypeRef::Rank2Function {
+                type_param_count,
+                params,
+                return_type,
+                ..
+            } => {
+                let params_str: Vec<String> =
+                    params.iter().map(|p| self.display_type_ref(p)).collect();
+                format!(
+                    "fn<{}>({}) -> {}",
+                    type_param_count,
+                    params_str.join(", "),
+                    self.display_type_ref(return_type)
+                )
             }
-            TypeRef::Reference { inner, mutability, tier } => {
-                let m = match mutability { Mutability::Immutable => "&", Mutability::Mutable => "&mut " };
-                let t = match tier { CbgrTier::Tier0 => "", CbgrTier::Tier1 => "checked ", CbgrTier::Tier2 => "unsafe " };
+            TypeRef::Reference {
+                inner,
+                mutability,
+                tier,
+            } => {
+                let m = match mutability {
+                    Mutability::Immutable => "&",
+                    Mutability::Mutable => "&mut ",
+                };
+                let t = match tier {
+                    CbgrTier::Tier0 => "",
+                    CbgrTier::Tier1 => "checked ",
+                    CbgrTier::Tier2 => "unsafe ",
+                };
                 format!("{}{}{}", m, t, self.display_type_ref(inner))
             }
             TypeRef::Tuple(elems) => {
@@ -317,7 +348,9 @@ impl VbcModule {
             TypeId::RESULT => "Result".into(),
             TypeId::DEQUE => "Deque".into(),
             TypeId::CHANNEL => "Channel".into(),
-            _ => self.get_type_name(tid).unwrap_or_else(|| format!("type#{}", tid.0)),
+            _ => self
+                .get_type_name(tid)
+                .unwrap_or_else(|| format!("type#{}", tid.0)),
         }
     }
 
@@ -365,18 +398,20 @@ impl VbcModule {
         // Exact match first
         for (idx, desc) in self.functions.iter().enumerate() {
             if let Some(fname) = self.get_string(desc.name)
-                && fname == name {
-                    return Some(FunctionId(idx as u32));
-                }
+                && fname == name
+            {
+                return Some(FunctionId(idx as u32));
+            }
         }
         // Suffix match: ".name" against fully-qualified registrations
         if name.contains('.') {
             let suffix = format!(".{}", name);
             for (idx, desc) in self.functions.iter().enumerate() {
                 if let Some(fname) = self.get_string(desc.name)
-                    && fname.ends_with(&suffix) {
-                        return Some(FunctionId(idx as u32));
-                    }
+                    && fname.ends_with(&suffix)
+                {
+                    return Some(FunctionId(idx as u32));
+                }
             }
         }
         None
@@ -449,11 +484,8 @@ impl VbcModule {
     /// Updates module flags based on content.
     pub fn update_flags(&mut self) {
         // Preserve profile flags that were set via set_profile_flags
-        let profile_flags = self.header.flags & (
-            VbcFlags::NOT_INTERPRETABLE |
-            VbcFlags::SYSTEMS_PROFILE |
-            VbcFlags::EMBEDDED_TARGET
-        );
+        let profile_flags = self.header.flags
+            & (VbcFlags::NOT_INTERPRETABLE | VbcFlags::SYSTEMS_PROFILE | VbcFlags::EMBEDDED_TARGET);
 
         let mut flags = profile_flags;
 
@@ -535,9 +567,10 @@ impl VbcModule {
     pub fn find_ffi_symbol(&self, name: &str) -> Option<FfiSymbolId> {
         for (idx, sym) in self.ffi_symbols.iter().enumerate() {
             if let Some(sym_name) = self.strings.get(sym.name)
-                && sym_name == name {
-                    return Some(FfiSymbolId(idx as u32));
-                }
+                && sym_name == name
+            {
+                return Some(FfiSymbolId(idx as u32));
+            }
         }
         None
     }
@@ -980,9 +1013,10 @@ impl VbcFunction {
                 | Instruction::Ret { .. }
                 | Instruction::RetV
                 | Instruction::Switch { .. }
-                    if i + 1 < instructions.len() => {
-                        starts.push((i + 1) as u32);
-                    }
+                    if i + 1 < instructions.len() =>
+                {
+                    starts.push((i + 1) as u32);
+                }
                 _ => {}
             }
         }
@@ -1131,7 +1165,6 @@ pub enum FfiPlatform {
     Android = 6,
 }
 
-
 impl FfiPlatform {
     /// Returns true if this platform matches the current compilation target.
     pub fn matches_current(&self) -> bool {
@@ -1240,7 +1273,6 @@ pub enum CallingConvention {
     Naked = 8,
 }
 
-
 /// Error handling protocol for FFI calls.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
@@ -1270,7 +1302,6 @@ pub enum ErrorProtocol {
     /// Returns sentinel on error AND sets errno.
     SentinelWithErrno = 8,
 }
-
 
 /// Memory effects of an FFI call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

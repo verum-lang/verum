@@ -59,13 +59,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use metal::{
-    Buffer, CommandQueue, CompileOptions, ComputePipelineDescriptor, ComputePipelineState,
-    Device, Library, MTLResourceOptions, MTLSize,
+    Buffer, CommandQueue, CompileOptions, ComputePipelineDescriptor, ComputePipelineState, Device,
+    Library, MTLResourceOptions, MTLSize,
 };
 
+use super::super::tensor::{DType, TensorHandle};
 use super::backend::{Backend, ComputeCapabilities};
 use super::device::DeviceId;
-use super::super::tensor::{DType, TensorHandle};
 use crate::instruction::{TensorBinaryOp, TensorReduceOp, TensorUnaryOp};
 
 // ============================================================================
@@ -1136,10 +1136,9 @@ impl MetalBufferPool {
         // Allocate new
         self.cache_misses.fetch_add(1, Ordering::Relaxed);
         let alloc_size = 1 << bucket;
-        let buffer = self.device.new_buffer(
-            alloc_size as u64,
-            MTLResourceOptions::StorageModeShared,
-        );
+        let buffer = self
+            .device
+            .new_buffer(alloc_size as u64, MTLResourceOptions::StorageModeShared);
         self.allocated.fetch_add(alloc_size, Ordering::Relaxed);
         Some(buffer)
     }
@@ -1374,7 +1373,7 @@ impl MetalBackend {
 
         // Vectorized dispatch: process 4 elements per thread
         let n = a.numel as u32;
-        let n_vec = (a.numel / 4) as u32;  // Number of float4 vectors
+        let n_vec = (a.numel / 4) as u32; // Number of float4 vectors
         encoder.set_bytes(3, 4, &n as *const u32 as *const _);
         encoder.set_bytes(4, 4, &n_vec as *const u32 as *const _);
 
@@ -1436,7 +1435,7 @@ impl MetalBackend {
 
         // Vectorized dispatch: process 4 elements per thread
         let n = a.numel as u32;
-        let n_vec = (a.numel / 4) as u32;  // Number of float4 vectors
+        let n_vec = (a.numel / 4) as u32; // Number of float4 vectors
         encoder.set_bytes(2, 4, &n as *const u32 as *const _);
         encoder.set_bytes(3, 4, &n_vec as *const u32 as *const _);
 
@@ -1758,9 +1757,11 @@ impl MetalBackend {
 
         // Return buffers to pool
         self.buffer_pool.deallocate(a_buf, numel * 4);
-        self.buffer_pool.deallocate(partial_max_buf, num_groups as usize * 4);
+        self.buffer_pool
+            .deallocate(partial_max_buf, num_groups as usize * 4);
         self.buffer_pool.deallocate(exp_buf, numel * 4);
-        self.buffer_pool.deallocate(partial_sum_buf, num_groups as usize * 4);
+        self.buffer_pool
+            .deallocate(partial_sum_buf, num_groups as usize * 4);
         self.buffer_pool.deallocate(out_buf, numel * 4);
 
         Some(output)
@@ -1831,7 +1832,9 @@ impl MetalBackend {
                 assert!(
                     b * dim + dim <= a.numel,
                     "softmax row copy out of bounds: offset={}, dim={}, numel={}",
-                    b * dim, dim, a.numel
+                    b * dim,
+                    dim,
+                    a.numel
                 );
                 unsafe {
                     // SAFETY: src.add(b*dim) is in bounds (checked above), dst has `dim` elements.
@@ -1850,7 +1853,9 @@ impl MetalBackend {
                 assert!(
                     b * dim + dim <= output.numel,
                     "softmax output copy out of bounds: offset={}, dim={}, numel={}",
-                    b * dim, dim, output.numel
+                    b * dim,
+                    dim,
+                    output.numel
                 );
                 unsafe {
                     // SAFETY: out_ptr.add(b*dim) is in bounds (checked above), res_ptr has `dim` elements.
@@ -2022,8 +2027,12 @@ impl MetalBackend {
         let input_buf = self.create_buffer(input)?;
         let gamma_buf = gamma.and_then(|g| self.create_buffer(g));
         let beta_buf = beta.and_then(|b| self.create_buffer(b));
-        let partial_sum_buf = self.buffer_pool.allocate(batch_size * groups_per_batch as usize * 4)?;
-        let partial_var_buf = self.buffer_pool.allocate(batch_size * groups_per_batch as usize * 4)?;
+        let partial_sum_buf = self
+            .buffer_pool
+            .allocate(batch_size * groups_per_batch as usize * 4)?;
+        let partial_var_buf = self
+            .buffer_pool
+            .allocate(batch_size * groups_per_batch as usize * 4)?;
         let means_buf = self.buffer_pool.allocate(batch_size * 4)?;
         let vars_buf = self.buffer_pool.allocate(batch_size * 4)?;
         let mut output = TensorHandle::zeros(&[batch_size, hidden_size], DType::F32)?;
@@ -2151,11 +2160,7 @@ impl MetalBackend {
             encoder.set_bytes(10, 4, &has_beta_u32 as *const u32 as *const _);
 
             let thread_group_size = MTLSize::new(256, 1, 1);
-            let num_groups = MTLSize::new(
-                (hidden_size as u64 + 255) / 256,
-                batch_size as u64,
-                1,
-            );
+            let num_groups = MTLSize::new((hidden_size as u64 + 255) / 256, batch_size as u64, 1);
             encoder.dispatch_thread_groups(num_groups, thread_group_size);
 
             encoder.end_encoding();
@@ -2173,8 +2178,10 @@ impl MetalBackend {
         if let Some(buf) = beta_buf {
             self.buffer_pool.deallocate(buf, hidden_size * 4);
         }
-        self.buffer_pool.deallocate(partial_sum_buf, batch_size * groups_per_batch as usize * 4);
-        self.buffer_pool.deallocate(partial_var_buf, batch_size * groups_per_batch as usize * 4);
+        self.buffer_pool
+            .deallocate(partial_sum_buf, batch_size * groups_per_batch as usize * 4);
+        self.buffer_pool
+            .deallocate(partial_var_buf, batch_size * groups_per_batch as usize * 4);
         self.buffer_pool.deallocate(means_buf, batch_size * 4);
         self.buffer_pool.deallocate(vars_buf, batch_size * 4);
         self.buffer_pool.deallocate(dummy_buf, hidden_size * 4);
@@ -2618,7 +2625,12 @@ mod tests {
         unsafe {
             for i in 0..10 {
                 let val = *ptr.add(i);
-                assert!((val - 4.0).abs() < 1e-5, "Expected 4.0, got {} at index {}", val, i);
+                assert!(
+                    (val - 4.0).abs() < 1e-5,
+                    "Expected 4.0, got {} at index {}",
+                    val,
+                    i
+                );
             }
         }
     }
@@ -2671,8 +2683,13 @@ mod tests {
 
             unsafe {
                 let val = *ptr;
-                assert!((val - expected).abs() < 1e-5,
-                    "For {:?}: expected {}, got {}", op, expected, val);
+                assert!(
+                    (val - expected).abs() < 1e-5,
+                    "For {:?}: expected {}, got {}",
+                    op,
+                    expected,
+                    val
+                );
             }
         }
     }
@@ -2709,8 +2726,14 @@ mod tests {
 
             unsafe {
                 let val = *ptr;
-                assert!((val - expected).abs() < 1e-4,
-                    "For {:?}({}): expected {}, got {}", op, input, expected, val);
+                assert!(
+                    (val - expected).abs() < 1e-4,
+                    "For {:?}({}): expected {}, got {}",
+                    op,
+                    input,
+                    expected,
+                    val
+                );
             }
         }
     }
@@ -2746,8 +2769,13 @@ mod tests {
             unsafe {
                 for i in 0..size {
                     let val = *ptr.add(i);
-                    assert!((val - 5.0).abs() < 1e-5,
-                        "Size {}: expected 5.0, got {} at index {}", size, val, i);
+                    assert!(
+                        (val - 5.0).abs() < 1e-5,
+                        "Size {}: expected 5.0, got {} at index {}",
+                        size,
+                        val,
+                        i
+                    );
                 }
             }
         }
@@ -2788,8 +2816,12 @@ mod tests {
             let ptr = result.data_ptr_f32();
             unsafe {
                 let val = *ptr;
-                assert!((val - 3.75).abs() < 1e-5,
-                    "Shape {:?}: expected 3.75, got {}", shape, val);
+                assert!(
+                    (val - 3.75).abs() < 1e-5,
+                    "Shape {:?}: expected 3.75, got {}",
+                    shape,
+                    val
+                );
             }
         }
     }
@@ -2817,15 +2849,28 @@ mod tests {
             let b = TensorHandle::full(&[64], DType::F32, b_val).unwrap();
 
             let result = backend.binop_gpu(&a, &b, op);
-            assert!(result.is_some(), "Failed for {:?}({}, {})", op, a_val, b_val);
+            assert!(
+                result.is_some(),
+                "Failed for {:?}({}, {})",
+                op,
+                a_val,
+                b_val
+            );
 
             let result = result.unwrap();
             let ptr = result.data_ptr_f32();
             unsafe {
                 let val = *ptr;
-                assert!((val - expected).abs() < tol,
+                assert!(
+                    (val - expected).abs() < tol,
                     "For {:?}({}, {}): expected {}, got {} (tol={})",
-                    op, a_val, b_val, expected, val, tol);
+                    op,
+                    a_val,
+                    b_val,
+                    expected,
+                    val,
+                    tol
+                );
             }
         }
     }
@@ -2840,11 +2885,11 @@ mod tests {
 
         // Test with values that might cause issues
         let special_values: &[(f64, TensorUnaryOp)] = &[
-            (0.0, TensorUnaryOp::Exp),    // exp(0) = 1
-            (1.0, TensorUnaryOp::Log),    // log(1) = 0
-            (0.0, TensorUnaryOp::Sqrt),   // sqrt(0) = 0
-            (-5.0, TensorUnaryOp::Relu),  // relu(-5) = 0
-            (5.0, TensorUnaryOp::Relu),   // relu(5) = 5
+            (0.0, TensorUnaryOp::Exp),   // exp(0) = 1
+            (1.0, TensorUnaryOp::Log),   // log(1) = 0
+            (0.0, TensorUnaryOp::Sqrt),  // sqrt(0) = 0
+            (-5.0, TensorUnaryOp::Relu), // relu(-5) = 0
+            (5.0, TensorUnaryOp::Relu),  // relu(5) = 5
         ];
 
         for &(val, op) in special_values {
@@ -2868,11 +2913,11 @@ mod tests {
         // Test sigmoid for various inputs
         // sigmoid(x) = 1 / (1 + exp(-x))
         let test_cases: &[(f64, f32)] = &[
-            (0.0, 0.5),          // sigmoid(0) = 0.5
-            (1.0, 0.7310586),    // sigmoid(1)
-            (-1.0, 0.26894143),  // sigmoid(-1)
-            (5.0, 0.9933072),    // sigmoid(5) ≈ 1
-            (-5.0, 0.0066929),   // sigmoid(-5) ≈ 0
+            (0.0, 0.5),         // sigmoid(0) = 0.5
+            (1.0, 0.7310586),   // sigmoid(1)
+            (-1.0, 0.26894143), // sigmoid(-1)
+            (5.0, 0.9933072),   // sigmoid(5) ≈ 1
+            (-5.0, 0.0066929),  // sigmoid(-5) ≈ 0
         ];
 
         for &(input, expected) in test_cases {
@@ -2884,8 +2929,13 @@ mod tests {
             let ptr = result.data_ptr_f32();
             unsafe {
                 let val = *ptr;
-                assert!((val - expected).abs() < 1e-4,
-                    "sigmoid({}): expected {}, got {}", input, expected, val);
+                assert!(
+                    (val - expected).abs() < 1e-4,
+                    "sigmoid({}): expected {}, got {}",
+                    input,
+                    expected,
+                    val
+                );
             }
         }
     }
@@ -2916,8 +2966,13 @@ mod tests {
             let ptr = result.data_ptr_f32();
             unsafe {
                 let val = *ptr;
-                assert!((val - expected).abs() < 1e-4,
-                    "tanh({}): expected {}, got {}", input, expected, val);
+                assert!(
+                    (val - expected).abs() < 1e-4,
+                    "tanh({}): expected {}, got {}",
+                    input,
+                    expected,
+                    val
+                );
             }
         }
     }
@@ -2964,10 +3019,10 @@ mod tests {
 
         // Chain of operations: +2, *3, -1, /2
         let ops: &[(TensorBinaryOp, f64)] = &[
-            (TensorBinaryOp::Add, 2.0),  // 1 + 2 = 3
-            (TensorBinaryOp::Mul, 3.0),  // 3 * 3 = 9
-            (TensorBinaryOp::Sub, 1.0),  // 9 - 1 = 8
-            (TensorBinaryOp::Div, 2.0),  // 8 / 2 = 4
+            (TensorBinaryOp::Add, 2.0), // 1 + 2 = 3
+            (TensorBinaryOp::Mul, 3.0), // 3 * 3 = 9
+            (TensorBinaryOp::Sub, 1.0), // 9 - 1 = 8
+            (TensorBinaryOp::Div, 2.0), // 8 / 2 = 4
         ];
 
         for (op, val) in ops {
@@ -2980,8 +3035,12 @@ mod tests {
         unsafe {
             for i in 0..size {
                 let val = *ptr.add(i);
-                assert!((val - 4.0).abs() < 1e-4,
-                    "Expected 4.0, got {} at index {}", val, i);
+                assert!(
+                    (val - 4.0).abs() < 1e-4,
+                    "Expected 4.0, got {} at index {}",
+                    val,
+                    i
+                );
             }
         }
     }
@@ -3018,8 +3077,16 @@ mod tests {
             let ptr = result.data_ptr_f32();
             unsafe {
                 let val = *ptr;
-                assert!((val - expected).abs() < 0.01,
-                    "{}x{} * {}x{}: expected {}, got {}", m, k, k, n, expected, val);
+                assert!(
+                    (val - expected).abs() < 0.01,
+                    "{}x{} * {}x{}: expected {}, got {}",
+                    m,
+                    k,
+                    k,
+                    n,
+                    expected,
+                    val
+                );
             }
         }
     }
@@ -3037,7 +3104,7 @@ mod tests {
         let backend = MetalBackend::new().unwrap();
 
         // Large tensor to see vectorization benefit
-        let size = 1_000_000;  // 1M elements (must be divisible by 4)
+        let size = 1_000_000; // 1M elements (must be divisible by 4)
         let size_aligned = (size / 4) * 4;
 
         let a = TensorHandle::full(&[size_aligned], DType::F32, std::f64::consts::PI).unwrap();
@@ -3049,7 +3116,11 @@ mod tests {
         let elapsed = start.elapsed();
 
         assert!(result.is_some());
-        assert!(elapsed.as_millis() < 1000, "Operation took too long: {:?}", elapsed);
+        assert!(
+            elapsed.as_millis() < 1000,
+            "Operation took too long: {:?}",
+            elapsed
+        );
 
         // Verify result
         let result = result.unwrap();
@@ -3057,8 +3128,12 @@ mod tests {
         let ptr = result.data_ptr_f32();
         unsafe {
             let val = *ptr;
-            assert!((val - expected).abs() < 1e-4,
-                "Expected {}, got {}", expected, val);
+            assert!(
+                (val - expected).abs() < 1e-4,
+                "Expected {}, got {}",
+                expected,
+                val
+            );
         }
     }
 
@@ -3088,8 +3163,12 @@ mod tests {
         let ptr = tensor.data_ptr_f32();
         unsafe {
             let val = *ptr;
-            assert!((val - expected).abs() < 1e-3,
-                "Chain result: expected {}, got {}", expected, val);
+            assert!(
+                (val - expected).abs() < 1e-3,
+                "Chain result: expected {}, got {}",
+                expected,
+                val
+            );
         }
     }
 
@@ -3111,7 +3190,11 @@ mod tests {
 
         let stats = pool.stats();
         // After the first allocation, all subsequent ones should be cache hits
-        assert!(stats.cache_hits >= 99, "Expected many cache hits, got {}", stats.cache_hits);
+        assert!(
+            stats.cache_hits >= 99,
+            "Expected many cache hits, got {}",
+            stats.cache_hits
+        );
     }
 
     // ==========================================================================
@@ -3136,8 +3219,12 @@ mod tests {
         unsafe {
             for i in 0..4 {
                 let val = *ptr.add(i);
-                assert!((val - 0.25).abs() < 1e-5,
-                    "softmax([0,0,0,0])[{}]: expected 0.25, got {}", i, val);
+                assert!(
+                    (val - 0.25).abs() < 1e-5,
+                    "softmax([0,0,0,0])[{}]: expected 0.25, got {}",
+                    i,
+                    val
+                );
             }
         }
     }
@@ -3161,7 +3248,11 @@ mod tests {
                 sum += *ptr.add(i);
             }
         }
-        assert!((sum - 1.0).abs() < 1e-4, "Softmax sum: expected 1.0, got {}", sum);
+        assert!(
+            (sum - 1.0).abs() < 1e-4,
+            "Softmax sum: expected 1.0, got {}",
+            sum
+        );
     }
 
     #[test]
@@ -3185,10 +3276,16 @@ mod tests {
         let expected = 1.0 / size as f32;
         let ptr = result.data_ptr_f32();
         unsafe {
-            for i in 0..10 {  // Check first few elements
+            for i in 0..10 {
+                // Check first few elements
                 let val = *ptr.add(i);
-                assert!((val - expected).abs() < 1e-6,
-                    "softmax uniform[{}]: expected {}, got {}", i, expected, val);
+                assert!(
+                    (val - expected).abs() < 1e-6,
+                    "softmax uniform[{}]: expected {}, got {}",
+                    i,
+                    expected,
+                    val
+                );
             }
         }
     }
@@ -3222,11 +3319,19 @@ mod tests {
         unsafe {
             for i in 0..4 {
                 let val = *out_ptr.add(i);
-                assert!(val.is_finite(), "softmax large values produced non-finite: {}", val);
+                assert!(
+                    val.is_finite(),
+                    "softmax large values produced non-finite: {}",
+                    val
+                );
                 sum += val;
             }
         }
-        assert!((sum - 1.0).abs() < 1e-4, "Softmax sum with large values: {}", sum);
+        assert!(
+            (sum - 1.0).abs() < 1e-4,
+            "Softmax sum with large values: {}",
+            sum
+        );
     }
 
     #[test]
@@ -3255,8 +3360,12 @@ mod tests {
                     row_sum += *ptr.add(batch * 8 + i);
                 }
             }
-            assert!((row_sum - 1.0).abs() < 1e-4,
-                "Batch {}: row sum = {}", batch, row_sum);
+            assert!(
+                (row_sum - 1.0).abs() < 1e-4,
+                "Batch {}: row sum = {}",
+                batch,
+                row_sum
+            );
         }
     }
 
@@ -3286,8 +3395,12 @@ mod tests {
                     row_sum += *ptr.add(b * dim + i);
                 }
             }
-            assert!((row_sum - 1.0).abs() < 1e-3,
-                "Batch {}: row sum = {}", b, row_sum);
+            assert!(
+                (row_sum - 1.0).abs() < 1e-3,
+                "Batch {}: row sum = {}",
+                b,
+                row_sum
+            );
         }
     }
 
@@ -3304,14 +3417,19 @@ mod tests {
         let gpu_result = backend.softmax_gpu(&a).unwrap();
 
         // Manual CPU softmax: exp(x - max) / sum(exp(x - max))
-        let expected = 1.0 / 16.0;  // All equal -> uniform distribution
+        let expected = 1.0 / 16.0; // All equal -> uniform distribution
 
         let ptr = gpu_result.data_ptr_f32();
         unsafe {
             for i in 0..16 {
                 let val = *ptr.add(i);
-                assert!((val - expected).abs() < 1e-5,
-                    "softmax_gpu[{}]: expected {}, got {}", i, expected, val);
+                assert!(
+                    (val - expected).abs() < 1e-5,
+                    "softmax_gpu[{}]: expected {}, got {}",
+                    i,
+                    expected,
+                    val
+                );
             }
         }
     }
@@ -3342,8 +3460,12 @@ mod tests {
         unsafe {
             for i in 0..8 {
                 let val = *ptr.add(i);
-                assert!(val.abs() < 1e-3,
-                    "layer_norm uniform[{}]: expected ~0.0, got {}", i, val);
+                assert!(
+                    val.abs() < 1e-3,
+                    "layer_norm uniform[{}]: expected ~0.0, got {}",
+                    i,
+                    val
+                );
             }
         }
     }
@@ -3371,8 +3493,12 @@ mod tests {
         unsafe {
             for i in 0..8 {
                 let val = *ptr.add(i);
-                assert!((val - 1.0).abs() < 1e-3,
-                    "layer_norm with gamma/beta[{}]: expected 1.0, got {}", i, val);
+                assert!(
+                    (val - 1.0).abs() < 1e-3,
+                    "layer_norm with gamma/beta[{}]: expected 1.0, got {}",
+                    i,
+                    val
+                );
             }
         }
     }
@@ -3407,10 +3533,18 @@ mod tests {
         unsafe {
             let v0 = *out_ptr.add(0);
             let v3 = *out_ptr.add(3);
-            assert!((v0 - (-1.0 / expected_std)).abs() < 0.1,
-                "layer_norm[0]: expected {}, got {}", -1.0 / expected_std, v0);
-            assert!((v3 - (1.0 / expected_std)).abs() < 0.1,
-                "layer_norm[3]: expected {}, got {}", 1.0 / expected_std, v3);
+            assert!(
+                (v0 - (-1.0 / expected_std)).abs() < 0.1,
+                "layer_norm[0]: expected {}, got {}",
+                -1.0 / expected_std,
+                v0
+            );
+            assert!(
+                (v3 - (1.0 / expected_std)).abs() < 0.1,
+                "layer_norm[3]: expected {}, got {}",
+                1.0 / expected_std,
+                v3
+            );
         }
     }
 
@@ -3442,8 +3576,12 @@ mod tests {
         unsafe {
             for i in 0..10 {
                 let val = *ptr.add(i);
-                assert!(val.abs() < 1e-2,
-                    "layer_norm transformer[{}]: expected ~0.0, got {}", i, val);
+                assert!(
+                    val.abs() < 1e-2,
+                    "layer_norm transformer[{}]: expected ~0.0, got {}",
+                    i,
+                    val
+                );
             }
         }
     }
@@ -3489,9 +3627,17 @@ mod tests {
         unsafe {
             for i in 0..10 {
                 let val = *ptr.add(i);
-                assert!(val.is_finite(), "layer_norm large produced non-finite: {}", val);
-                assert!(val.abs() < 1e-2,
-                    "layer_norm large[{}]: expected ~0.0, got {}", i, val);
+                assert!(
+                    val.is_finite(),
+                    "layer_norm large produced non-finite: {}",
+                    val
+                );
+                assert!(
+                    val.abs() < 1e-2,
+                    "layer_norm large[{}]: expected ~0.0, got {}",
+                    i,
+                    val
+                );
             }
         }
     }
@@ -3517,7 +3663,12 @@ mod tests {
         unsafe {
             for i in 0..16 {
                 let val = *ptr.add(i);
-                assert!(val.abs() < 1e-3, "layer_norm gamma only[{}]: got {}", i, val);
+                assert!(
+                    val.abs() < 1e-3,
+                    "layer_norm gamma only[{}]: got {}",
+                    i,
+                    val
+                );
             }
         }
     }
@@ -3543,8 +3694,12 @@ mod tests {
         unsafe {
             for i in 0..16 {
                 let val = *ptr.add(i);
-                assert!((val - 5.0).abs() < 1e-3,
-                    "layer_norm beta only[{}]: expected 5.0, got {}", i, val);
+                assert!(
+                    (val - 5.0).abs() < 1e-3,
+                    "layer_norm beta only[{}]: expected 5.0, got {}",
+                    i,
+                    val
+                );
             }
         }
     }
@@ -3570,8 +3725,12 @@ mod tests {
         for (batch, hidden) in configs {
             let input = TensorHandle::full(&[batch, hidden], DType::F32, 1.0).unwrap();
             let result = backend.layer_norm_gpu(&input, None, None, 1e-5);
-            assert!(result.is_some(),
-                "Failed for batch={}, hidden={}", batch, hidden);
+            assert!(
+                result.is_some(),
+                "Failed for batch={}, hidden={}",
+                batch,
+                hidden
+            );
 
             let result = result.unwrap();
             assert_eq!(result.shape[0], batch);
@@ -3603,8 +3762,11 @@ mod tests {
         let ptr = result.data_ptr_f32();
         unsafe {
             let sum = *ptr;
-            assert!((sum - 256.0).abs() < 1e-3,
-                "Sum of 256 ones: expected 256.0, got {}", sum);
+            assert!(
+                (sum - 256.0).abs() < 1e-3,
+                "Sum of 256 ones: expected 256.0, got {}",
+                sum
+            );
         }
     }
 
@@ -3630,8 +3792,11 @@ mod tests {
         let res_ptr = result.data_ptr_f32();
         unsafe {
             let max = *res_ptr;
-            assert!((max - 999.0).abs() < 1e-3,
-                "Max: expected 999.0, got {}", max);
+            assert!(
+                (max - 999.0).abs() < 1e-3,
+                "Max: expected 999.0, got {}",
+                max
+            );
         }
     }
 
@@ -3657,8 +3822,11 @@ mod tests {
         let res_ptr = result.data_ptr_f32();
         unsafe {
             let min = *res_ptr;
-            assert!((min - (-42.0)).abs() < 1e-3,
-                "Min: expected -42.0, got {}", min);
+            assert!(
+                (min - (-42.0)).abs() < 1e-3,
+                "Min: expected -42.0, got {}",
+                min
+            );
         }
     }
 
@@ -3680,8 +3848,11 @@ mod tests {
         unsafe {
             let mean = *ptr;
             // All values are 5.0, so mean = 5.0
-            assert!((mean - 5.0).abs() < 1e-3,
-                "Mean of 200 fives: expected 5.0, got {}", mean);
+            assert!(
+                (mean - 5.0).abs() < 1e-3,
+                "Mean of 200 fives: expected 5.0, got {}",
+                mean
+            );
         }
     }
 
@@ -3697,6 +3868,9 @@ mod tests {
         // Should return None for axis-specific reductions
         let input = TensorHandle::full(&[10, 10], DType::F32, 1.0).unwrap();
         let result = backend.reduce_gpu(&input, TensorReduceOp::Sum, Some(0));
-        assert!(result.is_none(), "Should return None for axis-specific reduce");
+        assert!(
+            result.is_none(),
+            "Should return None for axis-specific reduce"
+        );
     }
 }

@@ -43,7 +43,10 @@ fn empty_file_parses_to_empty_module() {
 fn file_with_only_whitespace() {
     let parser = VerumParser::new();
     let result = parser.parse_module_str("   \n\n\t\t  \n  ", file_id());
-    assert!(result.is_ok(), "Whitespace-only file should parse successfully");
+    assert!(
+        result.is_ok(),
+        "Whitespace-only file should parse successfully"
+    );
 }
 
 #[test]
@@ -53,7 +56,10 @@ fn file_with_only_line_comments() {
         "// This is a comment\n// Another comment\n// Final comment\n",
         file_id(),
     );
-    assert!(result.is_ok(), "Comment-only file should parse successfully");
+    assert!(
+        result.is_ok(),
+        "Comment-only file should parse successfully"
+    );
 }
 
 #[test]
@@ -63,16 +69,16 @@ fn file_with_only_block_comments() {
         "/* block comment */\n/* another\n   multiline\n   comment */",
         file_id(),
     );
-    assert!(result.is_ok(), "Block-comment-only file should parse successfully");
+    assert!(
+        result.is_ok(),
+        "Block-comment-only file should parse successfully"
+    );
 }
 
 #[test]
 fn file_with_nested_block_comments() {
     let parser = VerumParser::new();
-    let result = parser.parse_module_str(
-        "/* outer /* inner */ still outer */",
-        file_id(),
-    );
+    let result = parser.parse_module_str("/* outer /* inner */ still outer */", file_id());
     // Whether nested comments are supported or not, this should not panic
     let _ = result;
 }
@@ -178,10 +184,7 @@ fn deeply_nested_if_expressions_200_levels() {
 #[test]
 fn deeply_nested_binary_ops_500() {
     // a + a + a + ... (500 times) - this tests left-recursive pratt parsing
-    let input = (0..500)
-        .map(|_| "a")
-        .collect::<Vec<_>>()
-        .join(" + ");
+    let input = (0..500).map(|_| "a").collect::<Vec<_>>().join(" + ");
     let parser = VerumParser::new();
     let result = parser.parse_expr_str(&input, file_id());
     // Pratt parsing is iterative for left-assoc ops, so this should work
@@ -318,7 +321,10 @@ fn null_byte_in_input() {
 fn only_operators() {
     let parser = VerumParser::new();
     let result = parser.parse_expr_str("+ - * /", file_id());
-    assert!(result.is_err(), "Bare operators should not parse as expression");
+    assert!(
+        result.is_err(),
+        "Bare operators should not parse as expression"
+    );
 }
 
 #[test]

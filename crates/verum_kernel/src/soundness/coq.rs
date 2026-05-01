@@ -63,7 +63,8 @@ impl SoundnessBackend for CoqBackend {
              From Coq Require Import Strings.String.\n\
              From Coq Require Import Lists.List.\n\
              Import ListNotations.\n\
-             Open Scope string_scope.".to_string()
+             Open Scope string_scope."
+            .to_string()
     }
 
     fn render_core_term_inductive(&self) -> String {
@@ -107,7 +108,8 @@ impl SoundnessBackend for CoqBackend {
                | ModalBigAnd (components : list CoreTerm)\n  \
                | Shape (inner : CoreTerm)\n  \
                | Flat (inner : CoreTerm)\n  \
-               | Sharp (inner : CoreTerm).".to_string()
+               | Sharp (inner : CoreTerm)."
+            .to_string()
     }
 
     fn render_core_type_inductive(&self) -> String {
@@ -121,7 +123,8 @@ impl SoundnessBackend for CoqBackend {
                | RefineTy\n  \
                | GlueTy\n  \
                | InductiveTy (path : string)\n  \
-               | OtherTy.".to_string()
+               | OtherTy."
+            .to_string()
     }
 
     fn render_kernel_rule_inductive(&self, rules: &[RuleSpec]) -> String {
@@ -191,15 +194,15 @@ impl SoundnessBackend for CoqBackend {
         );
 
         let body = match &rule.status {
-            LemmaStatus::Proved { coq_tactics, .. } => format!(
-                "Proof.\n{}\nQed.",
-                coq_tactics
-            ),
-            LemmaStatus::Admitted { reason } => format!(
-                "Proof.\nAdmitted.\n(* reason: {} *)",
-                reason
-            ),
-            LemmaStatus::DischargedByFramework { lemma_path, framework, citation } => format!(
+            LemmaStatus::Proved { coq_tactics, .. } => format!("Proof.\n{}\nQed.", coq_tactics),
+            LemmaStatus::Admitted { reason } => {
+                format!("Proof.\nAdmitted.\n(* reason: {} *)", reason)
+            }
+            LemmaStatus::DischargedByFramework {
+                lemma_path,
+                framework,
+                citation,
+            } => format!(
                 "Proof.\nAdmitted.\n(* discharged-by: {} *)\n(* framework: {} *)\n(* citation: {} *)",
                 lemma_path, framework, citation
             ),

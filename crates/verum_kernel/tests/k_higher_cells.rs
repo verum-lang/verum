@@ -21,13 +21,13 @@
 //!  • Default dim — `PathCtorSig::one_cell` constructs dim=1.
 
 use verum_common::{List, Text};
-use verum_kernel::{
-    ConstructorSig, CoreTerm, PathCtorSig, RegisteredInductive,
-    eliminator_type,
-};
+use verum_kernel::{ConstructorSig, CoreTerm, PathCtorSig, RegisteredInductive, eliminator_type};
 
 fn nullary(name: &str) -> ConstructorSig {
-    ConstructorSig { name: Text::from(name), arg_types: List::new() }
+    ConstructorSig {
+        name: Text::from(name),
+        arg_types: List::new(),
+    }
 }
 
 fn var(name: &str) -> CoreTerm {
@@ -36,22 +36,13 @@ fn var(name: &str) -> CoreTerm {
 
 #[test]
 fn path_ctor_one_cell_helper_constructs_dim_1() {
-    let sig = PathCtorSig::one_cell(
-        Text::from("Loop"),
-        var("Base"),
-        var("Base"),
-    );
+    let sig = PathCtorSig::one_cell(Text::from("Loop"), var("Base"), var("Base"));
     assert_eq!(sig.dim, 1);
 }
 
 #[test]
 fn path_ctor_n_cell_helper_constructs_with_explicit_dim() {
-    let sig = PathCtorSig::n_cell(
-        Text::from("Surf"),
-        2,
-        var("loop_a"),
-        var("loop_b"),
-    );
+    let sig = PathCtorSig::n_cell(Text::from("Surf"), 2, var("loop_a"), var("loop_b"));
     assert_eq!(sig.dim, 2);
 }
 
@@ -77,15 +68,27 @@ fn two_cell_eliminator_branch_nests_pathover() {
     ));
     let elim = eliminator_type(&torus);
     // Walk past motive + case_Base.
-    let CoreTerm::Pi { codomain: a, .. } = elim else { panic!() };
-    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::Pi { binder, domain, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::Pi { codomain: a, .. } = elim else {
+        panic!()
+    };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::Pi { binder, domain, .. } = a.as_ref() else {
+        panic!()
+    };
     assert_eq!(binder.as_str(), "case_Surf");
     // dim=2 ⇒ outer PathOver wrapping inner PathOver.
-    let CoreTerm::PathOver { lhs: outer_lhs, path: outer_path, .. } =
-        domain.as_ref()
+    let CoreTerm::PathOver {
+        lhs: outer_lhs,
+        path: outer_path,
+        ..
+    } = domain.as_ref()
     else {
-        panic!("dim=2 branch must be PathOver-shaped at outer layer; got {:?}", domain.as_ref());
+        panic!(
+            "dim=2 branch must be PathOver-shaped at outer layer; got {:?}",
+            domain.as_ref()
+        );
     };
     // Inner layer (the dim=1 PathOver) lives in outer_lhs.
     let inner = outer_lhs.as_ref();
@@ -117,9 +120,15 @@ fn three_cell_eliminator_branch_nests_pathover_thrice() {
         var("two_cell_b"),
     ));
     let elim = eliminator_type(&three);
-    let CoreTerm::Pi { codomain: a, .. } = elim else { panic!() };
-    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::Pi { binder, domain, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::Pi { codomain: a, .. } = elim else {
+        panic!()
+    };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::Pi { binder, domain, .. } = a.as_ref() else {
+        panic!()
+    };
     assert_eq!(binder.as_str(), "case_Cell3");
 
     // Count PathOver nesting depth through the lhs spine.
@@ -152,10 +161,18 @@ fn one_cell_eliminator_unchanged_after_dim_field_landing() {
         var("One"),
     ));
     let elim = eliminator_type(&interval);
-    let CoreTerm::Pi { codomain: a, .. } = elim else { panic!() };
-    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else { panic!() };
-    let CoreTerm::Pi { domain, .. } = a.as_ref() else { panic!() };
+    let CoreTerm::Pi { codomain: a, .. } = elim else {
+        panic!()
+    };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::Pi { codomain: a, .. } = a.as_ref() else {
+        panic!()
+    };
+    let CoreTerm::Pi { domain, .. } = a.as_ref() else {
+        panic!()
+    };
     // Single layer (PathOver because heterogeneous).
     let CoreTerm::PathOver { lhs, .. } = domain.as_ref() else {
         panic!("dim=1 heterogeneous Seg branch must be a single PathOver");

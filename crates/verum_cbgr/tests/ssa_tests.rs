@@ -32,8 +32,10 @@ fn create_simple_cfg() -> ControlFlowGraph {
         definitions: vec![DefSite {
             block: entry,
             reference: RefId(1),
-            is_stack_allocated: true, span: None,
-        }].into(),
+            is_stack_allocated: true,
+            span: None,
+        }]
+        .into(),
         uses: vec![].into(),
         call_sites: vec![].into(),
         has_await_point: false,
@@ -51,8 +53,10 @@ fn create_simple_cfg() -> ControlFlowGraph {
         uses: vec![UseeSite {
             block: exit,
             reference: RefId(1),
-            is_mutable: false, span: None,
-        }].into(),
+            is_mutable: false,
+            span: None,
+        }]
+        .into(),
         call_sites: vec![].into(),
         has_await_point: false,
         is_exception_handler: false,

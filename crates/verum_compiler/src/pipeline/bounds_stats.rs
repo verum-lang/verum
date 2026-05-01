@@ -25,10 +25,10 @@ use anyhow::Result;
 use tracing::debug;
 
 use verum_ast::{
+    Module,
     decl::{FunctionBody, FunctionDecl, ItemKind},
     expr::{Block, Expr, ExprKind},
     stmt::StmtKind,
-    Module,
 };
 
 use super::CompilationPipeline;
@@ -45,10 +45,7 @@ impl<'s> CompilationPipeline<'s> {
 
     /// This pass is retained for early statistics and potential
     /// future AST-level optimisations.
-    pub(super) fn run_bounds_elimination_analysis(
-        &self,
-        module: &Module,
-    ) -> Result<()> {
+    pub(super) fn run_bounds_elimination_analysis(&self, module: &Module) -> Result<()> {
         debug!("Running AST-level bounds statistics collection");
         let start = Instant::now();
 

@@ -117,11 +117,8 @@ impl<'s> CompilationPipeline<'s> {
 
                     param_constraints.push((ty, param_name.clone()));
 
-                    let verification_result = verifier.verify_refinement(
-                        ty,
-                        None,
-                        Some(SmtVerifyMode::Auto),
-                    );
+                    let verification_result =
+                        verifier.verify_refinement(ty, None, Some(SmtVerifyMode::Auto));
 
                     match verification_result {
                         Ok(_proof_result) => {
@@ -379,8 +376,8 @@ impl<'s> CompilationPipeline<'s> {
         translator: &mut verum_smt::translate::Translator<'_>,
         smt_context: &SmtContext,
     ) -> SmtCheckResult {
-        use z3::ast::{Dynamic, Int};
         use z3::SatResult;
+        use z3::ast::{Dynamic, Int};
 
         // Create a fresh variable for the return value (bound to 'result' or 'it').
         let result_var = Int::new_const("result");

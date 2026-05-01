@@ -132,13 +132,17 @@ fn main() {
     // Verify affine modifier is parsed correctly
     for item in &module.items {
         if let verum_ast::ItemKind::Type(type_decl) = &item.kind
-            && type_decl.name.name.as_str() == "Handle" {
-                assert!(
-                    type_decl.resource_modifier.is_some(),
-                    "Handle should have affine modifier"
-                );
-                println!("Handle has resource_modifier: {:?}", type_decl.resource_modifier);
-            }
+            && type_decl.name.name.as_str() == "Handle"
+        {
+            assert!(
+                type_decl.resource_modifier.is_some(),
+                "Handle should have affine modifier"
+            );
+            println!(
+                "Handle has resource_modifier: {:?}",
+                type_decl.resource_modifier
+            );
+        }
     }
 
     // Phase 0: Register all type declarations FIRST (this registers affine types!)
@@ -171,8 +175,11 @@ fn main() {
         Err(e) => {
             let err_msg = format!("{}", e);
             assert!(
-                err_msg.contains("moved") || err_msg.contains("use after") || err_msg.contains("already"),
-                "Expected move-related error, got: {}", err_msg
+                err_msg.contains("moved")
+                    || err_msg.contains("use after")
+                    || err_msg.contains("already"),
+                "Expected move-related error, got: {}",
+                err_msg
             );
         }
         Ok(_) => {
@@ -193,7 +200,10 @@ fn test_affine_type_lookup() {
     checker.register_affine_type_for_testing("Handle");
 
     // Check if it's registered
-    assert!(checker.is_type_affine_by_name("Handle"), "Handle should be registered as affine");
+    assert!(
+        checker.is_type_affine_by_name("Handle"),
+        "Handle should be registered as affine"
+    );
 
     // Create Type::Named for Handle
     let handle_named = Type::Named {
@@ -212,7 +222,9 @@ fn test_affine_type_lookup() {
     // Check if the looked up type is Named
     match looked_up {
         Some(Type::Named { path, .. }) => {
-            let name = path.segments.last()
+            let name = path
+                .segments
+                .last()
                 .and_then(|seg| match seg {
                     verum_ast::ty::PathSegment::Name(id) => Some(id.name.as_str()),
                     _ => None,
@@ -231,9 +243,9 @@ fn test_affine_type_lookup() {
 // Integration test with TypeChecker
 #[test]
 fn test_affine_type_with_type_checker() {
-    use verum_types::infer::TypeChecker;
-    use verum_types::context::TypeScheme;
     use indexmap::IndexMap;
+    use verum_types::context::TypeScheme;
+    use verum_types::infer::TypeChecker;
 
     let mut checker = TypeChecker::new();
     let span = dummy_span();
@@ -269,5 +281,8 @@ fn test_affine_type_with_type_checker() {
 
     // Second use should fail (use after move)
     let second_use = checker.check_path_for_affine(&path, span);
-    assert!(second_use.is_err(), "Second use should fail - value already moved");
+    assert!(
+        second_use.is_err(),
+        "Second use should fail - value already moved"
+    );
 }

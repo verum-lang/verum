@@ -183,10 +183,7 @@ pub enum StoreError {
     },
     /// On-disk blob's digest didn't match its directory name. The entry
     /// has been evicted and any refs pointing at it cleared.
-    IntegrityFailure {
-        expected: Digest,
-        actual: Digest,
-    },
+    IntegrityFailure { expected: Digest, actual: Digest },
     /// `meta.toml` failed to parse — the entry is evicted.
     InvalidMeta { path: PathBuf, reason: String },
     /// Insert called with `expected_digest` ≠ digest of the supplied
@@ -344,8 +341,7 @@ impl ContentStore {
             last_accessed_at: now,
             size: blob.len() as u64,
         };
-        let meta_str =
-            toml::to_string(&meta).expect("Meta serialise — pure data, never fails");
+        let meta_str = toml::to_string(&meta).expect("Meta serialise — pure data, never fails");
         let meta_path = tmp.join("meta.toml");
         atomic_write_string(&meta_path, &meta_str)
             .map_err(io_err("write meta.toml", &meta_path))?;
@@ -370,8 +366,7 @@ impl ContentStore {
         if let Some(parent) = ref_path.parent() {
             fs::create_dir_all(parent).map_err(io_err("mkdir refs/<name>/", parent))?;
         }
-        atomic_write_string(&ref_path, &digest.to_hex())
-            .map_err(io_err("write ref", &ref_path))?;
+        atomic_write_string(&ref_path, &digest.to_hex()).map_err(io_err("write ref", &ref_path))?;
 
         Ok(digest)
     }
@@ -417,11 +412,7 @@ impl ContentStore {
         if let Ok(s) = toml::to_string(&meta) {
             let _ = atomic_write_string(&meta_path, &s);
         }
-        Ok(Some(StoreEntry {
-            digest,
-            blob,
-            meta,
-        }))
+        Ok(Some(StoreEntry { digest, blob, meta }))
     }
 
     /// Look up the digest pinned for `(name, version)`. Returns
@@ -429,11 +420,7 @@ impl ContentStore {
     /// integrity transitively if a ref points at a blob. A dangling
     /// ref (digest hex parses but blob is missing) is treated as a
     /// miss and the ref is silently cleared.
-    pub fn lookup_by_name_version(
-        &self,
-        name: &str,
-        version: &str,
-    ) -> StoreResult<Option<Digest>> {
+    pub fn lookup_by_name_version(&self, name: &str, version: &str) -> StoreResult<Option<Digest>> {
         let ref_path = self.ref_path(name, version)?;
         let text = match fs::read_to_string(&ref_path) {
             Ok(t) => t,
@@ -594,8 +581,7 @@ impl ContentStore {
         }
         // Also clear any orphan ref files left over.
         let _ = fs::remove_dir_all(self.root.join("refs"));
-        fs::create_dir_all(self.root.join("refs"))
-            .map_err(io_err("recreate refs/", &self.root))?;
+        fs::create_dir_all(self.root.join("refs")).map_err(io_err("recreate refs/", &self.root))?;
         Ok(n)
     }
 
@@ -604,7 +590,11 @@ impl ContentStore {
         let mut out = Vec::new();
         let refs_root = self.root.join("refs");
         let _ = walk_refs(&refs_root, &mut |path| {
-            let name = match path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str()) {
+            let name = match path
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str())
+            {
                 Some(n) => n.to_string(),
                 None => return,
             };
@@ -820,7 +810,10 @@ mod tests {
             .insert(&blob, Some(bogus), make_meta("a", "1.0.1"))
             .unwrap_err();
         match err {
-            StoreError::DigestMismatch { expected, actual: a } => {
+            StoreError::DigestMismatch {
+                expected,
+                actual: a,
+            } => {
                 assert_eq!(expected, bogus);
                 assert_eq!(a, actual);
             }
@@ -841,10 +834,12 @@ mod tests {
             store.lookup_by_name_version("json", "1.0.0").unwrap(),
             Some(d)
         );
-        assert!(store
-            .lookup_by_name_version("json", "1.0.1")
-            .unwrap()
-            .is_none());
+        assert!(
+            store
+                .lookup_by_name_version("json", "1.0.1")
+                .unwrap()
+                .is_none()
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -864,9 +859,7 @@ mod tests {
         let root = temp_root("tamper");
         let store = ContentStore::at(root.clone()).unwrap();
         let blob = b"original".to_vec();
-        let d = store
-            .insert(&blob, None, make_meta("c", "1.0.0"))
-            .unwrap();
+        let d = store.insert(&blob, None, make_meta("c", "1.0.0")).unwrap();
         // Tamper: overwrite blob.bin in place.
         let blob_path = store.entry_dir(d).join("blob.bin");
         fs::write(&blob_path, b"TAMPERED").unwrap();
@@ -876,10 +869,12 @@ mod tests {
         // Entry must be evicted after detection.
         assert!(!store.entry_dir(d).exists(), "entry should be evicted");
         // Ref must also be cleared.
-        assert!(store
-            .lookup_by_name_version("c", "1.0.0")
-            .unwrap()
-            .is_none());
+        assert!(
+            store
+                .lookup_by_name_version("c", "1.0.0")
+                .unwrap()
+                .is_none()
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -887,9 +882,7 @@ mod tests {
     fn lookup_evicts_corrupt_meta() {
         let root = temp_root("corrupt_meta");
         let store = ContentStore::at(root.clone()).unwrap();
-        let d = store
-            .insert(b"x", None, make_meta("c", "1.0.0"))
-            .unwrap();
+        let d = store.insert(b"x", None, make_meta("c", "1.0.0")).unwrap();
         fs::write(store.entry_dir(d).join("meta.toml"), b":::not-toml:::").unwrap();
         let err = store.lookup_by_digest(d).unwrap_err();
         assert!(matches!(err, StoreError::InvalidMeta { .. }));
@@ -901,9 +894,7 @@ mod tests {
     fn schema_version_skew_evicts_silently() {
         let root = temp_root("schema_skew");
         let store = ContentStore::at(root.clone()).unwrap();
-        let d = store
-            .insert(b"x", None, make_meta("c", "1.0.0"))
-            .unwrap();
+        let d = store.insert(b"x", None, make_meta("c", "1.0.0")).unwrap();
         let meta_path = store.entry_dir(d).join("meta.toml");
         let mut text = fs::read_to_string(&meta_path).unwrap();
         text = text.replace(
@@ -922,16 +913,16 @@ mod tests {
     fn dangling_ref_treated_as_miss_and_cleared() {
         let root = temp_root("dangling");
         let store = ContentStore::at(root.clone()).unwrap();
-        let d = store
-            .insert(b"x", None, make_meta("c", "1.0.0"))
-            .unwrap();
+        let d = store.insert(b"x", None, make_meta("c", "1.0.0")).unwrap();
         // Manually wipe the entry without going through evict() to
         // simulate filesystem-level deletion.
         fs::remove_dir_all(store.entry_dir(d)).unwrap();
-        assert!(store
-            .lookup_by_name_version("c", "1.0.0")
-            .unwrap()
-            .is_none());
+        assert!(
+            store
+                .lookup_by_name_version("c", "1.0.0")
+                .unwrap()
+                .is_none()
+        );
         // Ref file was cleared on detection.
         let ref_path = store.ref_path("c", "1.0.0").unwrap();
         assert!(!ref_path.exists());
@@ -969,8 +960,14 @@ mod tests {
             .unwrap();
         assert_eq!(d1, d2, "identical blobs share a digest");
         // Both refs point at the same digest.
-        assert_eq!(store.lookup_by_name_version("a", "1.0.0").unwrap(), Some(d1));
-        assert_eq!(store.lookup_by_name_version("a", "1.0.1").unwrap(), Some(d1));
+        assert_eq!(
+            store.lookup_by_name_version("a", "1.0.0").unwrap(),
+            Some(d1)
+        );
+        assert_eq!(
+            store.lookup_by_name_version("a", "1.0.1").unwrap(),
+            Some(d1)
+        );
         // list() reports one entry.
         assert_eq!(store.list().unwrap().len(), 1);
         let _ = fs::remove_dir_all(&root);
@@ -982,14 +979,14 @@ mod tests {
     fn evict_clears_refs_pointing_at_digest() {
         let root = temp_root("evict_refs");
         let store = ContentStore::at(root.clone()).unwrap();
-        let d = store
-            .insert(b"x", None, make_meta("c", "1.0.0"))
-            .unwrap();
+        let d = store.insert(b"x", None, make_meta("c", "1.0.0")).unwrap();
         store.evict(d).unwrap();
-        assert!(store
-            .lookup_by_name_version("c", "1.0.0")
-            .unwrap()
-            .is_none());
+        assert!(
+            store
+                .lookup_by_name_version("c", "1.0.0")
+                .unwrap()
+                .is_none()
+        );
         assert!(store.lookup_by_digest(d).unwrap().is_none());
         let _ = fs::remove_dir_all(&root);
     }
@@ -1031,14 +1028,18 @@ mod tests {
         let evicted = store.gc_to_size(2500).unwrap();
         // One of them should have been evicted (the older one).
         assert_eq!(evicted, 1);
-        assert!(store
-            .lookup_by_name_version("a", "1.0.0")
-            .unwrap()
-            .is_none());
-        assert!(store
-            .lookup_by_name_version("b", "1.0.0")
-            .unwrap()
-            .is_some());
+        assert!(
+            store
+                .lookup_by_name_version("a", "1.0.0")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            store
+                .lookup_by_name_version("b", "1.0.0")
+                .unwrap()
+                .is_some()
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1062,7 +1063,9 @@ mod tests {
         let root = temp_root("reject_name");
         let store = ContentStore::at(root.clone()).unwrap();
         for bad in ["", ".", "..", ".hidden", "a/b", "a\\b", "a\0b", "a b"] {
-            let err = store.insert(b"x", None, make_meta(bad, "1.0.0")).unwrap_err();
+            let err = store
+                .insert(b"x", None, make_meta(bad, "1.0.0"))
+                .unwrap_err();
             assert!(
                 matches!(err, StoreError::InvalidIdentifier { .. }),
                 "should reject {bad:?}, got {err:?}"
@@ -1096,12 +1099,8 @@ mod tests {
             .map(|i| {
                 let s = store.clone();
                 std::thread::spawn(move || {
-                    s.insert(
-                        blob,
-                        None,
-                        make_meta(&format!("dup-{i}"), "1.0.0"),
-                    )
-                    .unwrap()
+                    s.insert(blob, None, make_meta(&format!("dup-{i}"), "1.0.0"))
+                        .unwrap()
                 })
             })
             .collect();

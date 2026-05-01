@@ -185,12 +185,7 @@ impl RegistryClient {
     }
 
     /// Publish package
-    pub fn publish(
-        &self,
-        manifest: &CogMetadata,
-        cog_file: &Path,
-        token: &str,
-    ) -> Result<()> {
+    pub fn publish(&self, manifest: &CogMetadata, cog_file: &Path, token: &str) -> Result<()> {
         let url = format!(
             "{}/cogs/publish",
             super::registry_api_url(self.base_url.as_str())

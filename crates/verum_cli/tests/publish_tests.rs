@@ -165,9 +165,7 @@ fn test_valid_semver_versions() {
 
     for version in valid_versions {
         // Check basic structure: should have at least major.minor.patch
-        let parts: Vec<&str> = version
-            .split(['.', '-', '+'])
-            .collect();
+        let parts: Vec<&str> = version.split(['.', '-', '+']).collect();
         assert!(
             parts.len() >= 3,
             "Version '{}' should have at least 3 parts",

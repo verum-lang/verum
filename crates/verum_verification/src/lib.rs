@@ -83,32 +83,13 @@
 #![allow(unused_imports)]
 #![allow(dead_code)]
 
+/// Continuous benchmarking (#83) — head-to-head vs Coq / Lean4 /
+/// Isabelle / Agda. Single trait boundary
+/// [`benchmark::BenchmarkRunner`] + per-system mock + reference
+/// landscape values + `ComparisonMatrix` aggregator.
+pub mod benchmark;
 pub mod boundary;
 pub mod bounds_elimination;
-pub mod cbgr_elimination;
-pub mod context;
-pub mod contract;
-/// 13-strategy verification ladder dispatcher. Foundation-neutral
-/// trait + reference V0 dispatcher + ν-monotonicity invariant.
-pub mod ladder_dispatch;
-/// Proof-drafting infrastructure — typed proof-state view + ranked
-/// tactic-suggestion trait + reference engine. Single boundary that
-/// LSP / REPL / CLI consumers all drive through.
-pub mod proof_drafting;
-/// Industrial-grade tactic combinator catalogue — single source of
-/// truth for the 15 canonical combinators (skip / fail / seq /
-/// orelse / repeat / repeat_n / try / solve / first_of / all_goals /
-/// index_focus / named_focus / per_goal_split / have / apply_with)
-/// + their algebraic laws. Consumed by LSP / docs / `verum tactic`
-/// CLI.
-pub mod tactic_combinator;
-/// Per-theorem closure-hash incremental verification cache. Skip
-/// the kernel re-check when the closure hash matches and the cached
-/// verdict was Ok. Cache key includes `verum_kernel::VVA_VERSION`
-/// so any kernel-rule edit invalidates ALL caches. Single trait
-/// boundary [`closure_cache::IncrementalCacheStore`] +
-/// memory-backed + filesystem-backed reference impls.
-pub mod closure_cache;
 /// Canonical byte-level representation of AST nodes for the closure-
 /// hash incremental verification cache (#79 / #88 / #89 hardening).
 /// Replaces `format!("{:?}", thm.requires)`-style payloads — which
@@ -117,6 +98,36 @@ pub mod closure_cache;
 /// inline. Single source of byte-level determinism for the cache
 /// fingerprint.
 pub mod canonical_repr;
+pub mod cbgr_elimination;
+/// SMT certificate replay (#81) — backend-independent cert format
+/// + multi-backend cross-check. Single trait boundary
+/// [`cert_replay::CertReplayEngine`] + `KernelOnlyReplayEngine`
+/// (the trust-boundary anchor that catches tampered certs without
+/// trusting external solvers) + mock-backed per-backend engines.
+pub mod cert_replay;
+/// Per-theorem closure-hash incremental verification cache. Skip
+/// the kernel re-check when the closure hash matches and the cached
+/// verdict was Ok. Cache key includes `verum_kernel::VVA_VERSION`
+/// so any kernel-rule edit invalidates ALL caches. Single trait
+/// boundary [`closure_cache::IncrementalCacheStore`] +
+/// memory-backed + filesystem-backed reference impls.
+pub mod closure_cache;
+/// Cog distribution registry (#82) — reproducibility chain +
+/// multi-mirror trust model. Single trait boundary
+/// [`cog_registry::RegistryClient`] + memory-backed +
+/// filesystem-backed reference impls + `MultiMirrorClient`
+/// composite that requires consensus across mirrors.
+pub mod cog_registry;
+pub mod context;
+pub mod contract;
+pub mod cost;
+/// Cubical / HoTT first-class catalogue (#78) — typed primitive
+/// inventory (Path, Refl, J, Transp, Coe, Hcomp, Comp, Glue,
+/// Equiv, Univalence + 7 more) + computation-rule registry +
+/// face-formula validator. The architectural foundation for
+/// foundation-neutral cubical type theory in Verum.
+pub mod cubical;
+pub mod dependent_verification;
 /// Auto-paper documentation generator (#84). Projects every
 /// public @theorem / @lemma / @corollary / @axiom plus its
 /// docstring + proof body into a typed [`doc_render::DocItem`]
@@ -124,6 +135,7 @@ pub mod canonical_repr;
 /// [`doc_render::DocRenderer`] trait. Single source of truth for
 /// the corpus → paper-draft pipeline.
 pub mod doc_render;
+pub mod extension_policy;
 /// Foreign-system theorem import (#85) — inverse of cross-format
 /// export. Reads Coq / Lean4 / Mizar / Isabelle source files and
 /// projects each declaration into a typed
@@ -134,61 +146,49 @@ pub mod doc_render;
 /// impls (`CoqImporter` / `Lean4Importer` / `MizarImporter` /
 /// `IsabelleImporter`).
 pub mod foreign_import;
+pub mod framework_compat;
+pub mod framework_hygiene;
+pub mod hoare_logic;
+pub mod integration;
+pub mod kernel_recheck;
+/// 13-strategy verification ladder dispatcher. Foundation-neutral
+/// trait + reference V0 dispatcher + ν-monotonicity invariant.
+pub mod ladder_dispatch;
+pub mod level;
 /// LLM-native tactic protocol (#77) — LCF-style fail-closed bridge
 /// between a language-model proof proposer and the trusted kernel.
 /// The LLM may propose tactic sequences but the kernel re-checks
 /// every step; any rejection discards the proposal.
 pub mod llm_tactic;
+pub mod lock_ordering;
+pub mod math_structures;
+pub mod metrics;
+pub mod passes;
+/// Proof-drafting infrastructure — typed proof-state view + ranked
+/// tactic-suggestion trait + reference engine. Single boundary that
+/// LSP / REPL / CLI consumers all drive through.
+pub mod proof_drafting;
 /// Live proof REPL (#75) — stepwise tactic feedback + proof-tree
 /// visualisation. Single trait boundary
 /// [`proof_repl::ReplSession`] + reference V0 impl. Consumed by
 /// CLI batch mode + IDE / TUI integrations.
 pub mod proof_repl;
-/// Continuous benchmarking (#83) — head-to-head vs Coq / Lean4 /
-/// Isabelle / Agda. Single trait boundary
-/// [`benchmark::BenchmarkRunner`] + per-system mock + reference
-/// landscape values + `ComparisonMatrix` aggregator.
-pub mod benchmark;
-/// SMT certificate replay (#81) — backend-independent cert format
-/// + multi-backend cross-check. Single trait boundary
-/// [`cert_replay::CertReplayEngine`] + `KernelOnlyReplayEngine`
-/// (the trust-boundary anchor that catches tampered certs without
-/// trusting external solvers) + mock-backed per-backend engines.
-pub mod cert_replay;
-/// Cog distribution registry (#82) — reproducibility chain +
-/// multi-mirror trust model. Single trait boundary
-/// [`cog_registry::RegistryClient`] + memory-backed +
-/// filesystem-backed reference impls + `MultiMirrorClient`
-/// composite that requires consensus across mirrors.
-pub mod cog_registry;
-/// Cubical / HoTT first-class catalogue (#78) — typed primitive
-/// inventory (Path, Refl, J, Transp, Coe, Hcomp, Comp, Glue,
-/// Equiv, Univalence + 7 more) + computation-rule registry +
-/// face-formula validator. The architectural foundation for
-/// foundation-neutral cubical type theory in Verum.
-pub mod cubical;
-pub mod cost;
-pub mod dependent_verification;
-pub mod hoare_logic;
-pub mod framework_compat;
-pub mod framework_hygiene;
-pub mod integration;
-pub mod kernel_recheck;
-pub mod level;
-pub mod lock_ordering;
-pub mod math_structures;
-pub mod metrics;
-pub mod passes;
 pub mod proof_validator;
 pub mod separation_logic;
 pub mod ssa;
 pub mod subsumption;
+/// Industrial-grade tactic combinator catalogue — single source of
+/// truth for the 15 canonical combinators (skip / fail / seq /
+/// orelse / repeat / repeat_n / try / solve / first_of / all_goals /
+/// index_focus / named_focus / per_goal_split / have / apply_with)
+/// + their algebraic laws. Consumed by LSP / docs / `verum tactic`
+/// CLI.
+pub mod tactic_combinator;
 pub mod tactic_evaluation;
 pub mod tactic_heuristics;
 pub mod tensor_shapes;
 pub mod transition;
 pub mod vcgen;
-pub mod extension_policy;
 
 // Re-export main types
 pub use boundary::{
@@ -281,6 +281,12 @@ pub use contract::{
 pub use cost::{
     CostModel, CostReport, CostThreshold, DecisionCriteria, VerificationCost, VerificationDecision,
 };
+pub use framework_compat::{IncompatiblePair, KNOWN_INCOMPATIBLE_PAIRS, audit_framework_set};
+pub use framework_hygiene::{
+    DEFAULT_META_CLASSIFIER_THRESHOLD, HygieneDiagnostic, HygieneRecheckPass, HygieneSeverity,
+    epsilon_is_canonicalisable, name_has_brand_prefix, validate_epsilon_canonicalisable,
+    validate_foundation_neutral_name, validate_meta_classifier_uniqueness,
+};
 pub use hoare_logic::{
     Command,
     // Frame rule
@@ -301,14 +307,6 @@ pub use hoare_logic::{
     generate_vc as hoare_generate_vc,
     // Public API functions
     wp as hoare_wp,
-};
-pub use framework_compat::{
-    IncompatiblePair, KNOWN_INCOMPATIBLE_PAIRS, audit_framework_set,
-};
-pub use framework_hygiene::{
-    DEFAULT_META_CLASSIFIER_THRESHOLD, HygieneDiagnostic, HygieneRecheckPass, HygieneSeverity,
-    epsilon_is_canonicalisable, name_has_brand_prefix, validate_epsilon_canonicalisable,
-    validate_foundation_neutral_name, validate_meta_classifier_uniqueness,
 };
 pub use integration::{
     CodegenIntegration, HeapCounterexample, HoareVerificationResult, HoareZ3Verifier,
@@ -381,13 +379,13 @@ pub use metrics::{
     complexity_from_cfg,
     nesting_from_cfg,
 };
+pub use passes::pipeline::PipelineMode;
 pub use passes::{
     KernelRecheckPass, PassClassification, SmtVerificationPass, SmtVerificationResult,
     SmtVerificationStats, TransitionRecommendation, TransitionRecommendationPass, VCStatus,
     VCVerificationResult, VerificationError, VerificationPass, VerificationPipeline,
     VerificationResult,
 };
-pub use passes::pipeline::PipelineMode;
 pub use proof_validator::{
     CertificateFormat, HypothesisContext, ProofCertificateGenerator, ProofValidator,
     ValidationConfig, ValidationError, ValidationResult,

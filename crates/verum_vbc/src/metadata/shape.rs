@@ -252,54 +252,60 @@ impl ShapeMetadata {
         match constraint {
             ShapeConstraint::Positive(sym) => {
                 if let Some(&val) = bindings.get(sym)
-                    && val == 0 {
-                        return Some(format!("Symbol {:?} must be positive, got 0", sym));
-                    }
+                    && val == 0
+                {
+                    return Some(format!("Symbol {:?} must be positive, got 0", sym));
+                }
             }
             ShapeConstraint::Equal(sym, expected) => {
                 if let Some(&val) = bindings.get(sym)
-                    && val != *expected {
-                        return Some(format!(
-                            "Symbol {:?} must be {}, got {}",
-                            sym, expected, val
-                        ));
-                    }
+                    && val != *expected
+                {
+                    return Some(format!(
+                        "Symbol {:?} must be {}, got {}",
+                        sym, expected, val
+                    ));
+                }
             }
             ShapeConstraint::SymbolsEqual(a, b) => {
                 if let (Some(&va), Some(&vb)) = (bindings.get(a), bindings.get(b))
-                    && va != vb {
-                        return Some(format!(
-                            "Symbols {:?} and {:?} must be equal: {} != {}",
-                            a, b, va, vb
-                        ));
-                    }
+                    && va != vb
+                {
+                    return Some(format!(
+                        "Symbols {:?} and {:?} must be equal: {} != {}",
+                        a, b, va, vb
+                    ));
+                }
             }
             ShapeConstraint::Divisible(sym, divisor) => {
                 if let Some(&val) = bindings.get(sym)
-                    && val % divisor != 0 {
-                        return Some(format!(
-                            "Symbol {:?} must be divisible by {}, got {}",
-                            sym, divisor, val
-                        ));
-                    }
+                    && val % divisor != 0
+                {
+                    return Some(format!(
+                        "Symbol {:?} must be divisible by {}, got {}",
+                        sym, divisor, val
+                    ));
+                }
             }
             ShapeConstraint::PowerOf2(sym) => {
                 if let Some(&val) = bindings.get(sym)
-                    && (val == 0 || (val & (val - 1)) != 0) {
-                        return Some(format!(
-                            "Symbol {:?} must be a power of 2, got {}",
-                            sym, val
-                        ));
-                    }
+                    && (val == 0 || (val & (val - 1)) != 0)
+                {
+                    return Some(format!(
+                        "Symbol {:?} must be a power of 2, got {}",
+                        sym, val
+                    ));
+                }
             }
             ShapeConstraint::MatmulCompat { k_left, k_right } => {
                 if let (Some(&kl), Some(&kr)) = (bindings.get(k_left), bindings.get(k_right))
-                    && kl != kr {
-                        return Some(format!(
-                            "Matmul inner dimensions must match: {} != {}",
-                            kl, kr
-                        ));
-                    }
+                    && kl != kr
+                {
+                    return Some(format!(
+                        "Matmul inner dimensions must match: {} != {}",
+                        kl, kr
+                    ));
+                }
             }
         }
         None

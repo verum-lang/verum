@@ -105,11 +105,7 @@ impl TacticPackageRegistry {
     /// `(package, name)` is already bound. Callers that want to
     /// intentionally shadow must place the new entry in a
     /// different-scoped package and rely on the lookup algorithm.
-    pub fn register(
-        &mut self,
-        scope: PackageScope,
-        decl: TacticDecl,
-    ) -> Result<(), RegistryError> {
+    pub fn register(&mut self, scope: PackageScope, decl: TacticDecl) -> Result<(), RegistryError> {
         let package = decl.package.clone();
         let entry = self
             .entries
@@ -142,7 +138,10 @@ impl TacticPackageRegistry {
         // stdlib package sits at the end of lookup by construction
         // (its scope bucket is consulted last).
         if matches!(scope, PackageScope::ImportedCog)
-            && !self.import_order.iter().any(|p| p.as_str() == package.as_str())
+            && !self
+                .import_order
+                .iter()
+                .any(|p| p.as_str() == package.as_str())
         {
             self.import_order.push(package);
         }
@@ -196,10 +195,7 @@ impl TacticPackageRegistry {
 
     /// Count of registered tactics across every package.
     pub fn len(&self) -> usize {
-        self.entries
-            .values()
-            .map(|(_, decls)| decls.len())
-            .sum()
+        self.entries.values().map(|(_, decls)| decls.len()).sum()
     }
 
     /// Whether the registry is empty.
@@ -301,17 +297,13 @@ mod tests {
         let err = r
             .register(PackageScope::Project, decl("my_tac", "my_project"))
             .unwrap_err();
-        assert!(matches!(
-            err,
-            RegistryError::DuplicateRegistration { .. }
-        ));
+        assert!(matches!(err, RegistryError::DuplicateRegistration { .. }));
     }
 
     #[test]
     fn scope_conflict_rejected() {
         let mut r = TacticPackageRegistry::new();
-        r.register(PackageScope::Project, decl("a", "pkg"))
-            .unwrap();
+        r.register(PackageScope::Project, decl("a", "pkg")).unwrap();
         let err = r
             .register(PackageScope::Stdlib, decl("b", "pkg"))
             .unwrap_err();
@@ -394,13 +386,17 @@ mod tests {
             .map(|(n, s)| (n.as_str().to_string(), s))
             .collect();
         assert_eq!(pkgs.len(), 3);
-        assert!(pkgs.iter().any(|(n, s)| n == "core.proof.tactics"
-            && *s == PackageScope::Stdlib));
-        assert!(pkgs
-            .iter()
-            .any(|(n, s)| n == "my_project" && *s == PackageScope::Project));
-        assert!(pkgs
-            .iter()
-            .any(|(n, s)| n == "imported" && *s == PackageScope::ImportedCog));
+        assert!(
+            pkgs.iter()
+                .any(|(n, s)| n == "core.proof.tactics" && *s == PackageScope::Stdlib)
+        );
+        assert!(
+            pkgs.iter()
+                .any(|(n, s)| n == "my_project" && *s == PackageScope::Project)
+        );
+        assert!(
+            pkgs.iter()
+                .any(|(n, s)| n == "imported" && *s == PackageScope::ImportedCog)
+        );
     }
 }

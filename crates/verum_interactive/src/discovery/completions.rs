@@ -2,8 +2,8 @@
 
 use std::collections::HashMap;
 
-use super::index::DiscoveryIndex;
 use super::docs::DocKind;
+use super::index::DiscoveryIndex;
 
 /// A completion item
 #[derive(Debug, Clone)]
@@ -159,7 +159,10 @@ impl CompletionContext {
             .collect();
 
         // Check if after dot
-        let prefix_len = before_cursor.len() - before_cursor.trim_end_matches(|c: char| c.is_alphanumeric() || c == '_').len();
+        let prefix_len = before_cursor.len()
+            - before_cursor
+                .trim_end_matches(|c: char| c.is_alphanumeric() || c == '_')
+                .len();
         let before_prefix = &before_cursor[..before_cursor.len() - prefix_len];
         let after_dot = before_prefix.trim_end().ends_with('.');
 
@@ -176,11 +179,7 @@ impl CompletionContext {
                 .chars()
                 .rev()
                 .collect();
-            if !ident.is_empty() {
-                Some(ident)
-            } else {
-                None
-            }
+            if !ident.is_empty() { Some(ident) } else { None }
         } else {
             None
         };
@@ -512,7 +511,9 @@ impl CompletionProvider {
                 .with_priority(80),
             CompletionItem::new("match_expr", CompletionKind::Snippet)
                 .with_detail("Match expression")
-                .with_insert("match ${1:value} {\n    ${2:pattern} => ${3:result},\n    _ => ${0},\n}")
+                .with_insert(
+                    "match ${1:value} {\n    ${2:pattern} => ${3:result},\n    _ => ${0},\n}",
+                )
                 .as_snippet()
                 .with_priority(80),
             CompletionItem::new("for_loop", CompletionKind::Snippet)
@@ -648,7 +649,11 @@ mod tests {
         assert!(!completions.is_empty());
 
         // Should include keywords
-        assert!(completions.iter().any(|c| c.kind == CompletionKind::Keyword));
+        assert!(
+            completions
+                .iter()
+                .any(|c| c.kind == CompletionKind::Keyword)
+        );
     }
 
     #[test]

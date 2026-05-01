@@ -216,15 +216,11 @@ impl PromotionStrategy {
     /// Get human-readable description
     pub fn description(&self) -> Text {
         match self {
-            PromotionStrategy::ByRefCount(n) => {
-                Text::from(format!("Promote after {} accesses", n))
-            }
+            PromotionStrategy::ByRefCount(n) => Text::from(format!("Promote after {} accesses", n)),
             PromotionStrategy::ByConfidence(c) => {
                 Text::from(format!("Promote if confidence ≥ {:.1}%", c * 100.0))
             }
-            PromotionStrategy::ByHotness(h) => {
-                Text::from(format!("Promote if hotness ≥ {}", h))
-            }
+            PromotionStrategy::ByHotness(h) => Text::from(format!("Promote if hotness ≥ {}", h)),
             PromotionStrategy::ByAnalysis(a) => {
                 Text::from(format!("Promote if escape analysis shows: {:?}", a))
             }
@@ -677,7 +673,9 @@ impl PromotionStatistics {
 
     /// Get average time saved per promotion
     pub fn avg_time_saved_ns(&self) -> u64 {
-        self.estimated_time_saved_ns.checked_div(self.promotions).unwrap_or(0)
+        self.estimated_time_saved_ns
+            .checked_div(self.promotions)
+            .unwrap_or(0)
     }
 }
 

@@ -1,11 +1,11 @@
 //! SIMD extended opcode handler for VBC interpreter dispatch.
 
-use crate::instruction::{SimdSubOpcode, Opcode};
-use crate::value::Value;
 use super::super::super::error::{InterpreterError, InterpreterResult};
 use super::super::super::state::InterpreterState;
 use super::super::DispatchResult;
 use super::bytecode_io::*;
+use crate::instruction::{Opcode, SimdSubOpcode};
+use crate::value::Value;
 
 /// SimdExtended (0x2A) - Platform-agnostic SIMD operations.
 ///
@@ -27,7 +27,9 @@ use super::bytecode_io::*;
 
 /// Note: SIMD operations require platform-specific support. The interpreter
 /// implements scalar fallbacks; AOT compilation uses LLVM vector intrinsics.
-pub(in super::super) fn handle_simd_extended(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_simd_extended(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let sub_op_byte = read_u8(state)?;
     let sub_op = SimdSubOpcode::from_byte(sub_op_byte);
 
@@ -639,11 +641,9 @@ pub(in super::super) fn handle_simd_extended(state: &mut InterpreterState) -> In
         // ================================================================
         // Unimplemented sub-opcodes
         // ================================================================
-        None => {
-            Err(InterpreterError::NotImplemented {
-                feature: "simd_extended sub-opcode",
-                opcode: Some(Opcode::SimdExtended),
-            })
-        }
+        None => Err(InterpreterError::NotImplemented {
+            feature: "simd_extended sub-opcode",
+            opcode: Some(Opcode::SimdExtended),
+        }),
     }
 }

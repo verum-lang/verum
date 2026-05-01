@@ -24,14 +24,14 @@
 
 use std::cell::RefCell;
 
+use crate::ty::{Type, TypeVar};
 use verum_ast::{
     span::Span,
     ty::{Ident, Path},
 };
-use verum_common::{ConstValue, List, Map, Maybe, Set, Text};
 use verum_common::ToText;
 use verum_common::well_known_types::WellKnownType as WKT;
-use crate::ty::{Type, TypeVar};
+use verum_common::{ConstValue, List, Map, Maybe, Set, Text};
 
 // Thread-local recursion guard for implements_optimistic
 // Prevents infinite recursion when checking nested protocol bounds
@@ -123,13 +123,19 @@ impl ProtocolKind {
     /// Returns true if this kind can be used as a type constraint (in bounds).
     #[inline]
     pub fn is_constraint(&self) -> bool {
-        matches!(self, ProtocolKind::Constraint | ProtocolKind::ConstraintAndInjectable)
+        matches!(
+            self,
+            ProtocolKind::Constraint | ProtocolKind::ConstraintAndInjectable
+        )
     }
 
     /// Returns true if this kind can be used for dependency injection.
     #[inline]
     pub fn is_injectable(&self) -> bool {
-        matches!(self, ProtocolKind::Injectable | ProtocolKind::ConstraintAndInjectable)
+        matches!(
+            self,
+            ProtocolKind::Injectable | ProtocolKind::ConstraintAndInjectable
+        )
     }
 
     /// Returns true if this is a dual-kind protocol (both constraint and injectable).
@@ -1340,7 +1346,9 @@ impl MethodSignature {
             name: self.name.clone(),
             type_params: self.type_params.clone(),
             receiver: self.receiver,
-            params: self.params.iter()
+            params: self
+                .params
+                .iter()
                 .map(|p| Self::apply_tv_mapping(p, &mapping))
                 .collect(),
             return_type: Self::apply_tv_mapping(&self.return_type, &mapping),
@@ -1361,7 +1369,11 @@ impl MethodSignature {
                     Self::collect_type_vars(elem, vars);
                 }
             }
-            Type::Function { params, return_type, .. } => {
+            Type::Function {
+                params,
+                return_type,
+                ..
+            } => {
                 for param in params.iter() {
                     Self::collect_type_vars(param, vars);
                 }
@@ -1390,24 +1402,40 @@ impl MethodSignature {
             }
             Type::Named { path, args } => Type::Named {
                 path: path.clone(),
-                args: args.iter().map(|a| Self::apply_tv_mapping(a, mapping)).collect(),
+                args: args
+                    .iter()
+                    .map(|a| Self::apply_tv_mapping(a, mapping))
+                    .collect(),
             },
             Type::Generic { name, args } => Type::Generic {
                 name: name.clone(),
-                args: args.iter().map(|a| Self::apply_tv_mapping(a, mapping)).collect(),
+                args: args
+                    .iter()
+                    .map(|a| Self::apply_tv_mapping(a, mapping))
+                    .collect(),
             },
-            Type::Tuple(elems) => {
-                Type::Tuple(elems.iter().map(|e| Self::apply_tv_mapping(e, mapping)).collect())
-            }
-            Type::Function { params, return_type, contexts, type_params, properties } => {
-                Type::Function {
-                    params: params.iter().map(|p| Self::apply_tv_mapping(p, mapping)).collect(),
-                    return_type: Box::new(Self::apply_tv_mapping(return_type, mapping)),
-                    contexts: contexts.clone(),
-                    type_params: type_params.clone(),
-                    properties: properties.clone(),
-                }
-            }
+            Type::Tuple(elems) => Type::Tuple(
+                elems
+                    .iter()
+                    .map(|e| Self::apply_tv_mapping(e, mapping))
+                    .collect(),
+            ),
+            Type::Function {
+                params,
+                return_type,
+                contexts,
+                type_params,
+                properties,
+            } => Type::Function {
+                params: params
+                    .iter()
+                    .map(|p| Self::apply_tv_mapping(p, mapping))
+                    .collect(),
+                return_type: Box::new(Self::apply_tv_mapping(return_type, mapping)),
+                contexts: contexts.clone(),
+                type_params: type_params.clone(),
+                properties: properties.clone(),
+            },
             Type::Reference { mutable, inner } => Type::Reference {
                 mutable: *mutable,
                 inner: Box::new(Self::apply_tv_mapping(inner, mapping)),
@@ -1534,7 +1562,6 @@ pub struct ProtocolChecker {
     // Method Registry - For protocol-based method resolution
     // =========================================================================
     // Protocol-driven method resolution: methods resolved by searching implemented protocols for matching signatures
-
     /// Methods indexed by (type_constructor, method_name) -> signature
     /// This replaces the 2000-line get_builtin_method_type function
     method_registry: Map<(Text, Text), MethodSignature>,
@@ -1824,7 +1851,9 @@ impl ProtocolChecker {
     /// Public accessor for the per-instance checker id. Used by the
     /// type-checker glue to scope thread-local caches to this checker.
     #[inline]
-    pub fn id(&self) -> u64 { self.checker_id }
+    pub fn id(&self) -> u64 {
+        self.checker_id
+    }
 
     /// Clear implementation check cache
     ///
@@ -1869,7 +1898,9 @@ impl ProtocolChecker {
     /// Spec: stdlib-agnostic protocol resolution
     pub fn register_variant_type_name(&mut self, signature: Text, type_name: Text) {
         // First-wins: stdlib types registered first take precedence
-        self.variant_type_names.entry(signature).or_insert(type_name);
+        self.variant_type_names
+            .entry(signature)
+            .or_insert(type_name);
     }
 
     /// Look up the named type for a variant signature
@@ -2231,7 +2262,9 @@ impl ProtocolChecker {
                             Type::Tuple(List::from(vec![Type::Int, Type::maybe(Type::Int)])),
                         ),
                         has_default: true, // Default implementation returns (0, None)
-                        doc: Maybe::Some("Return size hint (lower bound, optional upper bound)".into()),
+                        doc: Maybe::Some(
+                            "Return size hint (lower bound, optional upper bound)".into(),
+                        ),
                         refinement_constraints: Map::new(),
                         is_async: false,
                         context_requirements: List::new(),
@@ -2255,7 +2288,8 @@ impl ProtocolChecker {
             specialization_info: Maybe::None,
             span: Span::default(),
         };
-        self.protocols.insert("AsyncIterator".into(), async_iterator);
+        self.protocols
+            .insert("AsyncIterator".into(), async_iterator);
 
         // Hash protocol
         // Hash protocol: fn hash(&self, hasher: &mut Hasher) for use in Map/Set, must be consistent with Eq
@@ -2363,7 +2397,7 @@ impl ProtocolChecker {
                     ProtocolMethod {
                         name: "default".into(),
                         ty: Type::function(
-                            List::new(), // Static method, no self parameter
+                            List::new(),                               // Static method, no self parameter
                             Type::Var(crate::ty::TypeVar::with_id(0)), // Returns Self
                         ),
                         has_default: false,
@@ -2767,7 +2801,7 @@ impl ProtocolChecker {
                         name: "from_output".into(),
                         ty: Type::function(
                             List::from(vec![Type::Var(crate::ty::TypeVar::with_id(0))]), // Output
-                            Type::Var(crate::ty::TypeVar::with_id(1)), // Self
+                            Type::Var(crate::ty::TypeVar::with_id(1)),                   // Self
                         ),
                         has_default: false,
                         doc: Maybe::Some("Construct from success value".into()),
@@ -2843,7 +2877,7 @@ impl ProtocolChecker {
                         name: "from_residual".into(),
                         ty: Type::function(
                             List::from(vec![Type::Var(crate::ty::TypeVar::with_id(0))]), // R (residual)
-                            Type::Var(crate::ty::TypeVar::with_id(1)), // Self
+                            Type::Var(crate::ty::TypeVar::with_id(1)),                   // Self
                         ),
                         has_default: false,
                         doc: Maybe::Some("Convert residual to Self".into()),
@@ -3430,31 +3464,88 @@ impl ProtocolChecker {
     /// Primitive types: Int, Float, Bool, Char, Text
     fn register_primitive_methods(&mut self) {
         // Int methods - only essential operations that can't come from stdlib
-        self.register_method(WKT::Int.as_str(), MethodSignature::immutable("abs", List::new(), Type::Int));
-        self.register_method(WKT::Int.as_str(), MethodSignature::immutable("to_float", List::new(), Type::Float));
-        self.register_method(WKT::Int.as_str(), MethodSignature::immutable("to_string", List::new(), Type::Text));
+        self.register_method(
+            WKT::Int.as_str(),
+            MethodSignature::immutable("abs", List::new(), Type::Int),
+        );
+        self.register_method(
+            WKT::Int.as_str(),
+            MethodSignature::immutable("to_float", List::new(), Type::Float),
+        );
+        self.register_method(
+            WKT::Int.as_str(),
+            MethodSignature::immutable("to_string", List::new(), Type::Text),
+        );
 
         // Float methods - only essential operations
-        self.register_method(WKT::Float.as_str(), MethodSignature::immutable("abs", List::new(), Type::Float));
-        self.register_method(WKT::Float.as_str(), MethodSignature::immutable("floor", List::new(), Type::Float));
-        self.register_method(WKT::Float.as_str(), MethodSignature::immutable("ceil", List::new(), Type::Float));
-        self.register_method(WKT::Float.as_str(), MethodSignature::immutable("round", List::new(), Type::Float));
-        self.register_method(WKT::Float.as_str(), MethodSignature::immutable("to_int", List::new(), Type::Int));
-        self.register_method(WKT::Float.as_str(), MethodSignature::immutable("to_string", List::new(), Type::Text));
-        self.register_method(WKT::Float.as_str(), MethodSignature::immutable("is_nan", List::new(), Type::Bool));
-        self.register_method(WKT::Float.as_str(), MethodSignature::immutable("is_infinite", List::new(), Type::Bool));
-        self.register_method(WKT::Float.as_str(), MethodSignature::immutable("is_finite", List::new(), Type::Bool));
+        self.register_method(
+            WKT::Float.as_str(),
+            MethodSignature::immutable("abs", List::new(), Type::Float),
+        );
+        self.register_method(
+            WKT::Float.as_str(),
+            MethodSignature::immutable("floor", List::new(), Type::Float),
+        );
+        self.register_method(
+            WKT::Float.as_str(),
+            MethodSignature::immutable("ceil", List::new(), Type::Float),
+        );
+        self.register_method(
+            WKT::Float.as_str(),
+            MethodSignature::immutable("round", List::new(), Type::Float),
+        );
+        self.register_method(
+            WKT::Float.as_str(),
+            MethodSignature::immutable("to_int", List::new(), Type::Int),
+        );
+        self.register_method(
+            WKT::Float.as_str(),
+            MethodSignature::immutable("to_string", List::new(), Type::Text),
+        );
+        self.register_method(
+            WKT::Float.as_str(),
+            MethodSignature::immutable("is_nan", List::new(), Type::Bool),
+        );
+        self.register_method(
+            WKT::Float.as_str(),
+            MethodSignature::immutable("is_infinite", List::new(), Type::Bool),
+        );
+        self.register_method(
+            WKT::Float.as_str(),
+            MethodSignature::immutable("is_finite", List::new(), Type::Bool),
+        );
 
         // Bool methods
-        self.register_method(WKT::Bool.as_str(), MethodSignature::immutable("to_string", List::new(), Type::Text));
+        self.register_method(
+            WKT::Bool.as_str(),
+            MethodSignature::immutable("to_string", List::new(), Type::Text),
+        );
 
         // Char methods
-        self.register_method(WKT::Char.as_str(), MethodSignature::immutable("to_string", List::new(), Type::Text));
-        self.register_method(WKT::Char.as_str(), MethodSignature::immutable("is_digit", List::new(), Type::Bool));
-        self.register_method(WKT::Char.as_str(), MethodSignature::immutable("is_alphabetic", List::new(), Type::Bool));
-        self.register_method(WKT::Char.as_str(), MethodSignature::immutable("is_whitespace", List::new(), Type::Bool));
-        self.register_method(WKT::Char.as_str(), MethodSignature::immutable("to_uppercase", List::new(), Type::Char));
-        self.register_method(WKT::Char.as_str(), MethodSignature::immutable("to_lowercase", List::new(), Type::Char));
+        self.register_method(
+            WKT::Char.as_str(),
+            MethodSignature::immutable("to_string", List::new(), Type::Text),
+        );
+        self.register_method(
+            WKT::Char.as_str(),
+            MethodSignature::immutable("is_digit", List::new(), Type::Bool),
+        );
+        self.register_method(
+            WKT::Char.as_str(),
+            MethodSignature::immutable("is_alphabetic", List::new(), Type::Bool),
+        );
+        self.register_method(
+            WKT::Char.as_str(),
+            MethodSignature::immutable("is_whitespace", List::new(), Type::Bool),
+        );
+        self.register_method(
+            WKT::Char.as_str(),
+            MethodSignature::immutable("to_uppercase", List::new(), Type::Char),
+        );
+        self.register_method(
+            WKT::Char.as_str(),
+            MethodSignature::immutable("to_lowercase", List::new(), Type::Char),
+        );
 
         // Byte methods - ASCII classification and conversion
         // Create Byte type for return values
@@ -3462,70 +3553,246 @@ impl ProtocolChecker {
             path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new("Byte", Span::default())),
             args: List::new(),
         };
-        self.register_method("Byte", MethodSignature::immutable("is_ascii_alphabetic", List::new(), Type::Bool));
-        self.register_method("Byte", MethodSignature::immutable("is_ascii_digit", List::new(), Type::Bool));
-        self.register_method("Byte", MethodSignature::immutable("is_ascii_alphanumeric", List::new(), Type::Bool));
-        self.register_method("Byte", MethodSignature::immutable("is_ascii_whitespace", List::new(), Type::Bool));
-        self.register_method("Byte", MethodSignature::immutable("to_ascii_uppercase", List::new(), byte_type.clone()));
-        self.register_method("Byte", MethodSignature::immutable("to_ascii_lowercase", List::new(), byte_type.clone()));
-        self.register_method("Byte", MethodSignature::immutable("to_int", List::new(), Type::Int));
-        self.register_method("Byte", MethodSignature::immutable("checked_add", List::from(vec![byte_type.clone()]), Type::maybe(byte_type.clone())));
-        self.register_method("Byte", MethodSignature::immutable("saturating_add", List::from(vec![byte_type.clone()]), byte_type.clone()));
-        self.register_method("Byte", MethodSignature::immutable("wrapping_add", List::from(vec![byte_type.clone()]), byte_type.clone()));
+        self.register_method(
+            "Byte",
+            MethodSignature::immutable("is_ascii_alphabetic", List::new(), Type::Bool),
+        );
+        self.register_method(
+            "Byte",
+            MethodSignature::immutable("is_ascii_digit", List::new(), Type::Bool),
+        );
+        self.register_method(
+            "Byte",
+            MethodSignature::immutable("is_ascii_alphanumeric", List::new(), Type::Bool),
+        );
+        self.register_method(
+            "Byte",
+            MethodSignature::immutable("is_ascii_whitespace", List::new(), Type::Bool),
+        );
+        self.register_method(
+            "Byte",
+            MethodSignature::immutable("to_ascii_uppercase", List::new(), byte_type.clone()),
+        );
+        self.register_method(
+            "Byte",
+            MethodSignature::immutable("to_ascii_lowercase", List::new(), byte_type.clone()),
+        );
+        self.register_method(
+            "Byte",
+            MethodSignature::immutable("to_int", List::new(), Type::Int),
+        );
+        self.register_method(
+            "Byte",
+            MethodSignature::immutable(
+                "checked_add",
+                List::from(vec![byte_type.clone()]),
+                Type::maybe(byte_type.clone()),
+            ),
+        );
+        self.register_method(
+            "Byte",
+            MethodSignature::immutable(
+                "saturating_add",
+                List::from(vec![byte_type.clone()]),
+                byte_type.clone(),
+            ),
+        );
+        self.register_method(
+            "Byte",
+            MethodSignature::immutable(
+                "wrapping_add",
+                List::from(vec![byte_type.clone()]),
+                byte_type.clone(),
+            ),
+        );
 
         // Text methods - only essential operations
-        self.register_method(WKT::Text.as_str(), MethodSignature::immutable("len", List::new(), Type::Int));
-        self.register_method(WKT::Text.as_str(), MethodSignature::immutable("is_empty", List::new(), Type::Bool));
-        self.register_method(WKT::Text.as_str(), MethodSignature::immutable("clone", List::new(), Type::Text));
+        self.register_method(
+            WKT::Text.as_str(),
+            MethodSignature::immutable("len", List::new(), Type::Int),
+        );
+        self.register_method(
+            WKT::Text.as_str(),
+            MethodSignature::immutable("is_empty", List::new(), Type::Bool),
+        );
+        self.register_method(
+            WKT::Text.as_str(),
+            MethodSignature::immutable("clone", List::new(), Type::Text),
+        );
         // Text FFI methods
         let cstring_ty = Type::Named {
-            path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new("CString", Span::default())),
+            path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
+                "CString",
+                Span::default(),
+            )),
             args: List::new(),
         };
-        self.register_method(WKT::Text.as_str(), MethodSignature::immutable("to_c_string", List::new(), cstring_ty.clone()));
-        self.register_method(WKT::Text.as_str(), MethodSignature::immutable("to_cstring", List::new(), cstring_ty.clone()));
-        self.register_method(WKT::Text.as_str(), MethodSignature::immutable("to_owned", List::new(), Type::Text));
-        self.register_method(WKT::Text.as_str(), MethodSignature::immutable("as_ptr", List::new(), Type::Pointer {
-            inner: Box::new(Type::Named {
-                path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new("UInt8", Span::default())),
-                args: List::new(),
-            }),
-            mutable: false,
-        }));
+        self.register_method(
+            WKT::Text.as_str(),
+            MethodSignature::immutable("to_c_string", List::new(), cstring_ty.clone()),
+        );
+        self.register_method(
+            WKT::Text.as_str(),
+            MethodSignature::immutable("to_cstring", List::new(), cstring_ty.clone()),
+        );
+        self.register_method(
+            WKT::Text.as_str(),
+            MethodSignature::immutable("to_owned", List::new(), Type::Text),
+        );
+        self.register_method(
+            WKT::Text.as_str(),
+            MethodSignature::immutable(
+                "as_ptr",
+                List::new(),
+                Type::Pointer {
+                    inner: Box::new(Type::Named {
+                        path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
+                            "UInt8",
+                            Span::default(),
+                        )),
+                        args: List::new(),
+                    }),
+                    mutable: false,
+                },
+            ),
+        );
 
         // UIntSize methods - arithmetic with overflow checks
         let uintsize_ty = Type::Named {
-            path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new("UIntSize", Span::default())),
+            path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
+                "UIntSize",
+                Span::default(),
+            )),
             args: List::new(),
         };
-        self.register_method("UIntSize", MethodSignature::immutable("checked_add", List::from(vec![uintsize_ty.clone()]), Type::maybe(uintsize_ty.clone())));
-        self.register_method("UIntSize", MethodSignature::immutable("checked_sub", List::from(vec![uintsize_ty.clone()]), Type::maybe(uintsize_ty.clone())));
-        self.register_method("UIntSize", MethodSignature::immutable("checked_mul", List::from(vec![uintsize_ty.clone()]), Type::maybe(uintsize_ty.clone())));
-        self.register_method("UIntSize", MethodSignature::immutable("saturating_add", List::from(vec![uintsize_ty.clone()]), uintsize_ty.clone()));
-        self.register_method("UIntSize", MethodSignature::immutable("saturating_sub", List::from(vec![uintsize_ty.clone()]), uintsize_ty.clone()));
-        self.register_method("UIntSize", MethodSignature::immutable("saturating_mul", List::from(vec![uintsize_ty.clone()]), uintsize_ty.clone()));
+        self.register_method(
+            "UIntSize",
+            MethodSignature::immutable(
+                "checked_add",
+                List::from(vec![uintsize_ty.clone()]),
+                Type::maybe(uintsize_ty.clone()),
+            ),
+        );
+        self.register_method(
+            "UIntSize",
+            MethodSignature::immutable(
+                "checked_sub",
+                List::from(vec![uintsize_ty.clone()]),
+                Type::maybe(uintsize_ty.clone()),
+            ),
+        );
+        self.register_method(
+            "UIntSize",
+            MethodSignature::immutable(
+                "checked_mul",
+                List::from(vec![uintsize_ty.clone()]),
+                Type::maybe(uintsize_ty.clone()),
+            ),
+        );
+        self.register_method(
+            "UIntSize",
+            MethodSignature::immutable(
+                "saturating_add",
+                List::from(vec![uintsize_ty.clone()]),
+                uintsize_ty.clone(),
+            ),
+        );
+        self.register_method(
+            "UIntSize",
+            MethodSignature::immutable(
+                "saturating_sub",
+                List::from(vec![uintsize_ty.clone()]),
+                uintsize_ty.clone(),
+            ),
+        );
+        self.register_method(
+            "UIntSize",
+            MethodSignature::immutable(
+                "saturating_mul",
+                List::from(vec![uintsize_ty.clone()]),
+                uintsize_ty.clone(),
+            ),
+        );
 
         // Sized integer methods (UInt16, UInt32, etc.) - byte order conversion
         for uint_name in ["UInt16", "UInt32", "UInt64"] {
             let uint_ty = Type::Named {
-                path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(uint_name, Span::default())),
+                path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
+                    uint_name,
+                    Span::default(),
+                )),
                 args: List::new(),
             };
-            self.register_method(uint_name, MethodSignature::immutable("from_be", List::from(vec![uint_ty.clone()]), uint_ty.clone()));
-            self.register_method(uint_name, MethodSignature::immutable("from_le", List::from(vec![uint_ty.clone()]), uint_ty.clone()));
-            self.register_method(uint_name, MethodSignature::immutable("to_be", List::new(), uint_ty.clone()));
-            self.register_method(uint_name, MethodSignature::immutable("to_le", List::new(), uint_ty.clone()));
-            self.register_method(uint_name, MethodSignature::immutable("to_be_bytes", List::new(), Type::Array {
-                element: Box::new(byte_type.clone()),
-                size: None,
-            }));
-            self.register_method(uint_name, MethodSignature::immutable("to_le_bytes", List::new(), Type::Array {
-                element: Box::new(byte_type.clone()),
-                size: None,
-            }));
-            self.register_method(uint_name, MethodSignature::immutable("checked_add", List::from(vec![uint_ty.clone()]), Type::maybe(uint_ty.clone())));
-            self.register_method(uint_name, MethodSignature::immutable("checked_sub", List::from(vec![uint_ty.clone()]), Type::maybe(uint_ty.clone())));
-            self.register_method(uint_name, MethodSignature::immutable("checked_mul", List::from(vec![uint_ty.clone()]), Type::maybe(uint_ty.clone())));
+            self.register_method(
+                uint_name,
+                MethodSignature::immutable(
+                    "from_be",
+                    List::from(vec![uint_ty.clone()]),
+                    uint_ty.clone(),
+                ),
+            );
+            self.register_method(
+                uint_name,
+                MethodSignature::immutable(
+                    "from_le",
+                    List::from(vec![uint_ty.clone()]),
+                    uint_ty.clone(),
+                ),
+            );
+            self.register_method(
+                uint_name,
+                MethodSignature::immutable("to_be", List::new(), uint_ty.clone()),
+            );
+            self.register_method(
+                uint_name,
+                MethodSignature::immutable("to_le", List::new(), uint_ty.clone()),
+            );
+            self.register_method(
+                uint_name,
+                MethodSignature::immutable(
+                    "to_be_bytes",
+                    List::new(),
+                    Type::Array {
+                        element: Box::new(byte_type.clone()),
+                        size: None,
+                    },
+                ),
+            );
+            self.register_method(
+                uint_name,
+                MethodSignature::immutable(
+                    "to_le_bytes",
+                    List::new(),
+                    Type::Array {
+                        element: Box::new(byte_type.clone()),
+                        size: None,
+                    },
+                ),
+            );
+            self.register_method(
+                uint_name,
+                MethodSignature::immutable(
+                    "checked_add",
+                    List::from(vec![uint_ty.clone()]),
+                    Type::maybe(uint_ty.clone()),
+                ),
+            );
+            self.register_method(
+                uint_name,
+                MethodSignature::immutable(
+                    "checked_sub",
+                    List::from(vec![uint_ty.clone()]),
+                    Type::maybe(uint_ty.clone()),
+                ),
+            );
+            self.register_method(
+                uint_name,
+                MethodSignature::immutable(
+                    "checked_mul",
+                    List::from(vec![uint_ty.clone()]),
+                    Type::maybe(uint_ty.clone()),
+                ),
+            );
         }
     }
 
@@ -3572,7 +3839,8 @@ impl ProtocolChecker {
         }
 
         // Check if receiver is a reference for reference-aware return handling
-        let is_reference = matches!(ty,
+        let is_reference = matches!(
+            ty,
             Type::Reference { .. } | Type::CheckedReference { .. } | Type::UnsafeReference { .. }
         );
 
@@ -3591,7 +3859,8 @@ impl ProtocolChecker {
             let substitution = self.build_method_substitution(&type_args);
 
             // Apply substitution to return type
-            let mut resolved_return_type = self.apply_substitution_to_type(&sig.return_type, &substitution);
+            let mut resolved_return_type =
+                self.apply_substitution_to_type(&sig.return_type, &substitution);
 
             // Reference-aware return handling for collection accessors
             // &List<T>.first() -> Maybe<&T>, &List<T>.get(i) -> Maybe<&T>
@@ -3607,7 +3876,9 @@ impl ProtocolChecker {
                 name: sig.name.clone(),
                 type_params: sig.type_params.clone(),
                 receiver: sig.receiver,
-                params: sig.params.iter()
+                params: sig
+                    .params
+                    .iter()
                     .map(|p| self.apply_substitution_to_type(p, &substitution))
                     .collect(),
                 return_type: resolved_return_type,
@@ -3652,13 +3923,19 @@ impl ProtocolChecker {
     /// This is an enhanced version of `lookup_method` that passes argument type
     /// information to protocol method resolution. This enables correct selection
     /// among multiple implementations of parameterized protocols like `FromResidual<R>`.
-    pub fn lookup_method_with_args(&self, ty: &Type, method_name: &str, arg_types: &[Type]) -> Option<MethodLookupResult> {
+    pub fn lookup_method_with_args(
+        &self,
+        ty: &Type,
+        method_name: &str,
+        arg_types: &[Type],
+    ) -> Option<MethodLookupResult> {
         // Try all non-protocol lookups first (same as lookup_method)
         if let Some(result) = self.lookup_cbgr_conversion(ty, method_name) {
             return Some(result);
         }
 
-        let is_reference = matches!(ty,
+        let is_reference = matches!(
+            ty,
             Type::Reference { .. } | Type::CheckedReference { .. } | Type::UnsafeReference { .. }
         );
 
@@ -3667,7 +3944,8 @@ impl ProtocolChecker {
         let key = (type_name.clone(), Text::from(method_name));
         if let Some(sig) = self.method_registry.get(&key) {
             let substitution = self.build_method_substitution(&type_args);
-            let mut resolved_return_type = self.apply_substitution_to_type(&sig.return_type, &substitution);
+            let mut resolved_return_type =
+                self.apply_substitution_to_type(&sig.return_type, &substitution);
 
             if is_reference {
                 resolved_return_type = self.adjust_return_for_reference_receiver(
@@ -3681,7 +3959,9 @@ impl ProtocolChecker {
                 name: sig.name.clone(),
                 type_params: sig.type_params.clone(),
                 receiver: sig.receiver,
-                params: sig.params.iter()
+                params: sig
+                    .params
+                    .iter()
                     .map(|p| self.apply_substitution_to_type(p, &substitution))
                     .collect(),
                 return_type: resolved_return_type,
@@ -3709,7 +3989,9 @@ impl ProtocolChecker {
         }
 
         // Protocol method lookup WITH arg types for disambiguation
-        if let Some(mut result) = self.lookup_protocol_method_for_type_with_args(ty, method_name, arg_types) {
+        if let Some(mut result) =
+            self.lookup_protocol_method_for_type_with_args(ty, method_name, arg_types)
+        {
             result.signature = result.signature.freshen();
             return Some(result);
         }
@@ -3726,29 +4008,45 @@ impl ProtocolChecker {
             (Type::Reference { inner, mutable }, "to_checked") => {
                 (Type::checked_reference(*mutable, *inner.clone()), false)
             }
-            (Type::Reference { inner, mutable: true }, "to_checked_mut") => {
-                (Type::checked_reference(true, *inner.clone()), true)
-            }
+            (
+                Type::Reference {
+                    inner,
+                    mutable: true,
+                },
+                "to_checked_mut",
+            ) => (Type::checked_reference(true, *inner.clone()), true),
             // to_managed: Tier 1 -> Tier 0
             (Type::CheckedReference { inner, mutable }, "to_managed") => {
                 (Type::reference(*mutable, *inner.clone()), false)
             }
-            (Type::CheckedReference { inner, mutable: true }, "to_managed_mut") => {
-                (Type::reference(true, *inner.clone()), true)
-            }
+            (
+                Type::CheckedReference {
+                    inner,
+                    mutable: true,
+                },
+                "to_managed_mut",
+            ) => (Type::reference(true, *inner.clone()), true),
             // to_unsafe: Any tier -> Tier 2
             (Type::Reference { inner, mutable }, "to_unsafe") => {
                 (Type::unsafe_reference(*mutable, *inner.clone()), false)
             }
-            (Type::Reference { inner, mutable: true }, "to_unsafe_mut") => {
-                (Type::unsafe_reference(true, *inner.clone()), true)
-            }
+            (
+                Type::Reference {
+                    inner,
+                    mutable: true,
+                },
+                "to_unsafe_mut",
+            ) => (Type::unsafe_reference(true, *inner.clone()), true),
             (Type::CheckedReference { inner, mutable }, "to_unsafe") => {
                 (Type::unsafe_reference(*mutable, *inner.clone()), false)
             }
-            (Type::CheckedReference { inner, mutable: true }, "to_unsafe_mut") => {
-                (Type::unsafe_reference(true, *inner.clone()), true)
-            }
+            (
+                Type::CheckedReference {
+                    inner,
+                    mutable: true,
+                },
+                "to_unsafe_mut",
+            ) => (Type::unsafe_reference(true, *inner.clone()), true),
             _ => return None,
         };
 
@@ -3756,7 +4054,11 @@ impl ProtocolChecker {
             signature: MethodSignature {
                 name: method_name.into(),
                 type_params: List::new(),
-                receiver: if is_mutating { ReceiverKind::RefMut } else { ReceiverKind::Ref },
+                receiver: if is_mutating {
+                    ReceiverKind::RefMut
+                } else {
+                    ReceiverKind::Ref
+                },
                 params: List::new(),
                 return_type,
                 is_mutating,
@@ -3797,13 +4099,26 @@ impl ProtocolChecker {
     /// Generator<Y, R> implements Iterator<Item = Y> with:
     /// - next(&mut self) -> Maybe<Y>
     /// - has_next(&self) -> Bool
-    fn lookup_generator_iterator_method(&self, ty: &Type, method_name: &str) -> Option<MethodLookupResult> {
+    fn lookup_generator_iterator_method(
+        &self,
+        ty: &Type,
+        method_name: &str,
+    ) -> Option<MethodLookupResult> {
         // Extract yield type from Generator
         let (yield_ty, _return_ty) = match ty {
-            Type::Generator { yield_ty, return_ty } => (*yield_ty.clone(), *return_ty.clone()),
-            Type::Reference { inner, .. } | Type::CheckedReference { inner, .. } | Type::UnsafeReference { inner, .. } => {
+            Type::Generator {
+                yield_ty,
+                return_ty,
+            } => (*yield_ty.clone(), *return_ty.clone()),
+            Type::Reference { inner, .. }
+            | Type::CheckedReference { inner, .. }
+            | Type::UnsafeReference { inner, .. } => {
                 // Handle &Generator, &mut Generator
-                if let Type::Generator { yield_ty, return_ty } = inner.as_ref() {
+                if let Type::Generator {
+                    yield_ty,
+                    return_ty,
+                } = inner.as_ref()
+                {
                     (*yield_ty.clone(), *return_ty.clone())
                 } else {
                     return None;
@@ -3929,7 +4244,8 @@ impl ProtocolChecker {
         // Only adjust for collection accessor methods
         let is_accessor = matches!(method_name, "first" | "last" | "get");
         let tn = type_name.as_str();
-        let is_collection = matches!(tn, "Array" | "Slice") || WKT::List.matches(tn) || WKT::Map.matches(tn);
+        let is_collection =
+            matches!(tn, "Array" | "Slice") || WKT::List.matches(tn) || WKT::Map.matches(tn);
 
         if is_accessor && is_collection {
             // Wrap the inner type in Maybe<&T> instead of Maybe<T>
@@ -3955,11 +4271,9 @@ impl ProtocolChecker {
         match ty {
             Type::Generic { name, args } => Some((name.clone(), args.clone())),
             Type::Named { path, args } => {
-                let name = path.segments.last().and_then(|seg| {
-                    match seg {
-                        verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.clone()),
-                        _ => None,
-                    }
+                let name = path.segments.last().and_then(|seg| match seg {
+                    verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.clone()),
+                    _ => None,
                 })?;
                 Some((name, args.clone()))
             }
@@ -3973,18 +4287,19 @@ impl ProtocolChecker {
             // Empty tuple is canonically Unit
             Type::Tuple(elems) if elems.is_empty() => Some(("Unit".into(), List::new())),
             // Array type - treat as List for method lookup
-            Type::Array { element, .. } => Some(("Array".into(), List::from(vec![*element.clone()]))),
+            Type::Array { element, .. } => {
+                Some(("Array".into(), List::from(vec![*element.clone()])))
+            }
             // Slice type
             Type::Slice { element } => Some(("Slice".into(), List::from(vec![*element.clone()]))),
             // Variant types - look up named type via variant_type_names registry
             // e.g., Type::Variant({None: Unit, Some: T}) -> ("Maybe", [T])
             Type::Variant(variants) => {
                 let signature = Self::variant_type_signature_static(variants);
-                let named_type = self.variant_type_names.get(&signature)
-                    .or_else(|| {
-                        let relaxed = Self::variant_type_signature_relaxed(variants);
-                        self.variant_type_names.get(&relaxed)
-                    })?;
+                let named_type = self.variant_type_names.get(&signature).or_else(|| {
+                    let relaxed = Self::variant_type_signature_relaxed(variants);
+                    self.variant_type_names.get(&relaxed)
+                })?;
                 let type_args: List<Type> = variants
                     .values()
                     .filter(|payload| **payload != Type::Unit)
@@ -3998,9 +4313,13 @@ impl ProtocolChecker {
             Type::UnsafeReference { inner, .. } => self.extract_type_info(inner),
             // Generator type - yield and return types as args
             // Concurrency model: structured concurrency with nurseries, async/await, channels, Send/Sync protocol bounds — Section 12 - Generators
-            Type::Generator { yield_ty, return_ty } => {
-                Some(("Generator".into(), List::from(vec![*yield_ty.clone(), *return_ty.clone()])))
-            }
+            Type::Generator {
+                yield_ty,
+                return_ty,
+            } => Some((
+                "Generator".into(),
+                List::from(vec![*yield_ty.clone(), *return_ty.clone()]),
+            )),
             _ => None,
         }
     }
@@ -4025,13 +4344,22 @@ impl ProtocolChecker {
             Type::Var(tv) => {
                 // Type variables with IDs 0, 1, 2 map to T, V, third type param
                 match tv.id() {
-                    0 => subst.get(&"T".into()).cloned().unwrap_or_else(|| ty.clone()),
-                    1 => subst.get(&"V".into()).cloned().unwrap_or_else(|| ty.clone()),
+                    0 => subst
+                        .get(&"T".into())
+                        .cloned()
+                        .unwrap_or_else(|| ty.clone()),
+                    1 => subst
+                        .get(&"V".into())
+                        .cloned()
+                        .unwrap_or_else(|| ty.clone()),
                     _ => ty.clone(),
                 }
             }
             Type::Generic { name, args } => {
-                let new_args: List<Type> = args.iter().map(|a| self.apply_substitution_to_type(a, subst)).collect();
+                let new_args: List<Type> = args
+                    .iter()
+                    .map(|a| self.apply_substitution_to_type(a, subst))
+                    .collect();
 
                 // CRITICAL FIX: Check if this is a deferred projection (e.g., ::Item)
                 // After substitution, if the base type is now concrete, resolve the projection.
@@ -4042,21 +4370,32 @@ impl ProtocolChecker {
                     // Check if base type is concrete (no unresolved type variables)
                     if !self.type_has_unresolved_vars(base_type) {
                         // Try to resolve the projection
-                        if let Some(resolved) = self.try_find_associated_type(base_type, &assoc_name) {
+                        if let Some(resolved) =
+                            self.try_find_associated_type(base_type, &assoc_name)
+                        {
                             // Recursively apply substitution to the resolved type
                             return self.apply_substitution_to_type(&resolved, subst);
                         }
                     }
                 }
 
-                Type::Generic { name: name.clone(), args: new_args }
+                Type::Generic {
+                    name: name.clone(),
+                    args: new_args,
+                }
             }
             Type::Named { path, args } => Type::Named {
                 path: path.clone(),
-                args: args.iter().map(|a| self.apply_substitution_to_type(a, subst)).collect(),
+                args: args
+                    .iter()
+                    .map(|a| self.apply_substitution_to_type(a, subst))
+                    .collect(),
             },
             Type::Tuple(elems) => Type::Tuple(
-                elems.iter().map(|e| self.apply_substitution_to_type(e, subst)).collect()
+                elems
+                    .iter()
+                    .map(|e| self.apply_substitution_to_type(e, subst))
+                    .collect(),
             ),
             Type::Reference { mutable, inner } => Type::Reference {
                 mutable: *mutable,
@@ -4067,7 +4406,11 @@ impl ProtocolChecker {
     }
 
     /// Look up a method from protocol implementations
-    fn lookup_protocol_method_for_type(&self, ty: &Type, method_name: &str) -> Option<MethodLookupResult> {
+    fn lookup_protocol_method_for_type(
+        &self,
+        ty: &Type,
+        method_name: &str,
+    ) -> Option<MethodLookupResult> {
         self.lookup_protocol_method_for_type_with_args(ty, method_name, &[])
     }
 
@@ -4078,7 +4421,12 @@ impl ProtocolChecker {
     /// `FromResidual<Maybe<Never>>` and `FromResidual<Result<Never, E>>` both for `Maybe<T>`),
     /// the `arg_types` are used to select the correct implementation by matching
     /// `protocol_args` against the actual argument types.
-    fn lookup_protocol_method_for_type_with_args(&self, ty: &Type, method_name: &str, arg_types: &[Type]) -> Option<MethodLookupResult> {
+    fn lookup_protocol_method_for_type_with_args(
+        &self,
+        ty: &Type,
+        method_name: &str,
+        arg_types: &[Type],
+    ) -> Option<MethodLookupResult> {
         // Get all implementations for this type
         let impls = self.get_implementations(ty);
 
@@ -4103,28 +4451,31 @@ impl ProtocolChecker {
                 //  - impl_.methods has `fn next(&mut self) -> Maybe<&T>` (concrete)
                 // We want the concrete signature to avoid unresolved Self.Item projections.
 
-                let (return_type, params, receiver, is_mutating, _using_impl_method) = if let Some(impl_method_ty) = impl_.methods.get(&Text::from(method_name)) {
-                    let ret = self.extract_return_type_from_method(impl_method_ty);
-                    let pms = self.extract_params_from_method(impl_method_ty);
-                    let (rcv, is_mut) = self.extract_receiver_from_method(impl_method_ty);
-                    (ret, pms, rcv, is_mut, true)
-                } else if let Some(method) = proto.methods.get(&Text::from(method_name)) {
-                    // Fallback to protocol method (abstract signature)
-                    let ret = self.extract_return_type_from_method(&method.ty);
-                    let pms = self.extract_params_from_method(&method.ty);
-                    let (rcv, is_mut) = self.extract_receiver_from_method(&method.ty);
-                    (ret, pms, rcv, is_mut, false)
-                } else if let Some(inherited_method) = self.find_superprotocol_method(proto, &Text::from(method_name)) {
-                    // Check superprotocol hierarchy for inherited methods.
-                    // When Eq extends PartialEq, methods from PartialEq should be
-                    // available on types implementing Eq.
-                    let ret = self.extract_return_type_from_method(&inherited_method.ty);
-                    let pms = self.extract_params_from_method(&inherited_method.ty);
-                    let (rcv, is_mut) = self.extract_receiver_from_method(&inherited_method.ty);
-                    (ret, pms, rcv, is_mut, false)
-                } else {
-                    continue; // Method not found in this impl or superprotocols
-                };
+                let (return_type, params, receiver, is_mutating, _using_impl_method) =
+                    if let Some(impl_method_ty) = impl_.methods.get(&Text::from(method_name)) {
+                        let ret = self.extract_return_type_from_method(impl_method_ty);
+                        let pms = self.extract_params_from_method(impl_method_ty);
+                        let (rcv, is_mut) = self.extract_receiver_from_method(impl_method_ty);
+                        (ret, pms, rcv, is_mut, true)
+                    } else if let Some(method) = proto.methods.get(&Text::from(method_name)) {
+                        // Fallback to protocol method (abstract signature)
+                        let ret = self.extract_return_type_from_method(&method.ty);
+                        let pms = self.extract_params_from_method(&method.ty);
+                        let (rcv, is_mut) = self.extract_receiver_from_method(&method.ty);
+                        (ret, pms, rcv, is_mut, false)
+                    } else if let Some(inherited_method) =
+                        self.find_superprotocol_method(proto, &Text::from(method_name))
+                    {
+                        // Check superprotocol hierarchy for inherited methods.
+                        // When Eq extends PartialEq, methods from PartialEq should be
+                        // available on types implementing Eq.
+                        let ret = self.extract_return_type_from_method(&inherited_method.ty);
+                        let pms = self.extract_params_from_method(&inherited_method.ty);
+                        let (rcv, is_mut) = self.extract_receiver_from_method(&inherited_method.ty);
+                        (ret, pms, rcv, is_mut, false)
+                    } else {
+                        continue; // Method not found in this impl or superprotocols
+                    };
 
                 // Use proper unification-based substitution.
                 // 1. Unify impl_.for_type with ty to get bindings (e.g., T52 -> &Int)
@@ -4182,11 +4533,10 @@ impl ProtocolChecker {
                     continue;
                 }
                 // Apply the for_type substitution to protocol_args for proper matching
-                let instantiated_protocol_arg = self.substitute_type_params(
-                    &candidate.protocol_args[0],
-                    &candidate.subst_map,
-                );
-                let normalized_protocol_arg = self.normalize_variant_to_generic(&instantiated_protocol_arg);
+                let instantiated_protocol_arg =
+                    self.substitute_type_params(&candidate.protocol_args[0], &candidate.subst_map);
+                let normalized_protocol_arg =
+                    self.normalize_variant_to_generic(&instantiated_protocol_arg);
                 let normalized_arg = self.normalize_variant_to_generic(&arg_types[0]);
 
                 let mut match_subst = Map::new();
@@ -4212,7 +4562,8 @@ impl ProtocolChecker {
         let candidate = &candidates[selected_idx];
 
         // Apply substitution using proper method that handles TypeVar IDs
-        let substituted_return_type = self.substitute_type_params(&candidate.return_type, &candidate.subst_map);
+        let substituted_return_type =
+            self.substitute_type_params(&candidate.return_type, &candidate.subst_map);
 
         // Apply a second pass for nested substitutions (e.g., Self was Wrapper<T52>
         // and T52 -> Person, need to substitute in the result of first pass)
@@ -4225,7 +4576,9 @@ impl ProtocolChecker {
         };
 
         // Substitute type params in method parameters too
-        let substituted_params: List<Type> = candidate.params.iter()
+        let substituted_params: List<Type> = candidate
+            .params
+            .iter()
             .map(|p| {
                 let subst_p = self.substitute_type_params(p, &candidate.subst_map);
                 if !type_param_map.is_empty() {
@@ -4309,7 +4662,9 @@ impl ProtocolChecker {
                     match first {
                         Type::Reference { mutable: true, .. } => (ReceiverKind::RefMut, true),
                         Type::Reference { mutable: false, .. } => (ReceiverKind::Ref, false),
-                        Type::Named { path, .. } if path.to_string() == "Self" => (ReceiverKind::Value, false),
+                        Type::Named { path, .. } if path.to_string() == "Self" => {
+                            (ReceiverKind::Value, false)
+                        }
                         _ => (ReceiverKind::Ref, false),
                     }
                 } else {
@@ -5013,8 +5368,8 @@ impl ProtocolChecker {
                         // where the concrete type is expanded to None(Unit) | Some(T)
                         // Look up the variant's signature to see if it maps to this generic type
                         let signature = Self::variant_type_signature_static(variants);
-                        let named_type_opt = self.variant_type_names.get(&signature)
-                            .or_else(|| {
+                        let named_type_opt =
+                            self.variant_type_names.get(&signature).or_else(|| {
                                 let relaxed = Self::variant_type_signature_relaxed(variants);
                                 self.variant_type_names.get(&relaxed)
                             });
@@ -5030,7 +5385,9 @@ impl ProtocolChecker {
                                     .collect();
 
                                 // Match pattern args to non-unit payloads positionally
-                                for (pattern_arg, payload) in a1.iter().zip(non_unit_payloads.iter()) {
+                                for (pattern_arg, payload) in
+                                    a1.iter().zip(non_unit_payloads.iter())
+                                {
                                     if !self.unify_types(pattern_arg, payload, subst) {
                                         return false;
                                     }
@@ -5269,7 +5626,10 @@ impl ProtocolChecker {
                 // Check type arguments recursively
                 args.iter().any(|arg| Self::type_mentions_name(arg, name))
             }
-            Type::Generic { name: gen_name, args } => {
+            Type::Generic {
+                name: gen_name,
+                args,
+            } => {
                 if gen_name.as_str() == name.as_str() {
                     return true;
                 }
@@ -5283,14 +5643,23 @@ impl ProtocolChecker {
             Type::Array { element, .. } => Self::type_mentions_name(element, name),
             Type::Tuple(types) => types.iter().any(|t| Self::type_mentions_name(t, name)),
             Type::Record(fields) => fields.values().any(|t| Self::type_mentions_name(t, name)),
-            Type::Function { params, return_type, .. } => {
+            Type::Function {
+                params,
+                return_type,
+                ..
+            } => {
                 params.iter().any(|p| Self::type_mentions_name(p, name))
                     || Self::type_mentions_name(return_type, name)
             }
             Type::Variant(variants) => variants.values().any(|t| Self::type_mentions_name(t, name)),
             // Primitive types don't contain type parameter references
-            Type::Unit | Type::Never | Type::Bool | Type::Int | Type::Float
-            | Type::Char | Type::Text => false,
+            Type::Unit
+            | Type::Never
+            | Type::Bool
+            | Type::Int
+            | Type::Float
+            | Type::Char
+            | Type::Text => false,
             // Other types - conservatively return false
             _ => false,
         }
@@ -5474,18 +5843,14 @@ impl ProtocolChecker {
         // Stack uses the checkerless key — recursion guarding is per-thread,
         // not per-checker. (Pre-A2 behaviour preserved.)
         let stack_key = (type_key.clone(), protocol_key.clone());
-        let cached = IMPL_OPTIMISTIC_CACHE.with(|c| {
-            c.borrow().get(&cache_key).copied()
-        });
+        let cached = IMPL_OPTIMISTIC_CACHE.with(|c| c.borrow().get(&cache_key).copied());
         if let Some(result) = cached {
             return result;
         }
 
         // Check for cycles: if we're already checking this (type, protocol) pair,
         // return false to break the cycle
-        let is_cycle = IMPL_CHECKING_STACK.with(|s| {
-            s.borrow().contains(&stack_key)
-        });
+        let is_cycle = IMPL_CHECKING_STACK.with(|s| s.borrow().contains(&stack_key));
         if is_cycle {
             return false;
         }
@@ -5509,10 +5874,16 @@ impl ProtocolChecker {
                 });
             }
         }
-        let _stack_guard = StackGuard { key: stack_key.clone() };
+        let _stack_guard = StackGuard {
+            key: stack_key.clone(),
+        };
 
         // Stage 1: Try exact match first (most common case, O(1))
-        if self.impl_index.get(&(type_key, protocol_key.clone())).is_some() {
+        if self
+            .impl_index
+            .get(&(type_key, protocol_key.clone()))
+            .is_some()
+        {
             // Cache the positive result
             IMPL_OPTIMISTIC_CACHE.with(|c| {
                 c.borrow_mut().insert(cache_key, true);
@@ -5584,7 +5955,9 @@ impl ProtocolChecker {
 
                     // Check if impl for_type has the same base type name
                     let impl_base_name = match &impl_.for_type {
-                        Type::Named { path, .. } => path.as_ident().map(|id| id.as_str().to_string()),
+                        Type::Named { path, .. } => {
+                            path.as_ident().map(|id| id.as_str().to_string())
+                        }
                         Type::Var(_) => Some("_".to_string()), // Blanket impl matches any type
                         _ => None,
                     };
@@ -5615,7 +5988,9 @@ impl ProtocolChecker {
 
                 // Check if impl for_type has the same generic name
                 let impl_name = match &impl_.for_type {
-                    Type::Generic { name: impl_name, .. } => Some(impl_name.as_str().to_string()),
+                    Type::Generic {
+                        name: impl_name, ..
+                    } => Some(impl_name.as_str().to_string()),
                     Type::Var(_) => Some("_".to_string()), // Blanket impl
                     _ => None,
                 };
@@ -5656,8 +6031,13 @@ impl ProtocolChecker {
                 if let Some(ident) = path.as_ident() {
                     let name = ident.as_str();
                     // Common associated type names
-                    if name == "IntoIter" || name == "Iter" || name == "Item"
-                        || name == "Output" || name == "Error" || name == "Target" {
+                    if name == "IntoIter"
+                        || name == "Iter"
+                        || name == "Item"
+                        || name == "Output"
+                        || name == "Error"
+                        || name == "Target"
+                    {
                         // If this is a projection-like type with non-empty args,
                         // it's likely an unresolved associated type
                         if !args.is_empty() {
@@ -5671,12 +6051,14 @@ impl ProtocolChecker {
             }
 
             // Generic types often contain unresolved components
-            Type::Generic { args, .. } => {
-                args.iter().any(|arg| self.contains_unresolved_type(arg))
-            }
+            Type::Generic { args, .. } => args.iter().any(|arg| self.contains_unresolved_type(arg)),
 
             // Function types - check params and return
-            Type::Function { params, return_type, .. } => {
+            Type::Function {
+                params,
+                return_type,
+                ..
+            } => {
                 params.iter().any(|p| self.contains_unresolved_type(p))
                     || self.contains_unresolved_type(return_type)
             }
@@ -5694,8 +6076,13 @@ impl ProtocolChecker {
             Type::Future { output } => self.contains_unresolved_type(output),
 
             // Concrete primitive types are fully resolved
-            Type::Unit | Type::Never | Type::Bool | Type::Int
-            | Type::Float | Type::Char | Type::Text => false,
+            Type::Unit
+            | Type::Never
+            | Type::Bool
+            | Type::Int
+            | Type::Float
+            | Type::Char
+            | Type::Text => false,
 
             // Other types - assume resolved
             _ => false,
@@ -5749,7 +6136,9 @@ impl ProtocolChecker {
                     // Check if base type is concrete (no unresolved type variables)
                     if !self.type_has_unresolved_vars(base_type) {
                         // Try to resolve the projection
-                        if let Some(resolved) = self.try_find_associated_type(base_type, &assoc_name) {
+                        if let Some(resolved) =
+                            self.try_find_associated_type(base_type, &assoc_name)
+                        {
                             // Recursively apply substitution to the resolved type
                             // (in case it contains further projections)
                             return self.apply_substitution(&resolved, substitution);
@@ -6404,7 +6793,8 @@ impl ProtocolChecker {
         }
 
         let result = self.resolve_method(ty, protocol, method)?;
-        self.method_resolution_cache.insert(cache_key, result.clone());
+        self.method_resolution_cache
+            .insert(cache_key, result.clone());
         Ok(result)
     }
 
@@ -6479,7 +6869,7 @@ impl ProtocolChecker {
                             // CRITICAL: Only treat as blanket if where_clauses actually constrain this type param.
                             // A true blanket impl like `implement<T: Clone> Clone for T` has where_clauses
                             // referencing T. A concrete impl like `implement Clone for Item` has no such clauses.
-                            
+
                             impl_.where_clauses.iter().any(|clause| {
                                 // Check if this where clause constrains the potential type parameter
                                 Self::type_mentions_name(&clause.ty, &name)
@@ -6497,7 +6887,8 @@ impl ProtocolChecker {
             if is_blanket {
                 // Try to match and check where clauses
                 if let Some(substitution) = self.try_match_type(&impl_.for_type, ty) {
-                    let satisfied = self.check_where_clauses_satisfied(&impl_.where_clauses, &substitution);
+                    let satisfied =
+                        self.check_where_clauses_satisfied(&impl_.where_clauses, &substitution);
                     if satisfied {
                         impls.push(impl_);
                     }
@@ -6653,16 +7044,25 @@ impl ProtocolChecker {
     /// When protocol Eq extends PartialEq, methods defined in PartialEq
     /// should be available on types implementing Eq. This traverses
     /// `super_protocols` breadth-first looking for `method_name`.
-    pub fn find_superprotocol_method<'a>(&'a self, proto: &'a Protocol, method_name: &Text) -> Option<&'a ProtocolMethod> {
+    pub fn find_superprotocol_method<'a>(
+        &'a self,
+        proto: &'a Protocol,
+        method_name: &Text,
+    ) -> Option<&'a ProtocolMethod> {
         let mut visited = Set::new();
         let mut queue: List<&Protocol> = List::new();
         // Seed with direct superprotocols
         for bound in proto.super_protocols.iter() {
             if let Some(parent) = self.lookup_protocol(&bound.protocol) {
-                let parent_name = bound.protocol.segments.last().and_then(|seg| match seg {
-                    verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.clone()),
-                    _ => None,
-                }).unwrap_or_default();
+                let parent_name = bound
+                    .protocol
+                    .segments
+                    .last()
+                    .and_then(|seg| match seg {
+                        verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
                 if visited.insert(parent_name) {
                     queue.push(parent);
                 }
@@ -6675,10 +7075,15 @@ impl ProtocolChecker {
             // Continue searching up the hierarchy
             for bound in current.super_protocols.iter() {
                 if let Some(grandparent) = self.lookup_protocol(&bound.protocol) {
-                    let name = bound.protocol.segments.last().and_then(|seg| match seg {
-                        verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.clone()),
-                        _ => None,
-                    }).unwrap_or_default();
+                    let name = bound
+                        .protocol
+                        .segments
+                        .last()
+                        .and_then(|seg| match seg {
+                            verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.clone()),
+                            _ => None,
+                        })
+                        .unwrap_or_default();
                     if visited.insert(name) {
                         queue.push(grandparent);
                     }
@@ -6874,9 +7279,8 @@ impl ProtocolChecker {
         let type_key = self.make_type_key(ty);
         let resolution_key = (type_key.clone(), assoc_name.clone());
 
-        let is_cycle = ASSOC_TYPE_RESOLUTION_STACK.with(|stack| {
-            stack.borrow().contains(&resolution_key)
-        });
+        let is_cycle =
+            ASSOC_TYPE_RESOLUTION_STACK.with(|stack| stack.borrow().contains(&resolution_key));
         if is_cycle {
             return None;
         }
@@ -6892,7 +7296,10 @@ impl ProtocolChecker {
             fn drop(&mut self) {
                 ASSOC_TYPE_RESOLUTION_STACK.with(|stack| {
                     let mut s = stack.borrow_mut();
-                    if let Some(pos) = s.iter().position(|item| item.0 == self.0 && item.1 == self.1) {
+                    if let Some(pos) = s
+                        .iter()
+                        .position(|item| item.0 == self.0 && item.1 == self.1)
+                    {
                         s.remove(pos);
                     }
                 });
@@ -6938,7 +7345,9 @@ impl ProtocolChecker {
 
                 if is_projection {
                     // Try to recursively resolve the projection
-                    if let Some(resolved) = self.try_resolve_projection_type(&substituted, assoc_name) {
+                    if let Some(resolved) =
+                        self.try_resolve_projection_type(&substituted, assoc_name)
+                    {
                         return Some(resolved);
                     }
                     // Resolution failed (likely cycle) - save as fallback but continue
@@ -6989,7 +7398,12 @@ impl ProtocolChecker {
     /// - concrete_ty = `Iter<IntoIter<[Int]>>` (the actual type we're querying)
     /// - assoc_ty = `::Item[I]` (the associated type value, a projection on I)
     /// - Result: `::Item[IntoIter<[Int]>]` (with I substituted)
-    fn substitute_impl_type_params(&self, assoc_ty: &Type, impl_: &ProtocolImpl, concrete_ty: &Type) -> Type {
+    fn substitute_impl_type_params(
+        &self,
+        assoc_ty: &Type,
+        impl_: &ProtocolImpl,
+        concrete_ty: &Type,
+    ) -> Type {
         // Phase 1: Build initial substitution by matching impl for_type against concrete_ty
         let mut substitution: Map<TypeVar, Type> = Map::new();
         self.build_type_substitution(&impl_.for_type, concrete_ty, &mut substitution);
@@ -7016,20 +7430,41 @@ impl ProtocolChecker {
     }
 
     /// Build a substitution by matching a pattern type against a concrete type.
-    fn build_type_substitution(&self, pattern: &Type, concrete: &Type, subst: &mut Map<TypeVar, Type>) {
+    fn build_type_substitution(
+        &self,
+        pattern: &Type,
+        concrete: &Type,
+        subst: &mut Map<TypeVar, Type>,
+    ) {
         match (pattern, concrete) {
             // Type variable in pattern - add to substitution
             (Type::Var(tv), _) => {
                 subst.insert(*tv, concrete.clone());
             }
             // Named types - match args positionally
-            (Type::Named { args: pattern_args, .. }, Type::Named { args: concrete_args, .. }) => {
+            (
+                Type::Named {
+                    args: pattern_args, ..
+                },
+                Type::Named {
+                    args: concrete_args,
+                    ..
+                },
+            ) => {
                 for (p, c) in pattern_args.iter().zip(concrete_args.iter()) {
                     self.build_type_substitution(p, c, subst);
                 }
             }
             // Generic types - match args positionally
-            (Type::Generic { args: pattern_args, .. }, Type::Generic { args: concrete_args, .. }) => {
+            (
+                Type::Generic {
+                    args: pattern_args, ..
+                },
+                Type::Generic {
+                    args: concrete_args,
+                    ..
+                },
+            ) => {
                 for (p, c) in pattern_args.iter().zip(concrete_args.iter()) {
                     self.build_type_substitution(p, c, subst);
                 }
@@ -7038,21 +7473,57 @@ impl ProtocolChecker {
             // This handles the common case where impl blocks register for_type as Generic
             // (e.g., Generic { name: "ListIter", args: [Var(T)] }) but the concrete type
             // is Named (e.g., Named { path: "ListIter", args: [Int] }), or vice versa.
-            (Type::Generic { name, args: pattern_args }, Type::Named { path, args: concrete_args }) => {
+            (
+                Type::Generic {
+                    name,
+                    args: pattern_args,
+                },
+                Type::Named {
+                    path,
+                    args: concrete_args,
+                },
+            ) => {
                 // Verify base names match before extracting substitutions
-                let named_name = path.segments.iter().filter_map(|seg| {
-                    if let verum_ast::ty::PathSegment::Name(ident) = seg { Some(ident.name.as_str()) } else { None }
-                }).next_back().unwrap_or("");
+                let named_name = path
+                    .segments
+                    .iter()
+                    .filter_map(|seg| {
+                        if let verum_ast::ty::PathSegment::Name(ident) = seg {
+                            Some(ident.name.as_str())
+                        } else {
+                            None
+                        }
+                    })
+                    .next_back()
+                    .unwrap_or("");
                 if name.as_str() == named_name {
                     for (p, c) in pattern_args.iter().zip(concrete_args.iter()) {
                         self.build_type_substitution(p, c, subst);
                     }
                 }
             }
-            (Type::Named { path, args: pattern_args }, Type::Generic { name, args: concrete_args }) => {
-                let named_name = path.segments.iter().filter_map(|seg| {
-                    if let verum_ast::ty::PathSegment::Name(ident) = seg { Some(ident.name.as_str()) } else { None }
-                }).next_back().unwrap_or("");
+            (
+                Type::Named {
+                    path,
+                    args: pattern_args,
+                },
+                Type::Generic {
+                    name,
+                    args: concrete_args,
+                },
+            ) => {
+                let named_name = path
+                    .segments
+                    .iter()
+                    .filter_map(|seg| {
+                        if let verum_ast::ty::PathSegment::Name(ident) = seg {
+                            Some(ident.name.as_str())
+                        } else {
+                            None
+                        }
+                    })
+                    .next_back()
+                    .unwrap_or("");
                 if named_name == name.as_str() {
                     for (p, c) in pattern_args.iter().zip(concrete_args.iter()) {
                         self.build_type_substitution(p, c, subst);
@@ -7075,8 +7546,16 @@ impl ProtocolChecker {
             }
             // Function types - match params and return type
             (
-                Type::Function { params: p_params, return_type: p_ret, .. },
-                Type::Function { params: c_params, return_type: c_ret, .. },
+                Type::Function {
+                    params: p_params,
+                    return_type: p_ret,
+                    ..
+                },
+                Type::Function {
+                    params: c_params,
+                    return_type: c_ret,
+                    ..
+                },
             ) => {
                 if p_params.len() == c_params.len() {
                     for (p, c) in p_params.iter().zip(c_params.iter()) {
@@ -7096,7 +7575,12 @@ impl ProtocolChecker {
     }
 
     /// Internal implementation with depth tracking to prevent stack overflow.
-    fn apply_type_substitution_impl(&self, ty: &Type, subst: &Map<TypeVar, Type>, depth: usize) -> Type {
+    fn apply_type_substitution_impl(
+        &self,
+        ty: &Type,
+        subst: &Map<TypeVar, Type>,
+        depth: usize,
+    ) -> Type {
         const MAX_SUBST_DEPTH: usize = 128;
         if depth > MAX_SUBST_DEPTH {
             // #306: surface the silent depth-limit fallback so a
@@ -7117,17 +7601,20 @@ impl ProtocolChecker {
         }
         let d = depth + 1;
         match ty {
-            Type::Var(tv) => {
-                subst.get(tv).cloned().unwrap_or_else(|| ty.clone())
-            }
+            Type::Var(tv) => subst.get(tv).cloned().unwrap_or_else(|| ty.clone()),
             Type::Named { path, args } => {
-                let new_args = args.iter()
+                let new_args = args
+                    .iter()
                     .map(|a| self.apply_type_substitution_impl(a, subst, d))
                     .collect();
-                Type::Named { path: path.clone(), args: new_args }
+                Type::Named {
+                    path: path.clone(),
+                    args: new_args,
+                }
             }
             Type::Generic { name, args } => {
-                let new_args: List<Type> = args.iter()
+                let new_args: List<Type> = args
+                    .iter()
                     .map(|a| self.apply_type_substitution_impl(a, subst, d))
                     .collect();
 
@@ -7140,43 +7627,50 @@ impl ProtocolChecker {
                     // Check if base type is concrete (no unresolved type variables)
                     if !self.type_has_unresolved_vars(base_type) {
                         // Try to resolve the projection
-                        if let Some(resolved) = self.try_find_associated_type(base_type, &assoc_name) {
+                        if let Some(resolved) =
+                            self.try_find_associated_type(base_type, &assoc_name)
+                        {
                             // Recursively apply substitution to the resolved type
                             return self.apply_type_substitution_impl(&resolved, subst, d);
                         }
                     }
                 }
 
-                Type::Generic { name: name.clone(), args: new_args }
-            }
-            Type::Reference { inner, mutable } => {
-                Type::Reference {
-                    inner: Box::new(self.apply_type_substitution_impl(inner, subst, d)),
-                    mutable: *mutable,
+                Type::Generic {
+                    name: name.clone(),
+                    args: new_args,
                 }
             }
-            Type::Tuple(elems) => {
-                Type::Tuple(elems.iter()
+            Type::Reference { inner, mutable } => Type::Reference {
+                inner: Box::new(self.apply_type_substitution_impl(inner, subst, d)),
+                mutable: *mutable,
+            },
+            Type::Tuple(elems) => Type::Tuple(
+                elems
+                    .iter()
                     .map(|e| self.apply_type_substitution_impl(e, subst, d))
-                    .collect())
-            }
-            Type::Array { element, size } => {
-                Type::Array {
-                    element: Box::new(self.apply_type_substitution_impl(element, subst, d)),
-                    size: *size,
-                }
-            }
-            Type::Function { params, return_type, contexts, properties, type_params } => {
-                Type::Function {
-                    params: params.iter()
-                        .map(|p| self.apply_type_substitution_impl(p, subst, d))
-                        .collect(),
-                    return_type: Box::new(self.apply_type_substitution_impl(return_type, subst, d)),
-                    contexts: contexts.clone(),
-                    properties: properties.clone(),
-                    type_params: type_params.clone(),
-                }
-            }
+                    .collect(),
+            ),
+            Type::Array { element, size } => Type::Array {
+                element: Box::new(self.apply_type_substitution_impl(element, subst, d)),
+                size: *size,
+            },
+            Type::Function {
+                params,
+                return_type,
+                contexts,
+                properties,
+                type_params,
+            } => Type::Function {
+                params: params
+                    .iter()
+                    .map(|p| self.apply_type_substitution_impl(p, subst, d))
+                    .collect(),
+                return_type: Box::new(self.apply_type_substitution_impl(return_type, subst, d)),
+                contexts: contexts.clone(),
+                properties: properties.clone(),
+                type_params: type_params.clone(),
+            },
             // Other types pass through unchanged
             _ => ty.clone(),
         }
@@ -7199,13 +7693,20 @@ impl ProtocolChecker {
             Type::CheckedReference { inner, .. } => self.type_has_unresolved_vars(inner),
             Type::UnsafeReference { inner, .. } => self.type_has_unresolved_vars(inner),
             Type::Pointer { inner, .. } => self.type_has_unresolved_vars(inner),
-            Type::Function { params, return_type, .. } => {
+            Type::Function {
+                params,
+                return_type,
+                ..
+            } => {
                 params.iter().any(|p| self.type_has_unresolved_vars(p))
                     || self.type_has_unresolved_vars(return_type)
             }
             Type::Refined { base, .. } => self.type_has_unresolved_vars(base),
             Type::Future { output } => self.type_has_unresolved_vars(output),
-            Type::Generator { yield_ty, return_ty } => {
+            Type::Generator {
+                yield_ty,
+                return_ty,
+            } => {
                 self.type_has_unresolved_vars(yield_ty) || self.type_has_unresolved_vars(return_ty)
             }
             // Primitive types and other concrete types
@@ -7247,7 +7748,8 @@ impl ProtocolChecker {
 
                 // Then try to resolve the projection
                 let assoc_text: Text = assoc_name.into();
-                if let Some(resolved) = self.try_find_associated_type(&normalized_base, &assoc_text) {
+                if let Some(resolved) = self.try_find_associated_type(&normalized_base, &assoc_text)
+                {
                     // Recursively normalize the result in case it contains more projections
                     self.normalize_projection_type(&resolved)
                 } else {
@@ -7261,19 +7763,28 @@ impl ProtocolChecker {
             // Normalize nested types
             Type::Generic { name, args } => Type::Generic {
                 name: name.clone(),
-                args: args.iter().map(|a| self.normalize_projection_type(a)).collect(),
+                args: args
+                    .iter()
+                    .map(|a| self.normalize_projection_type(a))
+                    .collect(),
             },
             Type::Named { path, args } => Type::Named {
                 path: path.clone(),
-                args: args.iter().map(|a| self.normalize_projection_type(a)).collect(),
+                args: args
+                    .iter()
+                    .map(|a| self.normalize_projection_type(a))
+                    .collect(),
             },
             Type::Reference { mutable, inner } => Type::Reference {
                 mutable: *mutable,
                 inner: verum_common::Heap::new(self.normalize_projection_type(inner)),
             },
-            Type::Tuple(elems) => {
-                Type::Tuple(elems.iter().map(|e| self.normalize_projection_type(e)).collect())
-            }
+            Type::Tuple(elems) => Type::Tuple(
+                elems
+                    .iter()
+                    .map(|e| self.normalize_projection_type(e))
+                    .collect(),
+            ),
             // Other types pass through unchanged
             _ => ty.clone(),
         }
@@ -7409,14 +7920,15 @@ impl ProtocolChecker {
             }
             Type::Named { path, args } => {
                 // Check both single-segment paths (as_ident) and multi-segment paths (last segment)
-                let n_opt = path.as_ident().map(|id| id.as_str())
-                    .or_else(|| path.segments.last().and_then(|seg| {
+                let n_opt = path.as_ident().map(|id| id.as_str()).or_else(|| {
+                    path.segments.last().and_then(|seg| {
                         if let verum_ast::ty::PathSegment::Name(id) = seg {
                             Some(id.name.as_str())
                         } else {
                             None
                         }
-                    }));
+                    })
+                });
                 if let Some(n) = n_opt {
                     if (WKT::Result.matches(n) || n == "IoResult") && args.len() == 2 {
                         return Some(TryProtocolResolution {
@@ -7451,7 +7963,9 @@ impl ProtocolChecker {
                     parts.sort();
                     parts.join("|")
                 };
-                let named_type = self.variant_type_names.get(&verum_common::Text::from(variant_sig.as_str()))
+                let named_type = self
+                    .variant_type_names
+                    .get(&verum_common::Text::from(variant_sig.as_str()))
                     .cloned();
 
                 // If the named type implements Try, we already handled it above
@@ -7461,18 +7975,24 @@ impl ProtocolChecker {
                 // the "success" value, the other carries the "error"/"empty" value.
                 if variants.len() == 2 {
                     // Find the "output" variant: first variant with non-Unit, non-Never payload
-                    let output_entry = variants.iter().find(|(_, ty)| {
-                        !matches!(ty, Type::Unit | Type::Never)
-                    });
+                    let output_entry = variants
+                        .iter()
+                        .find(|(_, ty)| !matches!(ty, Type::Unit | Type::Never));
 
                     if let Some((output_name, output_ty)) = output_entry {
                         return Some(TryProtocolResolution {
                             output: output_ty.clone(),
                             residual: Type::Variant(
-                                variants.iter().map(|(name, ty)| {
-                                    if name == output_name { (name.clone(), Type::Never) }
-                                    else { (name.clone(), ty.clone()) }
-                                }).collect(),
+                                variants
+                                    .iter()
+                                    .map(|(name, ty)| {
+                                        if name == output_name {
+                                            (name.clone(), Type::Never)
+                                        } else {
+                                            (name.clone(), ty.clone())
+                                        }
+                                    })
+                                    .collect(),
                             ),
                         });
                     }
@@ -7485,14 +8005,19 @@ impl ProtocolChecker {
                         args: List::new(),
                     };
                     if self.implements_protocol(&named_ty, "Try") {
-                        let try_path = Path::single(verum_ast::ty::Ident::new("Try", Span::default()));
+                        let try_path =
+                            Path::single(verum_ast::ty::Ident::new("Try", Span::default()));
                         if let Maybe::Some(impl_) = self.find_impl(&named_ty, &try_path) {
                             let mut subst = Map::new();
                             self.build_type_substitution_for_impl(&impl_.for_type, ty, &mut subst);
-                            let output = impl_.associated_types.get(&"Output".into())
+                            let output = impl_
+                                .associated_types
+                                .get(&"Output".into())
                                 .cloned()
                                 .map(|t| self.apply_type_substitution_with_map(&t, &subst));
-                            let residual = impl_.associated_types.get(&"Residual".into())
+                            let residual = impl_
+                                .associated_types
+                                .get(&"Residual".into())
                                 .cloned()
                                 .map(|t| self.apply_type_substitution_with_map(&t, &subst));
                             if let (Some(output), Some(residual)) = (output, residual) {
@@ -7526,14 +8051,30 @@ impl ProtocolChecker {
                 // eprintln!("[DEBUG build_subst] Var case: tv={:?} -> {:?}", tv, concrete);
                 subst.insert(*tv, concrete.clone());
             }
-            (Type::Generic { args: impl_args, .. }, Type::Generic { args: concrete_args, .. }) => {
+            (
+                Type::Generic {
+                    args: impl_args, ..
+                },
+                Type::Generic {
+                    args: concrete_args,
+                    ..
+                },
+            ) => {
                 // #[cfg(debug_assertions)]
                 // eprintln!("[DEBUG build_subst] Generic-Generic case");
                 for (impl_arg, concrete_arg) in impl_args.iter().zip(concrete_args.iter()) {
                     self.build_type_substitution_for_impl(impl_arg, concrete_arg, subst);
                 }
             }
-            (Type::Named { args: impl_args, .. }, Type::Named { args: concrete_args, .. }) => {
+            (
+                Type::Named {
+                    args: impl_args, ..
+                },
+                Type::Named {
+                    args: concrete_args,
+                    ..
+                },
+            ) => {
                 // #[cfg(debug_assertions)]
                 // eprintln!("[DEBUG build_subst] Named-Named case");
                 for (impl_arg, concrete_arg) in impl_args.iter().zip(concrete_args.iter()) {
@@ -7544,7 +8085,16 @@ impl ProtocolChecker {
             // This handles cases where impl's for_type is Named (e.g., Named { path: "Rev", args: [Var(I)] })
             // but the concrete type is Generic (e.g., Generic { name: "Rev", args: [Range<Int>] }).
             // This can happen when my Placeholder fix converts Rev<Self> to Generic instead of Named.
-            (Type::Named { path, args: impl_args }, Type::Generic { name, args: concrete_args }) => {
+            (
+                Type::Named {
+                    path,
+                    args: impl_args,
+                },
+                Type::Generic {
+                    name,
+                    args: concrete_args,
+                },
+            ) => {
                 // Verify the base type name matches
                 if let Some(ident) = path.as_ident() {
                     if ident.as_str() == name.as_str() && impl_args.len() == concrete_args.len() {
@@ -7555,7 +8105,16 @@ impl ProtocolChecker {
                 }
             }
             // Reverse case: Generic impl type matching Named concrete type
-            (Type::Generic { name, args: impl_args }, Type::Named { path, args: concrete_args }) => {
+            (
+                Type::Generic {
+                    name,
+                    args: impl_args,
+                },
+                Type::Named {
+                    path,
+                    args: concrete_args,
+                },
+            ) => {
                 if let Some(ident) = path.as_ident() {
                     if name.as_str() == ident.as_str() && impl_args.len() == concrete_args.len() {
                         for (impl_arg, concrete_arg) in impl_args.iter().zip(concrete_args.iter()) {
@@ -7567,18 +8126,23 @@ impl ProtocolChecker {
             // Handle Generic pattern matching Variant concrete type (stdlib-agnostic)
             // This allows impls like `implement<T, E> Try for Result<T, E>` to work
             // when the concrete type is Variant({Ok: Int, Err: Text})
-            (Type::Generic { name, args: impl_args }, Type::Variant(variants)) => {
+            (
+                Type::Generic {
+                    name,
+                    args: impl_args,
+                },
+                Type::Variant(variants),
+            ) => {
                 // #[cfg(debug_assertions)]
                 // eprintln!("[DEBUG build_subst] Generic-Variant case: name={}", name);
                 // Verify this variant corresponds to this generic type
                 let signature = Self::variant_type_signature_static(variants);
                 // #[cfg(debug_assertions)]
                 // eprintln!("[DEBUG build_subst] signature={}", signature);
-                let named_type_opt = self.variant_type_names.get(&signature)
-                    .or_else(|| {
-                        let relaxed = Self::variant_type_signature_relaxed(variants);
-                        self.variant_type_names.get(&relaxed)
-                    });
+                let named_type_opt = self.variant_type_names.get(&signature).or_else(|| {
+                    let relaxed = Self::variant_type_signature_relaxed(variants);
+                    self.variant_type_names.get(&relaxed)
+                });
                 if let Some(named_type) = named_type_opt {
                     // #[cfg(debug_assertions)]
                     // eprintln!("[DEBUG build_subst] found named_type={}", named_type);
@@ -7614,7 +8178,11 @@ impl ProtocolChecker {
                 // Match payloads by variant name
                 for (name, impl_payload) in impl_variants.iter() {
                     if let Some(concrete_payload) = concrete_variants.get(name) {
-                        self.build_type_substitution_for_impl(impl_payload, concrete_payload, subst);
+                        self.build_type_substitution_for_impl(
+                            impl_payload,
+                            concrete_payload,
+                            subst,
+                        );
                     }
                 }
             }
@@ -7645,9 +8213,7 @@ impl ProtocolChecker {
             },
             Type::Reference { mutable, inner } => Type::Reference {
                 mutable: *mutable,
-                inner: verum_common::Heap::new(
-                    self.apply_type_substitution_with_map(inner, subst),
-                ),
+                inner: verum_common::Heap::new(self.apply_type_substitution_with_map(inner, subst)),
             },
             Type::Tuple(elems) => Type::Tuple(
                 elems
@@ -7660,12 +8226,21 @@ impl ProtocolChecker {
                 let new_variants: indexmap::IndexMap<Text, Type> = variants
                     .iter()
                     .map(|(name, payload)| {
-                        (name.clone(), self.apply_type_substitution_with_map(payload, subst))
+                        (
+                            name.clone(),
+                            self.apply_type_substitution_with_map(payload, subst),
+                        )
                     })
                     .collect();
                 Type::Variant(new_variants)
             }
-            Type::Function { params, return_type, contexts, type_params, properties } => Type::Function {
+            Type::Function {
+                params,
+                return_type,
+                contexts,
+                type_params,
+                properties,
+            } => Type::Function {
                 params: params
                     .iter()
                     .map(|p| self.apply_type_substitution_with_map(p, subst))
@@ -7752,7 +8327,8 @@ impl ProtocolChecker {
             // eprintln!("[DEBUG can_convert_residual] impl_for_type_normalized = {:?}", impl_for_type_normalized);
 
             // Check if impl.for_type matches return_type
-            let for_type_match = self.try_match_type(&impl_for_type_normalized, &return_type_normalized);
+            let for_type_match =
+                self.try_match_type(&impl_for_type_normalized, &return_type_normalized);
             if for_type_match.is_none() {
                 // #[cfg(debug_assertions)]
                 // eprintln!("[DEBUG can_convert_residual] for_type did not match");
@@ -7773,23 +8349,34 @@ impl ProtocolChecker {
                 let impl_residual_normalized = self.normalize_variant_to_generic(impl_residual);
 
                 // Apply the substitution from for_type matching to the protocol arg
-                let impl_residual_instantiated = self.apply_substitution(&impl_residual_normalized, &for_type_subst);
+                let impl_residual_instantiated =
+                    self.apply_substitution(&impl_residual_normalized, &for_type_subst);
                 // Also normalize the instantiated result
-                let impl_residual_instantiated_normalized = self.normalize_variant_to_generic(&impl_residual_instantiated);
+                let impl_residual_instantiated_normalized =
+                    self.normalize_variant_to_generic(&impl_residual_instantiated);
                 // #[cfg(debug_assertions)]
                 // eprintln!("[DEBUG can_convert_residual] impl_residual_normalized = {:?}", impl_residual_normalized);
                 // #[cfg(debug_assertions)]
                 // eprintln!("[DEBUG can_convert_residual] impl_residual_instantiated_normalized = {:?}", impl_residual_instantiated_normalized);
 
                 // Now check if the instantiated residual matches the actual residual
-                if self.try_match_type(&impl_residual_instantiated_normalized, &residual_type_normalized).is_some() {
+                if self
+                    .try_match_type(
+                        &impl_residual_instantiated_normalized,
+                        &residual_type_normalized,
+                    )
+                    .is_some()
+                {
                     // #[cfg(debug_assertions)]
                     // eprintln!("[DEBUG can_convert_residual] SUCCESS! residual matched");
                     return true;
                 }
 
                 // Also try matching the raw impl_residual_normalized (for wildcard type params)
-                if self.try_match_type(&impl_residual_normalized, &residual_type_normalized).is_some() {
+                if self
+                    .try_match_type(&impl_residual_normalized, &residual_type_normalized)
+                    .is_some()
+                {
                     // #[cfg(debug_assertions)]
                     // eprintln!("[DEBUG can_convert_residual] SUCCESS! raw impl_residual matched");
                     return true;
@@ -7810,8 +8397,12 @@ impl ProtocolChecker {
 
                 if let Some(for_type_subst) = self.try_match_type(&impl_.for_type, return_type) {
                     if let Some(impl_residual) = impl_.protocol_args.first() {
-                        let impl_residual_instantiated = self.apply_substitution(impl_residual, &for_type_subst);
-                        if self.try_match_type(&impl_residual_instantiated, residual_type).is_some() {
+                        let impl_residual_instantiated =
+                            self.apply_substitution(impl_residual, &for_type_subst);
+                        if self
+                            .try_match_type(&impl_residual_instantiated, residual_type)
+                            .is_some()
+                        {
                             return true;
                         }
                         if self.try_match_type(impl_residual, residual_type).is_some() {
@@ -7978,7 +8569,8 @@ impl ProtocolChecker {
         // =========================================================================
         // Try to resolve IntoIterator via registered protocol implementation.
         // This is the preferred method as it doesn't require hardcoded type knowledge.
-        let into_iter_path = Path::single(verum_ast::ty::Ident::new("IntoIterator", Span::default()));
+        let into_iter_path =
+            Path::single(verum_ast::ty::Ident::new("IntoIterator", Span::default()));
 
         if let Maybe::Some(impl_) = self.find_impl(ty, &into_iter_path) {
             // Build type substitution from impl's generic type to concrete type
@@ -8171,7 +8763,8 @@ impl ProtocolChecker {
         // Stdlib-agnostic type system: type checker operates without hardcoded knowledge of stdlib types, stdlib types registered from parsed .vr files
         // =========================================================================
         // Try to resolve AsyncIterator via registered protocol implementation.
-        let async_iter_path = Path::single(verum_ast::ty::Ident::new("AsyncIterator", Span::default()));
+        let async_iter_path =
+            Path::single(verum_ast::ty::Ident::new("AsyncIterator", Span::default()));
         if let Maybe::Some(impl_) = self.find_impl(ty, &async_iter_path) {
             // Build type substitution from impl's generic type to concrete type
             let mut subst = Map::new();
@@ -8235,9 +8828,9 @@ impl ProtocolChecker {
 
         // Handle references - unwrap and recurse
         match ty {
-            Type::Reference { inner, .. } |
-            Type::CheckedReference { inner, .. } |
-            Type::UnsafeReference { inner, .. } => {
+            Type::Reference { inner, .. }
+            | Type::CheckedReference { inner, .. }
+            | Type::UnsafeReference { inner, .. } => {
                 return self.resolve_index_protocol(inner);
             }
             _ => {}
@@ -8377,7 +8970,10 @@ impl ProtocolChecker {
         // Stdlib-agnostic type system: type checker operates without hardcoded knowledge of stdlib types, stdlib types registered from parsed .vr files
         // =========================================================================
         // Try to resolve Maybe via registered protocol implementation.
-        let maybe_path = Path::single(verum_ast::ty::Ident::new(WKT::Maybe.as_str(), Span::default()));
+        let maybe_path = Path::single(verum_ast::ty::Ident::new(
+            WKT::Maybe.as_str(),
+            Span::default(),
+        ));
         if let Maybe::Some(impl_) = self.find_impl(ty, &maybe_path) {
             // Build type substitution from impl's generic type to concrete type
             let mut subst = Map::new();
@@ -8507,11 +9103,8 @@ impl ProtocolChecker {
         // or a generic type with the same name
         for impl_ in &self.impls {
             // Check if this impl is for the requested protocol
-            let impl_protocol_name: Maybe<Text> = impl_
-                .protocol
-                .segments
-                .last()
-                .and_then(|seg| match seg {
+            let impl_protocol_name: Maybe<Text> =
+                impl_.protocol.segments.last().and_then(|seg| match seg {
                     verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.clone()),
                     _ => None,
                 });
@@ -8531,13 +9124,10 @@ impl ProtocolChecker {
 
                 // Named type (possibly generic)
                 Type::Named { path, .. } => {
-                    let type_name: Maybe<Text> = path
-                        .segments
-                        .last()
-                        .and_then(|seg| match seg {
-                            verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.clone()),
-                            _ => None,
-                        });
+                    let type_name: Maybe<Text> = path.segments.last().and_then(|seg| match seg {
+                        verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.clone()),
+                        _ => None,
+                    });
                     if type_name.as_ref() == Option::Some(constructor_name) {
                         return true;
                     }
@@ -9057,18 +9647,21 @@ impl ProtocolChecker {
                 }
 
                 // Find the protocol definition to get method-level type_param_names
-                let protocol_name = impl_.protocol.as_ident()
+                let protocol_name = impl_
+                    .protocol
+                    .as_ident()
                     .map(|id| id.name.clone())
                     .unwrap_or_default();
-                let type_param_names = if let Maybe::Some(protocol) = self.get_protocol(&protocol_name) {
-                    if let Some(proto_method) = protocol.methods.get(method_name) {
-                        proto_method.type_param_names.clone()
+                let type_param_names =
+                    if let Maybe::Some(protocol) = self.get_protocol(&protocol_name) {
+                        if let Some(proto_method) = protocol.methods.get(method_name) {
+                            proto_method.type_param_names.clone()
+                        } else {
+                            List::new()
+                        }
                     } else {
                         List::new()
-                    }
-                } else {
-                    List::new()
-                };
+                    };
 
                 return Ok(Maybe::Some((result_ty, type_param_names)));
             }
@@ -9122,12 +9715,13 @@ impl ProtocolChecker {
         // impl-level `F` binding and its method-local `F` parameter
         // gets silently replaced, producing type errors like
         // "expected Int, found fn(Int) -> Int".
-        let method_level_param_names: Option<List<Text>> = impls
-            .iter()
-            .find_map(|impl_| {
-                let proto = self.lookup_protocol(&impl_.protocol)?;
-                proto.methods.get(method_name).map(|pm| pm.type_param_names.clone())
-            });
+        let method_level_param_names: Option<List<Text>> = impls.iter().find_map(|impl_| {
+            let proto = self.lookup_protocol(&impl_.protocol)?;
+            proto
+                .methods
+                .get(method_name)
+                .map(|pm| pm.type_param_names.clone())
+        });
 
         for impl_ in impls.iter() {
             if let Some(method_ty) = impl_.methods.get(method_name) {
@@ -9294,11 +9888,10 @@ impl ProtocolChecker {
             .iter()
             .map(|(name, payload)| {
                 let payload_name = match payload {
-                    Type::Named { path, .. } => {
-                        path.as_ident()
-                            .map(|id| id.name.as_str().to_string())
-                            .unwrap_or_default()
-                    }
+                    Type::Named { path, .. } => path
+                        .as_ident()
+                        .map(|id| id.name.as_str().to_string())
+                        .unwrap_or_default(),
                     Type::Generic { name: n, .. } => n.as_str().to_string(),
                     // Unit, primitives, and TypeVars are not distinctive for
                     // disambiguation — only Named/Generic payload types matter.
@@ -9349,7 +9942,8 @@ impl ProtocolChecker {
                         let tn = ident.name.as_str();
                         // Normalize primitive and numeric type names for consistent protocol lookup
                         use verum_common::well_known_types::type_names;
-                        if type_names::is_primitive_value_type(tn) || matches!(tn, "Never" | "Text") {
+                        if type_names::is_primitive_value_type(tn) || matches!(tn, "Never" | "Text")
+                        {
                             return tn.into();
                         }
                     }
@@ -9994,8 +10588,12 @@ impl ProtocolChecker {
         // CRITICAL FIX: Check if protocol_args are different
         // Sub<Duration> and Sub<Instant> for the same type are NOT overlapping
         // because they have different type arguments
-        if impl1.protocol_args.len() == impl2.protocol_args.len() && !impl1.protocol_args.is_empty() {
-            let args_could_unify = impl1.protocol_args.iter().zip(impl2.protocol_args.iter())
+        if impl1.protocol_args.len() == impl2.protocol_args.len() && !impl1.protocol_args.is_empty()
+        {
+            let args_could_unify = impl1
+                .protocol_args
+                .iter()
+                .zip(impl2.protocol_args.iter())
                 .any(|(arg1, arg2)| self.types_could_unify(arg1, arg2));
             if !args_could_unify {
                 return Ok(()); // Different protocol_args means no overlap
@@ -10445,7 +11043,7 @@ impl ProtocolChecker {
                     name: name.clone(),
                     args: substituted_args,
                 }
-            },
+            }
 
             // Function types: substitute in parameters, return type, and type params
             Type::Function {
@@ -10906,13 +11504,16 @@ impl ProtocolChecker {
 
         // If only one implementation, return it
         if applicable.len() == 1 {
-            let idx = match applicable.iter().next() {
-                Some(&i) => i,
-                None => return Err(crate::advanced_protocols::AdvancedProtocolError::AmbiguousSpecialization {
-                    ty: ty.clone(),
-                    candidates: List::new(),
-                }),
-            };
+            let idx =
+                match applicable.iter().next() {
+                    Some(&i) => i,
+                    None => return Err(
+                        crate::advanced_protocols::AdvancedProtocolError::AmbiguousSpecialization {
+                            ty: ty.clone(),
+                            candidates: List::new(),
+                        },
+                    ),
+                };
             return self.impls.get(idx).ok_or_else(|| {
                 crate::advanced_protocols::AdvancedProtocolError::AmbiguousSpecialization {
                     ty: ty.clone(),
@@ -11337,8 +11938,7 @@ impl ProtocolChecker {
             (Type::Named { path: p1, args: a1 }, Type::Named { path: p2, args: a2 }) => {
                 let k1 = self.make_protocol_key(p1);
                 let k2 = self.make_protocol_key(p2);
-                Type::canonical_primitive(k1.as_str())
-                    == Type::canonical_primitive(k2.as_str())
+                Type::canonical_primitive(k1.as_str()) == Type::canonical_primitive(k2.as_str())
                     && a1.len() == a2.len()
                     && a1
                         .iter()
@@ -11348,8 +11948,7 @@ impl ProtocolChecker {
 
             // Generic types — same numeric-alias normalization.
             (Type::Generic { name: n1, args: a1 }, Type::Generic { name: n2, args: a2 }) => {
-                Type::canonical_primitive(n1.as_str())
-                    == Type::canonical_primitive(n2.as_str())
+                Type::canonical_primitive(n1.as_str()) == Type::canonical_primitive(n2.as_str())
                     && a1.len() == a2.len()
                     && a1
                         .iter()
@@ -13940,7 +14539,9 @@ mod tests {
             defining_crate: Maybe::Some("test".into()),
             span: Span::default(),
         };
-        checker.register_protocol(validator_protocol_updated).unwrap();
+        checker
+            .register_protocol(validator_protocol_updated)
+            .unwrap();
 
         // Implementation only provides required method (validate has default)
         let mut impl_methods = Map::new();
@@ -14361,10 +14962,8 @@ mod tests {
     fn test_export_instance_registry_mirrors_impls() {
         let mut checker = ProtocolChecker::new_empty();
 
-        let show_method_ty = Type::function(
-            List::from(vec![Type::Var(TypeVar::with_id(0))]),
-            Type::Text,
-        );
+        let show_method_ty =
+            Type::function(List::from(vec![Type::Var(TypeVar::with_id(0))]), Type::Text);
         let mut show_methods = Map::new();
         show_methods.insert(
             "show".into(),
@@ -14531,8 +15130,10 @@ mod tests {
         // Use `new_empty()` so no standard protocols collide with
         // our test impl at `register_impl` time.
         let mut checker = ProtocolChecker::new_empty();
-        let proto_path =
-            Path::single(Ident::new("CustomProto_InstanceSearchTest", Span::default()));
+        let proto_path = Path::single(Ident::new(
+            "CustomProto_InstanceSearchTest",
+            Span::default(),
+        ));
         let blanket = ProtocolImpl {
             protocol: proto_path.clone(),
             protocol_args: List::new(),
@@ -14551,9 +15152,7 @@ mod tests {
         // Default ON: blanket-impl scan reaches Type::Int.
         match checker.find_impl(&Type::Int, &proto_path) {
             Maybe::Some(_) => {} // expected
-            Maybe::None => panic!(
-                "default instance_search=true must find the blanket impl"
-            ),
+            Maybe::None => panic!("default instance_search=true must find the blanket impl"),
         }
 
         // Flip OFF: Stage 2 skipped → None.
@@ -14573,8 +15172,7 @@ mod tests {
         // search" knob, not a complete protocol-resolver
         // disable.
         let mut checker = ProtocolChecker::new_empty();
-        let proto_path =
-            Path::single(Ident::new("CustomProto_ExactMatchTest", Span::default()));
+        let proto_path = Path::single(Ident::new("CustomProto_ExactMatchTest", Span::default()));
         let concrete = ProtocolImpl {
             protocol: proto_path.clone(),
             protocol_args: List::new(),
@@ -14599,9 +15197,7 @@ mod tests {
                     "exact-match path must still return the concrete impl"
                 );
             }
-            Maybe::None => panic!(
-                "instance_search=false must NOT block exact-match resolution"
-            ),
+            Maybe::None => panic!("instance_search=false must NOT block exact-match resolution"),
         }
     }
 
@@ -14635,10 +15231,7 @@ mod tests {
         checker.register_protocol(proto).unwrap();
 
         // Register the type as defined in another foreign cog.
-        checker.register_type_crate(
-            "ForeignType".into(),
-            "another_foreign_cog".into(),
-        );
+        checker.register_type_crate("ForeignType".into(), "another_foreign_cog".into());
 
         ProtocolImpl {
             protocol: Path::single(Ident::new(proto_name, Span::default())),
@@ -14703,10 +15296,7 @@ mod tests {
             CoherenceMode::from_manifest_str("unchecked"),
             CoherenceMode::Off
         );
-        assert_eq!(
-            CoherenceMode::from_manifest_str("off"),
-            CoherenceMode::Off
-        );
+        assert_eq!(CoherenceMode::from_manifest_str("off"), CoherenceMode::Off);
         // Unknown → Strict (with warn! side-effect).
         assert_eq!(
             CoherenceMode::from_manifest_str("nonsense"),
@@ -14725,10 +15315,7 @@ mod tests {
         let bad = make_orphan_impl(&mut checker);
         let result = checker.register_impl(bad);
         assert!(
-            matches!(
-                result,
-                Err(CoherenceError::OrphanRuleViolation { .. })
-            ),
+            matches!(result, Err(CoherenceError::OrphanRuleViolation { .. })),
             "Strict mode must reject orphan impls; got {:?}",
             result
         );
@@ -14794,8 +15381,7 @@ mod tests {
         // protocol on the same concrete type returns
         // OverlappingImplementations on the second registration.
         let mut checker = ProtocolChecker::new_empty();
-        let proto_path =
-            Path::single(Ident::new("OverlapProto_Strict", Span::default()));
+        let proto_path = Path::single(Ident::new("OverlapProto_Strict", Span::default()));
 
         let first = ProtocolImpl {
             protocol: proto_path.clone(),
@@ -14830,8 +15416,7 @@ mod tests {
         // coherence_warnings.
         let mut checker = ProtocolChecker::new_empty();
         checker.set_coherence_mode(CoherenceMode::Lenient);
-        let proto_path =
-            Path::single(Ident::new("OverlapProto_Lenient", Span::default()));
+        let proto_path = Path::single(Ident::new("OverlapProto_Lenient", Span::default()));
 
         let first = ProtocolImpl {
             protocol: proto_path.clone(),
@@ -14861,11 +15446,9 @@ mod tests {
             1,
             "Lenient mode must record exactly one OverlappingImplementations"
         );
-        assert!(
-            matches!(
-                warnings[0],
-                CoherenceError::OverlappingImplementations { .. }
-            )
-        );
+        assert!(matches!(
+            warnings[0],
+            CoherenceError::OverlappingImplementations { .. }
+        ));
     }
 }

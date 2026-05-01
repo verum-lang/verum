@@ -1,15 +1,15 @@
 //! Iterator and range instruction handlers for VBC interpreter.
 
-use crate::instruction::Reg;
-use crate::types::TypeId;
-use crate::value::Value;
 use super::super::super::error::{InterpreterError, InterpreterResult};
-use super::super::super::state::{InterpreterState, GeneratorId, GeneratorStatus};
 use super::super::super::heap;
+use super::super::super::state::{GeneratorId, GeneratorStatus, InterpreterState};
 use super::super::DispatchResult;
 use super::super::dispatch_loop_table_with_entry_depth;
 use super::bytecode_io::*;
-use super::cbgr_helpers::{is_cbgr_ref, decode_cbgr_ref};
+use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
+use crate::instruction::Reg;
+use crate::types::TypeId;
+use crate::value::Value;
 
 // ── Iterator type constants ──
 const ITER_TYPE_LIST: i64 = 0;
@@ -40,7 +40,9 @@ const ITER_TYPE_GENERATOR: i64 = 4;
 /// Iterator protocol: creates an iterator object from a collection or range. The iterator
 /// holds a type tag (LIST/SET/MAP/ARRAY/RANGE), the source reference, and a cursor index.
 /// Each call to IterNext advances the cursor and returns the next element or nil.
-pub(in super::super) fn handle_iter_new(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_iter_new(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
 
@@ -59,11 +61,12 @@ pub(in super::super) fn handle_iter_new(state: &mut InterpreterState) -> Interpr
     if source.is_generator() {
         // Generator iterator: store generator value directly in iterator object.
         // IterNext will detect ITER_TYPE_GENERATOR and resume the generator.
-        let iter_obj = state.heap.alloc(TypeId::UNIT, 3 * std::mem::size_of::<Value>())?;
+        let iter_obj = state
+            .heap
+            .alloc(TypeId::UNIT, 3 * std::mem::size_of::<Value>())?;
         state.record_allocation();
-        let iter_ptr = unsafe {
-            (iter_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
-        };
+        let iter_ptr =
+            unsafe { (iter_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
         unsafe {
             *iter_ptr = source; // generator value
             *iter_ptr.add(1) = Value::from_i64(0); // unused for generators
@@ -90,9 +93,7 @@ pub(in super::super) fn handle_iter_new(state: &mut InterpreterState) -> Interpr
             if src_header.type_id == TypeId::UNIT
                 && src_header.size as usize == 4 * std::mem::size_of::<Value>()
             {
-                let data = unsafe {
-                    src_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-                };
+                let data = unsafe { src_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
                 let tag = unsafe { (*data.add(3)).as_i64() };
                 if (ITER_TYPE_LIST..=ITER_TYPE_RANGE).contains(&tag) {
                     let inner_source = unsafe { *data };
@@ -138,12 +139,13 @@ pub(in super::super) fn handle_iter_new(state: &mut InterpreterState) -> Interpr
     };
 
     // Allocate iterator object: [source_ptr, current_idx, iter_type]
-    let iter_obj = state.heap.alloc(TypeId::UNIT, 3 * std::mem::size_of::<Value>())?;
+    let iter_obj = state
+        .heap
+        .alloc(TypeId::UNIT, 3 * std::mem::size_of::<Value>())?;
     state.record_allocation();
 
-    let iter_ptr = unsafe {
-        (iter_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let iter_ptr =
+        unsafe { (iter_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
     // Initialize iterator
     unsafe {
@@ -162,7 +164,9 @@ pub(in super::super) fn handle_iter_new(state: &mut InterpreterState) -> Interpr
 /// Format: `IterNext dst, has_next_dst, iter`
 /// Advances iterator, sets dst to next value (or unit if exhausted),
 /// and sets has_next_dst to bool indicating if there was a value.
-pub(in super::super) fn handle_iter_next(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_iter_next(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let has_next_dst = read_reg(state)?;
     let iter_reg = read_reg(state)?;
@@ -173,9 +177,7 @@ pub(in super::super) fn handle_iter_next(state: &mut InterpreterState) -> Interp
     }
 
     // Read iterator state
-    let iter_data = unsafe {
-        iter_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let iter_data = unsafe { iter_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
     let source = unsafe { *iter_data };
     let current_idx = unsafe { (*iter_data.add(1)).as_i64() } as usize;
     let iter_type = unsafe { (*iter_data.add(2)).as_i64() };
@@ -191,39 +193,62 @@ pub(in super::super) fn handle_iter_next(state: &mut InterpreterState) -> Interp
 
         let gen_id = GeneratorId(gen_val.as_generator_id());
 
-        if !state.generators.get(gen_id).map(|g| g.can_resume()).unwrap_or(false) {
+        if !state
+            .generators
+            .get(gen_id)
+            .map(|g| g.can_resume())
+            .unwrap_or(false)
+        {
             state.set_reg(dst, Value::unit());
             state.set_reg(has_next_dst, Value::from_bool(false));
             return Ok(DispatchResult::Continue);
         }
 
         let (func_id, status, reg_count) = {
-            let generator = state.generators.get(gen_id)
-                .ok_or(InterpreterError::InvalidGeneratorId { generator_id: gen_id })?;
+            let generator =
+                state
+                    .generators
+                    .get(gen_id)
+                    .ok_or(InterpreterError::InvalidGeneratorId {
+                        generator_id: gen_id,
+                    })?;
             (generator.func_id, generator.status, generator.reg_count)
         };
 
-        let _func = state.module.get_function(func_id)
+        let _func = state
+            .module
+            .get_function(func_id)
             .ok_or(InterpreterError::FunctionNotFound(func_id))?;
 
         // PC is relative to function start (matching handle_call which sets pc=0)
-        let (resume_pc, restore_registers, restore_contexts) = match status {
-            GeneratorStatus::Created => {
-                let generator = state.generators.get(gen_id)
-                    .ok_or(InterpreterError::InvalidGeneratorId { generator_id: gen_id })?;
-                (0u32, generator.saved_registers.clone(), Vec::new())
-            }
-            GeneratorStatus::Yielded => {
-                let generator = state.generators.get(gen_id)
-                    .ok_or(InterpreterError::InvalidGeneratorId { generator_id: gen_id })?;
-                (generator.saved_pc, generator.saved_registers.clone(), generator.saved_contexts.clone())
-            }
-            _ => {
-                state.set_reg(dst, Value::unit());
-                state.set_reg(has_next_dst, Value::from_bool(false));
-                return Ok(DispatchResult::Continue);
-            }
-        };
+        let (resume_pc, restore_registers, restore_contexts) =
+            match status {
+                GeneratorStatus::Created => {
+                    let generator = state.generators.get(gen_id).ok_or(
+                        InterpreterError::InvalidGeneratorId {
+                            generator_id: gen_id,
+                        },
+                    )?;
+                    (0u32, generator.saved_registers.clone(), Vec::new())
+                }
+                GeneratorStatus::Yielded => {
+                    let generator = state.generators.get(gen_id).ok_or(
+                        InterpreterError::InvalidGeneratorId {
+                            generator_id: gen_id,
+                        },
+                    )?;
+                    (
+                        generator.saved_pc,
+                        generator.saved_registers.clone(),
+                        generator.saved_contexts.clone(),
+                    )
+                }
+                _ => {
+                    state.set_reg(dst, Value::unit());
+                    state.set_reg(has_next_dst, Value::from_bool(false));
+                    return Ok(DispatchResult::Continue);
+                }
+            };
 
         if let Some(g) = state.generators.get_mut(gen_id) {
             g.status = GeneratorStatus::Running;
@@ -231,7 +256,9 @@ pub(in super::super) fn handle_iter_next(state: &mut InterpreterState) -> Interp
 
         let entry_depth = state.call_stack.depth();
         let return_pc = state.pc();
-        state.call_stack.push_frame(func_id, reg_count, return_pc, dst)?;
+        state
+            .call_stack
+            .push_frame(func_id, reg_count, return_pc, dst)?;
         state.registers.push_frame(reg_count);
 
         let new_reg_base = state.reg_base();
@@ -250,11 +277,15 @@ pub(in super::super) fn handle_iter_next(state: &mut InterpreterState) -> Interp
 
         {
             let value = result?;
-            if state.generators.get(gen_id)
+            if state
+                .generators
+                .get(gen_id)
                 .map(|g| g.status == GeneratorStatus::Yielded)
                 .unwrap_or(false)
             {
-                let yielded = state.generators.get(gen_id)
+                let yielded = state
+                    .generators
+                    .get(gen_id)
                     .and_then(|g| g.yielded_value)
                     .unwrap_or(value);
                 state.set_reg(dst, yielded);
@@ -278,9 +309,7 @@ pub(in super::super) fn handle_iter_next(state: &mut InterpreterState) -> Interp
     match iter_type {
         ITER_TYPE_LIST => {
             // Read list header: [len, cap, backing_ptr]
-            let list_header = unsafe {
-                source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-            };
+            let list_header = unsafe { source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
             let len = unsafe { (*list_header).as_i64() } as usize;
 
             if current_idx >= len {
@@ -293,27 +322,27 @@ pub(in super::super) fn handle_iter_next(state: &mut InterpreterState) -> Interp
             // Get element from backing array
             let backing_ptr = unsafe { (*list_header.add(2)).as_ptr::<u8>() };
             let elem_ptr = unsafe {
-                backing_ptr.add(heap::OBJECT_HEADER_SIZE + current_idx * std::mem::size_of::<Value>()) as *const Value
+                backing_ptr
+                    .add(heap::OBJECT_HEADER_SIZE + current_idx * std::mem::size_of::<Value>())
+                    as *const Value
             };
             let element = unsafe { *elem_ptr };
 
             // Advance iterator
-            unsafe { *iter_data.add(1) = Value::from_i64((current_idx + 1) as i64); }
+            unsafe {
+                *iter_data.add(1) = Value::from_i64((current_idx + 1) as i64);
+            }
 
             state.set_reg(dst, element);
             state.set_reg(has_next_dst, Value::from_bool(true));
         }
         ITER_TYPE_MAP => {
             // Read map/set header: [count, capacity, entries_ptr]
-            let map_header = unsafe {
-                source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-            };
+            let map_header = unsafe { source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
             let capacity = unsafe { (*map_header.add(1)).as_i64() } as usize;
             let entries_ptr = unsafe { (*map_header.add(2)).as_ptr::<u8>() };
 
-            let entries_data = unsafe {
-                entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-            };
+            let entries_data = unsafe { entries_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
             // Inspect the source's type_id to decide element shape:
             //  SET → yield key only (matches `implement<T> Iterator for
@@ -334,18 +363,20 @@ pub(in super::super) fn handle_iter_next(state: &mut InterpreterState) -> Interp
                 let entry_key = unsafe { *entries_data.add(idx * 2) };
                 if !entry_key.is_unit() {
                     // Advance iterator to next slot.
-                    unsafe { *iter_data.add(1) = Value::from_i64((idx + 1) as i64); }
+                    unsafe {
+                        *iter_data.add(1) = Value::from_i64((idx + 1) as i64);
+                    }
 
                     let element = if source_is_set {
                         entry_key
                     } else {
                         let entry_val = unsafe { *entries_data.add(idx * 2 + 1) };
-                        let tuple_obj = state.heap.alloc(
-                            TypeId::TUPLE,
-                            2 * std::mem::size_of::<Value>(),
-                        )?;
+                        let tuple_obj = state
+                            .heap
+                            .alloc(TypeId::TUPLE, 2 * std::mem::size_of::<Value>())?;
                         let tuple_data = unsafe {
-                            (tuple_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
+                            (tuple_obj.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE)
+                                as *mut Value
                         };
                         unsafe {
                             *tuple_data = entry_key;
@@ -362,15 +393,15 @@ pub(in super::super) fn handle_iter_next(state: &mut InterpreterState) -> Interp
             }
 
             // Exhausted
-            unsafe { *iter_data.add(1) = Value::from_i64(capacity as i64); }
+            unsafe {
+                *iter_data.add(1) = Value::from_i64(capacity as i64);
+            }
             state.set_reg(dst, Value::unit());
             state.set_reg(has_next_dst, Value::from_bool(false));
         }
         ITER_TYPE_ARRAY => {
             // Read array length from header (arrays store len in first slot after object header)
-            let array_header = unsafe {
-                source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-            };
+            let array_header = unsafe { source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
             // For arrays, we use a simpler layout: elements directly after header
             // The length is stored separately or passed as metadata
             // For now, treat similarly to list
@@ -382,12 +413,12 @@ pub(in super::super) fn handle_iter_next(state: &mut InterpreterState) -> Interp
                 return Ok(DispatchResult::Continue);
             }
 
-            let elem_ptr = unsafe {
-                array_header.add(1 + current_idx)
-            };
+            let elem_ptr = unsafe { array_header.add(1 + current_idx) };
             let element = unsafe { *elem_ptr };
 
-            unsafe { *iter_data.add(1) = Value::from_i64((current_idx + 1) as i64); }
+            unsafe {
+                *iter_data.add(1) = Value::from_i64((current_idx + 1) as i64);
+            }
 
             state.set_reg(dst, element);
             state.set_reg(has_next_dst, Value::from_bool(true));
@@ -400,9 +431,7 @@ pub(in super::super) fn handle_iter_next(state: &mut InterpreterState) -> Interp
 
             // Range objects have layout: [start, end, step, inclusive_flag]
             // We read these on first iteration
-            let range_header = unsafe {
-                source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value
-            };
+            let range_header = unsafe { source_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
 
             // On first iteration (current_idx == 0), initialize from range
             let current_val = if current_idx == 0 {
@@ -434,7 +463,9 @@ pub(in super::super) fn handle_iter_next(state: &mut InterpreterState) -> Interp
             state.set_reg(has_next_dst, Value::from_bool(true));
 
             // Store next value in current_idx slot
-            unsafe { *iter_data.add(1) = Value::from_i64(current_val + 1); }
+            unsafe {
+                *iter_data.add(1) = Value::from_i64(current_val + 1);
+            }
         }
         _ => {
             // Unknown iterator type
@@ -457,7 +488,9 @@ pub(in super::super) fn handle_iter_next(state: &mut InterpreterState) -> Interp
 ///  [0] start: Starting value (Int)
 ///  [1] end: Ending value (Int)
 ///  [2] inclusive: Whether end is included (Bool: 0 or 1)
-pub(in super::super) fn handle_new_range(state: &mut InterpreterState) -> InterpreterResult<DispatchResult> {
+pub(in super::super) fn handle_new_range(
+    state: &mut InterpreterState,
+) -> InterpreterResult<DispatchResult> {
     let dst = read_reg(state)?;
     let start_reg = read_reg(state)?;
     let end_reg = read_reg(state)?;
@@ -472,13 +505,14 @@ pub(in super::super) fn handle_new_range(state: &mut InterpreterState) -> Interp
     let end_int = end_val.as_i64();
 
     // Allocate Range object: ObjectHeader + 3 Values (start, end, inclusive)
-    let obj = state.heap.alloc(crate::types::TypeId::RANGE, 3 * std::mem::size_of::<Value>())?;
+    let obj = state.heap.alloc(
+        crate::types::TypeId::RANGE,
+        3 * std::mem::size_of::<Value>(),
+    )?;
     state.record_allocation();
 
     let base_ptr = obj.as_ptr() as *mut u8;
-    let data_ptr = unsafe {
-        base_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value
-    };
+    let data_ptr = unsafe { base_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
 
     // Write range data - must match IterNext's expected layout
     unsafe {
@@ -490,4 +524,3 @@ pub(in super::super) fn handle_new_range(state: &mut InterpreterState) -> Interp
     state.set_reg(dst, Value::from_ptr(base_ptr));
     Ok(DispatchResult::Continue)
 }
-

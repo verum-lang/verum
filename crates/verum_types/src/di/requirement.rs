@@ -141,7 +141,10 @@ impl ContextExpr {
     ///
 
     /// Follows chains: if v1 -> v2 -> Concrete, resolves transitively.
-    pub fn apply_context_subst(&self, subst: &indexmap::IndexMap<crate::ty::TypeVar, ContextExpr>) -> ContextExpr {
+    pub fn apply_context_subst(
+        &self,
+        subst: &indexmap::IndexMap<crate::ty::TypeVar, ContextExpr>,
+    ) -> ContextExpr {
         match self {
             ContextExpr::Concrete(_) => self.clone(),
             ContextExpr::Variable(var) => {
@@ -314,7 +317,6 @@ pub struct ContextRef {
     pub is_async: bool,
 
     // ---- Advanced Context Pattern Fields (Advanced context patterns (negative contexts, call graph verification, module aliases)) ----
-
     /// Optional alias for the context (`Database as db`)
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.2 - Aliased Contexts
     #[serde(default)]
@@ -505,7 +507,8 @@ impl ContextRequirement {
     pub fn get_context(&self, name: &str) -> Maybe<&ContextRef> {
         self.contexts
             .iter()
-            .find(|c| c.name.as_str() == name).and_then(Maybe::Some)
+            .find(|c| c.name.as_str() == name)
+            .and_then(Maybe::Some)
     }
 
     /// Merge this requirement with another
@@ -649,7 +652,9 @@ impl ContextRequirement {
 
     /// `true` if the context is explicitly excluded (`!Context`)
     pub fn is_excluded(&self, name: &str) -> bool {
-        self.contexts.iter().any(|c| c.is_negative && c.name.as_str() == name)
+        self.contexts
+            .iter()
+            .any(|c| c.is_negative && c.name.as_str() == name)
     }
 
     /// Get a context by its alias
@@ -668,7 +673,8 @@ impl ContextRequirement {
     pub fn get_by_alias(&self, alias: &str) -> Maybe<&ContextRef> {
         self.contexts
             .iter()
-            .find(|c| c.effective_name().as_str() == alias).and_then(Maybe::Some)
+            .find(|c| c.effective_name().as_str() == alias)
+            .and_then(Maybe::Some)
     }
 
     /// Get all aliased contexts
@@ -687,7 +693,10 @@ impl ContextRequirement {
 
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.1 - Conditional Contexts
     pub fn conditional_contexts(&self) -> List<&ContextRef> {
-        self.contexts.iter().filter(|c| c.is_conditional()).collect()
+        self.contexts
+            .iter()
+            .filter(|c| c.is_conditional())
+            .collect()
     }
 
     /// Get all transformed contexts
@@ -695,7 +704,10 @@ impl ContextRequirement {
 
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.3 - Context Transformations
     pub fn transformed_contexts(&self) -> List<&ContextRef> {
-        self.contexts.iter().filter(|c| c.has_transforms()).collect()
+        self.contexts
+            .iter()
+            .filter(|c| c.has_transforms())
+            .collect()
     }
 
     /// Validate that using a context name is allowed
@@ -719,7 +731,8 @@ impl ContextRequirement {
             Err(format!(
                 "Context '{}' is explicitly excluded in function signature. Cannot use it.",
                 name
-            ).into())
+            )
+            .into())
         } else {
             Ok(())
         }
@@ -804,7 +817,11 @@ impl ContextRef {
     ///
 
     /// Context declaration: "context Name { ... }" with method signatures, contexts are NOT types (separate namespace) — 1.3 - Context Transformations
-    pub fn with_transforms(name: Text, type_id: TypeId, transforms: List<ContextTransformRef>) -> Self {
+    pub fn with_transforms(
+        name: Text,
+        type_id: TypeId,
+        transforms: List<ContextTransformRef>,
+    ) -> Self {
         ContextRef {
             name,
             type_id,

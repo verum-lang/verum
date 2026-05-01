@@ -78,15 +78,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use super::{
-    CompilationPhase, PhaseData, PhaseInput, PhaseMetrics, PhaseOutput, VbcModuleData,
-};
+use super::{CompilationPhase, PhaseData, PhaseInput, PhaseMetrics, PhaseOutput, VbcModuleData};
 use verum_common::{List, Text};
 use verum_diagnostics::Diagnostic;
 use verum_vbc::module::{FunctionId, VbcModule};
 use verum_vbc::mono::{
-    InstantiationGraph, MonoPhaseConfig, MonomorphizationPhase as VbcMonoPhase,
-    SourceLocation,
+    InstantiationGraph, MonoPhaseConfig, MonomorphizationPhase as VbcMonoPhase, SourceLocation,
 };
 use verum_vbc::types::TypeRef;
 
@@ -187,10 +184,7 @@ impl VbcMonomorphizationPhase {
     ///
 
     /// Returns the monomorphized module on success, or diagnostic errors on failure.
-    pub fn monomorphize(
-        &mut self,
-        module: &VbcModule,
-    ) -> Result<VbcModule, List<Diagnostic>> {
+    pub fn monomorphize(&mut self, module: &VbcModule) -> Result<VbcModule, List<Diagnostic>> {
         let module_data = VbcModuleData {
             module: module.clone(),
             tier_stats: super::VbcTierStats {
@@ -517,9 +511,19 @@ impl VbcMonomorphizationPhase {
                 }
             }
             Opcode::Jmp => 4,
-            Opcode::JmpIf | Opcode::JmpNot | Opcode::JmpEq | Opcode::JmpNe
-            | Opcode::JmpLt | Opcode::JmpLe | Opcode::JmpGt | Opcode::JmpGe => {
-                let reg_len = if pc < bytecode.len() && bytecode[pc] < 128 { 1 } else { 2 };
+            Opcode::JmpIf
+            | Opcode::JmpNot
+            | Opcode::JmpEq
+            | Opcode::JmpNe
+            | Opcode::JmpLt
+            | Opcode::JmpLe
+            | Opcode::JmpGt
+            | Opcode::JmpGe => {
+                let reg_len = if pc < bytecode.len() && bytecode[pc] < 128 {
+                    1
+                } else {
+                    2
+                };
                 reg_len + 4
             }
             _ => 4, // Default estimate
@@ -674,8 +678,8 @@ mod tests {
 
     #[test]
     fn test_vbc_mono_phase_with_cache_dir() {
-        let phase = VbcMonomorphizationPhase::new()
-            .with_cache_dir(PathBuf::from("/tmp/mono_cache"));
+        let phase =
+            VbcMonomorphizationPhase::new().with_cache_dir(PathBuf::from("/tmp/mono_cache"));
         assert_eq!(phase.cache_dir, Some(PathBuf::from("/tmp/mono_cache")));
     }
 

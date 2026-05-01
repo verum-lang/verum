@@ -150,7 +150,10 @@ impl TypeScheme {
     }
 
     /// Add protocol bounds to an existing scheme.
-    pub fn with_protocol_bounds(mut self, var_protocol_bounds: Map<TypeVar, List<ProtocolBound>>) -> Self {
+    pub fn with_protocol_bounds(
+        mut self,
+        var_protocol_bounds: Map<TypeVar, List<ProtocolBound>>,
+    ) -> Self {
         self.var_protocol_bounds = var_protocol_bounds;
         self
     }
@@ -162,7 +165,10 @@ impl TypeScheme {
 
     /// Get the number of explicit (non-implicit) type parameters
     pub fn explicit_var_count(&self) -> usize {
-        self.vars.iter().filter(|v| !self.implicit_vars.contains(v)).count()
+        self.vars
+            .iter()
+            .filter(|v| !self.implicit_vars.contains(v))
+            .count()
     }
 
     /// Get the number of implicit type parameters
@@ -267,10 +273,8 @@ impl TypeScheme {
         for (old_var, bounds) in &self.var_type_bounds {
             if let Some(fresh_var) = old_to_fresh.get(old_var) {
                 // Apply substitution to bounds to replace old vars with fresh ones
-                let mapped_bounds: List<Type> = bounds
-                    .iter()
-                    .map(|b| b.apply_subst(&subst))
-                    .collect();
+                let mapped_bounds: List<Type> =
+                    bounds.iter().map(|b| b.apply_subst(&subst)).collect();
                 fresh_bounds.insert(*fresh_var, mapped_bounds);
             }
         }
@@ -283,7 +287,9 @@ impl TypeScheme {
 
     /// Returns (instantiated_type, fresh_vars, protocol_bounds_for_fresh_vars).
     /// Used at call sites to verify concrete types satisfy protocol constraints.
-    pub fn instantiate_with_protocol_bounds(&self) -> (Type, List<TypeVar>, Map<TypeVar, List<ProtocolBound>>) {
+    pub fn instantiate_with_protocol_bounds(
+        &self,
+    ) -> (Type, List<TypeVar>, Map<TypeVar, List<ProtocolBound>>) {
         if self.vars.is_empty() {
             return (self.ty.clone(), List::new(), Map::new());
         }
@@ -307,7 +313,11 @@ impl TypeScheme {
             }
         }
 
-        (self.ty.apply_subst(&subst), fresh_vars, fresh_protocol_bounds)
+        (
+            self.ty.apply_subst(&subst),
+            fresh_vars,
+            fresh_protocol_bounds,
+        )
     }
 
     /// Get free type variables in the scheme
@@ -1797,10 +1807,16 @@ impl TypeContext {
         // u32 type alias: use UInt32 (4 bytes) rather than Int (8 bytes)
         // to match the type system's from_le_bytes/to_le_bytes byte counts.
         // CBGR generation counters that need the full range should use Int directly.
-        self.define_alias("u32", Type::Named {
-            path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new("UInt32", verum_ast::span::Span::dummy())),
-            args: verum_common::List::new(),
-        });
+        self.define_alias(
+            "u32",
+            Type::Named {
+                path: verum_ast::ty::Path::single(verum_ast::ty::Ident::new(
+                    "UInt32",
+                    verum_ast::span::Span::dummy(),
+                )),
+                args: verum_common::List::new(),
+            },
+        );
 
         // Epoch type for CBGR epoch tracking
         self.define_alias("Epoch", Type::Int);
@@ -2198,11 +2214,7 @@ impl TypeContext {
     }
 
     /// Resolve a module-qualified alias
-    pub fn resolve_module_alias(
-        &self,
-        module_id: ModuleId,
-        name: &str,
-    ) -> Option<&Type> {
+    pub fn resolve_module_alias(&self, module_id: ModuleId, name: &str) -> Option<&Type> {
         let key = (module_id, Text::from(name));
         if let Some(target_type) = self.module_type_aliases.get(&key) {
             return Option::Some(target_type);
@@ -2212,13 +2224,8 @@ impl TypeContext {
 
     /// Look up a type definition in a specific module
     /// Import and re-export system: "mount module.{item1, item2}" for imports, pub use for re-exports, glob imports — Qualified type lookup (Module.Type)
-    pub fn lookup_module_type(
-        &self,
-        module_id: ModuleId,
-        name: &str,
-    ) -> Option<&Type> {
-        self.module_type_defs
-            .get(&(module_id, Text::from(name)))
+    pub fn lookup_module_type(&self, module_id: ModuleId, name: &str) -> Option<&Type> {
+        self.module_type_defs.get(&(module_id, Text::from(name)))
     }
 
     /// Look up a qualified type by path (e.g., "Module.Type" or "module::type")
@@ -2484,9 +2491,7 @@ impl TypeContext {
             }
             Type::Named { path: _, args: _ } => {
                 // Look up the named type and generate accessors for it
-                if let Option::Some(resolved_ty) =
-                    self.lookup_type(type_name).cloned()
-                {
+                if let Option::Some(resolved_ty) = self.lookup_type(type_name).cloned() {
                     self.generate_accessors(type_name, &resolved_ty)
                 } else {
                     Ok(()) // Not a record type, nothing to generate
@@ -2708,8 +2713,9 @@ impl InitState {
             InitState::FullyInitialized => true,
             InitState::Uninitialized => false,
             InitState::PartiallyInitialized(partial) => match partial {
-                PartialInit::Tuple { initialized, .. }
-                | PartialInit::Array { initialized, .. } => initialized.contains(&index),
+                PartialInit::Tuple { initialized, .. } | PartialInit::Array { initialized, .. } => {
+                    initialized.contains(&index)
+                }
                 PartialInit::Record { .. } => false,
             },
         }

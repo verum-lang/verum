@@ -37,8 +37,8 @@ pub mod result;
 // Re-export main types for convenience
 pub use context::ScriptContext;
 pub use incremental::{
-    detect_dependencies, CachedLine, DependencyGraph, IncrementalScriptParser, IncrementalStats,
+    CachedLine, DependencyGraph, IncrementalScriptParser, IncrementalStats, detect_dependencies,
 };
-pub use parser::{needs_continuation, suggest_completion, ScriptParser};
-pub use recovery::{explain_error, suggest_autocompletion, RecoveryResult, ScriptRecovery};
+pub use parser::{ScriptParser, needs_continuation, suggest_completion};
+pub use recovery::{RecoveryResult, ScriptRecovery, explain_error, suggest_autocompletion};
 pub use result::{ParseMode, ScriptParseResult};

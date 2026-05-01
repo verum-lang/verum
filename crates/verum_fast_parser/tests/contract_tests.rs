@@ -26,9 +26,9 @@
 
 use verum_ast::span::FileId;
 use verum_ast::{Expr, ExprKind, Item, ItemKind, Literal, LiteralKind};
-use verum_lexer::{Lexer, Token};
-use verum_fast_parser::VerumParser;
 use verum_common::Text;
+use verum_fast_parser::VerumParser;
+use verum_lexer::{Lexer, Token};
 
 /// Helper to parse a single expression
 fn parse_expr(source: &str) -> Expr {

@@ -46,11 +46,17 @@ fn omega_maps_to_kernel_omega() {
 fn omega_plus_n_maps_to_one_omega_plus_n() {
     assert_eq!(
         convert_eps_to_md_omega(&EpsInvariant::OmegaPlus(1)),
-        OrdinalDepth { omega_coeff: 1, finite_offset: 1 },
+        OrdinalDepth {
+            omega_coeff: 1,
+            finite_offset: 1
+        },
     );
     assert_eq!(
         convert_eps_to_md_omega(&EpsInvariant::OmegaPlus(7)),
-        OrdinalDepth { omega_coeff: 1, finite_offset: 7 },
+        OrdinalDepth {
+            omega_coeff: 1,
+            finite_offset: 7
+        },
     );
 }
 
@@ -61,14 +67,20 @@ fn omega_times_n_maps_to_n_omega() {
             coeff: 2,
             offset: 0,
         }),
-        OrdinalDepth { omega_coeff: 2, finite_offset: 0 },
+        OrdinalDepth {
+            omega_coeff: 2,
+            finite_offset: 0
+        },
     );
     assert_eq!(
         convert_eps_to_md_omega(&EpsInvariant::OmegaTimes {
             coeff: 3,
             offset: 5,
         }),
-        OrdinalDepth { omega_coeff: 3, finite_offset: 5 },
+        OrdinalDepth {
+            omega_coeff: 3,
+            finite_offset: 5
+        },
     );
 }
 
@@ -107,11 +119,7 @@ fn finite_n_lt_omega() {
     for n in [0u32, 1, 5, 100, u32::MAX - 1] {
         let a = convert_eps_to_md_omega(&EpsInvariant::Finite(n));
         let b = convert_eps_to_md_omega(&EpsInvariant::Omega);
-        assert!(
-            a.lt(&b),
-            "Finite({}) must be lt Omega in lex ordering",
-            n,
-        );
+        assert!(a.lt(&b), "Finite({}) must be lt Omega in lex ordering", n,);
     }
 }
 
@@ -152,8 +160,14 @@ fn zero_is_canonical_minimum() {
         EpsInvariant::Finite(1),
         EpsInvariant::Omega,
         EpsInvariant::OmegaPlus(0),
-        EpsInvariant::OmegaTimes { coeff: 1, offset: 0 },
-        EpsInvariant::OmegaTimes { coeff: u32::MAX, offset: u32::MAX },
+        EpsInvariant::OmegaTimes {
+            coeff: 1,
+            offset: 0,
+        },
+        EpsInvariant::OmegaTimes {
+            coeff: u32::MAX,
+            offset: u32::MAX,
+        },
     ] {
         let v = convert_eps_to_md_omega(&eps);
         assert!(

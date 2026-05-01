@@ -27,43 +27,37 @@ use std::time::{Duration, Instant};
 
 use tracing::{debug, info};
 
+use verum_ast::expr::BinOp;
+use verum_ast::span::Span;
 use verum_common::{List, Text};
 use verum_diagnostics::{Diagnostic, DiagnosticBuilder};
-use verum_ast::span::Span;
-use verum_ast::expr::BinOp;
+use verum_verification::cbgr_elimination::{
+    BasicBlock as EscapeBasicBlock, BlockId as EscapeBlockId, DefSite, Scope, ScopeId, UseSite,
+};
 use verum_verification::{
     // Bounds elimination
     ArrayAccess,
     BoundsCheckEliminator,
-    CheckDecision,
-    Expression as BoundsExpression,
     // CBGR escape analysis
     CBGROptimizer,
+    CheckDecision,
     EscapeCFG,
     EscapeStatus,
+    Expression as BoundsExpression,
     OptimizationConfig,
     RefVariable,
     // Verification passes
     TransitionRecommendation,
-    VerificationLevel,
     // Transition analysis
     TransitionStrategy,
-};
-use verum_verification::cbgr_elimination::{
-    BlockId as EscapeBlockId,
-    ScopeId,
-    BasicBlock as EscapeBasicBlock,
-    DefSite,
-    UseSite,
-    Scope,
+    VerificationLevel,
 };
 
 use crate::phases::{
     CompilationPhase, PhaseData, PhaseInput, PhaseMetrics, PhaseOutput,
     mir_lowering::{
-        MirModule, MirFunction, BasicBlock, BlockId, LocalId,
-        MirStatement, MirType, Place, Rvalue, Operand, MirConstant,
-        Terminator, DominatorTree, LoopInfo,
+        BasicBlock, BlockId, DominatorTree, LocalId, LoopInfo, MirConstant, MirFunction, MirModule,
+        MirStatement, MirType, Operand, Place, Rvalue, Terminator,
     },
 };
 
@@ -269,7 +263,10 @@ impl VerificationPhase {
     }
 
     /// Verify a single MIR module
-    pub fn verify_module(&mut self, module: &MirModule) -> Result<VerificationPhaseResults, String> {
+    pub fn verify_module(
+        &mut self,
+        module: &MirModule,
+    ) -> Result<VerificationPhaseResults, String> {
         let start = Instant::now();
         info!("Verifying module: {}", module.name);
 
@@ -373,14 +370,16 @@ impl VerificationPhase {
 
         // Calculate aggregate rates
         if module_results.bounds_stats.total_checks > 0 {
-            module_results.bounds_stats.elimination_rate =
-                (module_results.bounds_stats.eliminated as f64 /
-                 module_results.bounds_stats.total_checks as f64) * 100.0;
+            module_results.bounds_stats.elimination_rate = (module_results.bounds_stats.eliminated
+                as f64
+                / module_results.bounds_stats.total_checks as f64)
+                * 100.0;
         }
         if module_results.cbgr_stats.total_refs > 0 {
-            module_results.cbgr_stats.promotion_rate =
-                (module_results.cbgr_stats.promoted_to_tier1 as f64 /
-                 module_results.cbgr_stats.total_refs as f64) * 100.0;
+            module_results.cbgr_stats.promotion_rate = (module_results.cbgr_stats.promoted_to_tier1
+                as f64
+                / module_results.cbgr_stats.total_refs as f64)
+                * 100.0;
         }
 
         module_results.total_time = start.elapsed();
@@ -422,7 +421,13 @@ impl VerificationPhase {
 
                     // Try to eliminate using multiple strategies
                     let decision = self.analyze_single_bounds_check(
-                        array, index, block_idx, &dom_tree, &loop_info, func, &mut eliminator
+                        array,
+                        index,
+                        block_idx,
+                        &dom_tree,
+                        &loop_info,
+                        func,
+                        &mut eliminator,
                     );
 
                     match decision {
@@ -461,7 +466,10 @@ impl VerificationPhase {
             self.try_const_eval_length(array, func),
         ) {
             if const_idx >= 0 && (const_idx as usize) < array_len {
-                debug!("Bounds check eliminated: constant index {} < array len {}", const_idx, array_len);
+                debug!(
+                    "Bounds check eliminated: constant index {} < array len {}",
+                    const_idx, array_len
+                );
                 return CheckDecision::Eliminate;
             }
         }
@@ -600,7 +608,12 @@ impl VerificationPhase {
     }
 
     /// Extract step value from loop update
-    fn extract_step_from_update(&self, operand: &Operand, index: &Place, func: &MirFunction) -> Option<i64> {
+    fn extract_step_from_update(
+        &self,
+        operand: &Operand,
+        index: &Place,
+        func: &MirFunction,
+    ) -> Option<i64> {
         // Look for pattern: index + const or index - const
         match operand {
             Operand::Copy(place) | Operand::Move(place) => {
@@ -645,7 +658,12 @@ impl VerificationPhase {
     }
 
     /// Find loop upper bound from branch condition
-    fn find_loop_upper_bound(&self, header: BlockId, index: &Place, func: &MirFunction) -> Option<i64> {
+    fn find_loop_upper_bound(
+        &self,
+        header: BlockId,
+        index: &Place,
+        func: &MirFunction,
+    ) -> Option<i64> {
         // Look at loop exit condition
         if let Some(header_block) = func.blocks.get(header.0) {
             if let Terminator::Branch { condition, .. } = &header_block.terminator {
@@ -666,7 +684,9 @@ impl VerificationPhase {
                                             }
                                             BinOp::Le => {
                                                 if self.is_place_operand(left, index) {
-                                                    return self.try_const_operand(right).map(|v| v + 1);
+                                                    return self
+                                                        .try_const_operand(right)
+                                                        .map(|v| v + 1);
                                                 }
                                             }
                                             BinOp::Gt => {
@@ -676,7 +696,9 @@ impl VerificationPhase {
                                             }
                                             BinOp::Ge => {
                                                 if self.is_place_operand(right, index) {
-                                                    return self.try_const_operand(left).map(|v| v + 1);
+                                                    return self
+                                                        .try_const_operand(left)
+                                                        .map(|v| v + 1);
                                                 }
                                             }
                                             _ => {}
@@ -693,7 +715,13 @@ impl VerificationPhase {
     }
 
     /// Check if a place is loop-invariant
-    fn is_loop_invariant(&self, place: &Place, header: BlockId, loop_info: &LoopInfo, func: &MirFunction) -> bool {
+    fn is_loop_invariant(
+        &self,
+        place: &Place,
+        header: BlockId,
+        loop_info: &LoopInfo,
+        func: &MirFunction,
+    ) -> bool {
         // A place is loop-invariant if it's not modified within the loop
         if let Some(loop_blocks) = loop_info.loop_bodies.get(&header) {
             for block_id in loop_blocks {
@@ -712,18 +740,31 @@ impl VerificationPhase {
     }
 
     /// Check if an index expression is loop-invariant
-    fn is_loop_invariant_index(&self, index: &Place, header: BlockId, loop_info: &LoopInfo, func: &MirFunction) -> bool {
+    fn is_loop_invariant_index(
+        &self,
+        index: &Place,
+        header: BlockId,
+        loop_info: &LoopInfo,
+        func: &MirFunction,
+    ) -> bool {
         // For simple indices, just check if the place is invariant
         self.is_loop_invariant(index, header, loop_info, func)
     }
 
     /// Create an ArrayAccess for verum_verification's BoundsCheckEliminator
-    fn create_array_access(&self, array: &Place, index: &Place, block_idx: usize, func: &MirFunction) -> ArrayAccess {
+    fn create_array_access(
+        &self,
+        array: &Place,
+        index: &Place,
+        block_idx: usize,
+        func: &MirFunction,
+    ) -> ArrayAccess {
         let array_expr = self.place_to_bounds_expr(array, func);
         let index_expr = self.place_to_bounds_expr(index, func);
 
         // Try to get array length from type (reserved for future use with SMT analysis)
-        let _length = self.try_const_eval_length(array, func)
+        let _length = self
+            .try_const_eval_length(array, func)
             .map(|len| BoundsExpression::int(len as i64));
 
         ArrayAccess {
@@ -909,9 +950,9 @@ impl VerificationPhase {
             EscapeStatus::EscapesToClosure
         } else if let Some(def_blk) = def_block {
             // Check if definition dominates all uses
-            let all_dominated = use_blocks.iter().all(|use_blk| {
-                def_blk == *use_blk || dom_tree.dominates(def_blk, *use_blk)
-            });
+            let all_dominated = use_blocks
+                .iter()
+                .all(|use_blk| def_blk == *use_blk || dom_tree.dominates(def_blk, *use_blk));
 
             if all_dominated {
                 EscapeStatus::NoEscape
@@ -994,7 +1035,11 @@ impl VerificationPhase {
     }
 
     /// Build EscapeCFG with full def/use analysis for CBGR optimization
-    fn build_escape_cfg_with_analysis(&self, func: &MirFunction, _dom_tree: &DominatorTree) -> EscapeCFG {
+    fn build_escape_cfg_with_analysis(
+        &self,
+        func: &MirFunction,
+        _dom_tree: &DominatorTree,
+    ) -> EscapeCFG {
         let entry_block = EscapeBlockId::new(func.entry_block.0 as u64);
         let root_scope = ScopeId::new(0);
         let mut cfg = EscapeCFG::new(entry_block, root_scope);
@@ -1032,7 +1077,13 @@ impl VerificationPhase {
                         }
 
                         // Use sites in rvalue
-                        self.extract_uses_from_rvalue(rvalue, block_id, root_scope, func, &mut escape_block);
+                        self.extract_uses_from_rvalue(
+                            rvalue,
+                            block_id,
+                            root_scope,
+                            func,
+                            &mut escape_block,
+                        );
                     }
                     MirStatement::GenerationCheck(place) => {
                         if self.is_reference_local(place.local, func) {
@@ -1075,7 +1126,8 @@ impl VerificationPhase {
     }
 
     fn is_reference_local(&self, local_id: LocalId, func: &MirFunction) -> bool {
-        func.locals.iter()
+        func.locals
+            .iter()
             .find(|l| l.id == local_id)
             .map(|l| self.is_reference_type(&l.ty))
             .unwrap_or(false)
@@ -1166,7 +1218,7 @@ impl VerificationPhase {
                             self.results.bounds_stats.eliminated,
                             self.results.bounds_stats.total_checks,
                         ))
-                        .build()
+                        .build(),
                 );
             }
         }
@@ -1183,7 +1235,7 @@ impl VerificationPhase {
                             self.results.cbgr_stats.promoted_to_tier1,
                             self.results.cbgr_stats.total_refs,
                         ))
-                        .build()
+                        .build(),
                 );
             }
         }
@@ -1250,17 +1302,18 @@ impl CompilationPhase for VerificationPhase {
 
     fn execute(&self, input: PhaseInput) -> Result<PhaseOutput, List<Diagnostic>> {
         // Extract MIR modules from input
-        let mir_modules = match &input.data {
-            PhaseData::Mir(modules) => modules,
-            PhaseData::OptimizedMir(modules) => modules,
-            _ => {
-                return Err(vec![DiagnosticBuilder::error()
+        let mir_modules =
+            match &input.data {
+                PhaseData::Mir(modules) => modules,
+                PhaseData::OptimizedMir(modules) => modules,
+                _ => {
+                    return Err(vec![DiagnosticBuilder::error()
                     .code("V0001")
                     .message("Verification phase requires MIR modules as input (Phase 6 or later)")
                     .build()]
-                .into());
-            }
-        };
+                    .into());
+                }
+            };
 
         // Create mutable verifier
         let mut verifier = VerificationPhase::with_config(self.config.clone());
@@ -1279,18 +1332,22 @@ impl CompilationPhase for VerificationPhase {
                     all_results.bounds_stats.kept += results.bounds_stats.kept;
 
                     all_results.cbgr_stats.total_refs += results.cbgr_stats.total_refs;
-                    all_results.cbgr_stats.promoted_to_tier1 += results.cbgr_stats.promoted_to_tier1;
+                    all_results.cbgr_stats.promoted_to_tier1 +=
+                        results.cbgr_stats.promoted_to_tier1;
                     all_results.cbgr_stats.kept_at_tier0 += results.cbgr_stats.kept_at_tier0;
-                    all_results.cbgr_stats.checks_eliminated += results.cbgr_stats.checks_eliminated;
+                    all_results.cbgr_stats.checks_eliminated +=
+                        results.cbgr_stats.checks_eliminated;
                 }
                 Err(e) => {
-                    return Err(vec![DiagnosticBuilder::error()
-                        .code("V0002")
-                        .message(format!(
-                            "Verification failed for module '{}': {}",
-                            module.name, e
-                        ))
-                        .build()]
+                    return Err(vec![
+                        DiagnosticBuilder::error()
+                            .code("V0002")
+                            .message(format!(
+                                "Verification failed for module '{}': {}",
+                                module.name, e
+                            ))
+                            .build(),
+                    ]
                     .into());
                 }
             }
@@ -1298,14 +1355,16 @@ impl CompilationPhase for VerificationPhase {
 
         // Calculate aggregate rates
         if all_results.bounds_stats.total_checks > 0 {
-            all_results.bounds_stats.elimination_rate =
-                (all_results.bounds_stats.eliminated as f64 /
-                 all_results.bounds_stats.total_checks as f64) * 100.0;
+            all_results.bounds_stats.elimination_rate = (all_results.bounds_stats.eliminated
+                as f64
+                / all_results.bounds_stats.total_checks as f64)
+                * 100.0;
         }
         if all_results.cbgr_stats.total_refs > 0 {
-            all_results.cbgr_stats.promotion_rate =
-                (all_results.cbgr_stats.promoted_to_tier1 as f64 /
-                 all_results.cbgr_stats.total_refs as f64) * 100.0;
+            all_results.cbgr_stats.promotion_rate = (all_results.cbgr_stats.promoted_to_tier1
+                as f64
+                / all_results.cbgr_stats.total_refs as f64)
+                * 100.0;
         }
 
         all_results.total_time = start.elapsed();

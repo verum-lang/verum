@@ -145,9 +145,11 @@ fn hot_loop_cache_hit_after_warming() {
     // exactly one cache hit OR one syntactic hit (no second SMT
     // call). The invariant is: total SMT calls + total syntactic
     // hits never exceeds total checks.
-    let total_lookups =
-        stats.smt_checks + stats.cache_hits + stats.syntactic_checks;
-    assert_eq!(total_lookups, 2, "two checks must produce two recorded outcomes");
+    let total_lookups = stats.smt_checks + stats.cache_hits + stats.syntactic_checks;
+    assert_eq!(
+        total_lookups, 2,
+        "two checks must produce two recorded outcomes"
+    );
 
     // No more than one SMT call across both checks. The second
     // check must short-circuit through cache or syntactic.

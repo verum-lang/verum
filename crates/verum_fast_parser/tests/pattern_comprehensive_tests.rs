@@ -143,7 +143,12 @@ mod rest_patterns {
     #[test]
     fn rest_in_slice_end() {
         let pattern = parse_ok("[first, ..]");
-        if let PatternKind::Slice { before, rest, after } = pattern.kind {
+        if let PatternKind::Slice {
+            before,
+            rest,
+            after,
+        } = pattern.kind
+        {
             assert_eq!(before.len(), 1);
             // Bare `..` without binding sets rest: None
             assert!(rest.is_none());
@@ -156,7 +161,12 @@ mod rest_patterns {
     #[test]
     fn rest_in_slice_start() {
         let pattern = parse_ok("[.., last]");
-        if let PatternKind::Slice { before, rest, after } = pattern.kind {
+        if let PatternKind::Slice {
+            before,
+            rest,
+            after,
+        } = pattern.kind
+        {
             assert!(before.is_empty());
             // Bare `..` without binding sets rest: None
             assert!(rest.is_none());
@@ -169,7 +179,12 @@ mod rest_patterns {
     #[test]
     fn rest_in_slice_middle() {
         let pattern = parse_ok("[first, .., last]");
-        if let PatternKind::Slice { before, rest, after } = pattern.kind {
+        if let PatternKind::Slice {
+            before,
+            rest,
+            after,
+        } = pattern.kind
+        {
             assert_eq!(before.len(), 1);
             // Bare `..` without binding sets rest: None
             assert!(rest.is_none());
@@ -182,7 +197,12 @@ mod rest_patterns {
     #[test]
     fn rest_with_binding() {
         let pattern = parse_ok("[first, ..rest]");
-        if let PatternKind::Slice { before, rest, after } = pattern.kind {
+        if let PatternKind::Slice {
+            before,
+            rest,
+            after,
+        } = pattern.kind
+        {
             assert_eq!(before.len(), 1);
             assert!(rest.is_some());
             assert!(after.is_empty());
@@ -198,7 +218,11 @@ mod rest_patterns {
         // This could be an Array pattern with a single Rest element
         // or a Slice pattern - depends on parser implementation
         match pattern.kind {
-            PatternKind::Slice { before, rest, after } => {
+            PatternKind::Slice {
+                before,
+                rest,
+                after,
+            } => {
                 assert!(before.is_empty());
                 // Bare `..` without binding sets rest: None
                 assert!(rest.is_none());
@@ -224,7 +248,10 @@ mod ident_patterns {
     fn ident_basic() {
         let pattern = parse_ok("x");
         if let PatternKind::Ident {
-            by_ref, mutable, name, subpattern
+            by_ref,
+            mutable,
+            name,
+            subpattern,
         } = pattern.kind
         {
             assert!(!by_ref);
@@ -249,7 +276,10 @@ mod ident_patterns {
     #[test]
     fn ident_ref() {
         let pattern = parse_ok("ref x");
-        if let PatternKind::Ident { by_ref, mutable, .. } = pattern.kind {
+        if let PatternKind::Ident {
+            by_ref, mutable, ..
+        } = pattern.kind
+        {
             assert!(by_ref);
             assert!(!mutable);
         } else {
@@ -260,7 +290,10 @@ mod ident_patterns {
     #[test]
     fn ident_ref_mut() {
         let pattern = parse_ok("ref mut x");
-        if let PatternKind::Ident { by_ref, mutable, .. } = pattern.kind {
+        if let PatternKind::Ident {
+            by_ref, mutable, ..
+        } = pattern.kind
+        {
             assert!(by_ref);
             assert!(mutable);
         } else {
@@ -271,7 +304,10 @@ mod ident_patterns {
     #[test]
     fn ident_with_at_binding() {
         let pattern = parse_ok("x @ Some(y)");
-        if let PatternKind::Ident { name, subpattern, .. } = pattern.kind {
+        if let PatternKind::Ident {
+            name, subpattern, ..
+        } = pattern.kind
+        {
             assert_eq!(name.name.as_str(), "x");
             assert!(subpattern.is_some());
             let sub = subpattern.unwrap();
@@ -284,7 +320,10 @@ mod ident_patterns {
     #[test]
     fn ident_at_binding_with_range() {
         let pattern = parse_ok("n @ 1..=10");
-        if let PatternKind::Ident { name, subpattern, .. } = pattern.kind {
+        if let PatternKind::Ident {
+            name, subpattern, ..
+        } = pattern.kind
+        {
             assert_eq!(name.name.as_str(), "n");
             assert!(subpattern.is_some());
             let sub = subpattern.unwrap();
@@ -521,7 +560,12 @@ mod slice_patterns {
     #[test]
     fn slice_with_rest_end() {
         let pattern = parse_ok("[a, b, ..]");
-        if let PatternKind::Slice { before, rest, after } = pattern.kind {
+        if let PatternKind::Slice {
+            before,
+            rest,
+            after,
+        } = pattern.kind
+        {
             assert_eq!(before.len(), 2);
             // Bare `..` without binding sets rest: None
             assert!(rest.is_none());
@@ -534,7 +578,12 @@ mod slice_patterns {
     #[test]
     fn slice_with_rest_start() {
         let pattern = parse_ok("[.., y, z]");
-        if let PatternKind::Slice { before, rest, after } = pattern.kind {
+        if let PatternKind::Slice {
+            before,
+            rest,
+            after,
+        } = pattern.kind
+        {
             assert!(before.is_empty());
             // Bare `..` without binding sets rest: None
             assert!(rest.is_none());
@@ -547,7 +596,12 @@ mod slice_patterns {
     #[test]
     fn slice_with_rest_middle() {
         let pattern = parse_ok("[a, b, .., y, z]");
-        if let PatternKind::Slice { before, rest, after } = pattern.kind {
+        if let PatternKind::Slice {
+            before,
+            rest,
+            after,
+        } = pattern.kind
+        {
             assert_eq!(before.len(), 2);
             // Bare `..` without binding sets rest: None
             assert!(rest.is_none());
@@ -831,7 +885,12 @@ mod range_patterns {
     #[test]
     fn range_exclusive() {
         let pattern = parse_ok("1..10");
-        if let PatternKind::Range { start, end, inclusive } = pattern.kind {
+        if let PatternKind::Range {
+            start,
+            end,
+            inclusive,
+        } = pattern.kind
+        {
             assert!(start.is_some());
             assert!(end.is_some());
             assert!(!inclusive);
@@ -843,7 +902,12 @@ mod range_patterns {
     #[test]
     fn range_inclusive() {
         let pattern = parse_ok("1..=10");
-        if let PatternKind::Range { start, end, inclusive } = pattern.kind {
+        if let PatternKind::Range {
+            start,
+            end,
+            inclusive,
+        } = pattern.kind
+        {
             assert!(start.is_some());
             assert!(end.is_some());
             assert!(inclusive);
@@ -877,7 +941,12 @@ mod range_patterns {
     #[test]
     fn range_char() {
         let pattern = parse_ok("'a'..='z'");
-        if let PatternKind::Range { start, end, inclusive } = pattern.kind {
+        if let PatternKind::Range {
+            start,
+            end,
+            inclusive,
+        } = pattern.kind
+        {
             assert!(start.is_some());
             assert!(end.is_some());
             assert!(inclusive);
@@ -929,7 +998,12 @@ mod active_patterns {
     fn active_total_no_params() {
         // Even() - total pattern, no params
         let pattern = parse_ok("Even()");
-        if let PatternKind::Active { name, params, bindings } = pattern.kind {
+        if let PatternKind::Active {
+            name,
+            params,
+            bindings,
+        } = pattern.kind
+        {
             assert_eq!(name.name.as_str(), "Even");
             assert!(params.is_empty());
             assert!(bindings.is_empty());
@@ -942,7 +1016,12 @@ mod active_patterns {
     fn active_total_with_params() {
         // InRange(0, 100)() - parameterized total pattern
         let pattern = parse_ok("InRange(0, 100)()");
-        if let PatternKind::Active { name, params, bindings } = pattern.kind {
+        if let PatternKind::Active {
+            name,
+            params,
+            bindings,
+        } = pattern.kind
+        {
             assert_eq!(name.name.as_str(), "InRange");
             assert_eq!(params.len(), 2);
             assert!(bindings.is_empty());
@@ -955,7 +1034,12 @@ mod active_patterns {
     fn active_partial_single_binding() {
         // ParseInt()(n) - partial pattern with extraction
         let pattern = parse_ok("ParseInt()(n)");
-        if let PatternKind::Active { name, params, bindings } = pattern.kind {
+        if let PatternKind::Active {
+            name,
+            params,
+            bindings,
+        } = pattern.kind
+        {
             assert_eq!(name.name.as_str(), "ParseInt");
             assert!(params.is_empty());
             assert_eq!(bindings.len(), 1);
@@ -980,7 +1064,12 @@ mod active_patterns {
     fn active_partial_with_params() {
         // RegexMatch("\\d+")(matched) - parameterized partial pattern
         let pattern = parse_ok(r#"RegexMatch("\\d+")(matched)"#);
-        if let PatternKind::Active { name, params, bindings } = pattern.kind {
+        if let PatternKind::Active {
+            name,
+            params,
+            bindings,
+        } = pattern.kind
+        {
             assert_eq!(name.name.as_str(), "RegexMatch");
             assert_eq!(params.len(), 1);
             assert_eq!(bindings.len(), 1);
@@ -993,7 +1082,12 @@ mod active_patterns {
     fn active_partial_complex_bindings() {
         // SplitAt(2, 3)(before, middle, after) - multi-param multi-binding
         let pattern = parse_ok("SplitAt(2, 3)(before, middle, after)");
-        if let PatternKind::Active { name, params, bindings } = pattern.kind {
+        if let PatternKind::Active {
+            name,
+            params,
+            bindings,
+        } = pattern.kind
+        {
             assert_eq!(name.name.as_str(), "SplitAt");
             assert_eq!(params.len(), 2);
             assert_eq!(bindings.len(), 3);
@@ -1102,7 +1196,11 @@ mod guard_patterns {
         // (x if x > 0) - guard inside parens, wrapped as Paren(Guard {...})
         let pattern = parse_ok("(x if x > 0)");
         let inner = unwrap_paren(&pattern);
-        if let PatternKind::Guard { pattern: guard_inner, guard } = &inner.kind {
+        if let PatternKind::Guard {
+            pattern: guard_inner,
+            guard,
+        } = &inner.kind
+        {
             assert!(matches!(guard_inner.kind, PatternKind::Ident { .. }));
             // guard should be an expression
             assert!(!guard.span.is_dummy());
@@ -1132,7 +1230,11 @@ mod guard_patterns {
         // (Some(x) if x > 0) - guard on variant, wrapped as Paren(Guard {...})
         let pattern = parse_ok("(Some(x) if x > 0)");
         let inner = unwrap_paren(&pattern);
-        if let PatternKind::Guard { pattern: guard_inner, .. } = &inner.kind {
+        if let PatternKind::Guard {
+            pattern: guard_inner,
+            ..
+        } = &inner.kind
+        {
             assert!(matches!(guard_inner.kind, PatternKind::Variant { .. }));
         } else {
             panic!("Expected guard pattern, got {:?}", inner.kind);
@@ -1144,10 +1246,17 @@ mod guard_patterns {
         // (n if n > 0 && n < 100) - complex guard expression, wrapped as Paren(Guard {...})
         let pattern = parse_ok("(n if n > 0 && n < 100)");
         let inner = unwrap_paren(&pattern);
-        if let PatternKind::Guard { pattern: guard_inner, .. } = &inner.kind {
+        if let PatternKind::Guard {
+            pattern: guard_inner,
+            ..
+        } = &inner.kind
+        {
             assert!(matches!(guard_inner.kind, PatternKind::Ident { .. }));
         } else {
-            panic!("Expected guard pattern with complex condition, got {:?}", inner.kind);
+            panic!(
+                "Expected guard pattern with complex condition, got {:?}",
+                inner.kind
+            );
         }
     }
 
@@ -1264,7 +1373,11 @@ mod stream_patterns {
     fn stream_empty() {
         // stream[] - match exhausted iterator
         let pattern = parse_ok("stream[]");
-        if let PatternKind::Stream { head_patterns, rest } = pattern.kind {
+        if let PatternKind::Stream {
+            head_patterns,
+            rest,
+        } = pattern.kind
+        {
             assert!(head_patterns.is_empty());
             assert!(rest.is_none());
         } else {
@@ -1276,7 +1389,11 @@ mod stream_patterns {
     fn stream_single_head() {
         // stream[first] - consume one element
         let pattern = parse_ok("stream[first]");
-        if let PatternKind::Stream { head_patterns, rest } = pattern.kind {
+        if let PatternKind::Stream {
+            head_patterns,
+            rest,
+        } = pattern.kind
+        {
             assert_eq!(head_patterns.len(), 1);
             assert!(rest.is_none());
         } else {
@@ -1288,7 +1405,11 @@ mod stream_patterns {
     fn stream_multiple_heads() {
         // stream[a, b, c] - consume exact count
         let pattern = parse_ok("stream[a, b, c]");
-        if let PatternKind::Stream { head_patterns, rest } = pattern.kind {
+        if let PatternKind::Stream {
+            head_patterns,
+            rest,
+        } = pattern.kind
+        {
             assert_eq!(head_patterns.len(), 3);
             assert!(rest.is_none());
         } else {
@@ -1300,7 +1421,11 @@ mod stream_patterns {
     fn stream_with_rest_binding() {
         // stream[first, ...rest] - consume one, bind remaining iterator
         let pattern = parse_ok("stream[first, ...rest]");
-        if let PatternKind::Stream { head_patterns, rest } = pattern.kind {
+        if let PatternKind::Stream {
+            head_patterns,
+            rest,
+        } = pattern.kind
+        {
             assert_eq!(head_patterns.len(), 1);
             assert!(rest.is_some());
             assert_eq!(rest.unwrap().name.as_str(), "rest");
@@ -1313,7 +1438,11 @@ mod stream_patterns {
     fn stream_multiple_heads_with_rest() {
         // stream[a, b, ...tail] - consume multiple, bind rest
         let pattern = parse_ok("stream[a, b, ...tail]");
-        if let PatternKind::Stream { head_patterns, rest } = pattern.kind {
+        if let PatternKind::Stream {
+            head_patterns,
+            rest,
+        } = pattern.kind
+        {
             assert_eq!(head_patterns.len(), 2);
             assert!(rest.is_some());
         } else {
@@ -1325,7 +1454,11 @@ mod stream_patterns {
     fn stream_discard_rest() {
         // stream[first, ...] - consume and discard rest (no binding)
         let pattern = parse_ok("stream[first, ...]");
-        if let PatternKind::Stream { head_patterns, rest } = pattern.kind {
+        if let PatternKind::Stream {
+            head_patterns,
+            rest,
+        } = pattern.kind
+        {
             assert_eq!(head_patterns.len(), 1);
             // rest should be None when just '...' without binding
             assert!(rest.is_none());
@@ -1338,7 +1471,11 @@ mod stream_patterns {
     fn stream_only_rest() {
         // stream[...all] - bind entire iterator without consuming
         let pattern = parse_ok("stream[...all]");
-        if let PatternKind::Stream { head_patterns, rest } = pattern.kind {
+        if let PatternKind::Stream {
+            head_patterns,
+            rest,
+        } = pattern.kind
+        {
             assert!(head_patterns.is_empty());
             assert!(rest.is_some());
             assert_eq!(rest.unwrap().name.as_str(), "all");
@@ -1351,7 +1488,11 @@ mod stream_patterns {
     fn stream_nested_patterns() {
         // stream[(a, b), (c, d), ...rest] - tuples in stream
         let pattern = parse_ok("stream[(a, b), (c, d), ...rest]");
-        if let PatternKind::Stream { head_patterns, rest } = pattern.kind {
+        if let PatternKind::Stream {
+            head_patterns,
+            rest,
+        } = pattern.kind
+        {
             assert_eq!(head_patterns.len(), 2);
             for head in &head_patterns {
                 assert!(matches!(head.kind, PatternKind::Tuple(_)));
@@ -1385,7 +1526,8 @@ mod complex_combinations {
     #[test]
     fn all_pattern_types_in_context() {
         // Comprehensive parsing of multiple pattern types in function context
-        assert_parses_in_fn(r#"
+        assert_parses_in_fn(
+            r#"
             match value {
                 _ => {},
                 x => {},
@@ -1400,7 +1542,8 @@ mod complex_combinations {
                 1..=10 => {},
                 (x) => {},
             };
-        "#);
+        "#,
+        );
     }
 
     #[test]
@@ -1419,7 +1562,11 @@ mod complex_combinations {
         // Guard combined with and pattern inside parens, wrapped as Paren(Guard {...})
         let pattern = parse_ok("(Even() & n if n > 0)");
         let inner = unwrap_paren(&pattern);
-        if let PatternKind::Guard { pattern: guard_inner, .. } = &inner.kind {
+        if let PatternKind::Guard {
+            pattern: guard_inner,
+            ..
+        } = &inner.kind
+        {
             assert!(matches!(guard_inner.kind, PatternKind::And(_)));
         } else {
             panic!("Expected guard with and pattern, got {:?}", inner.kind);
@@ -1459,12 +1606,19 @@ mod complex_combinations {
         // @ binding combined with guard, wrapped as Paren(Guard {...})
         let pattern = parse_ok("(n @ Some(x) if x > 0)");
         let inner = unwrap_paren(&pattern);
-        if let PatternKind::Guard { pattern: guard_inner, .. } = &inner.kind {
+        if let PatternKind::Guard {
+            pattern: guard_inner,
+            ..
+        } = &inner.kind
+        {
             // Check it's an ident with @ binding (subpattern is Maybe<Heap<Pattern>>)
             if let PatternKind::Ident { subpattern, .. } = &guard_inner.kind {
                 assert!(subpattern.is_some());
             } else {
-                panic!("Expected ident pattern with @ binding, got {:?}", guard_inner.kind);
+                panic!(
+                    "Expected ident pattern with @ binding, got {:?}",
+                    guard_inner.kind
+                );
             }
         } else {
             panic!("Expected guard with @ binding, got {:?}", inner.kind);

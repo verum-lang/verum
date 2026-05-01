@@ -100,7 +100,9 @@ impl LlmGoalSummary {
     /// hash is deterministic across runs.
     pub fn render_prompt(&self) -> Text {
         let mut s = String::new();
-        s.push_str("You are a proof assistant. Propose a Verum tactic sequence to discharge the goal.\n\n");
+        s.push_str(
+            "You are a proof assistant. Propose a Verum tactic sequence to discharge the goal.\n\n",
+        );
         s.push_str(&format!("Theorem: {}\n", self.theorem_name.as_str()));
         s.push_str(&format!("Goal: {}\n", self.focused_proposition.as_str()));
         if !self.hypotheses.is_empty() {
@@ -357,10 +359,9 @@ impl KernelRejectReason {
                 "unrecognised tactic shape '{}' — accept only `apply NAME` or canonical tactics",
                 head.as_str()
             )),
-            Self::MalformedSyntax { detail } => Text::from(format!(
-                "malformed tactic: {}",
-                detail.as_str()
-            )),
+            Self::MalformedSyntax { detail } => {
+                Text::from(format!("malformed tactic: {}", detail.as_str()))
+            }
             Self::Other(t) => t.clone(),
         }
     }
@@ -410,7 +411,8 @@ pub trait KernelChecker: std::fmt::Debug + Send + Sync {
         goal: &LlmGoalSummary,
         step: &str,
     ) -> Result<(), KernelRejectReason> {
-        self.check_step(goal, step).map_err(KernelRejectReason::Other)
+        self.check_step(goal, step)
+            .map_err(KernelRejectReason::Other)
     }
 }
 
@@ -570,10 +572,7 @@ impl KernelChecker for PatternKernelChecker {
                 detail: Text::from("`apply` with no lemma name"),
             }),
             ParsedStep::Apply { name } => {
-                let resolved = goal
-                    .lemmas_in_scope
-                    .iter()
-                    .any(|(n, _)| n.as_str() == name);
+                let resolved = goal.lemmas_in_scope.iter().any(|(n, _)| n.as_str() == name);
                 if resolved {
                     Ok(())
                 } else {
@@ -638,10 +637,7 @@ impl KernelInferChecker {
     /// Lookup a lemma name in the kernel registry. Returns true
     /// iff a registered axiom or definition matches by name.
     fn registry_has(&self, name: &str) -> bool {
-        self.registry
-            .all()
-            .iter()
-            .any(|a| a.name.as_str() == name)
+        self.registry.all().iter().any(|a| a.name.as_str() == name)
     }
 }
 
@@ -673,10 +669,7 @@ impl KernelChecker for KernelInferChecker {
                 // tell "the LLM cited an inscrutable name" from
                 // "the LLM cited a name the LLM was told about but
                 // the kernel hasn't registered".
-                let in_textual_scope = goal
-                    .lemmas_in_scope
-                    .iter()
-                    .any(|(n, _)| n.as_str() == name);
+                let in_textual_scope = goal.lemmas_in_scope.iter().any(|(n, _)| n.as_str() == name);
                 if in_textual_scope {
                     Err(KernelRejectReason::NotKernelAttested {
                         name: Text::from(name),
@@ -830,7 +823,11 @@ impl FilesystemAuditTrail {
         let path = path.into();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
-                Text::from(format!("creating audit trail dir {}: {}", parent.display(), e))
+                Text::from(format!(
+                    "creating audit trail dir {}: {}",
+                    parent.display(),
+                    e
+                ))
             })?;
         }
         Ok(Self { path })
@@ -845,9 +842,8 @@ impl AuditTrail for FilesystemAuditTrail {
     fn append(&self, event: LlmProtocolEvent) -> Result<(), Text> {
         use std::fs::OpenOptions;
         use std::io::Write;
-        let json = serde_json::to_string(&event).map_err(|e| {
-            Text::from(format!("audit trail serialise: {}", e))
-        })?;
+        let json = serde_json::to_string(&event)
+            .map_err(|e| Text::from(format!("audit trail serialise: {}", e)))?;
         let mut f = OpenOptions::new()
             .create(true)
             .append(true)
@@ -869,11 +865,7 @@ impl AuditTrail for FilesystemAuditTrail {
                 continue;
             }
             let event: LlmProtocolEvent = serde_json::from_str(line).map_err(|e| {
-                Text::from(format!(
-                    "audit trail parse error at line {}: {}",
-                    i + 1,
-                    e
-                ))
+                Text::from(format!("audit trail parse error at line {}: {}", i + 1, e))
             })?;
             out.push(event);
         }
@@ -971,10 +963,7 @@ mod tests {
 
     fn goal_with_lemmas(lemmas: &[(&str, &str)]) -> LlmGoalSummary {
         let mut g = LlmGoalSummary::new("thm", "P(x)");
-        g.lemmas_in_scope = lemmas
-            .iter()
-            .map(|(n, s)| lemma(n, s))
-            .collect();
+        g.lemmas_in_scope = lemmas.iter().map(|(n, s)| lemma(n, s)).collect();
         g
     }
 
@@ -1049,7 +1038,11 @@ mod tests {
         let c = PatternKernelChecker::new();
         let g = LlmGoalSummary::new("thm", "P");
         for t in &["intro", "auto", "simp", "ring", "linarith", "trivial"] {
-            assert!(c.check_step(&g, t).is_ok(), "tactic {} should be accepted", t);
+            assert!(
+                c.check_step(&g, t).is_ok(),
+                "tactic {} should be accepted",
+                t
+            );
         }
     }
 
@@ -1110,9 +1103,16 @@ mod tests {
         let c = PatternKernelChecker::new();
         let g = LlmGoalSummary::new("thm", "P");
         for tac in [
-            "cases h", "induction n", "unfold foo_def", "subst x",
-            "rewrite h", "rw eq", "exists witness", "constructor",
-            "exfalso", "contradiction",
+            "cases h",
+            "induction n",
+            "unfold foo_def",
+            "subst x",
+            "rewrite h",
+            "rw eq",
+            "exists witness",
+            "constructor",
+            "exfalso",
+            "contradiction",
         ] {
             assert!(
                 c.check_step(&g, tac).is_ok(),
@@ -1192,7 +1192,9 @@ mod tests {
         let checker = PatternKernelChecker::new();
         let trail = MemoryAuditTrail::new();
         let g = LlmGoalSummary::new("thm", "P");
-        let v = KernelGate::new().run(&adapter, &checker, &g, &trail).unwrap();
+        let v = KernelGate::new()
+            .run(&adapter, &checker, &g, &trail)
+            .unwrap();
         match v {
             KernelVerdict::Accepted { steps_checked } => assert_eq!(steps_checked, 2),
             other => panic!("expected Accepted, got {:?}", other),
@@ -1210,7 +1212,9 @@ mod tests {
         let checker = PatternKernelChecker::new();
         let trail = MemoryAuditTrail::new();
         let g = LlmGoalSummary::new("thm", "P");
-        let v = KernelGate::new().run(&adapter, &checker, &g, &trail).unwrap();
+        let v = KernelGate::new()
+            .run(&adapter, &checker, &g, &trail)
+            .unwrap();
         match v {
             KernelVerdict::Rejected {
                 failed_step_index,
@@ -1233,7 +1237,9 @@ mod tests {
         let checker = PatternKernelChecker::new();
         let trail = MemoryAuditTrail::new();
         let g = LlmGoalSummary::new("thm", "P");
-        let v = KernelGate::new().run(&adapter, &checker, &g, &trail).unwrap();
+        let v = KernelGate::new()
+            .run(&adapter, &checker, &g, &trail)
+            .unwrap();
         assert!(!v.is_accepted());
     }
 
@@ -1265,14 +1271,13 @@ mod tests {
     fn task_77_lcf_fail_closed_contract_holds() {
         // §3 of acceptance: the LLM never short-circuits the kernel.
         // Any garbage step → KernelRejected, no Accepted verdict.
-        let adapter = MockLlmAdapter::new(
-            "evil",
-            vec!["totally bogus syntax that should fail"],
-        );
+        let adapter = MockLlmAdapter::new("evil", vec!["totally bogus syntax that should fail"]);
         let checker = PatternKernelChecker::new();
         let trail = MemoryAuditTrail::new();
         let g = LlmGoalSummary::new("thm", "P");
-        let v = KernelGate::new().run(&adapter, &checker, &g, &trail).unwrap();
+        let v = KernelGate::new()
+            .run(&adapter, &checker, &g, &trail)
+            .unwrap();
         assert!(!v.is_accepted(), "kernel must reject garbage proposal");
     }
 
@@ -1348,10 +1353,7 @@ mod tests {
             .label(),
             "malformed-syntax"
         );
-        assert_eq!(
-            KernelRejectReason::Other(Text::from("x")).label(),
-            "other"
-        );
+        assert_eq!(KernelRejectReason::Other(Text::from("x")).label(), "other");
     }
 
     #[test]
@@ -1413,10 +1415,7 @@ mod tests {
         let reg = AxiomRegistry::new();
         let c = KernelInferChecker::new(reg);
         let mut g = LlmGoalSummary::new("thm", "P");
-        g.lemmas_in_scope = vec![(
-            Text::from("foo_lemma"),
-            Text::from("P"),
-        )];
+        g.lemmas_in_scope = vec![(Text::from("foo_lemma"), Text::from("P"))];
         match c.check_step_typed(&g, "apply foo_lemma") {
             Err(KernelRejectReason::NotKernelAttested { name }) => {
                 assert_eq!(name.as_str(), "foo_lemma");
@@ -1434,9 +1433,7 @@ mod tests {
         let reg = registry_with(&["registered"]);
         let c = KernelInferChecker::new(reg);
         let mut g = LlmGoalSummary::new("thm", "P");
-        g.lemmas_in_scope = vec![
-            (Text::from("textual_only"), Text::from("Q")),
-        ];
+        g.lemmas_in_scope = vec![(Text::from("textual_only"), Text::from("Q"))];
 
         c.check_step(&g, "apply registered").unwrap();
 
@@ -1485,10 +1482,7 @@ mod tests {
         // Goal claims a different name is in scope; the LLM
         // attempts to apply it. Production mode rejects.
         let mut g = LlmGoalSummary::new("thm", "P");
-        g.lemmas_in_scope = vec![(
-            Text::from("forged_axiom"),
-            Text::from("anything"),
-        )];
+        g.lemmas_in_scope = vec![(Text::from("forged_axiom"), Text::from("anything"))];
         assert!(c.check_step(&g, "apply forged_axiom").is_err());
 
         // Same goal, applied through the trusted name: accept.

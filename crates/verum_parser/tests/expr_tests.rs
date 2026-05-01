@@ -403,7 +403,11 @@ fn test_parse_dereference() {
 fn test_parse_function_call_no_args() {
     let expr = parse_expr_test("foo()");
     match &expr.kind {
-        ExprKind::Call { func, type_args: _, args } => {
+        ExprKind::Call {
+            func,
+            type_args: _,
+            args,
+        } => {
             assert_eq!(args.len(), 0, "Expected no arguments");
         }
         _ => panic!("Expected function call"),
@@ -414,7 +418,11 @@ fn test_parse_function_call_no_args() {
 fn test_parse_function_call_one_arg() {
     let expr = parse_expr_test("foo(5)");
     match &expr.kind {
-        ExprKind::Call { func, type_args: _, args } => {
+        ExprKind::Call {
+            func,
+            type_args: _,
+            args,
+        } => {
             assert_eq!(args.len(), 1, "Expected one argument");
         }
         _ => panic!("Expected function call"),
@@ -425,7 +433,11 @@ fn test_parse_function_call_one_arg() {
 fn test_parse_function_call_multiple_args() {
     let expr = parse_expr_test("foo(1, 2, 3)");
     match &expr.kind {
-        ExprKind::Call { func, type_args: _, args } => {
+        ExprKind::Call {
+            func,
+            type_args: _,
+            args,
+        } => {
             assert_eq!(args.len(), 3, "Expected three arguments");
         }
         _ => panic!("Expected function call"),
@@ -817,10 +829,7 @@ fn test_parse_return_with_value() {
 fn test_parse_try_recover() {
     let expr = parse_expr_test("try { } recover { }");
     match &expr.kind {
-        ExprKind::TryRecover {
-            try_block,
-            recover,
-        } => {
+        ExprKind::TryRecover { try_block, recover } => {
             // Correct structure
         }
         _ => panic!("Expected try-recover expression"),
@@ -932,7 +941,10 @@ fn test_parse_try_recover_closure_with_block() {
             if let verum_ast::expr::RecoverBody::Closure { param, body, .. } = recover {
                 // Param should be an identifier pattern
                 assert!(
-                    matches!(param.pattern.kind, verum_ast::pattern::PatternKind::Ident { .. }),
+                    matches!(
+                        param.pattern.kind,
+                        verum_ast::pattern::PatternKind::Ident { .. }
+                    ),
                     "Expected ident pattern for closure param"
                 );
                 // Body should be a block expression
@@ -957,7 +969,10 @@ fn test_parse_try_recover_closure_with_expression() {
             if let verum_ast::expr::RecoverBody::Closure { param, body, .. } = recover {
                 // Param should be an identifier pattern
                 assert!(
-                    matches!(param.pattern.kind, verum_ast::pattern::PatternKind::Ident { .. }),
+                    matches!(
+                        param.pattern.kind,
+                        verum_ast::pattern::PatternKind::Ident { .. }
+                    ),
                     "Expected ident pattern for closure param"
                 );
                 // Body should be a call expression (not a block)
@@ -983,7 +998,10 @@ fn test_parse_try_recover_closure_with_wildcard() {
             if let verum_ast::expr::RecoverBody::Closure { param, body, .. } = recover {
                 // Param should be wildcard pattern
                 assert!(
-                    matches!(param.pattern.kind, verum_ast::pattern::PatternKind::Wildcard),
+                    matches!(
+                        param.pattern.kind,
+                        verum_ast::pattern::PatternKind::Wildcard
+                    ),
                     "Expected wildcard pattern for closure param"
                 );
             } else {
@@ -1019,11 +1037,18 @@ fn test_parse_try_recover_closure_with_finally() {
     // try { ... } recover |e| handle(e) finally { cleanup() }
     let expr = parse_expr_test("try { risky() } recover |e| handle(e) finally { cleanup() }");
     match &expr.kind {
-        ExprKind::TryRecoverFinally { recover, finally_block, .. } => {
+        ExprKind::TryRecoverFinally {
+            recover,
+            finally_block,
+            ..
+        } => {
             if let verum_ast::expr::RecoverBody::Closure { param, body, .. } = recover {
                 // Param should be an identifier pattern
                 assert!(
-                    matches!(param.pattern.kind, verum_ast::pattern::PatternKind::Ident { .. }),
+                    matches!(
+                        param.pattern.kind,
+                        verum_ast::pattern::PatternKind::Ident { .. }
+                    ),
                     "Expected ident pattern for closure param"
                 );
             } else {
@@ -1046,19 +1071,22 @@ fn test_parse_generic_type_expr_method_call() {
     // Repository<User>.find(1) - generic type followed by method call
     let expr = parse_expr_test("Repository<User>.find(1)");
     match &expr.kind {
-        ExprKind::MethodCall { receiver, method, type_args: _, args } => {
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            type_args: _,
+            args,
+        } => {
             assert_eq!(method.name.as_str(), "find", "Expected method name 'find'");
             assert_eq!(args.len(), 1, "Expected 1 argument");
             // Receiver should be a TypeExpr with a Generic type
             match &receiver.kind {
-                ExprKind::TypeExpr(ty) => {
-                    match &ty.kind {
-                        verum_ast::TypeKind::Generic { base, args } => {
-                            assert_eq!(args.len(), 1, "Expected 1 type argument");
-                        }
-                        _ => panic!("Expected Generic type, got {:?}", ty.kind),
+                ExprKind::TypeExpr(ty) => match &ty.kind {
+                    verum_ast::TypeKind::Generic { base, args } => {
+                        assert_eq!(args.len(), 1, "Expected 1 type argument");
                     }
-                }
+                    _ => panic!("Expected Generic type, got {:?}", ty.kind),
+                },
                 _ => panic!("Expected TypeExpr receiver, got {:?}", receiver.kind),
             }
         }
@@ -1071,19 +1099,22 @@ fn test_parse_generic_type_expr_nested() {
     // Map<Text, List<Int>>.new() - nested generic types
     let expr = parse_expr_test("Map<Text, List<Int>>.new()");
     match &expr.kind {
-        ExprKind::MethodCall { receiver, method, type_args: _, args } => {
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            type_args: _,
+            args,
+        } => {
             assert_eq!(method.name.as_str(), "new", "Expected method name 'new'");
             assert_eq!(args.len(), 0, "Expected 0 arguments");
             // Receiver should be a TypeExpr with a Generic type
             match &receiver.kind {
-                ExprKind::TypeExpr(ty) => {
-                    match &ty.kind {
-                        verum_ast::TypeKind::Generic { base, args } => {
-                            assert_eq!(args.len(), 2, "Expected 2 type arguments for Map");
-                        }
-                        _ => panic!("Expected Generic type, got {:?}", ty.kind),
+                ExprKind::TypeExpr(ty) => match &ty.kind {
+                    verum_ast::TypeKind::Generic { base, args } => {
+                        assert_eq!(args.len(), 2, "Expected 2 type arguments for Map");
                     }
-                }
+                    _ => panic!("Expected Generic type, got {:?}", ty.kind),
+                },
                 _ => panic!("Expected TypeExpr receiver, got {:?}", receiver.kind),
             }
         }

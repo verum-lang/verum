@@ -49,12 +49,12 @@
 //! // assert_eq!(result.len(), 2); // Result is [2, 4]
 //! ```
 
-use crate::z3_backend::{AdvancedResult, Z3Solver};
-use verum_ast::{Expr, ExprKind, LiteralKind};
 use crate::context::Context;
 use crate::translate::Translator;
-use verum_common::{Heap, List, Map, Maybe, Text};
+use crate::z3_backend::{AdvancedResult, Z3Solver};
+use verum_ast::{Expr, ExprKind, LiteralKind};
 use verum_common::ToText;
+use verum_common::{Heap, List, Map, Maybe, Text};
 use z3::ast::{Bool, Dynamic, Int};
 
 /// Tensor shape verifier using Z3 Array theory

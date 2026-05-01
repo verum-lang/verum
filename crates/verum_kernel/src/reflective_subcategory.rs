@@ -220,15 +220,8 @@ mod tests {
     #[test]
     fn build_reflective_subcategory_succeeds_on_well_formed_input() {
         let pre = SaftPreconditions::fully_satisfied("ι");
-        let rs = build_reflective_subcategory(
-            "D ↪ C",
-            &sample_d(),
-            &sample_c(),
-            "ι",
-            true,
-            &pre,
-        )
-        .expect("well-formed input");
+        let rs = build_reflective_subcategory("D ↪ C", &sample_d(), &sample_c(), "ι", true, &pre)
+            .expect("well-formed input");
         assert!(rs.is_coherent());
         assert_eq!(rs.inclusion_name.as_str(), "ι");
         assert!(rs.reflector_name.as_str().starts_with("ι"));
@@ -243,27 +236,21 @@ mod tests {
             &sample_d(),
             &sample_c(),
             "ι",
-            false,  // NOT fully faithful
+            false, // NOT fully faithful
             &pre,
         );
-        assert!(rs.is_none(),
-            "Reflective-subcategory inclusion must be fully faithful");
+        assert!(
+            rs.is_none(),
+            "Reflective-subcategory inclusion must be fully faithful"
+        );
     }
 
     #[test]
     fn build_fails_when_saft_preconditions_fail() {
         let mut pre = SaftPreconditions::fully_satisfied("ι");
         pre.target_presentable = false;
-        let rs = build_reflective_subcategory(
-            "D ↪ C",
-            &sample_d(),
-            &sample_c(),
-            "ι",
-            true,
-            &pre,
-        );
-        assert!(rs.is_none(),
-            "SAFT preconditions must hold for r to exist");
+        let rs = build_reflective_subcategory("D ↪ C", &sample_d(), &sample_c(), "ι", true, &pre);
+        assert!(rs.is_none(), "SAFT preconditions must hold for r to exist");
     }
 
     // ----- Universal-property tests -----
@@ -271,58 +258,45 @@ mod tests {
     #[test]
     fn idempotency_witness_holds_on_built_reflective_subcategories() {
         let pre = SaftPreconditions::fully_satisfied("ι");
-        let rs = build_reflective_subcategory(
-            "D ↪ C",
-            &sample_d(),
-            &sample_c(),
-            "ι",
-            true,
-            &pre,
-        )
-        .unwrap();
-        assert!(idempotency_witness(&rs),
-            "ι ∘ r is idempotent up to iso (HTT 5.2.7.4 (iii))");
+        let rs = build_reflective_subcategory("D ↪ C", &sample_d(), &sample_c(), "ι", true, &pre)
+            .unwrap();
+        assert!(
+            idempotency_witness(&rs),
+            "ι ∘ r is idempotent up to iso (HTT 5.2.7.4 (iii))"
+        );
     }
 
     #[test]
     fn reflector_unit_is_localisation_witness() {
         let pre = SaftPreconditions::fully_satisfied("ι");
-        let rs = build_reflective_subcategory(
-            "D ↪ C",
-            &sample_d(),
-            &sample_c(),
-            "ι",
-            true,
-            &pre,
-        )
-        .unwrap();
-        assert!(reflector_unit_is_localisation(&rs),
-            "η exhibits r as the localisation (HTT 5.2.7.4 (iv))");
+        let rs = build_reflective_subcategory("D ↪ C", &sample_d(), &sample_c(), "ι", true, &pre)
+            .unwrap();
+        assert!(
+            reflector_unit_is_localisation(&rs),
+            "η exhibits r as the localisation (HTT 5.2.7.4 (iv))"
+        );
     }
 
     #[test]
     fn is_reflective_decides_via_witnesses() {
         let pre = SaftPreconditions::fully_satisfied("ι");
-        let rs = build_reflective_subcategory(
-            "D ↪ C",
-            &sample_d(),
-            &sample_c(),
-            "ι",
-            true,
-            &pre,
-        )
-        .unwrap();
+        let rs = build_reflective_subcategory("D ↪ C", &sample_d(), &sample_c(), "ι", true, &pre)
+            .unwrap();
         assert!(is_reflective(&rs));
 
         let mut bad = rs.clone();
         bad.is_idempotent = false;
-        assert!(!is_reflective(&bad),
-            "Loss of idempotency must defeat is_reflective");
+        assert!(
+            !is_reflective(&bad),
+            "Loss of idempotency must defeat is_reflective"
+        );
 
         let mut bad2 = rs.clone();
         bad2.adjunction_holds = false;
-        assert!(!is_reflective(&bad2),
-            "Loss of adjunction-coherence must defeat is_reflective");
+        assert!(
+            !is_reflective(&bad2),
+            "Loss of adjunction-coherence must defeat is_reflective"
+        );
     }
 
     // ----- MSFS Lemma 10.3 chain integration -----
@@ -330,14 +304,8 @@ mod tests {
     #[test]
     fn msfs_lemma_10_3_iota_r_chain_via_reflective_subcategory() {
         // Lemma 10.3: S_S^global is a reflective subcategory of cF.
-        let s_s = InfinityCategory::at_canonical_universe(
-            "S_S^global",
-            Ordinal::Finite(1),
-        );
-        let cf = InfinityCategory::at_canonical_universe(
-            "cF",
-            Ordinal::Finite(1),
-        );
+        let s_s = InfinityCategory::at_canonical_universe("S_S^global", Ordinal::Finite(1));
+        let cf = InfinityCategory::at_canonical_universe("cF", Ordinal::Finite(1));
         let pre = SaftPreconditions::fully_satisfied("ι");
         let rs = build_reflective_subcategory(
             "S_S^global ↪ cF",

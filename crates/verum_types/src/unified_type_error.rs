@@ -1,7 +1,7 @@
 //! Unified type error wrapper for Phase 2 error consolidation.
 
-use crate::{TypeError, KindError, ProjectionError, CapabilityError};
 use crate::specialization_selection::SpecializationError;
+use crate::{CapabilityError, KindError, ProjectionError, TypeError};
 
 /// Unified wrapper for type system errors.
 #[derive(Debug)]
@@ -28,21 +28,31 @@ impl std::fmt::Display for UnifiedTypeError {
 impl std::error::Error for UnifiedTypeError {}
 
 impl From<TypeError> for UnifiedTypeError {
-    fn from(e: TypeError) -> Self { Self::Type(e) }
+    fn from(e: TypeError) -> Self {
+        Self::Type(e)
+    }
 }
 
 impl From<SpecializationError> for UnifiedTypeError {
-    fn from(e: SpecializationError) -> Self { Self::Specialization(e) }
+    fn from(e: SpecializationError) -> Self {
+        Self::Specialization(e)
+    }
 }
 
 impl From<KindError> for UnifiedTypeError {
-    fn from(e: KindError) -> Self { Self::Kind(e) }
+    fn from(e: KindError) -> Self {
+        Self::Kind(e)
+    }
 }
 
 impl From<ProjectionError> for UnifiedTypeError {
-    fn from(e: ProjectionError) -> Self { Self::Projection(e) }
+    fn from(e: ProjectionError) -> Self {
+        Self::Projection(e)
+    }
 }
 
 impl From<CapabilityError> for UnifiedTypeError {
-    fn from(e: CapabilityError) -> Self { Self::Capability(e) }
+    fn from(e: CapabilityError) -> Self {
+        Self::Capability(e)
+    }
 }

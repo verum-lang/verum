@@ -153,7 +153,10 @@ fn test_utf8_span_conversion() {
     // line may differ. Calculate expected column from line start.
     let line2_start = source.find('\n').unwrap() + 1;
     let expected_col = (msg_offset as usize - line2_start) + 1;
-    assert_eq!(diag_span.column, expected_col, "msg should be at correct column");
+    assert_eq!(
+        diag_span.column, expected_col,
+        "msg should be at correct column"
+    );
 }
 
 #[test]
@@ -167,7 +170,10 @@ fn test_multiline_single_span() {
     let diag_span = session.convert_span(ast_span);
 
     assert_eq!(diag_span.line, 2, "Should be on line 2");
-    assert!(!diag_span.is_multiline(), "Single-line content should not be multiline");
+    assert!(
+        !diag_span.is_multiline(),
+        "Single-line content should not be multiline"
+    );
     assert_eq!(diag_span.column, 1, "Should start at column 1");
     assert_eq!(diag_span.end_column, 9, "Should end at column 9");
 }

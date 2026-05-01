@@ -29,15 +29,19 @@
 
 use serde::Serialize;
 
-use crate::compression::{compress, CompressionOptions};
+use crate::compression::{CompressionOptions, compress};
 use crate::encoding::*;
 use crate::error::VbcResult;
-use crate::format::{CompressionAlgorithm, VbcFlags, VbcHeader, HEADER_SIZE, MAGIC, VERSION_MAJOR, VERSION_MINOR};
+use crate::format::{
+    CompressionAlgorithm, HEADER_SIZE, MAGIC, VERSION_MAJOR, VERSION_MINOR, VbcFlags, VbcHeader,
+};
 use crate::module::{
     Constant, FfiLibrary, FfiStructLayout, FfiSymbol, FunctionDescriptor, SourceMap,
     SpecializationEntry, VbcModule,
 };
-use crate::types::{FieldDescriptor, TypeDescriptor, TypeParamDescriptor, TypeRef, VariantDescriptor};
+use crate::types::{
+    FieldDescriptor, TypeDescriptor, TypeParamDescriptor, TypeRef, VariantDescriptor,
+};
 
 /// Bundle for serializing FFI tables together.
 /// This groups libraries, symbols, and layouts for efficient serialization.
@@ -79,7 +83,10 @@ pub fn serialize_module(module: &VbcModule) -> VbcResult<Vec<u8>> {
 /// // With lz4 for faster decompression
 /// let bytes = serialize_module_compressed(&module, CompressionOptions::lz4())?;
 /// ```
-pub fn serialize_module_compressed(module: &VbcModule, options: CompressionOptions) -> VbcResult<Vec<u8>> {
+pub fn serialize_module_compressed(
+    module: &VbcModule,
+    options: CompressionOptions,
+) -> VbcResult<Vec<u8>> {
     let mut serializer = Serializer::new(options);
     serializer.serialize(module)?;
     Ok(serializer.finish())
@@ -137,7 +144,8 @@ impl Serializer {
 
         // 5. Serialize bytecode (with optional compression)
         let bytecode_offset = self.output.len() as u32;
-        let (bytecode_size, _uncompressed_bytecode_size) = self.serialize_bytecode(&module.bytecode)?;
+        let (bytecode_size, _uncompressed_bytecode_size) =
+            self.serialize_bytecode(&module.bytecode)?;
 
         // 6. Serialize specialization table
         let specialization_table_offset = self.output.len() as u32;
@@ -204,7 +212,9 @@ impl Serializer {
             version_major: VERSION_MAJOR,
             version_minor: VERSION_MINOR,
             flags: module.header.flags | extra_flags | compression_flag,
-            module_name_offset: module.strings.iter()
+            module_name_offset: module
+                .strings
+                .iter()
                 .find(|(s, _)| *s == module.name)
                 .map(|(_, id)| id.0)
                 .unwrap_or(0),
@@ -705,46 +715,40 @@ impl Serializer {
         // Serialize each present section using bincode
         // Each section: u32 length + bincode data
         if has_shapes {
-            let data =
-                bincode::serialize(&module.shape_metadata).map_err(|e| {
-                    crate::error::VbcError::Serialization(format!("shape_metadata: {}", e))
-                })?;
+            let data = bincode::serialize(&module.shape_metadata).map_err(|e| {
+                crate::error::VbcError::Serialization(format!("shape_metadata: {}", e))
+            })?;
             encode_u32(data.len() as u32, &mut self.output);
             self.output.extend_from_slice(&data);
         }
 
         if has_device_hints {
-            let data =
-                bincode::serialize(&module.device_hints).map_err(|e| {
-                    crate::error::VbcError::Serialization(format!("device_hints: {}", e))
-                })?;
+            let data = bincode::serialize(&module.device_hints).map_err(|e| {
+                crate::error::VbcError::Serialization(format!("device_hints: {}", e))
+            })?;
             encode_u32(data.len() as u32, &mut self.output);
             self.output.extend_from_slice(&data);
         }
 
         if has_distribution {
-            let data =
-                bincode::serialize(&module.distribution).map_err(|e| {
-                    crate::error::VbcError::Serialization(format!("distribution: {}", e))
-                })?;
+            let data = bincode::serialize(&module.distribution).map_err(|e| {
+                crate::error::VbcError::Serialization(format!("distribution: {}", e))
+            })?;
             encode_u32(data.len() as u32, &mut self.output);
             self.output.extend_from_slice(&data);
         }
 
         if has_autodiff {
-            let data =
-                bincode::serialize(&module.autodiff_graph).map_err(|e| {
-                    crate::error::VbcError::Serialization(format!("autodiff_graph: {}", e))
-                })?;
+            let data = bincode::serialize(&module.autodiff_graph).map_err(|e| {
+                crate::error::VbcError::Serialization(format!("autodiff_graph: {}", e))
+            })?;
             encode_u32(data.len() as u32, &mut self.output);
             self.output.extend_from_slice(&data);
         }
 
         if has_mlir_hints {
-            let data =
-                bincode::serialize(&module.mlir_hints).map_err(|e| {
-                    crate::error::VbcError::Serialization(format!("mlir_hints: {}", e))
-                })?;
+            let data = bincode::serialize(&module.mlir_hints)
+                .map_err(|e| crate::error::VbcError::Serialization(format!("mlir_hints: {}", e)))?;
             encode_u32(data.len() as u32, &mut self.output);
             self.output.extend_from_slice(&data);
         }
@@ -756,9 +760,8 @@ impl Serializer {
                 symbols: &module.ffi_symbols,
                 layouts: &module.ffi_layouts,
             };
-            let data = bincode::serialize(&ffi_bundle).map_err(|e| {
-                crate::error::VbcError::Serialization(format!("ffi_tables: {}", e))
-            })?;
+            let data = bincode::serialize(&ffi_bundle)
+                .map_err(|e| crate::error::VbcError::Serialization(format!("ffi_tables: {}", e)))?;
             encode_u32(data.len() as u32, &mut self.output);
             self.output.extend_from_slice(&data);
         }
@@ -772,7 +775,11 @@ impl Serializer {
             self.output.extend_from_slice(&data);
         }
 
-        Ok((start as u32, (self.output.len() - start) as u32, extra_flags))
+        Ok((
+            start as u32,
+            (self.output.len() - start) as u32,
+            extra_flags,
+        ))
     }
 
     /// Serializes an optional u32.
@@ -829,19 +836,19 @@ mod tests {
     fn test_serialize_with_tensor_metadata() {
         use crate::deserialize::deserialize_module;
         use crate::metadata::{
-            shape::{DType, InstructionId, ShapeDim, StaticShape, SymbolDef},
+            autodiff::{CheckpointBoundary, VjpRule},
             device::{BlockId, DevicePreference, ValueId},
             distribution::{MeshTopology, ShardingSpec},
-            autodiff::{CheckpointBoundary, VjpRule},
             mlir::{FusionGroup, RegionId},
+            shape::{DType, InstructionId, ShapeDim, StaticShape, SymbolDef},
         };
 
         let mut module = VbcModule::new("tensor_test".to_string());
 
         // Add shape metadata
-        let batch_symbol = module.shape_metadata.define_symbol(
-            SymbolDef::new("batch_size").with_bounds(1, 256)
-        );
+        let batch_symbol = module
+            .shape_metadata
+            .define_symbol(SymbolDef::new("batch_size").with_bounds(1, 256));
         module.shape_metadata.add_static_shape(
             InstructionId(0),
             StaticShape::new(
@@ -851,21 +858,23 @@ mod tests {
         );
 
         // Add device hints
-        module.device_hints.set_placement(BlockId(0), DevicePreference::cuda());
-        module.device_hints.set_placement(BlockId(1), DevicePreference::CPU);
+        module
+            .device_hints
+            .set_placement(BlockId(0), DevicePreference::cuda());
+        module
+            .device_hints
+            .set_placement(BlockId(1), DevicePreference::CPU);
 
         // Add distribution metadata
         module.distribution.set_mesh(MeshTopology::grid(4, 8));
-        module.distribution.add_sharding(
-            ValueId(0),
-            ShardingSpec::shard_dim(2, 0, "hosts"),
-        );
+        module
+            .distribution
+            .add_sharding(ValueId(0), ShardingSpec::shard_dim(2, 0, "hosts"));
 
         // Add autodiff graph
-        module.autodiff_graph.add_vjp(VjpRule::new(
-            crate::FunctionId(0),
-            crate::FunctionId(1),
-        ));
+        module
+            .autodiff_graph
+            .add_vjp(VjpRule::new(crate::FunctionId(0), crate::FunctionId(1)));
         module.autodiff_graph.add_checkpoint(
             CheckpointBoundary::new(InstructionId(10), InstructionId(50))
                 .with_memory_savings(1024 * 1024),
@@ -913,9 +922,17 @@ mod tests {
 
         // Verify autodiff
         assert!(!loaded.autodiff_graph.is_empty());
-        assert!(loaded.autodiff_graph.get_vjp(crate::FunctionId(0)).is_some());
+        assert!(
+            loaded
+                .autodiff_graph
+                .get_vjp(crate::FunctionId(0))
+                .is_some()
+        );
         assert_eq!(loaded.autodiff_graph.checkpoints.len(), 1);
-        assert_eq!(loaded.autodiff_graph.checkpoint_memory_savings(), 1024 * 1024);
+        assert_eq!(
+            loaded.autodiff_graph.checkpoint_memory_savings(),
+            1024 * 1024
+        );
 
         // Verify MLIR hints
         assert!(!loaded.mlir_hints.is_empty());
@@ -1036,28 +1053,51 @@ mod tests {
 
         // Verify FFI libraries
         assert_eq!(loaded.ffi_libraries.len(), 2);
-        assert_eq!(loaded.get_string(loaded.ffi_libraries[0].name), Some("libSystem.B.dylib"));
+        assert_eq!(
+            loaded.get_string(loaded.ffi_libraries[0].name),
+            Some("libSystem.B.dylib")
+        );
         assert_eq!(loaded.ffi_libraries[0].platform, FfiPlatform::Darwin);
         assert!(loaded.ffi_libraries[0].required);
-        assert_eq!(loaded.get_string(loaded.ffi_libraries[1].name), Some("kernel32.dll"));
+        assert_eq!(
+            loaded.get_string(loaded.ffi_libraries[1].name),
+            Some("kernel32.dll")
+        );
         assert_eq!(loaded.ffi_libraries[1].platform, FfiPlatform::Windows);
         assert!(!loaded.ffi_libraries[1].required);
 
         // Verify FFI symbols
         assert_eq!(loaded.ffi_symbols.len(), 3);
-        assert_eq!(loaded.get_string(loaded.ffi_symbols[0].name), Some("getpid"));
+        assert_eq!(
+            loaded.get_string(loaded.ffi_symbols[0].name),
+            Some("getpid")
+        );
         assert_eq!(loaded.ffi_symbols[0].signature.return_type, CType::I32);
         assert!(loaded.ffi_symbols[0].signature.param_types.is_empty());
 
-        assert_eq!(loaded.get_string(loaded.ffi_symbols[1].name), Some("malloc"));
+        assert_eq!(
+            loaded.get_string(loaded.ffi_symbols[1].name),
+            Some("malloc")
+        );
         assert_eq!(loaded.ffi_symbols[1].signature.return_type, CType::Ptr);
         assert_eq!(loaded.ffi_symbols[1].signature.param_types.len(), 1);
-        assert!(loaded.ffi_symbols[1].memory_effects.contains(MemoryEffects::ALLOCS));
+        assert!(
+            loaded.ffi_symbols[1]
+                .memory_effects
+                .contains(MemoryEffects::ALLOCS)
+        );
 
-        assert_eq!(loaded.get_string(loaded.ffi_symbols[2].name), Some("printf"));
+        assert_eq!(
+            loaded.get_string(loaded.ffi_symbols[2].name),
+            Some("printf")
+        );
         assert!(loaded.ffi_symbols[2].signature.is_variadic);
         assert_eq!(loaded.ffi_symbols[2].signature.fixed_param_count, 1);
-        assert!(loaded.ffi_symbols[2].memory_effects.contains(MemoryEffects::IO));
+        assert!(
+            loaded.ffi_symbols[2]
+                .memory_effects
+                .contains(MemoryEffects::IO)
+        );
 
         // Verify FFI struct layout
         assert_eq!(loaded.ffi_layouts.len(), 1);
@@ -1065,15 +1105,24 @@ mod tests {
         assert_eq!(loaded.ffi_layouts[0].size, 16);
         assert_eq!(loaded.ffi_layouts[0].align, 8);
         assert_eq!(loaded.ffi_layouts[0].fields.len(), 2);
-        assert_eq!(loaded.get_string(loaded.ffi_layouts[0].fields[0].name), Some("x"));
+        assert_eq!(
+            loaded.get_string(loaded.ffi_layouts[0].fields[0].name),
+            Some("x")
+        );
         assert_eq!(loaded.ffi_layouts[0].fields[0].c_type, CType::F64);
         assert_eq!(loaded.ffi_layouts[0].fields[0].offset, 0);
 
         // Verify dependencies
         assert_eq!(loaded.dependencies.len(), 2);
-        assert_eq!(loaded.get_string(loaded.dependencies[0].name), Some("std.core"));
+        assert_eq!(
+            loaded.get_string(loaded.dependencies[0].name),
+            Some("std.core")
+        );
         assert_eq!(loaded.dependencies[0].hash, 0x1234567890abcdef);
-        assert_eq!(loaded.get_string(loaded.dependencies[1].name), Some("std.io"));
+        assert_eq!(
+            loaded.get_string(loaded.dependencies[1].name),
+            Some("std.io")
+        );
         assert_eq!(loaded.dependencies[1].hash, 0xfedcba0987654321);
 
         // Verify HAS_FFI flag is set
@@ -1099,7 +1148,8 @@ mod tests {
         module.add_constant(Constant::Float(3.14159));
 
         // Serialize with zstd compression
-        let compressed_bytes = serialize_module_compressed(&module, CompressionOptions::zstd()).unwrap();
+        let compressed_bytes =
+            serialize_module_compressed(&module, CompressionOptions::zstd()).unwrap();
 
         // Serialize without compression for comparison
         let uncompressed_bytes = serialize_module(&module).unwrap();
@@ -1114,16 +1164,26 @@ mod tests {
 
         // Verify COMPRESSED flag is set
         let flags_offset = 8; // After magic (4) + version (4)
-        let flags_bits = u32::from_le_bytes(compressed_bytes[flags_offset..flags_offset + 4].try_into().unwrap());
+        let flags_bits = u32::from_le_bytes(
+            compressed_bytes[flags_offset..flags_offset + 4]
+                .try_into()
+                .unwrap(),
+        );
         let flags = VbcFlags::from_bits_truncate(flags_bits);
-        assert!(flags.contains(VbcFlags::COMPRESSED), "COMPRESSED flag should be set");
+        assert!(
+            flags.contains(VbcFlags::COMPRESSED),
+            "COMPRESSED flag should be set"
+        );
 
         // Deserialize and verify roundtrip
         let loaded = deserialize_module(&compressed_bytes).unwrap();
         assert_eq!(loaded.name, "compression_test");
         assert_eq!(loaded.bytecode.len(), 4096);
         assert!(loaded.bytecode.iter().all(|&b| b == 0x00));
-        assert_eq!(loaded.get_string(crate::types::StringId(0)), Some("compression_test"));
+        assert_eq!(
+            loaded.get_string(crate::types::StringId(0)),
+            Some("compression_test")
+        );
         assert_eq!(loaded.constants.len(), 2);
     }
 
@@ -1139,7 +1199,8 @@ mod tests {
         module.bytecode = vec![0xAA; 2048]; // Repeated pattern
 
         // Serialize with lz4 compression
-        let compressed_bytes = serialize_module_compressed(&module, CompressionOptions::lz4()).unwrap();
+        let compressed_bytes =
+            serialize_module_compressed(&module, CompressionOptions::lz4()).unwrap();
 
         // Serialize without compression for comparison
         let uncompressed_bytes = serialize_module(&module).unwrap();
@@ -1175,9 +1236,13 @@ mod tests {
 
         // COMPRESSED flag should NOT be set (too small to compress)
         let flags_offset = 8;
-        let flags_bits = u32::from_le_bytes(bytes[flags_offset..flags_offset + 4].try_into().unwrap());
+        let flags_bits =
+            u32::from_le_bytes(bytes[flags_offset..flags_offset + 4].try_into().unwrap());
         let flags = VbcFlags::from_bits_truncate(flags_bits);
-        assert!(!flags.contains(VbcFlags::COMPRESSED), "COMPRESSED flag should NOT be set for small data");
+        assert!(
+            !flags.contains(VbcFlags::COMPRESSED),
+            "COMPRESSED flag should NOT be set for small data"
+        );
 
         // Roundtrip should still work
         let loaded = deserialize_module(&bytes).unwrap();
@@ -1196,9 +1261,13 @@ mod tests {
 
         // COMPRESSED flag should NOT be set
         let flags_offset = 8;
-        let flags_bits = u32::from_le_bytes(bytes[flags_offset..flags_offset + 4].try_into().unwrap());
+        let flags_bits =
+            u32::from_le_bytes(bytes[flags_offset..flags_offset + 4].try_into().unwrap());
         let flags = VbcFlags::from_bits_truncate(flags_bits);
-        assert!(!flags.contains(VbcFlags::COMPRESSED), "COMPRESSED flag should NOT be set");
+        assert!(
+            !flags.contains(VbcFlags::COMPRESSED),
+            "COMPRESSED flag should NOT be set"
+        );
 
         // Roundtrip should work
         let loaded = deserialize_module(&bytes).unwrap();

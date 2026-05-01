@@ -28,9 +28,9 @@
 //! type-erased at runtime (proof irrelevance for the Prop universe).
 
 // Use the proof_extraction module's ProofTerm (with Text formulas)
+use verum_common::{List, Text};
 use verum_smt::proof_extraction::ProofTerm;
 use verum_smt::{ProofExtractor, ProofFormatter, ProofMinimizer, ProofValidation};
-use verum_common::{List, Text};
 
 // ==================== Proof Extraction Tests ====================
 

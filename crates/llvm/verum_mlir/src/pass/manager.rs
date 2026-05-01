@@ -7,12 +7,12 @@ use crate::{
     pass::Pass,
     string_ref::StringRef,
 };
+use std::{marker::PhantomData, mem::forget, path::PathBuf};
 use verum_mlir_sys::{
     MlirPassManager, mlirPassManagerAddOwnedPass, mlirPassManagerCreate, mlirPassManagerDestroy,
     mlirPassManagerEnableIRPrinting, mlirPassManagerEnableVerifier,
     mlirPassManagerGetAsOpPassManager, mlirPassManagerGetNestedUnder, mlirPassManagerRunOnOp,
 };
-use std::{marker::PhantomData, mem::forget, path::PathBuf};
 
 /// A pass manager.
 pub struct PassManager<'c> {

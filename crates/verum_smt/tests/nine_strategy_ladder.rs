@@ -15,8 +15,15 @@ use verum_smt::verify_strategy::{NuOrdinal, VerifyStrategy};
 #[test]
 fn ladder_parses_all_nine_distinct_variants() {
     let values = [
-        "runtime", "static", "fast", "formal", "proof",
-        "thorough", "reliable", "certified", "synthesize",
+        "runtime",
+        "static",
+        "fast",
+        "formal",
+        "proof",
+        "thorough",
+        "reliable",
+        "certified",
+        "synthesize",
     ];
     let parsed: Vec<_> = values
         .iter()
@@ -38,11 +45,26 @@ fn ladder_parses_all_nine_distinct_variants() {
 
 #[test]
 fn legacy_aliases_still_parse() {
-    assert_eq!(VerifyStrategy::from_attribute_value("quick"), Some(VerifyStrategy::Fast));
-    assert_eq!(VerifyStrategy::from_attribute_value("rapid"), Some(VerifyStrategy::Fast));
-    assert_eq!(VerifyStrategy::from_attribute_value("robust"), Some(VerifyStrategy::Thorough));
-    assert_eq!(VerifyStrategy::from_attribute_value("cross_validate"), Some(VerifyStrategy::Certified));
-    assert_eq!(VerifyStrategy::from_attribute_value("synthesis"), Some(VerifyStrategy::Synthesize));
+    assert_eq!(
+        VerifyStrategy::from_attribute_value("quick"),
+        Some(VerifyStrategy::Fast)
+    );
+    assert_eq!(
+        VerifyStrategy::from_attribute_value("rapid"),
+        Some(VerifyStrategy::Fast)
+    );
+    assert_eq!(
+        VerifyStrategy::from_attribute_value("robust"),
+        Some(VerifyStrategy::Thorough)
+    );
+    assert_eq!(
+        VerifyStrategy::from_attribute_value("cross_validate"),
+        Some(VerifyStrategy::Certified)
+    );
+    assert_eq!(
+        VerifyStrategy::from_attribute_value("synthesis"),
+        Some(VerifyStrategy::Synthesize)
+    );
 }
 
 #[test]
@@ -70,7 +92,10 @@ fn proof_and_reliable_are_no_longer_aliases() {
 #[test]
 fn unknown_strategy_returns_none() {
     assert_eq!(VerifyStrategy::from_attribute_value(""), None);
-    assert_eq!(VerifyStrategy::from_attribute_value("sound-and-complete"), None);
+    assert_eq!(
+        VerifyStrategy::from_attribute_value("sound-and-complete"),
+        None
+    );
     assert_eq!(VerifyStrategy::from_attribute_value("auto"), None); // not in the canonical ladder
 }
 
@@ -127,16 +152,25 @@ fn nu_ordinals_match_vva_table() {
     assert_eq!(VerifyStrategy::Runtime.nu_ordinal(), NuOrdinal::Zero);
 
     assert_eq!(VerifyStrategy::Static.nu_ordinal(), NuOrdinal::FiniteOne);
-    assert_eq!(VerifyStrategy::Fast.nu_ordinal(),   NuOrdinal::FiniteTwo);
+    assert_eq!(VerifyStrategy::Fast.nu_ordinal(), NuOrdinal::FiniteTwo);
 
     assert_eq!(VerifyStrategy::Formal.nu_ordinal(), NuOrdinal::Omega);
-    assert_eq!(VerifyStrategy::Proof.nu_ordinal(),  NuOrdinal::OmegaPlusOne);
+    assert_eq!(VerifyStrategy::Proof.nu_ordinal(), NuOrdinal::OmegaPlusOne);
 
-    assert_eq!(VerifyStrategy::Thorough.nu_ordinal(),  NuOrdinal::OmegaTwice);
-    assert_eq!(VerifyStrategy::Reliable.nu_ordinal(),  NuOrdinal::OmegaTwicePlusOne);
-    assert_eq!(VerifyStrategy::Certified.nu_ordinal(), NuOrdinal::OmegaTwicePlusTwo);
+    assert_eq!(VerifyStrategy::Thorough.nu_ordinal(), NuOrdinal::OmegaTwice);
+    assert_eq!(
+        VerifyStrategy::Reliable.nu_ordinal(),
+        NuOrdinal::OmegaTwicePlusOne
+    );
+    assert_eq!(
+        VerifyStrategy::Certified.nu_ordinal(),
+        NuOrdinal::OmegaTwicePlusTwo
+    );
 
-    assert_eq!(VerifyStrategy::Synthesize.nu_ordinal(), NuOrdinal::OmegaThricePlusOne);
+    assert_eq!(
+        VerifyStrategy::Synthesize.nu_ordinal(),
+        NuOrdinal::OmegaThricePlusOne
+    );
 }
 
 #[test]
@@ -239,11 +273,24 @@ fn timeout_multipliers_reflect_cost_ordering() {
     assert_eq!(VerifyStrategy::Static.timeout_multiplier(), 0.0);
     assert_eq!(VerifyStrategy::Proof.timeout_multiplier(), 0.0);
 
-    assert!(VerifyStrategy::Fast.timeout_multiplier() < VerifyStrategy::Formal.timeout_multiplier());
-    assert!(VerifyStrategy::Formal.timeout_multiplier() < VerifyStrategy::Thorough.timeout_multiplier());
-    assert!(VerifyStrategy::Thorough.timeout_multiplier() <= VerifyStrategy::Reliable.timeout_multiplier());
-    assert!(VerifyStrategy::Reliable.timeout_multiplier() <= VerifyStrategy::Certified.timeout_multiplier());
-    assert!(VerifyStrategy::Certified.timeout_multiplier() < VerifyStrategy::Synthesize.timeout_multiplier());
+    assert!(
+        VerifyStrategy::Fast.timeout_multiplier() < VerifyStrategy::Formal.timeout_multiplier()
+    );
+    assert!(
+        VerifyStrategy::Formal.timeout_multiplier() < VerifyStrategy::Thorough.timeout_multiplier()
+    );
+    assert!(
+        VerifyStrategy::Thorough.timeout_multiplier()
+            <= VerifyStrategy::Reliable.timeout_multiplier()
+    );
+    assert!(
+        VerifyStrategy::Reliable.timeout_multiplier()
+            <= VerifyStrategy::Certified.timeout_multiplier()
+    );
+    assert!(
+        VerifyStrategy::Certified.timeout_multiplier()
+            < VerifyStrategy::Synthesize.timeout_multiplier()
+    );
 }
 
 // -----------------------------------------------------------------------------
@@ -254,8 +301,8 @@ fn timeout_multipliers_reflect_cost_ordering() {
 fn canonical_form_round_trips() {
     for s in VerifyStrategy::LADDER {
         let canonical = s.as_str();
-        let parsed = VerifyStrategy::from_attribute_value(canonical)
-            .expect("canonical form must parse");
+        let parsed =
+            VerifyStrategy::from_attribute_value(canonical).expect("canonical form must parse");
         assert_eq!(parsed, s);
     }
 }

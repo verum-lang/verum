@@ -49,10 +49,10 @@
 
 use std::time::{Duration, Instant};
 
+use verum_ast::Module;
 use verum_ast::decl::FunctionDecl;
 use verum_ast::expr::ExprKind;
 use verum_ast::literal::LiteralKind;
-use verum_ast::Module;
 use verum_common::{List, Map, Maybe, Text};
 
 use crate::infer::TypeChecker;
@@ -196,7 +196,11 @@ pub struct RegistrationError {
 
 impl std::fmt::Display for RegistrationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} error in {}: {}", self.phase, self.module, self.message)
+        write!(
+            f,
+            "{} error in {}: {}",
+            self.phase, self.module, self.message
+        )
     }
 }
 
@@ -256,14 +260,12 @@ impl ModuleOrder {
             "core/memory",     // Memory allocation, Heap<T>, Shared<T>
             "core/panic",      // Panic handling
             "core/env",        // Environment access
-
             // ═══════════════════════════════════════════════════════════════
             // LAYER 1: TEXT (depends on core)
             // ═══════════════════════════════════════════════════════════════
             "text/char",   // Character operations
             "text/text",   // Text operations
             "text/format", // Formatting (Display, Debug)
-
             // ═══════════════════════════════════════════════════════════════
             // LAYER 2: COLLECTIONS (depends on core, text)
             // ═══════════════════════════════════════════════════════════════
@@ -274,7 +276,6 @@ impl ModuleOrder {
             "collections/deque", // Deque<T> - double-ended queue
             "collections/heap",  // Heap<T> - priority queue
             "collections/btree", // BTree<K, V> - balanced tree
-
             // ═══════════════════════════════════════════════════════════════
             // LAYER 3: I/O (depends on core, text, collections)
             // ═══════════════════════════════════════════════════════════════
@@ -284,7 +285,6 @@ impl ModuleOrder {
             "io/file",      // File operations
             "io/stdio",     // Standard I/O (stdin, stdout, stderr)
             "io/fs",        // File system operations
-
             // ═══════════════════════════════════════════════════════════════
             // LAYER 4: SYNC (depends on core)
             // ═══════════════════════════════════════════════════════════════
@@ -296,7 +296,6 @@ impl ModuleOrder {
             "sync/semaphore", // Semaphore
             "sync/once",      // Once cell
             "sync/mod",       // Re-exports
-
             // ═══════════════════════════════════════════════════════════════
             // LAYER 5: TIME (depends on core)
             // ═══════════════════════════════════════════════════════════════
@@ -304,7 +303,6 @@ impl ModuleOrder {
             "time/instant",     // Instant type
             "time/system_time", // SystemTime type
             "time/mod",         // Re-exports
-
             // ═══════════════════════════════════════════════════════════════
             // LAYER 6: NET (depends on io, sync)
             // ═══════════════════════════════════════════════════════════════
@@ -312,7 +310,6 @@ impl ModuleOrder {
             "net/tcp",  // TCP streams and listeners
             "net/udp",  // UDP sockets
             "net/dns",  // DNS resolution
-
             // ═══════════════════════════════════════════════════════════════
             // LAYER 7: ASYNC (depends on all above)
             // ═══════════════════════════════════════════════════════════════
@@ -324,7 +321,6 @@ impl ModuleOrder {
             "async/stream",   // AsyncStream protocol
             "async/channel",  // Async channels
             "async/select",   // Select expressions
-
             // ═══════════════════════════════════════════════════════════════
             // ROOT MODULE (re-exports everything)
             // ═══════════════════════════════════════════════════════════════
@@ -616,7 +612,10 @@ impl StdlibTypeRegistry {
 
         if self.verbose {
             eprintln!("    Processed {} import declarations", imports_processed);
-            eprintln!("  Global Pass 1: Registering {} type names...", result.total_modules);
+            eprintln!(
+                "  Global Pass 1: Registering {} type names...",
+                result.total_modules
+            );
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -659,8 +658,10 @@ impl StdlibTypeRegistry {
         }
 
         if self.verbose {
-            eprintln!("    Registered {} protocols ({} errors)",
-                      result.protocols_registered, result.protocol_errors);
+            eprintln!(
+                "    Registered {} protocols ({} errors)",
+                result.protocols_registered, result.protocol_errors
+            );
             eprintln!("  Global Pass 3: Resolving type definitions...");
         }
 
@@ -685,8 +686,10 @@ impl StdlibTypeRegistry {
         }
 
         if self.verbose {
-            eprintln!("    Resolved type definitions ({} errors)",
-                      result.type_definition_errors);
+            eprintln!(
+                "    Resolved type definitions ({} errors)",
+                result.type_definition_errors
+            );
             eprintln!("  Global Pass 4: Registering impl blocks...");
         }
 
@@ -713,8 +716,10 @@ impl StdlibTypeRegistry {
         }
 
         if self.verbose {
-            eprintln!("    Registered {} impls ({} errors)",
-                      result.impls_registered, result.impl_errors);
+            eprintln!(
+                "    Registered {} impls ({} errors)",
+                result.impls_registered, result.impl_errors
+            );
             eprintln!("  Global Pass 5: Registering module-level functions...");
         }
 
@@ -780,7 +785,10 @@ impl StdlibTypeRegistry {
         }
 
         if self.verbose {
-            eprintln!("    Registered {} consts, {} extern functions", consts_registered, externs_registered);
+            eprintln!(
+                "    Registered {} consts, {} extern functions",
+                consts_registered, externs_registered
+            );
             eprintln!("  Global Pass 7: Registering @intrinsic functions...");
         }
 
@@ -798,7 +806,9 @@ impl StdlibTypeRegistry {
                     // Check if function has @intrinsic attribute
                     if let Maybe::Some(intrinsic_name) = extract_intrinsic_name(func_decl) {
                         // Register function using intrinsic name (not the function name)
-                        if let Err(_e) = type_checker.register_intrinsic_function(func_decl, &intrinsic_name) {
+                        if let Err(_e) =
+                            type_checker.register_intrinsic_function(func_decl, &intrinsic_name)
+                        {
                             // Log but continue
                         } else {
                             intrinsics_registered += 1;
@@ -809,7 +819,10 @@ impl StdlibTypeRegistry {
         }
 
         if self.verbose {
-            eprintln!("    Registered {} intrinsic functions", intrinsics_registered);
+            eprintln!(
+                "    Registered {} intrinsic functions",
+                intrinsics_registered
+            );
         }
 
         result.duration = start.elapsed();
@@ -824,7 +837,8 @@ impl StdlibTypeRegistry {
         self.stats.impls_registered = result.impls_registered;
         self.stats.total_modules = result.total_modules;
         self.stats.successful_modules = result.total_modules
-            - (result.protocol_errors + result.type_definition_errors + result.impl_errors).min(result.total_modules);
+            - (result.protocol_errors + result.type_definition_errors + result.impl_errors)
+                .min(result.total_modules);
         self.stats.total_time = result.duration;
 
         result
@@ -970,7 +984,11 @@ mod tests {
             }
         }
 
-        eprintln!("\nParsed {} modules ({} parse errors)", parsed_modules.len(), parse_errors);
+        eprintln!(
+            "\nParsed {} modules ({} parse errors)",
+            parsed_modules.len(),
+            parse_errors
+        );
 
         // Create registry and run global passes
         let mut registry = StdlibTypeRegistry::new();
@@ -984,10 +1002,16 @@ mod tests {
 
         eprintln!("\nGlobal Pass Results:");
         eprintln!("  - Types registered: {}", pass_result.types_registered);
-        eprintln!("  - Protocols registered: {}", pass_result.protocols_registered);
+        eprintln!(
+            "  - Protocols registered: {}",
+            pass_result.protocols_registered
+        );
         eprintln!("  - Impls registered: {}", pass_result.impls_registered);
         eprintln!("  - Protocol errors: {}", pass_result.protocol_errors);
-        eprintln!("  - Type definition errors: {}", pass_result.type_definition_errors);
+        eprintln!(
+            "  - Type definition errors: {}",
+            pass_result.type_definition_errors
+        );
         eprintln!("  - Impl errors: {}", pass_result.impl_errors);
 
         // Now typecheck each module's function bodies
@@ -1039,7 +1063,10 @@ mod tests {
             }
 
             if module_errors.is_empty() {
-                eprintln!("  [PASS] {} - {} functions checked", module_name, funcs_in_module);
+                eprintln!(
+                    "  [PASS] {} - {} functions checked",
+                    module_name, funcs_in_module
+                );
                 modules_passed += 1;
             } else {
                 eprintln!("  [FAIL] {} - {} errors:", module_name, module_errors.len());
@@ -1057,11 +1084,16 @@ mod tests {
         eprintln!("TYPECHECK SUMMARY");
         eprintln!("{}", "=".repeat(60));
         eprintln!();
-        eprintln!("  Modules passed: {}/{} ({:.1}%)",
-                  modules_passed,
-                  modules_passed + modules_failed,
-                  modules_passed as f64 / (modules_passed + modules_failed).max(1) as f64 * 100.0);
-        eprintln!("  Functions checked: {} ({} failed)", total_functions, functions_failed);
+        eprintln!(
+            "  Modules passed: {}/{} ({:.1}%)",
+            modules_passed,
+            modules_passed + modules_failed,
+            modules_passed as f64 / (modules_passed + modules_failed).max(1) as f64 * 100.0
+        );
+        eprintln!(
+            "  Functions checked: {} ({} failed)",
+            total_functions, functions_failed
+        );
         eprintln!("  Registration errors: {}", pass_result.total_errors());
         eprintln!();
 
@@ -1074,8 +1106,10 @@ mod tests {
 
         // Test assertion - we want at least 50% of modules passing
         let pass_rate = modules_passed as f64 / (modules_passed + modules_failed).max(1) as f64;
-        assert!(pass_rate >= 0.20,
-                "Typecheck pass rate too low: {:.1}% (expected at least 20%)",
-                pass_rate * 100.0);
+        assert!(
+            pass_rate >= 0.20,
+            "Typecheck pass rate too low: {:.1}% (expected at least 20%)",
+            pass_rate * 100.0
+        );
     }
 }

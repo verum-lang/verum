@@ -195,7 +195,11 @@ impl Repl {
         println!("{} Parsing (verum_fast_parser)", "✓".green());
         println!("{} VBC codegen (verum_vbc::codegen)", "✓".green());
         println!("{} VBC interpreter (verum_vbc::interpreter)", "✓".green());
-        println!("{} Persistent session source ({} chars)", "✓".green(), self.session_source.len());
+        println!(
+            "{} Persistent session source ({} chars)",
+            "✓".green(),
+            self.session_source.len()
+        );
         println!();
     }
 
@@ -306,10 +310,7 @@ impl Repl {
                 }
                 self.eval_counter += 1;
                 let func_name = format!("__repl_script_{}", self.eval_counter);
-                let wrapper = format!(
-                    "fn {}() {{\n    {}\n}}\n",
-                    func_name, trimmed
-                );
+                let wrapper = format!("fn {}() {{\n    {}\n}}\n", func_name, trimmed);
                 let stdout = self.compile_and_run(&wrapper, &func_name)?;
                 return Ok(stdout.into());
             }
@@ -339,7 +340,9 @@ impl Repl {
         if !source.contains("fn main") {
             source.push_str("\nfn main() {}\n");
         }
-        compile_module_str(&source).map(|_| ()).map_err(|e| anyhow::anyhow!(e))
+        compile_module_str(&source)
+            .map(|_| ())
+            .map_err(|e| anyhow::anyhow!(e))
     }
 
     /// Compile `session_source ++ extra_source`, locate `func_name`,
@@ -372,16 +375,14 @@ fn compile_module_str(source: &str) -> std::result::Result<verum_vbc::VbcModule,
     let file_id = FileId::new(0);
     let lexer = Lexer::new(source, file_id);
     let parser = verum_fast_parser::VerumParser::new();
-    let module = parser
-        .parse_module(lexer, file_id)
-        .map_err(|errs| {
-            let first = errs
-                .iter()
-                .next()
-                .map(|e| format!("{:?}", e))
-                .unwrap_or_default();
-            format!("parse error: {}", first)
-        })?;
+    let module = parser.parse_module(lexer, file_id).map_err(|errs| {
+        let first = errs
+            .iter()
+            .next()
+            .map(|e| format!("{:?}", e))
+            .unwrap_or_default();
+        format!("parse error: {}", first)
+    })?;
     let config = CodegenConfig::new("repl");
     let mut codegen = VbcCodegen::with_config(config);
     codegen

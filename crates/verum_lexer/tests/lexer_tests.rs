@@ -16,8 +16,8 @@
 // Tests for the Lexer implementation.
 
 use verum_ast::span::FileId;
-use verum_lexer::{Lexer, LookaheadLexer, TokenKind};
 use verum_common::Text;
+use verum_lexer::{Lexer, LookaheadLexer, TokenKind};
 
 #[test]
 fn test_basic_lexing() {
@@ -143,7 +143,9 @@ fn test_number_formats() {
     assert!(matches!(tokens[0].kind, TokenKind::Integer(ref lit) if lit.as_i64() == Some(42)));
     assert!(matches!(tokens[1].kind, TokenKind::Integer(ref lit) if lit.as_i64() == Some(42)));
     assert!(matches!(tokens[2].kind, TokenKind::Integer(ref lit) if lit.as_i64() == Some(42)));
-    assert!(matches!(tokens[3].kind, TokenKind::Integer(ref lit) if lit.as_i64() == Some(1_000_000)));
+    assert!(
+        matches!(tokens[3].kind, TokenKind::Integer(ref lit) if lit.as_i64() == Some(1_000_000))
+    );
 }
 
 #[test]

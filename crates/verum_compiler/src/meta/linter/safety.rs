@@ -14,10 +14,10 @@
 
 use std::collections::HashSet;
 
+use verum_ast::Span;
 use verum_ast::decl::{FunctionBody, FunctionDecl};
 use verum_ast::expr::{Expr, ExprKind};
 use verum_ast::stmt::{Stmt, StmtKind};
-use verum_ast::Span;
 use verum_common::{Maybe, Text};
 
 use super::dataflow::{AnalysisContext, ExternalInputChecker};
@@ -121,7 +121,12 @@ impl SafetyDetector {
     }
 
     /// Check for unbounded recursion
-    pub fn check_unbounded_recursion(&self, ctx: &AnalysisContext, span: Span, result: &mut LintResult) {
+    pub fn check_unbounded_recursion(
+        &self,
+        ctx: &AnalysisContext,
+        span: Span,
+        result: &mut LintResult,
+    ) {
         if let Some(ref func_name) = ctx.current_function {
             if ctx.has_recursion(func_name) {
                 Self::detect_pattern(
@@ -165,9 +170,7 @@ impl SafetyDetector {
                     "while true loop without break may cause infinite compile-time execution",
                 ),
                 span,
-                Maybe::Some(Text::from(
-                    "Add a break condition or use bounded iteration",
-                )),
+                Maybe::Some(Text::from("Add a break condition or use bounded iteration")),
                 result,
             );
         }

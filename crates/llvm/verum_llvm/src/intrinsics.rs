@@ -1,4 +1,6 @@
-use verum_llvm_sys::core::{LLVMGetIntrinsicDeclaration, LLVMIntrinsicIsOverloaded, LLVMLookupIntrinsicID};
+use verum_llvm_sys::core::{
+    LLVMGetIntrinsicDeclaration, LLVMIntrinsicIsOverloaded, LLVMLookupIntrinsicID,
+};
 use verum_llvm_sys::prelude::LLVMTypeRef;
 
 use crate::module::Module;
@@ -50,7 +52,8 @@ impl Intrinsic {
     /// builder.build_call(trap_function, &[], "trap_call");
     /// ```
     pub fn find(name: &str) -> Option<Self> {
-        let id = unsafe { LLVMLookupIntrinsicID(name.as_ptr() as *const ::libc::c_char, name.len()) };
+        let id =
+            unsafe { LLVMLookupIntrinsicID(name.as_ptr() as *const ::libc::c_char, name.len()) };
 
         if id == 0 {
             return None;
@@ -101,7 +104,8 @@ impl Intrinsic {
         module: &Module<'ctx>,
         param_types: &[BasicTypeEnum],
     ) -> Option<FunctionValue<'ctx>> {
-        let mut param_types: Vec<LLVMTypeRef> = param_types.iter().map(|val| val.as_type_ref()).collect();
+        let mut param_types: Vec<LLVMTypeRef> =
+            param_types.iter().map(|val| val.as_type_ref()).collect();
 
         // param_types should be empty for non-overloaded intrinsics (I think?)
         // for overloaded intrinsics they determine the overload used

@@ -30,8 +30,8 @@ use verum_ast::{
     expr::{BinOp, Expr, ExprKind, UnOp},
     span::Span,
 };
-use verum_common::{ConstValue, List, Maybe, Text};
 use verum_common::ToText;
+use verum_common::{ConstValue, List, Maybe, Text};
 
 // ==================== Core Types ====================
 

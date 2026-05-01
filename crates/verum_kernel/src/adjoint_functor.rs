@@ -158,9 +158,7 @@ impl SaftPreconditions {
 /// Returns `true` iff all three hold. current surface trusts the witness
 /// flags; Future work will inspect each flag's structural witness.
 pub fn left_adjoint_exists(pre: &SaftPreconditions) -> bool {
-    pre.source_presentable
-        && pre.target_presentable
-        && pre.preserves_small_colimits
+    pre.source_presentable && pre.target_presentable && pre.preserves_small_colimits
 }
 
 /// Decide whether a functor admits a *left adjoint* (dual of HTT 5.5.2.9).
@@ -171,9 +169,7 @@ pub fn left_adjoint_exists(pre: &SaftPreconditions) -> bool {
 ///  2. Target is presentable.
 ///  3. The functor preserves all small limits and is accessible.
 pub fn right_adjoint_exists(pre: &SaftPreconditions) -> bool {
-    pre.source_presentable
-        && pre.target_presentable
-        && pre.preserves_small_limits_and_accessible
+    pre.source_presentable && pre.target_presentable && pre.preserves_small_limits_and_accessible
 }
 
 // =============================================================================
@@ -278,8 +274,7 @@ pub fn compose_adjunctions(first: &Adjunction, second: &Adjunction) -> Option<Ad
         )),
         has_unit: first.has_unit && second.has_unit,
         has_counit: first.has_counit && second.has_counit,
-        triangle_identities_hold: first.triangle_identities_hold
-            && second.triangle_identities_hold,
+        triangle_identities_hold: first.triangle_identities_hold && second.triangle_identities_hold,
         adjunction_level: if first.adjunction_level.lt(&second.adjunction_level) {
             first.adjunction_level.clone()
         } else {
@@ -378,8 +373,10 @@ mod tests {
             &pre,
             AdjunctionDirection::BuildRightOfLeft,
         );
-        assert!(adj.is_none(),
-            "non-presentable source must defeat HTT 5.5.2.9");
+        assert!(
+            adj.is_none(),
+            "non-presentable source must defeat HTT 5.5.2.9"
+        );
     }
 
     #[test]
@@ -443,8 +440,10 @@ mod tests {
             AdjunctionDirection::BuildRightOfLeft,
         )
         .unwrap();
-        assert!(compose_adjunctions(&cd, &ec).is_none(),
-            "adjunctions don't compose when target ≠ source");
+        assert!(
+            compose_adjunctions(&cd, &ec).is_none(),
+            "adjunctions don't compose when target ≠ source"
+        );
     }
 
     // ----- MSFS Lemma 10.3 chain integration -----
@@ -454,17 +453,11 @@ mod tests {
         // Lemma 10.3 builds (ι, r) where ι : S_S → cF is a fully-faithful
         // inclusion and r : cF → S_S is the reflector. Under SAFT
         // preconditions r exists as ι's left adjoint.
-        let s_s = InfinityCategory::at_canonical_universe(
-            "S_S^global", Ordinal::Finite(1),
-        );
-        let cf = InfinityCategory::at_canonical_universe(
-            "cF", Ordinal::Finite(1),
-        );
+        let s_s = InfinityCategory::at_canonical_universe("S_S^global", Ordinal::Finite(1));
+        let cf = InfinityCategory::at_canonical_universe("cF", Ordinal::Finite(1));
         let pre = SaftPreconditions::fully_satisfied("ι");
-        let adj = build_adjunction(
-            "ι", &s_s, &cf, &pre, AdjunctionDirection::BuildLeftOfRight,
-        )
-        .expect("Lemma 10.3 SAFT preconditions hold");
+        let adj = build_adjunction("ι", &s_s, &cf, &pre, AdjunctionDirection::BuildLeftOfRight)
+            .expect("Lemma 10.3 SAFT preconditions hold");
         assert_eq!(adj.right_functor.as_str(), "ι");
         assert_eq!(adj.left_functor.as_str(), "ι†");
         assert!(adj.is_coherent());

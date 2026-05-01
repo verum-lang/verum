@@ -83,30 +83,15 @@ unsafe impl Sync for LibraryHandle {}
 #[allow(missing_docs)]
 pub enum FfiPlatformError {
     /// Library not found.
-    LibraryNotFound {
-        name: String,
-        reason: String,
-    },
+    LibraryNotFound { name: String, reason: String },
     /// Symbol not found in library.
-    SymbolNotFound {
-        symbol: String,
-        library: String,
-    },
+    SymbolNotFound { symbol: String, library: String },
     /// Failed to allocate executable memory.
-    AllocationFailed {
-        size: usize,
-        reason: String,
-    },
+    AllocationFailed { size: usize, reason: String },
     /// Platform-specific error.
-    PlatformError {
-        code: i32,
-        message: String,
-    },
+    PlatformError { code: i32, message: String },
     /// Invalid library name.
-    InvalidLibraryName {
-        name: String,
-        reason: String,
-    },
+    InvalidLibraryName { name: String, reason: String },
     /// FFI callback signature contains a struct-by-value (`CTypeRuntime::
     /// StructValue`) parameter or return type. Struct-by-value in
     /// callbacks is not supported — the libffi closure path needs a
@@ -119,9 +104,7 @@ pub enum FfiPlatformError {
     /// `"argument {index}"` (1-based) for a parameter, so the caller
     /// can produce an actionable diagnostic without re-walking the
     /// signature.
-    StructValueInCallback {
-        position: String,
-    },
+    StructValueInCallback { position: String },
 }
 
 impl fmt::Display for FfiPlatformError {
@@ -134,7 +117,11 @@ impl fmt::Display for FfiPlatformError {
                 write!(f, "symbol '{}' not found in library '{}'", symbol, library)
             }
             FfiPlatformError::AllocationFailed { size, reason } => {
-                write!(f, "failed to allocate {} bytes of executable memory: {}", size, reason)
+                write!(
+                    f,
+                    "failed to allocate {} bytes of executable memory: {}",
+                    size, reason
+                )
             }
             FfiPlatformError::PlatformError { code, message } => {
                 write!(f, "platform error ({}): {}", code, message)

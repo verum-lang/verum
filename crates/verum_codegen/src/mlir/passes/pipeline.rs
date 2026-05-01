@@ -37,23 +37,20 @@
 //!  └── Cast Reconciliation
 //! ```
 
-use crate::mlir::error::{MlirError, Result};
 use super::{
-    CbgrEliminationPass, CbgrEliminationStats,
-    ContextMonomorphizationPass, ContextMonoStats,
-    RefinementPropagationPass, RefinementStats,
-    LlvmLoweringPass,
-    VerumPass, PassResult, PassStats,
+    CbgrEliminationPass, CbgrEliminationStats, ContextMonoStats, ContextMonomorphizationPass,
+    LlvmLoweringPass, PassResult, PassStats, RefinementPropagationPass, RefinementStats, VerumPass,
 };
+use crate::mlir::error::{MlirError, Result};
 
+use std::time::Instant;
+use verum_common::Text;
 use verum_mlir::{
     Context,
     ir::Module,
     ir::operation::OperationLike,
     pass::{PassManager, transform},
 };
-use std::time::Instant;
-use verum_common::Text;
 
 /// Configuration for the pass pipeline.
 #[derive(Debug, Clone)]
@@ -271,8 +268,7 @@ impl PipelineStats {
         if let Some(ref ref_stats) = self.refinement_stats {
             parts.push(format!(
                 "Refinement: {} redundant ({:.1}%)",
-                ref_stats.checks_proven_redundant,
-                ref_stats.redundancy_rate
+                ref_stats.checks_proven_redundant, ref_stats.redundancy_rate
             ));
         }
 
@@ -326,7 +322,7 @@ impl<'c> PassPipeline<'c> {
             Some(
                 CbgrEliminationPass::new()
                     .with_aggressive(config.cbgr_aggressive)
-                    .with_verbose(config.verbose)
+                    .with_verbose(config.verbose),
             )
         } else {
             None
@@ -334,20 +330,14 @@ impl<'c> PassPipeline<'c> {
 
         // Create context monomorphization pass if enabled
         let context_mono_pass = if config.enable_context_mono {
-            Some(
-                ContextMonomorphizationPass::new()
-                    .with_verbose(config.verbose)
-            )
+            Some(ContextMonomorphizationPass::new().with_verbose(config.verbose))
         } else {
             None
         };
 
         // Create refinement propagation pass if enabled
         let refinement_pass = if config.enable_refinement_propagation {
-            Some(
-                RefinementPropagationPass::new()
-                    .with_verbose(config.verbose)
-            )
+            Some(RefinementPropagationPass::new().with_verbose(config.verbose))
         } else {
             None
         };
@@ -365,51 +355,49 @@ impl<'c> PassPipeline<'c> {
         // `enable_early_opts` / `enable_late_opts` give finer-
         // grained control beneath the umbrella.
         let standard_opts_master = config.enable_standard_opts;
-        let early_pass_manager = if standard_opts_master
-            && config.enable_early_opts
-            && config.optimization_level >= 1
-        {
-            let pm = PassManager::new(context);
-            pm.enable_verifier(config.verify_after_each_pass);
+        let early_pass_manager =
+            if standard_opts_master && config.enable_early_opts && config.optimization_level >= 1 {
+                let pm = PassManager::new(context);
+                pm.enable_verifier(config.verify_after_each_pass);
 
-            // Add canonicalization pass
-            pm.add_pass(transform::create_canonicalizer());
+                // Add canonicalization pass
+                pm.add_pass(transform::create_canonicalizer());
 
-            // Add CSE pass
-            pm.add_pass(transform::create_cse());
+                // Add CSE pass
+                pm.add_pass(transform::create_cse());
 
-            Some(pm)
-        } else {
-            None
-        };
+                Some(pm)
+            } else {
+                None
+            };
 
         // Create late optimization pass manager
-        let late_pass_manager = if standard_opts_master
-            && config.enable_late_opts && config.optimization_level >= 2 {
-            let pm = PassManager::new(context);
-            pm.enable_verifier(config.verify_after_each_pass);
+        let late_pass_manager =
+            if standard_opts_master && config.enable_late_opts && config.optimization_level >= 2 {
+                let pm = PassManager::new(context);
+                pm.enable_verifier(config.verify_after_each_pass);
 
-            // Add SCCP (Sparse Conditional Constant Propagation)
-            pm.add_pass(transform::create_sccp());
+                // Add SCCP (Sparse Conditional Constant Propagation)
+                pm.add_pass(transform::create_sccp());
 
-            // Add LICM (Loop Invariant Code Motion)
-            pm.add_pass(transform::create_loop_invariant_code_motion());
+                // Add LICM (Loop Invariant Code Motion)
+                pm.add_pass(transform::create_loop_invariant_code_motion());
 
-            // Add Mem2Reg (memory to register promotion)
-            pm.add_pass(transform::create_mem_2_reg());
+                // Add Mem2Reg (memory to register promotion)
+                pm.add_pass(transform::create_mem_2_reg());
 
-            if config.optimization_level >= 3 {
-                // Add inliner at higher optimization levels
-                pm.add_pass(transform::create_inliner());
-            }
+                if config.optimization_level >= 3 {
+                    // Add inliner at higher optimization levels
+                    pm.add_pass(transform::create_inliner());
+                }
 
-            // Add DCE (Dead Code Elimination)
-            pm.add_pass(transform::create_symbol_dce());
+                // Add DCE (Dead Code Elimination)
+                pm.add_pass(transform::create_symbol_dce());
 
-            Some(pm)
-        } else {
-            None
-        };
+                Some(pm)
+            } else {
+                None
+            };
 
         // Create lowering pass manager
         let mut lowering_pass_manager = PassManager::new(context);
@@ -512,7 +500,8 @@ impl<'c> PassPipeline<'c> {
             }
 
             let start = Instant::now();
-            early_pm.run(module)
+            early_pm
+                .run(module)
                 .map_err(|_| MlirError::PassPipelineError {
                     message: Text::from("Early optimization passes failed"),
                 })?;
@@ -543,7 +532,9 @@ impl<'c> PassPipeline<'c> {
             stats.passes_run += 1;
 
             if pass_result.modified {
-                result.passes_that_modified.push(Text::from("cbgr-elimination"));
+                result
+                    .passes_that_modified
+                    .push(Text::from("cbgr-elimination"));
             }
             result.total_operations_modified += pass_result.stats.operations_modified;
             result.total_operations_removed += pass_result.stats.operations_removed;
@@ -585,7 +576,9 @@ impl<'c> PassPipeline<'c> {
             stats.passes_run += 1;
 
             if pass_result.modified {
-                result.passes_that_modified.push(Text::from("refinement-propagation"));
+                result
+                    .passes_that_modified
+                    .push(Text::from("refinement-propagation"));
             }
             result.total_operations_removed += pass_result.stats.operations_removed;
 
@@ -600,7 +593,8 @@ impl<'c> PassPipeline<'c> {
             }
 
             let start = Instant::now();
-            late_pm.run(module)
+            late_pm
+                .run(module)
                 .map_err(|_| MlirError::PassPipelineError {
                     message: Text::from("Late optimization passes failed"),
                 })?;
@@ -628,7 +622,8 @@ impl<'c> PassPipeline<'c> {
             }
 
             let start = Instant::now();
-            self.lowering_pass_manager.run(module)
+            self.lowering_pass_manager
+                .run(module)
                 .map_err(|_| MlirError::PassPipelineError {
                     message: Text::from("LLVM lowering passes failed"),
                 })?;
@@ -647,7 +642,9 @@ impl<'c> PassPipeline<'c> {
 
         // Verify module after all passes
         if !module.as_operation().verify() {
-            return Err(MlirError::verification("Module verification failed after passes"));
+            return Err(MlirError::verification(
+                "Module verification failed after passes",
+            ));
         }
 
         // Finalize statistics
@@ -864,11 +861,7 @@ mod tests {
     /// Helper: build a PassConfig with the standard-opts umbrella
     /// and per-phase flags at specified states. Used to pin the
     /// load-bearing master-vs-per-phase precedence.
-    fn config_with(
-        standard_opts: bool,
-        early_opts: bool,
-        late_opts: bool,
-    ) -> PassConfig {
+    fn config_with(standard_opts: bool, early_opts: bool, late_opts: bool) -> PassConfig {
         PassConfig {
             enable_cbgr_elimination: false,
             enable_context_mono: false,
@@ -923,6 +916,9 @@ mod tests {
         // Opt-in tooling (debugger, custom pipeline harness)
         // flips this on per-call.
         let cfg = PassConfig::default();
-        assert!(!cfg.debug_ir_printing, "default debug_ir_printing must stay false");
+        assert!(
+            !cfg.debug_ir_printing,
+            "default debug_ir_printing must stay false"
+        );
     }
 }

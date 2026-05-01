@@ -398,7 +398,10 @@ fn test_complex_expression_serialization() {
                     attributes: verum_common::List::new(),
                     pattern: Pattern::literal(Literal::int(1, span)),
                     guard: Maybe::None,
-                    body: Heap::new(Expr::literal(Literal::string("one".to_string().into(), span))),
+                    body: Heap::new(Expr::literal(Literal::string(
+                        "one".to_string().into(),
+                        span,
+                    ))),
                     with_clause: Maybe::None,
                     span,
                 },
@@ -406,7 +409,10 @@ fn test_complex_expression_serialization() {
                     attributes: verum_common::List::new(),
                     pattern: Pattern::wildcard(span),
                     guard: Maybe::Some(Heap::new(Expr::literal(Literal::bool(true, span)))),
-                    body: Heap::new(Expr::literal(Literal::string("other".to_string().into(), span))),
+                    body: Heap::new(Expr::literal(Literal::string(
+                        "other".to_string().into(),
+                        span,
+                    ))),
                     with_clause: Maybe::None,
                     span,
                 },
@@ -614,7 +620,8 @@ fn test_module_serialization() {
         List::from(vec![Item::new(
             ItemKind::Mount(MountDecl {
                 visibility: Visibility::Private,
-                tree: MountTree { alias: Maybe::None,
+                tree: MountTree {
+                    alias: Maybe::None,
                     kind: MountTreeKind::Path(Path::new(
                         List::from(vec![
                             PathSegment::Name(test_ident("std")),

@@ -12,11 +12,11 @@
 //! `Binary { op: Eq, .. }` (a definitional equality). Anything
 //! else fails the shape gate before the rule can fire.
 
+use verum_ast::LiteralKind;
 use verum_ast::expr::{BinOp, Expr, ExprKind};
 use verum_ast::literal::Literal;
 use verum_ast::span::Span;
 use verum_ast::ty::{Ident, Path};
-use verum_ast::LiteralKind;
 use verum_common::Heap;
 use verum_smt::proof_term_unified::ProofTerm;
 use verum_verification::proof_validator::ProofValidator;

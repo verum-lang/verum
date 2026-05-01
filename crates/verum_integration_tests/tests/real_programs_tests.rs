@@ -21,19 +21,18 @@
 
 use std::sync::Arc;
 
-use verum_compiler::api::{compile_to_vbc, parse, CommonPipelineConfig, SourceFile};
+use verum_compiler::api::{CommonPipelineConfig, SourceFile, compile_to_vbc, parse};
+use verum_vbc::VbcModule;
 use verum_vbc::interpreter::Interpreter;
 use verum_vbc::module::FunctionId;
 use verum_vbc::value::Value;
-use verum_vbc::VbcModule;
 
 // ============================================================================
 // Test Harness (same pattern as compile_run_e2e_tests.rs)
 // ============================================================================
 
 fn compile_and_run(source: &str) -> Result<(String, i32), String> {
-    let vbc_module = compile_to_vbc(source)
-        .map_err(|e| format!("Compilation failed: {}", e))?;
+    let vbc_module = compile_to_vbc(source).map_err(|e| format!("Compilation failed: {}", e))?;
 
     let module = Arc::new(vbc_module);
     let mut interpreter = Interpreter::new(module.clone());
@@ -52,16 +51,22 @@ fn compile_and_run(source: &str) -> Result<(String, i32), String> {
 }
 
 fn run_ok(source: &str) -> String {
-    let (stdout, exit_code) = compile_and_run(source)
-        .expect("Compilation should succeed");
-    assert_eq!(exit_code, 0, "Program should exit successfully. stdout: {}", stdout);
+    let (stdout, exit_code) = compile_and_run(source).expect("Compilation should succeed");
+    assert_eq!(
+        exit_code, 0,
+        "Program should exit successfully. stdout: {}",
+        stdout
+    );
     stdout
 }
 
 fn run_err(source: &str) -> String {
-    let (stdout, exit_code) = compile_and_run(source)
-        .expect("Compilation should succeed");
-    assert_eq!(exit_code, 1, "Program should exit with error. stdout: {}", stdout);
+    let (stdout, exit_code) = compile_and_run(source).expect("Compilation should succeed");
+    assert_eq!(
+        exit_code, 1,
+        "Program should exit with error. stdout: {}",
+        stdout
+    );
     stdout
 }
 
@@ -83,9 +88,10 @@ fn parse_ok(source: &str) {
 fn find_main(module: &VbcModule) -> Result<FunctionId, String> {
     for (idx, func_desc) in module.functions.iter().enumerate() {
         if let Some(name) = module.get_string(func_desc.name)
-            && name == "main" {
-                return Ok(FunctionId(idx as u32));
-            }
+            && name == "main"
+        {
+            return Ok(FunctionId(idx as u32));
+        }
     }
     Err("No main function found in VBC module".to_string())
 }
@@ -97,7 +103,8 @@ fn find_main(module: &VbcModule) -> Result<FunctionId, String> {
 #[test]
 fn real_data_processing_sum_fields() {
     // Record type with field access, loop accumulation
-    let stdout = run_ok(r#"
+    let stdout = run_ok(
+        r#"
         type Record is { name: Text, value: Int };
 
         fn sum_values(a: Int, b: Int, c: Int) -> Int {
@@ -108,14 +115,16 @@ fn real_data_processing_sum_fields() {
             let total = sum_values(10, 20, 30);
             print(total);
         }
-    "#);
+    "#,
+    );
     assert!(stdout.contains("60"), "Expected 60, got: {:?}", stdout);
 }
 
 #[test]
 fn real_data_processing_transform() {
     // Multi-step computation pipeline
-    let stdout = run_ok(r#"
+    let stdout = run_ok(
+        r#"
         fn double(x: Int) -> Int { x * 2 }
         fn add_ten(x: Int) -> Int { x + 10 }
         fn square(x: Int) -> Int { x * x }
@@ -130,7 +139,8 @@ fn real_data_processing_transform() {
         fn main() {
             print(pipeline(5));
         }
-    "#);
+    "#,
+    );
     // double(5)=10, add_ten(10)=20, square(20)=400
     assert!(stdout.contains("400"), "Expected 400, got: {:?}", stdout);
 }
@@ -138,7 +148,8 @@ fn real_data_processing_transform() {
 #[test]
 fn real_data_processing_accumulator() {
     // While-loop accumulator pattern (simulates processing a list of records)
-    let stdout = run_ok(r#"
+    let stdout = run_ok(
+        r#"
         fn get_value(index: Int) -> Int {
             if index == 0 { 15 }
             else { if index == 1 { 25 }
@@ -160,7 +171,8 @@ fn real_data_processing_accumulator() {
         fn main() {
             print(process_records(3));
         }
-    "#);
+    "#,
+    );
     // 15 + 25 + 35 = 75
     assert!(stdout.contains("75"), "Expected 75, got: {:?}", stdout);
 }
@@ -168,7 +180,8 @@ fn real_data_processing_accumulator() {
 #[test]
 fn real_compile_record_with_methods() {
     // Record type definition + implement block with methods
-    let _module = compile_ok(r#"
+    let _module = compile_ok(
+        r#"
         type Record is { name: Text, value: Int };
 
         implement Record {
@@ -183,7 +196,8 @@ fn real_compile_record_with_methods() {
 
         fn main() {
         }
-    "#);
+    "#,
+    );
 }
 
 // ============================================================================
@@ -193,19 +207,22 @@ fn real_compile_record_with_methods() {
 #[test]
 fn real_compile_tree_type() {
     // Recursive sum type with generic parameter
-    let _module = compile_ok(r#"
+    let _module = compile_ok(
+        r#"
         type Tree<T> is Leaf(T) | Node { left: Heap<Tree<T>>, right: Heap<Tree<T>>, value: T };
 
         fn main() {
             let leaf = Leaf(42);
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn real_compile_binary_tree_operations() {
     // Full tree type with count and sum operations
-    let _module = compile_ok(r#"
+    let _module = compile_ok(
+        r#"
         type IntTree is Leaf(Int) | Branch { left: Heap<IntTree>, right: Heap<IntTree> };
 
         fn count(tree: &IntTree) -> Int {
@@ -217,13 +234,15 @@ fn real_compile_binary_tree_operations() {
 
         fn main() {
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn real_recursive_tree_computation() {
     // Simulate tree depth computation using recursion
-    let stdout = run_ok(r#"
+    let stdout = run_ok(
+        r#"
         fn tree_depth(is_leaf: Bool, left_depth: Int, right_depth: Int) -> Int {
             if is_leaf {
                 0
@@ -240,9 +259,14 @@ fn real_recursive_tree_computation() {
             let root_depth = tree_depth(false, leaf_depth, right_depth);
             print(root_depth);
         }
-    "#);
+    "#,
+    );
     // leaf=0, right=max(0,0)+1=1, root=max(0,1)+1=2
-    assert!(stdout.contains("2"), "Expected tree depth 2, got: {:?}", stdout);
+    assert!(
+        stdout.contains("2"),
+        "Expected tree depth 2, got: {:?}",
+        stdout
+    );
 }
 
 // ============================================================================
@@ -252,7 +276,8 @@ fn real_recursive_tree_computation() {
 #[test]
 fn real_compile_result_type_usage() {
     // Result type with Ok/Err construction and match
-    let _module = compile_ok(r#"
+    let _module = compile_ok(
+        r#"
         type Result<T, E> is Ok(T) | Err(E);
 
         fn parse_positive(n: Int) -> Result<Int, Text> {
@@ -266,13 +291,15 @@ fn real_compile_result_type_usage() {
         fn main() {
             let r = parse_positive(5);
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn real_error_handling_with_match() {
     // Match on Result-like sum type
-    let stdout = run_ok(r#"
+    let stdout = run_ok(
+        r#"
         fn validate(n: Int) -> Int {
             if n >= 0 { n * 2 } else { -1 }
         }
@@ -290,7 +317,8 @@ fn real_error_handling_with_match() {
             print(process(21));
             print(process(-5));
         }
-    "#);
+    "#,
+    );
     // process(21) = validate(21)=42, 42+100=142
     // process(-5) = validate(-5)=-1, returns 0
     assert!(stdout.contains("142"), "Expected 142, got: {:?}", stdout);
@@ -300,7 +328,8 @@ fn real_error_handling_with_match() {
 #[test]
 fn real_compile_error_propagation() {
     // Error propagation with ? operator
-    parse_ok(r#"
+    parse_ok(
+        r#"
         type Result<T, E> is Ok(T) | Err(E);
 
         fn step1(x: Int) -> Result<Int, Text> {
@@ -320,13 +349,15 @@ fn real_compile_error_propagation() {
         fn main() {
             let result = pipeline(10);
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn real_multi_stage_validation() {
     // Multi-step validation chain with early exits
-    let stdout = run_ok(r#"
+    let stdout = run_ok(
+        r#"
         fn check_range(n: Int, low: Int, high: Int) -> Bool {
             n >= low && n <= high
         }
@@ -350,10 +381,23 @@ fn real_multi_stage_validation() {
             print(validate_all(200));
             print(validate_all(7));
         }
-    "#);
-    assert!(stdout.contains("42"), "Expected 42 for valid input, got: {:?}", stdout);
-    assert!(stdout.contains("-1"), "Expected -1 for out of range, got: {:?}", stdout);
-    assert!(stdout.contains("-2"), "Expected -2 for odd number, got: {:?}", stdout);
+    "#,
+    );
+    assert!(
+        stdout.contains("42"),
+        "Expected 42 for valid input, got: {:?}",
+        stdout
+    );
+    assert!(
+        stdout.contains("-1"),
+        "Expected -1 for out of range, got: {:?}",
+        stdout
+    );
+    assert!(
+        stdout.contains("-2"),
+        "Expected -2 for odd number, got: {:?}",
+        stdout
+    );
 }
 
 // ============================================================================
@@ -363,7 +407,8 @@ fn real_multi_stage_validation() {
 #[test]
 fn real_compile_protocol_with_implementation() {
     // Full protocol definition and implementation
-    let _module = compile_ok(r#"
+    let _module = compile_ok(
+        r#"
         type Shape is protocol {
             fn area(&self) -> Float;
         };
@@ -378,13 +423,15 @@ fn real_compile_protocol_with_implementation() {
 
         fn main() {
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn real_compile_multiple_protocol_impls() {
     // Multiple types implementing the same protocol
-    let _module = compile_ok(r#"
+    let _module = compile_ok(
+        r#"
         type Describable is protocol {
             fn describe(&self) -> Text;
         };
@@ -406,13 +453,15 @@ fn real_compile_multiple_protocol_impls() {
 
         fn main() {
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn real_compile_protocol_with_generic() {
     // Protocol with associated type-like pattern
-    let _module = compile_ok(r#"
+    let _module = compile_ok(
+        r#"
         type Container<T> is protocol {
             fn get(&self) -> T;
             fn size(&self) -> Int;
@@ -432,13 +481,15 @@ fn real_compile_protocol_with_generic() {
 
         fn main() {
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn real_polymorphic_dispatch_simulation() {
     // Simulate protocol dispatch via function pointers
-    let stdout = run_ok(r#"
+    let stdout = run_ok(
+        r#"
         fn circle_area(radius: Float) -> Float {
             3.14159 * radius * radius
         }
@@ -453,11 +504,20 @@ fn real_polymorphic_dispatch_simulation() {
             print(c);
             print(r);
         }
-    "#);
+    "#,
+    );
     // circle: 3.14159 * 25 = 78.53975
     // rect: 12.0
-    assert!(stdout.contains("78"), "Expected circle area ~78, got: {:?}", stdout);
-    assert!(stdout.contains("12"), "Expected rect area 12, got: {:?}", stdout);
+    assert!(
+        stdout.contains("78"),
+        "Expected circle area ~78, got: {:?}",
+        stdout
+    );
+    assert!(
+        stdout.contains("12"),
+        "Expected rect area 12, got: {:?}",
+        stdout
+    );
 }
 
 // ============================================================================
@@ -467,7 +527,8 @@ fn real_polymorphic_dispatch_simulation() {
 #[test]
 fn real_compile_context_logger() {
     // Context system with Logger protocol pattern
-    let _module = compile_ok(r#"
+    let _module = compile_ok(
+        r#"
         context Logger {
             fn log(msg: Text);
         }
@@ -478,13 +539,15 @@ fn real_compile_context_logger() {
 
         fn main() {
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn real_compile_context_chaining() {
     // Multiple contexts chained through function calls
-    let _module = compile_ok(r#"
+    let _module = compile_ok(
+        r#"
         context Logger {}
         context Database {}
         context Cache {}
@@ -502,13 +565,15 @@ fn real_compile_context_chaining() {
 
         fn main() {
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn real_compile_provide_context() {
     // Context provision with provide blocks
-    let _module = compile_ok(r#"
+    let _module = compile_ok(
+        r#"
         context Config {}
 
         fn get_setting() -> Int using [Config] {
@@ -520,7 +585,8 @@ fn real_compile_provide_context() {
                 let val = get_setting();
             }
         }
-    "#);
+    "#,
+    );
 }
 
 // ============================================================================
@@ -530,7 +596,8 @@ fn real_compile_provide_context() {
 #[test]
 fn real_parse_async_function() {
     // Async function definition with Result return
-    parse_ok(r#"
+    parse_ok(
+        r#"
         async fn fetch(url: Text) -> Text {
             "response"
         }
@@ -542,13 +609,15 @@ fn real_parse_async_function() {
 
         fn main() {
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn real_parse_async_with_context() {
     // Async function using context system
-    parse_ok(r#"
+    parse_ok(
+        r#"
         context HttpClient {}
 
         async fn get_data(url: Text) -> Text using [HttpClient] {
@@ -557,13 +626,15 @@ fn real_parse_async_with_context() {
 
         fn main() {
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn real_parse_async_select() {
     // Async select expression - arms require .await per grammar
-    parse_ok(r#"
+    parse_ok(
+        r#"
         async fn race() -> Int {
             select {
                 a = timeout(100).await => 1,
@@ -573,7 +644,8 @@ fn real_parse_async_select() {
 
         fn main() {
         }
-    "#);
+    "#,
+    );
 }
 
 // ============================================================================
@@ -583,7 +655,8 @@ fn real_parse_async_select() {
 #[test]
 fn real_calculator_program() {
     // Complete calculator with multiple operations
-    let stdout = run_ok(r#"
+    let stdout = run_ok(
+        r#"
         fn add(a: Int, b: Int) -> Int { a + b }
         fn sub(a: Int, b: Int) -> Int { a - b }
         fn mul(a: Int, b: Int) -> Int { a * b }
@@ -607,7 +680,8 @@ fn real_calculator_program() {
             print(calculate(2, 10, 5));
             print(calculate(3, 10, 5));
         }
-    "#);
+    "#,
+    );
     assert!(stdout.contains("15"), "Expected add=15, got: {:?}", stdout);
     assert!(stdout.contains("5"), "Expected sub=5, got: {:?}", stdout);
     assert!(stdout.contains("50"), "Expected mul=50, got: {:?}", stdout);
@@ -617,7 +691,8 @@ fn real_calculator_program() {
 #[test]
 fn real_sorting_simulation() {
     // Bubble sort-style comparison chain
-    let stdout = run_ok(r#"
+    let stdout = run_ok(
+        r#"
         fn min_of_three(a: Int, b: Int, c: Int) -> Int {
             let mut result = a;
             if b < result { result = b; }
@@ -647,7 +722,8 @@ fn real_sorting_simulation() {
             print(mid_of_three(a, b, c));
             print(max_of_three(a, b, c));
         }
-    "#);
+    "#,
+    );
     assert!(stdout.contains("10"), "Expected min=10, got: {:?}", stdout);
     assert!(stdout.contains("20"), "Expected mid=20, got: {:?}", stdout);
     assert!(stdout.contains("30"), "Expected max=30, got: {:?}", stdout);
@@ -656,7 +732,8 @@ fn real_sorting_simulation() {
 #[test]
 fn real_state_machine() {
     // State machine simulation using integer states
-    let stdout = run_ok(r#"
+    let stdout = run_ok(
+        r#"
         fn next_state(state: Int, input: Int) -> Int {
             match state {
                 0 => {
@@ -686,15 +763,25 @@ fn real_state_machine() {
             // Invalid sequence: 1, 1, 3 -> resets to 0
             print(run_machine(1, 1, 3));
         }
-    "#);
-    assert!(stdout.contains("3"), "Expected accepted state 3, got: {:?}", stdout);
-    assert!(stdout.contains("0"), "Expected rejected state 0, got: {:?}", stdout);
+    "#,
+    );
+    assert!(
+        stdout.contains("3"),
+        "Expected accepted state 3, got: {:?}",
+        stdout
+    );
+    assert!(
+        stdout.contains("0"),
+        "Expected rejected state 0, got: {:?}",
+        stdout
+    );
 }
 
 #[test]
 fn real_gcd_algorithm() {
     // Euclidean GCD algorithm
-    let stdout = run_ok(r#"
+    let stdout = run_ok(
+        r#"
         fn gcd(a: Int, b: Int) -> Int {
             let mut x = a;
             let mut y = b;
@@ -711,16 +798,26 @@ fn real_gcd_algorithm() {
             print(gcd(100, 75));
             print(gcd(7, 13));
         }
-    "#);
-    assert!(stdout.contains("6"), "Expected gcd(48,18)=6, got: {:?}", stdout);
-    assert!(stdout.contains("25"), "Expected gcd(100,75)=25, got: {:?}", stdout);
+    "#,
+    );
+    assert!(
+        stdout.contains("6"),
+        "Expected gcd(48,18)=6, got: {:?}",
+        stdout
+    );
+    assert!(
+        stdout.contains("25"),
+        "Expected gcd(100,75)=25, got: {:?}",
+        stdout
+    );
     // gcd(7,13) = 1 (coprime)
 }
 
 #[test]
 fn real_power_function() {
     // Iterative exponentiation
-    let stdout = run_ok(r#"
+    let stdout = run_ok(
+        r#"
         fn power(base: Int, exp: Int) -> Int {
             let mut result = 1;
             let mut i = 0;
@@ -736,16 +833,26 @@ fn real_power_function() {
             print(power(3, 4));
             print(power(5, 3));
         }
-    "#);
-    assert!(stdout.contains("1024"), "Expected 2^10=1024, got: {:?}", stdout);
+    "#,
+    );
+    assert!(
+        stdout.contains("1024"),
+        "Expected 2^10=1024, got: {:?}",
+        stdout
+    );
     assert!(stdout.contains("81"), "Expected 3^4=81, got: {:?}", stdout);
-    assert!(stdout.contains("125"), "Expected 5^3=125, got: {:?}", stdout);
+    assert!(
+        stdout.contains("125"),
+        "Expected 5^3=125, got: {:?}",
+        stdout
+    );
 }
 
 #[test]
 fn real_compile_full_type_system() {
     // Comprehensive type system: records, sum types, newtypes, protocols
-    let _module = compile_ok(r#"
+    let _module = compile_ok(
+        r#"
         type UserId is (Int);
         type Email is (Text);
 
@@ -770,13 +877,15 @@ fn real_compile_full_type_system() {
         fn main() {
             let status = Active;
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn real_compile_generic_container() {
     // Generic type with methods
-    let _module = compile_ok(r#"
+    let _module = compile_ok(
+        r#"
         type Pair<A, B> is { first: A, second: B };
 
         type Maybe<T> is None | Some(T);
@@ -793,13 +902,15 @@ fn real_compile_generic_container() {
             let x = Some(42);
             let y = None;
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn real_collatz_conjecture() {
     // Collatz sequence - counts steps until reaching 1
-    let stdout = run_ok(r#"
+    let stdout = run_ok(
+        r#"
         fn collatz_steps(n: Int) -> Int {
             let mut current = n;
             let mut steps = 0;
@@ -818,17 +929,27 @@ fn real_collatz_conjecture() {
             print(collatz_steps(6));
             print(collatz_steps(27));
         }
-    "#);
+    "#,
+    );
     // 6 -> 3 -> 10 -> 5 -> 16 -> 8 -> 4 -> 2 -> 1 = 8 steps
-    assert!(stdout.contains("8"), "Expected collatz(6)=8 steps, got: {:?}", stdout);
+    assert!(
+        stdout.contains("8"),
+        "Expected collatz(6)=8 steps, got: {:?}",
+        stdout
+    );
     // 27 takes 111 steps
-    assert!(stdout.contains("111"), "Expected collatz(27)=111 steps, got: {:?}", stdout);
+    assert!(
+        stdout.contains("111"),
+        "Expected collatz(27)=111 steps, got: {:?}",
+        stdout
+    );
 }
 
 #[test]
 fn real_is_prime() {
     // Primality testing
-    let stdout = run_ok(r#"
+    let stdout = run_ok(
+        r#"
         fn is_prime(n: Int) -> Bool {
             if n < 2 { return false; }
             if n < 4 { return true; }
@@ -861,17 +982,31 @@ fn real_is_prime() {
             print(is_prime(15));
             print(count_primes(20));
         }
-    "#);
-    assert!(stdout.contains("true"), "Expected true for prime, got: {:?}", stdout);
-    assert!(stdout.contains("false"), "Expected false for non-prime, got: {:?}", stdout);
+    "#,
+    );
+    assert!(
+        stdout.contains("true"),
+        "Expected true for prime, got: {:?}",
+        stdout
+    );
+    assert!(
+        stdout.contains("false"),
+        "Expected false for non-prime, got: {:?}",
+        stdout
+    );
     // Primes <= 20: 2,3,5,7,11,13,17,19 = 8
-    assert!(stdout.contains("8"), "Expected 8 primes <= 20, got: {:?}", stdout);
+    assert!(
+        stdout.contains("8"),
+        "Expected 8 primes <= 20, got: {:?}",
+        stdout
+    );
 }
 
 #[test]
 fn real_compile_attribute_and_mount() {
     // Attributes and mount statements
-    parse_ok(r#"
+    parse_ok(
+        r#"
         mount std.io;
 
         @derive(Eq, Hash)
@@ -882,13 +1017,15 @@ fn real_compile_attribute_and_mount() {
 
         fn main() {
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn real_compile_lambda_and_higher_order() {
     // Lambda expressions and higher-order functions
-    parse_ok(r#"
+    parse_ok(
+        r#"
         fn apply(f: fn(Int) -> Int, x: Int) -> Int {
             f(x)
         }
@@ -903,26 +1040,30 @@ fn real_compile_lambda_and_higher_order() {
             let result = apply(double, 21);
             print(result);
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn real_compile_format_strings() {
     // Format string literals (f-strings)
-    parse_ok(r#"
+    parse_ok(
+        r#"
         fn main() {
             let name = "Verum";
             let version = 1;
             let msg = f"Welcome to {name} v{version}";
             print(msg);
         }
-    "#);
+    "#,
+    );
 }
 
 #[test]
 fn real_compile_match_with_destructuring() {
     // Pattern matching with destructuring
-    let _module = compile_ok(r#"
+    let _module = compile_ok(
+        r#"
         type Maybe<T> is None | Some(T);
 
         fn describe(val: Maybe<Int>) -> Text {
@@ -936,7 +1077,8 @@ fn real_compile_match_with_destructuring() {
             let a = Some(42);
             let b = None;
         }
-    "#);
+    "#,
+    );
 }
 
 // ============================================================================
@@ -946,7 +1088,8 @@ fn real_compile_match_with_destructuring() {
 #[test]
 fn real_fibonacci_memoization_iterative() {
     // Iterative Fibonacci (efficient, tests loops + mutation)
-    let stdout = run_ok(r#"
+    let stdout = run_ok(
+        r#"
         fn fib_iter(n: Int) -> Int {
             if n <= 0 { return 0; }
             if n == 1 { return 1; }
@@ -968,16 +1111,26 @@ fn real_fibonacci_memoization_iterative() {
             print(fib_iter(10));
             print(fib_iter(20));
         }
-    "#);
+    "#,
+    );
     assert!(stdout.contains("0"), "Expected fib(0)=0, got: {:?}", stdout);
-    assert!(stdout.contains("55"), "Expected fib(10)=55, got: {:?}", stdout);
-    assert!(stdout.contains("6765"), "Expected fib(20)=6765, got: {:?}", stdout);
+    assert!(
+        stdout.contains("55"),
+        "Expected fib(10)=55, got: {:?}",
+        stdout
+    );
+    assert!(
+        stdout.contains("6765"),
+        "Expected fib(20)=6765, got: {:?}",
+        stdout
+    );
 }
 
 #[test]
 fn real_ackermann_small() {
     // Ackermann function - deeply recursive, tests stack management
-    let stdout = run_ok(r#"
+    let stdout = run_ok(
+        r#"
         fn ackermann(m: Int, n: Int) -> Int {
             if m == 0 {
                 n + 1
@@ -996,17 +1149,35 @@ fn real_ackermann_small() {
             print(ackermann(2, 2));
             print(ackermann(3, 3));
         }
-    "#);
-    assert!(stdout.contains("1"), "Expected ack(0,0)=1, got: {:?}", stdout);
-    assert!(stdout.contains("3"), "Expected ack(1,1)=3, got: {:?}", stdout);
-    assert!(stdout.contains("7"), "Expected ack(2,2)=7, got: {:?}", stdout);
-    assert!(stdout.contains("61"), "Expected ack(3,3)=61, got: {:?}", stdout);
+    "#,
+    );
+    assert!(
+        stdout.contains("1"),
+        "Expected ack(0,0)=1, got: {:?}",
+        stdout
+    );
+    assert!(
+        stdout.contains("3"),
+        "Expected ack(1,1)=3, got: {:?}",
+        stdout
+    );
+    assert!(
+        stdout.contains("7"),
+        "Expected ack(2,2)=7, got: {:?}",
+        stdout
+    );
+    assert!(
+        stdout.contains("61"),
+        "Expected ack(3,3)=61, got: {:?}",
+        stdout
+    );
 }
 
 #[test]
 fn real_digit_sum() {
     // Compute sum of digits (tests modulo and division)
-    let stdout = run_ok(r#"
+    let stdout = run_ok(
+        r#"
         fn digit_sum(n: Int) -> Int {
             let mut num = n;
             if num < 0 { num = -num; }
@@ -1023,15 +1194,25 @@ fn real_digit_sum() {
             print(digit_sum(999));
             print(digit_sum(100));
         }
-    "#);
-    assert!(stdout.contains("15"), "Expected digit_sum(12345)=15, got: {:?}", stdout);
-    assert!(stdout.contains("27"), "Expected digit_sum(999)=27, got: {:?}", stdout);
+    "#,
+    );
+    assert!(
+        stdout.contains("15"),
+        "Expected digit_sum(12345)=15, got: {:?}",
+        stdout
+    );
+    assert!(
+        stdout.contains("27"),
+        "Expected digit_sum(999)=27, got: {:?}",
+        stdout
+    );
 }
 
 #[test]
 fn real_fizzbuzz() {
     // FizzBuzz using helper functions to avoid deep nesting
-    let stdout = run_ok(r#"
+    let stdout = run_ok(
+        r#"
         fn classify(i: Int) -> Int {
             if i % 15 == 0 { 3 }
             else { if i % 3 == 0 { 1 }
@@ -1049,10 +1230,27 @@ fn real_fizzbuzz() {
             print(c15);
             print(c7);
         }
-    "#);
+    "#,
+    );
     // classify(3)=1 (Fizz), classify(5)=2 (Buzz), classify(15)=3 (FizzBuzz), classify(7)=0
-    assert!(stdout.contains("1"), "Expected 1 for Fizz, got: {:?}", stdout);
-    assert!(stdout.contains("2"), "Expected 2 for Buzz, got: {:?}", stdout);
-    assert!(stdout.contains("3"), "Expected 3 for FizzBuzz, got: {:?}", stdout);
-    assert!(stdout.contains("0"), "Expected 0 for normal, got: {:?}", stdout);
+    assert!(
+        stdout.contains("1"),
+        "Expected 1 for Fizz, got: {:?}",
+        stdout
+    );
+    assert!(
+        stdout.contains("2"),
+        "Expected 2 for Buzz, got: {:?}",
+        stdout
+    );
+    assert!(
+        stdout.contains("3"),
+        "Expected 3 for FizzBuzz, got: {:?}",
+        stdout
+    );
+    assert!(
+        stdout.contains("0"),
+        "Expected 0 for normal, got: {:?}",
+        stdout
+    );
 }

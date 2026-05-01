@@ -85,11 +85,10 @@ fn two_file_project_mount_helper_resolves() {
 
     // Run the resolver.
     let mut loader = ModuleLoader::new(root.path());
-    let resolved =
-        resolve_file_mounts(&mut loader, &[(main_path.clone(), main_ast)], |source| {
-            Ok(parse(source.source.as_str(), source.file_id))
-        })
-        .expect("resolution must succeed");
+    let resolved = resolve_file_mounts(&mut loader, &[(main_path.clone(), main_ast)], |source| {
+        Ok(parse(source.source.as_str(), source.file_id))
+    })
+    .expect("resolution must succeed");
 
     assert_eq!(resolved.len(), 1, "expected exactly one resolved file");
     let entry = &resolved[0];
@@ -116,11 +115,7 @@ fn three_file_transitive_mount_resolves_in_order() {
     let leaf = root.path().join("leaf.vr");
     std::fs::write(&a, "module a;\nmount ./mid.vr;\n").unwrap();
     std::fs::write(&mid, "module mid;\nmount ./leaf.vr;\n").unwrap();
-    std::fs::write(
-        &leaf,
-        "module leaf;\npublic fn answer() -> Int { 42 }\n",
-    )
-    .unwrap();
+    std::fs::write(&leaf, "module leaf;\npublic fn answer() -> Int { 42 }\n").unwrap();
 
     let a_ast = parse(&std::fs::read_to_string(&a).unwrap(), FileId::new(1));
 
@@ -141,16 +136,8 @@ fn alias_overrides_basename() {
     let root = tempfile::TempDir::new().unwrap();
     let main_path = root.path().join("main.vr");
     let helper_path = root.path().join("helper.vr");
-    std::fs::write(
-        &main_path,
-        "module main;\nmount ./helper.vr as Util;\n",
-    )
-    .unwrap();
-    std::fs::write(
-        &helper_path,
-        "module helper;\npublic fn x() -> Int { 0 }\n",
-    )
-    .unwrap();
+    std::fs::write(&main_path, "module main;\nmount ./helper.vr as Util;\n").unwrap();
+    std::fs::write(&helper_path, "module helper;\npublic fn x() -> Int { 0 }\n").unwrap();
 
     let main_ast = parse(
         &std::fs::read_to_string(&main_path).unwrap(),
@@ -158,11 +145,10 @@ fn alias_overrides_basename() {
     );
 
     let mut loader = ModuleLoader::new(root.path());
-    let resolved =
-        resolve_file_mounts(&mut loader, &[(main_path, main_ast)], |source| {
-            Ok(parse(source.source.as_str(), source.file_id))
-        })
-        .unwrap();
+    let resolved = resolve_file_mounts(&mut loader, &[(main_path, main_ast)], |source| {
+        Ok(parse(source.source.as_str(), source.file_id))
+    })
+    .unwrap();
 
     assert_eq!(resolved.len(), 1);
     assert_eq!(
@@ -188,11 +174,9 @@ fn diamond_pattern_dedupes_shared_target() {
     let b_ast = parse(&std::fs::read_to_string(&b).unwrap(), FileId::new(2));
 
     let mut loader = ModuleLoader::new(root.path());
-    let resolved = resolve_file_mounts(
-        &mut loader,
-        &[(a, a_ast), (b, b_ast)],
-        |source| Ok(parse(source.source.as_str(), source.file_id)),
-    )
+    let resolved = resolve_file_mounts(&mut loader, &[(a, a_ast), (b, b_ast)], |source| {
+        Ok(parse(source.source.as_str(), source.file_id))
+    })
     .unwrap();
 
     assert_eq!(
@@ -218,17 +202,12 @@ fn sibling_at_parent_directory_resolves() {
     std::fs::write(&util, "module util;\npublic fn now() -> Int { 1 }\n").unwrap();
     std::fs::write(&inner, "module inner;\nmount ../util.vr;\n").unwrap();
 
-    let inner_ast = parse(
-        &std::fs::read_to_string(&inner).unwrap(),
-        FileId::new(1),
-    );
+    let inner_ast = parse(&std::fs::read_to_string(&inner).unwrap(), FileId::new(1));
 
     let mut loader = ModuleLoader::new(root.path());
-    let resolved = resolve_file_mounts(
-        &mut loader,
-        &[(inner.clone(), inner_ast)],
-        |source| Ok(parse(source.source.as_str(), source.file_id)),
-    )
+    let resolved = resolve_file_mounts(&mut loader, &[(inner.clone(), inner_ast)], |source| {
+        Ok(parse(source.source.as_str(), source.file_id))
+    })
     .unwrap();
 
     assert_eq!(resolved.len(), 1);
@@ -287,11 +266,9 @@ fn sandbox_blocks_escape_attempt_outside_root() {
     };
 
     let mut loader = ModuleLoader::new(root.path());
-    let result = resolve_file_mounts(
-        &mut loader,
-        &[(importing, importing_ast)],
-        |source| Ok(parse(source.source.as_str(), source.file_id)),
-    );
+    let result = resolve_file_mounts(&mut loader, &[(importing, importing_ast)], |source| {
+        Ok(parse(source.source.as_str(), source.file_id))
+    });
     assert!(
         result.is_err(),
         "loader sandbox MUST reject the escape attempt"

@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use verum_common::Text;
 use verum_verification::proof_drafting::LemmaSummary;
 use verum_verification::proof_repl::{
-    run_batch, summarise, DefaultReplSession, ReplCommand, ReplResponse, ReplSession,
+    DefaultReplSession, ReplCommand, ReplResponse, ReplSession, run_batch, summarise,
 };
 
 fn parse_lemmas(flags: &[String]) -> Result<Vec<LemmaSummary>> {
@@ -69,10 +69,7 @@ fn parse_command_line(line: &str) -> Result<Option<ReplCommand>> {
             5
         } else {
             rest.parse().map_err(|_| {
-                CliError::InvalidArgument(format!(
-                    "hint must be `hint [N]`, got `{}`",
-                    line
-                ))
+                CliError::InvalidArgument(format!("hint must be `hint [N]`, got `{}`", line))
             })?
         };
         return Ok(Some(ReplCommand::Hint { max }));
@@ -140,9 +137,7 @@ pub fn run_batch_cli(
         ));
     }
     if goal.is_empty() {
-        return Err(CliError::InvalidArgument(
-            "--goal must be non-empty".into(),
-        ));
+        return Err(CliError::InvalidArgument("--goal must be non-empty".into()));
     }
     validate_format(format)?;
 
@@ -154,11 +149,7 @@ pub fn run_batch_cli(
     let mut script = String::new();
     if let Some(path) = commands_file {
         let body = std::fs::read_to_string(path).map_err(|e| {
-            CliError::VerificationFailed(format!(
-                "reading {}: {}",
-                path.display(),
-                e
-            ))
+            CliError::VerificationFailed(format!("reading {}: {}", path.display(), e))
         })?;
         script.push_str(&body);
         script.push('\n');
@@ -190,10 +181,7 @@ pub fn run_batch_cli(
 }
 
 fn emit_responses_plain(responses: &[ReplResponse], session: &DefaultReplSession) {
-    println!(
-        "REPL transcript ({} command(s) executed):",
-        responses.len()
-    );
+    println!("REPL transcript ({} command(s) executed):", responses.len());
     println!();
     for (i, r) in responses.iter().enumerate() {
         match r {
@@ -210,9 +198,7 @@ fn emit_responses_plain(responses: &[ReplResponse], session: &DefaultReplSession
                     snapshot.history_depth
                 );
             }
-            ReplResponse::Rejected {
-                tactic, reason, ..
-            } => {
+            ReplResponse::Rejected { tactic, reason, .. } => {
                 println!(
                     "  [{:>3}] ✗ apply  {}  → {}",
                     i + 1,
@@ -290,7 +276,10 @@ fn emit_responses_plain(responses: &[ReplResponse], session: &DefaultReplSession
     println!("Final state:");
     println!("  history_depth : {}", final_snap.history_depth);
     println!("  redo_depth    : {}", final_snap.redo_depth);
-    println!("  applied_steps : {} step(s)", final_snap.applied_steps.len());
+    println!(
+        "  applied_steps : {} step(s)",
+        final_snap.applied_steps.len()
+    );
 }
 
 fn emit_responses_json(responses: &[ReplResponse], session: &DefaultReplSession) {
@@ -326,21 +315,14 @@ fn emit_responses_json(responses: &[ReplResponse], session: &DefaultReplSession)
 // run_tree_cli — emit proof-tree DOT after applying steps
 // =============================================================================
 
-pub fn run_tree_cli(
-    theorem: &str,
-    goal: &str,
-    lemmas: &[String],
-    apply: &[String],
-) -> Result<()> {
+pub fn run_tree_cli(theorem: &str, goal: &str, lemmas: &[String], apply: &[String]) -> Result<()> {
     if theorem.is_empty() {
         return Err(CliError::InvalidArgument(
             "--theorem must be non-empty".into(),
         ));
     }
     if goal.is_empty() {
-        return Err(CliError::InvalidArgument(
-            "--goal must be non-empty".into(),
-        ));
+        return Err(CliError::InvalidArgument("--goal must be non-empty".into()));
     }
     let parsed_lemmas = parse_lemmas(lemmas)?;
     let mut session = DefaultReplSession::new(theorem, goal, parsed_lemmas);
@@ -498,28 +480,14 @@ mod tests {
 
     #[test]
     fn run_batch_cli_rejection_returns_err() {
-        let r = run_batch_cli(
-            "thm",
-            "P",
-            &[],
-            None,
-            &["xyz_garbage".into()],
-            "plain",
-        );
+        let r = run_batch_cli("thm", "P", &[], None, &["xyz_garbage".into()], "plain");
         assert!(matches!(r, Err(CliError::VerificationFailed(_))));
     }
 
     #[test]
     fn run_batch_cli_reads_file() {
         let f = write_temp("intro\nauto\nstatus\n");
-        let r = run_batch_cli(
-            "thm",
-            "P",
-            &[],
-            Some(&f.path().to_path_buf()),
-            &[],
-            "plain",
-        );
+        let r = run_batch_cli("thm", "P", &[], Some(&f.path().to_path_buf()), &[], "plain");
         assert!(r.is_ok());
     }
 
@@ -556,12 +524,7 @@ mod tests {
     fn run_tree_cli_emits_dot() {
         // Sink stdout via capturing isn't trivial in unit tests;
         // we just verify the function returns Ok on a happy path.
-        let r = run_tree_cli(
-            "thm",
-            "P",
-            &[],
-            &["intro".into(), "auto".into()],
-        );
+        let r = run_tree_cli("thm", "P", &[], &["intro".into(), "auto".into()]);
         assert!(r.is_ok());
     }
 

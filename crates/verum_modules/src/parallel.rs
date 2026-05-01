@@ -22,11 +22,11 @@
 //! independent_groups algorithm) can be loaded concurrently, significantly
 //! improving compilation times for large projects.
 
+use crate::ModuleInfo;
 use crate::dependency::DependencyGraph;
 use crate::error::{ModuleError, ModuleResult};
 use crate::loader::ModuleLoader;
 use crate::path::{ModuleId, ModulePath};
-use crate::ModuleInfo;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -224,7 +224,16 @@ impl ParallelLoader {
                 // Semaphore is never closed; acquire only fails if closed
                 let _permit = match sem.acquire().await {
                     Ok(p) => p,
-                    Err(_) => return (module_id, path, Err(crate::error::ModuleError::Other { message: "semaphore closed".into(), span: None })),
+                    Err(_) => {
+                        return (
+                            module_id,
+                            path,
+                            Err(crate::error::ModuleError::Other {
+                                message: "semaphore closed".into(),
+                                span: None,
+                            }),
+                        );
+                    }
                 };
                 let mut loader_guard = loader.lock().await;
                 let result = loader_guard.load_and_parse(&path, module_id);
@@ -298,7 +307,15 @@ impl ParallelLoader {
             let handle = tokio::spawn(async move {
                 let _permit = match sem.acquire().await {
                     Ok(p) => p,
-                    Err(_) => return (id, Err(crate::error::ModuleError::Other { message: "semaphore closed".into(), span: None })),
+                    Err(_) => {
+                        return (
+                            id,
+                            Err(crate::error::ModuleError::Other {
+                                message: "semaphore closed".into(),
+                                span: None,
+                            }),
+                        );
+                    }
                 };
                 let mut loader_guard = loader.lock().await;
                 let result = loader_guard.load_and_parse(&path, id);
@@ -410,10 +427,7 @@ impl SyncParallelLoader {
     }
 
     /// Load all modules in the dependency graph using rayon.
-    pub fn load_all(
-        &mut self,
-        graph: &DependencyGraph,
-    ) -> ModuleResult<Map<ModuleId, ModuleInfo>> {
+    pub fn load_all(&mut self, graph: &DependencyGraph) -> ModuleResult<Map<ModuleId, ModuleInfo>> {
         use rayon::prelude::*;
 
         let groups = graph.independent_groups();

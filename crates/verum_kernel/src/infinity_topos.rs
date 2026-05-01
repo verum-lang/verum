@@ -151,7 +151,8 @@ impl InfinityTopos {
     pub fn is_coherent(&self) -> bool {
         self.left_exact_reflector
             && self.giraud.all_satisfied()
-            && self.reflective_inclusion
+            && self
+                .reflective_inclusion
                 .as_ref()
                 .map(|rs| rs.is_coherent())
                 .unwrap_or(true)
@@ -194,9 +195,10 @@ pub fn build_infinity_topos(
         return None;
     }
     if let Some(rs) = &reflective_inclusion
-        && !rs.is_coherent() {
-            return None;
-        }
+        && !rs.is_coherent()
+    {
+        return None;
+    }
     Some(InfinityTopos {
         name: name.into(),
         underlying_category: underlying.clone(),
@@ -220,8 +222,8 @@ pub fn presheaf_category_is_topos(
         name: presheaf_category.name.clone(),
         underlying_category: presheaf_category.clone(),
         presenting_site: underlying_site.into(),
-        reflective_inclusion: None,  // identity inclusion
-        left_exact_reflector: true,  // identity is left-exact
+        reflective_inclusion: None, // identity inclusion
+        left_exact_reflector: true, // identity is left-exact
         giraud: GiraudAxioms::fully_satisfied(),
         level: Ordinal::Finite(1),
     }
@@ -270,8 +272,11 @@ mod tests {
                 3 => g.effective_groupoids = false,
                 _ => {}
             }
-            assert!(!g.all_satisfied(),
-                "Each Giraud axiom must be independently required (breaker={})", breaker);
+            assert!(
+                !g.all_satisfied(),
+                "Each Giraud axiom must be independently required (breaker={})",
+                breaker
+            );
         }
     }
 
@@ -288,15 +293,9 @@ mod tests {
     #[test]
     fn build_infinity_topos_via_left_exact_localisation() {
         let pre = SaftPreconditions::fully_satisfied("ι");
-        let rs = build_reflective_subcategory(
-            "T ↪ PSh(C)",
-            &sample_t(),
-            &sample_psh(),
-            "ι",
-            true,
-            &pre,
-        )
-        .unwrap();
+        let rs =
+            build_reflective_subcategory("T ↪ PSh(C)", &sample_t(), &sample_psh(), "ι", true, &pre)
+                .unwrap();
         let t = build_infinity_topos(
             "T",
             &sample_t(),
@@ -317,27 +316,21 @@ mod tests {
             &sample_t(),
             "C",
             None,
-            false,  // reflector NOT left exact
+            false, // reflector NOT left exact
             GiraudAxioms::fully_satisfied(),
         );
-        assert!(t.is_none(),
-            "Reflector must be left exact per HTT 6.1.0.6 (ii)");
+        assert!(
+            t.is_none(),
+            "Reflector must be left exact per HTT 6.1.0.6 (ii)"
+        );
     }
 
     #[test]
     fn build_fails_when_giraud_axioms_break() {
         let mut g = GiraudAxioms::fully_satisfied();
         g.disjoint_coproducts = false;
-        let t = build_infinity_topos(
-            "T",
-            &sample_t(),
-            "C",
-            None,
-            true,
-            g,
-        );
-        assert!(t.is_none(),
-            "Giraud axioms must hold per HTT 6.1.0.4");
+        let t = build_infinity_topos("T", &sample_t(), "C", None, true, g);
+        assert!(t.is_none(), "Giraud axioms must hold per HTT 6.1.0.4");
     }
 
     // ----- Decision predicates -----
@@ -366,24 +359,14 @@ mod tests {
     fn msfs_s_s_global_is_infinity_topos() {
         // §3 admits via msfs_s_s_is_infty_topos host-stdlib axiom.
         // Promotion: invoke build_infinity_topos directly.
-        let s_s = InfinityCategory::at_canonical_universe(
-            "S_S^global",
-            Ordinal::Finite(1),
-        );
+        let s_s = InfinityCategory::at_canonical_universe("S_S^global", Ordinal::Finite(1));
         let psh = InfinityCategory::at_canonical_universe(
             "PSh(LegitimateAbstraction)",
             Ordinal::Finite(1),
         );
         let pre = SaftPreconditions::fully_satisfied("ι");
-        let rs = build_reflective_subcategory(
-            "S_S^global ↪ PSh(LA)",
-            &s_s,
-            &psh,
-            "ι",
-            true,
-            &pre,
-        )
-        .unwrap();
+        let rs = build_reflective_subcategory("S_S^global ↪ PSh(LA)", &s_s, &psh, "ι", true, &pre)
+            .unwrap();
         let topos = build_infinity_topos(
             "S_S^global",
             &s_s,

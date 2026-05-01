@@ -131,8 +131,14 @@ fn test_nested_tuple_index() {
     let mut eval = ConstEvaluator::new();
 
     // Create nested tuple ((1, 2), (3, 4))
-    let inner1 = Expr::new(ExprKind::Tuple(vec![int_lit(1), int_lit(2)].into()), Span::dummy());
-    let inner2 = Expr::new(ExprKind::Tuple(vec![int_lit(3), int_lit(4)].into()), Span::dummy());
+    let inner1 = Expr::new(
+        ExprKind::Tuple(vec![int_lit(1), int_lit(2)].into()),
+        Span::dummy(),
+    );
+    let inner2 = Expr::new(
+        ExprKind::Tuple(vec![int_lit(3), int_lit(4)].into()),
+        Span::dummy(),
+    );
     let outer = Expr::new(ExprKind::Tuple(vec![inner1, inner2].into()), Span::dummy());
 
     // Access .1 to get (3, 4)
@@ -171,7 +177,10 @@ fn test_array_index_with_constant_expression() {
         int_lit(400),
         int_lit(500),
     ];
-    let array = Expr::new(ExprKind::Array(ArrayExpr::List(elements.into())), Span::dummy());
+    let array = Expr::new(
+        ExprKind::Array(ArrayExpr::List(elements.into())),
+        Span::dummy(),
+    );
 
     // Access with computed index: 1 + 1 = 2
     let index_expr = Expr::new(
@@ -210,7 +219,10 @@ fn test_array_index_with_variable_binding() {
         int_lit(40),
         int_lit(50),
     ];
-    let array = Expr::new(ExprKind::Array(ArrayExpr::List(elements.into())), Span::dummy());
+    let array = Expr::new(
+        ExprKind::Array(ArrayExpr::List(elements.into())),
+        Span::dummy(),
+    );
 
     // Access with variable: array[i]
     let index_expr = path_expr("i");
@@ -237,7 +249,9 @@ fn test_tensor_shape_with_literal_dimensions() {
 
     // Shape: [2, 3, 4]
     let shape = Expr::new(
-        ExprKind::Array(ArrayExpr::List(vec![int_lit(2), int_lit(3), int_lit(4)].into())),
+        ExprKind::Array(ArrayExpr::List(
+            vec![int_lit(2), int_lit(3), int_lit(4)].into(),
+        )),
         Span::dummy(),
     );
 
@@ -307,7 +321,9 @@ fn test_tensor_total_elements() {
 
     // Shape: [2, 3, 4] -> total = 24
     let shape = Expr::new(
-        ExprKind::Array(ArrayExpr::List(vec![int_lit(2), int_lit(3), int_lit(4)].into())),
+        ExprKind::Array(ArrayExpr::List(
+            vec![int_lit(2), int_lit(3), int_lit(4)].into(),
+        )),
         Span::dummy(),
     );
 
@@ -321,13 +337,17 @@ fn test_tensor_shape_broadcast_compatibility() {
 
     // Shape1: [3, 1, 5]
     let shape1 = Expr::new(
-        ExprKind::Array(ArrayExpr::List(vec![int_lit(3), int_lit(1), int_lit(5)].into())),
+        ExprKind::Array(ArrayExpr::List(
+            vec![int_lit(3), int_lit(1), int_lit(5)].into(),
+        )),
         Span::dummy(),
     );
 
     // Shape2: [1, 4, 5] - broadcast compatible with shape1
     let shape2 = Expr::new(
-        ExprKind::Array(ArrayExpr::List(vec![int_lit(1), int_lit(4), int_lit(5)].into())),
+        ExprKind::Array(ArrayExpr::List(
+            vec![int_lit(1), int_lit(4), int_lit(5)].into(),
+        )),
         Span::dummy(),
     );
 
@@ -341,13 +361,17 @@ fn test_tensor_shape_not_broadcast_compatible() {
 
     // Shape1: [3, 2, 5]
     let shape1 = Expr::new(
-        ExprKind::Array(ArrayExpr::List(vec![int_lit(3), int_lit(2), int_lit(5)].into())),
+        ExprKind::Array(ArrayExpr::List(
+            vec![int_lit(3), int_lit(2), int_lit(5)].into(),
+        )),
         Span::dummy(),
     );
 
     // Shape2: [3, 4, 5] - NOT broadcast compatible (2 != 4 and neither is 1)
     let shape2 = Expr::new(
-        ExprKind::Array(ArrayExpr::List(vec![int_lit(3), int_lit(4), int_lit(5)].into())),
+        ExprKind::Array(ArrayExpr::List(
+            vec![int_lit(3), int_lit(4), int_lit(5)].into(),
+        )),
         Span::dummy(),
     );
 
@@ -413,7 +437,10 @@ fn test_eval_zero_dimension_tensor_shape() {
     let mut eval = ConstEvaluator::new();
 
     // Empty shape: [] for scalar
-    let shape = Expr::new(ExprKind::Array(ArrayExpr::List(vec![].into())), Span::dummy());
+    let shape = Expr::new(
+        ExprKind::Array(ArrayExpr::List(vec![].into())),
+        Span::dummy(),
+    );
 
     let dims = eval.compute_tensor_shape(&shape).unwrap();
     assert_eq!(dims.len(), 0);
@@ -440,11 +467,9 @@ fn test_eval_large_dimension_product() {
 
     // Shape: [100, 100, 100] -> total = 1,000,000
     let shape = Expr::new(
-        ExprKind::Array(ArrayExpr::List(vec![
-            int_lit(100),
-            int_lit(100),
-            int_lit(100),
-        ].into())),
+        ExprKind::Array(ArrayExpr::List(
+            vec![int_lit(100), int_lit(100), int_lit(100)].into(),
+        )),
         Span::dummy(),
     );
 
@@ -466,7 +491,10 @@ fn test_mixed_type_tuple_evaluation() {
         ExprKind::Literal(Literal::bool(true, Span::dummy())),
         Span::dummy(),
     );
-    let tuple = Expr::new(ExprKind::Tuple(vec![int_elem, bool_elem].into()), Span::dummy());
+    let tuple = Expr::new(
+        ExprKind::Tuple(vec![int_elem, bool_elem].into()),
+        Span::dummy(),
+    );
 
     // Access integer element
     let int_access = Expr::new(
@@ -486,8 +514,14 @@ fn test_deeply_nested_structure_evaluation() {
     let mut eval = ConstEvaluator::new();
 
     // Create ((1, 2), (3, (4, 5)))
-    let inner1 = Expr::new(ExprKind::Tuple(vec![int_lit(1), int_lit(2)].into()), Span::dummy());
-    let inner2_deep = Expr::new(ExprKind::Tuple(vec![int_lit(4), int_lit(5)].into()), Span::dummy());
+    let inner1 = Expr::new(
+        ExprKind::Tuple(vec![int_lit(1), int_lit(2)].into()),
+        Span::dummy(),
+    );
+    let inner2_deep = Expr::new(
+        ExprKind::Tuple(vec![int_lit(4), int_lit(5)].into()),
+        Span::dummy(),
+    );
     let inner2 = Expr::new(
         ExprKind::Tuple(vec![int_lit(3), inner2_deep].into()),
         Span::dummy(),

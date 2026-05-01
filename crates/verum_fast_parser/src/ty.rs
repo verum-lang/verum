@@ -10,7 +10,9 @@
 //! - Function types: `fn(A, B) -> C`
 
 use verum_ast::ffi::CallingConvention;
-use verum_ast::ty::{GenericParamKind, KindAnnotation, Lifetime, WherePredicate, WherePredicateKind};
+use verum_ast::ty::{
+    GenericParamKind, KindAnnotation, Lifetime, WherePredicate, WherePredicateKind,
+};
 use verum_ast::{
     ContextList, ContextRequirement, GenericParam, Ident, Path, RefinementPredicate, Type,
     TypeKind, WhereClause, ty::*,
@@ -144,7 +146,10 @@ impl<'a> RecursiveParser<'a> {
         }
 
         let span = self.stream.current_span();
-        Err(ParseError::invalid_syntax("expected type in quantifier binding", span))
+        Err(ParseError::invalid_syntax(
+            "expected type in quantifier binding",
+            span,
+        ))
     }
 
     /// Parse a simple path-based type without `.` continuation.
@@ -271,7 +276,9 @@ impl<'a> RecursiveParser<'a> {
             );
             self.stream.reset_to(pos); // restore position
             if looks_like_capability {
-                return Err(ParseError::capability_no_with(self.stream.make_span(start_pos)));
+                return Err(ParseError::capability_no_with(
+                    self.stream.make_span(start_pos),
+                ));
             }
         }
 
@@ -411,9 +418,7 @@ impl<'a> RecursiveParser<'a> {
                             | Some(TokenKind::EqEq)
                             | Some(TokenKind::BangEq) => true,
                             // Logical operators
-                            Some(TokenKind::AmpersandAmpersand) | Some(TokenKind::PipePipe) => {
-                                true
-                            }
+                            Some(TokenKind::AmpersandAmpersand) | Some(TokenKind::PipePipe) => true,
                             // Pattern matching: {result is Some => ...}
                             Some(TokenKind::Is) => true,
                             // result.xxx is ambiguous: could be refinement {result.len() > 0}
@@ -617,7 +622,9 @@ impl<'a> RecursiveParser<'a> {
                 return Ok(type_lambda);
             }
             // If type lambda parsing failed, report the original error
-            return Err(ParseError::leading_pipe_no_context(self.stream.current_span()));
+            return Err(ParseError::leading_pipe_no_context(
+                self.stream.current_span(),
+            ));
         }
 
         // Unit type: ()
@@ -725,9 +732,15 @@ impl<'a> RecursiveParser<'a> {
         if self.stream.check(&TokenKind::Async) {
             // Look ahead: if next is 'fn', parse as async function type
             // Otherwise, treat 'async' as a modifier on a protocol bound (async FnOnce, etc.)
-            if matches!(self.stream.peek_nth(1).map(|t| &t.kind), Some(TokenKind::Fn)) {
+            if matches!(
+                self.stream.peek_nth(1).map(|t| &t.kind),
+                Some(TokenKind::Fn)
+            ) {
                 return self.parse_async_function_type();
-            } else if matches!(self.stream.peek_nth(1).map(|t| &t.kind), Some(TokenKind::Async)) {
+            } else if matches!(
+                self.stream.peek_nth(1).map(|t| &t.kind),
+                Some(TokenKind::Async)
+            ) {
                 // E018: Duplicate async keyword is not allowed
                 return Err(ParseError::invalid_syntax(
                     "duplicate `async` keyword is not allowed",
@@ -796,7 +809,12 @@ impl<'a> RecursiveParser<'a> {
             self.stream.advance(); // consume 'meta'
             let inner = self.parse_type_no_refinement()?;
             let span = self.stream.make_span(start_pos);
-            return Ok(Type::new(TypeKind::Meta { inner: Heap::new(inner) }, span));
+            return Ok(Type::new(
+                TypeKind::Meta {
+                    inner: Heap::new(inner),
+                },
+                span,
+            ));
         }
 
         // Meta type: @Expr, @TokenStream, @Type, etc.
@@ -881,10 +899,7 @@ impl<'a> RecursiveParser<'a> {
 
         // Construct as a path type with @ prefix
         // The name becomes a path like "@Expr" which the type checker treats as a meta type
-        let segment = PathSegment::Name(Ident::new(
-            Text::from(format!("@{}", name)),
-            name_span,
-        ));
+        let segment = PathSegment::Name(Ident::new(Text::from(format!("@{}", name)), name_span));
         let path = Path::new(List::from(vec![segment]), span);
 
         Ok(Type::new(TypeKind::Path(path), span))
@@ -1043,10 +1058,7 @@ impl<'a> RecursiveParser<'a> {
                 self.stream.expect(TokenKind::Comma)?;
                 let rhs = self.parse_universe_level_expr()?;
                 self.stream.expect(TokenKind::RParen)?;
-                Ok(UniverseLevelExpr::Max(
-                    Heap::new(lhs),
-                    Heap::new(rhs),
-                ))
+                Ok(UniverseLevelExpr::Max(Heap::new(lhs), Heap::new(rhs)))
             }
             // Level variable: u, v, ...
             Some(Token {
@@ -1235,7 +1247,9 @@ impl<'a> RecursiveParser<'a> {
         // E098: Check for missing colon - if next is an identifier, it should be preceded by colon
         if !self.stream.check(&TokenKind::Colon) {
             if self.is_ident() || self.stream.check(&TokenKind::LBrace) {
-                return Err(ParseError::existential_missing_colon(self.stream.make_span(start_pos)));
+                return Err(ParseError::existential_missing_colon(
+                    self.stream.make_span(start_pos),
+                ));
             }
         }
 
@@ -1244,7 +1258,9 @@ impl<'a> RecursiveParser<'a> {
 
         // E097: Check for empty bounds - `some T: {}` or `some T: )`
         if self.stream.check(&TokenKind::LBrace) || self.stream.check(&TokenKind::RParen) {
-            return Err(ParseError::existential_no_bounds(self.stream.make_span(start_pos)));
+            return Err(ParseError::existential_no_bounds(
+                self.stream.make_span(start_pos),
+            ));
         }
 
         // Parse bounds using parse_type_bounds_or_type to support generic bounds
@@ -1289,7 +1305,10 @@ impl<'a> RecursiveParser<'a> {
                 "naked" => CallingConvention::Naked,
                 _ => {
                     return Err(ParseError::invalid_syntax(
-                        format!("unknown calling convention: \"{}\". Expected \"C\", \"stdcall\", \"fastcall\", \"sysv64\", or \"system\"", abi_str),
+                        format!(
+                            "unknown calling convention: \"{}\". Expected \"C\", \"stdcall\", \"fastcall\", \"sysv64\", or \"system\"",
+                            abi_str
+                        ),
                         self.stream.current_span(),
                     ));
                 }
@@ -1313,7 +1332,10 @@ impl<'a> RecursiveParser<'a> {
     /// Rank-2 function types have universally quantified type parameters:
     /// - `fn<R>(Reducer<B, R>) -> Reducer<A, R>` - R is quantified within the function type
     /// - This enables storing polymorphic functions as values (e.g., transducers)
-    fn parse_function_type(&mut self, calling_convention: Maybe<CallingConvention>) -> ParseResult<Type> {
+    fn parse_function_type(
+        &mut self,
+        calling_convention: Maybe<CallingConvention>,
+    ) -> ParseResult<Type> {
         let start_pos = self.stream.position();
 
         self.stream.expect(TokenKind::Fn)?;
@@ -1334,7 +1356,9 @@ impl<'a> RecursiveParser<'a> {
         };
         // E061: Unclosed function parameter list
         if self.stream.consume(&TokenKind::RParen).is_none() {
-            return Err(ParseError::unclosed_fn_params(self.stream.make_span(start_pos)));
+            return Err(ParseError::unclosed_fn_params(
+                self.stream.make_span(start_pos),
+            ));
         }
 
         // Optional throws clause: throws(ErrorType) or throws(A | B)
@@ -1359,7 +1383,9 @@ impl<'a> RecursiveParser<'a> {
         // E063: Wrong arrow operator (=> instead of ->)
         if self.stream.check(&TokenKind::FatArrow) {
             return Err(ParseError::with_error_code(
-                ParseErrorKind::InvalidSyntax { message: "function type must use `->` not `=>`".into() },
+                ParseErrorKind::InvalidSyntax {
+                    message: "function type must use `->` not `=>`".into(),
+                },
                 self.stream.current_span(),
                 ErrorCode::WrongArrowOperator,
             ));
@@ -1371,10 +1397,15 @@ impl<'a> RecursiveParser<'a> {
             // E062: Missing return type after arrow
             if matches!(
                 self.stream.peek_kind(),
-                Some(TokenKind::Semicolon) | Some(TokenKind::RBrace) | Some(TokenKind::RBracket) | None
+                Some(TokenKind::Semicolon)
+                    | Some(TokenKind::RBrace)
+                    | Some(TokenKind::RBracket)
+                    | None
             ) {
                 return Err(ParseError::with_error_code(
-                    ParseErrorKind::InvalidSyntax { message: "missing return type after `->`".into() },
+                    ParseErrorKind::InvalidSyntax {
+                        message: "missing return type after `->`".into(),
+                    },
                     self.stream.make_span(start_pos),
                     ErrorCode::FnTypeMissingReturn,
                 ));
@@ -1550,7 +1581,9 @@ impl<'a> RecursiveParser<'a> {
         if types.len() == 1 {
             // Just return the inner type (parentheses are ignored in type syntax)
             // SAFETY: len() == 1 guarantees exactly one element
-            return Ok(types.into_iter().next()
+            return Ok(types
+                .into_iter()
+                .next()
                 .expect("types.len() == 1 guarantees one element"));
         }
 
@@ -1568,7 +1601,9 @@ impl<'a> RecursiveParser<'a> {
 
         // E074: Array missing element type - [; 10] or []
         if self.stream.check(&TokenKind::Semicolon) || self.stream.check(&TokenKind::RBracket) {
-            return Err(ParseError::array_missing_element(self.stream.make_span(start_pos)));
+            return Err(ParseError::array_missing_element(
+                self.stream.make_span(start_pos),
+            ));
         }
 
         let element = self.parse_type()?;
@@ -1576,23 +1611,31 @@ impl<'a> RecursiveParser<'a> {
         // E073: Missing semicolon before size - [T N] instead of [T; N]
         // If we see an integer directly after the type (no semicolon), that's an error
         if matches!(self.stream.peek_kind(), Some(TokenKind::Integer(_))) {
-            return Err(ParseError::array_double_semicolon(self.stream.make_span(start_pos)));
+            return Err(ParseError::array_double_semicolon(
+                self.stream.make_span(start_pos),
+            ));
         }
 
         let result = if self.stream.consume(&TokenKind::Semicolon).is_some() {
             // E073: Array double semicolon - [T;; N]
             if self.stream.check(&TokenKind::Semicolon) {
-                return Err(ParseError::array_double_semicolon(self.stream.make_span(start_pos)));
+                return Err(ParseError::array_double_semicolon(
+                    self.stream.make_span(start_pos),
+                ));
             }
             // E071: Array missing size - [T;] no size after semicolon
             if self.stream.check(&TokenKind::RBracket) {
-                return Err(ParseError::array_missing_size(self.stream.make_span(start_pos)));
+                return Err(ParseError::array_missing_size(
+                    self.stream.make_span(start_pos),
+                ));
             }
             // Array type: [T; N]
             let size = self.parse_expr()?;
             // E070: Unclosed array type - [T; N) missing ]
             if self.stream.consume(&TokenKind::RBracket).is_none() {
-                return Err(ParseError::unclosed_array_type(self.stream.make_span(start_pos)));
+                return Err(ParseError::unclosed_array_type(
+                    self.stream.make_span(start_pos),
+                ));
             }
 
             let span = self.stream.make_span(start_pos);
@@ -1607,7 +1650,9 @@ impl<'a> RecursiveParser<'a> {
             // Slice type: [T]
             // E070: Unclosed array/slice type
             if self.stream.consume(&TokenKind::RBracket).is_none() {
-                return Err(ParseError::unclosed_array_type(self.stream.make_span(start_pos)));
+                return Err(ParseError::unclosed_array_type(
+                    self.stream.make_span(start_pos),
+                ));
             }
 
             let span = self.stream.make_span(start_pos);
@@ -1653,15 +1698,22 @@ impl<'a> RecursiveParser<'a> {
             // Skip this check if we came from a pending split (e.g., parsing &&&T)
             // because in that case the following & is expected for the third reference level
             if !from_pending_split && self.stream.check(&TokenKind::Ampersand) {
-                return Err(ParseError::double_ampersand_ref(self.stream.make_span(start_pos)));
+                return Err(ParseError::double_ampersand_ref(
+                    self.stream.make_span(start_pos),
+                ));
             }
 
             // E057: Reference without type `&)` or `&;` or `&,`
             if matches!(
                 self.stream.peek_kind(),
-                Some(TokenKind::RParen) | Some(TokenKind::Semicolon) | Some(TokenKind::Comma) | Some(TokenKind::RBracket)
+                Some(TokenKind::RParen)
+                    | Some(TokenKind::Semicolon)
+                    | Some(TokenKind::Comma)
+                    | Some(TokenKind::RBracket)
             ) {
-                return Err(ParseError::ref_without_type(self.stream.make_span(start_pos)));
+                return Err(ParseError::ref_without_type(
+                    self.stream.make_span(start_pos),
+                ));
             }
 
             // Optional lifetime annotation: &'a T
@@ -1683,18 +1735,26 @@ impl<'a> RecursiveParser<'a> {
 
             // E058: Double checked `&checked checked T` or double unsafe
             if is_checked && self.stream.check(&TokenKind::Checked) {
-                return Err(ParseError::double_checked_ref(self.stream.make_span(start_pos)));
+                return Err(ParseError::double_checked_ref(
+                    self.stream.make_span(start_pos),
+                ));
             }
             if is_unsafe && self.stream.check(&TokenKind::Unsafe) {
-                return Err(ParseError::double_checked_ref(self.stream.make_span(start_pos)));
+                return Err(ParseError::double_checked_ref(
+                    self.stream.make_span(start_pos),
+                ));
             }
 
             // E059: Conflicting modifiers `&checked unsafe T`
             if is_checked && self.stream.check(&TokenKind::Unsafe) {
-                return Err(ParseError::conflicting_ref_modifiers(self.stream.make_span(start_pos)));
+                return Err(ParseError::conflicting_ref_modifiers(
+                    self.stream.make_span(start_pos),
+                ));
             }
             if is_unsafe && self.stream.check(&TokenKind::Checked) {
-                return Err(ParseError::conflicting_ref_modifiers(self.stream.make_span(start_pos)));
+                return Err(ParseError::conflicting_ref_modifiers(
+                    self.stream.make_span(start_pos),
+                ));
             }
 
             // Check for mut
@@ -1702,7 +1762,9 @@ impl<'a> RecursiveParser<'a> {
 
             // E058: Double mut `&mut mut T`
             if mutable && self.stream.check(&TokenKind::Mut) {
-                return Err(ParseError::double_checked_ref(self.stream.make_span(start_pos)));
+                return Err(ParseError::double_checked_ref(
+                    self.stream.make_span(start_pos),
+                ));
             }
 
             // Parse inner type WITHOUT refinements
@@ -2004,14 +2066,15 @@ impl<'a> RecursiveParser<'a> {
                     self.stream.peek_nth_kind(1),
                     Some(TokenKind::Ident(name))
                         if name.as_str().chars().next().is_some_and(|c| c.is_lowercase())
-                )
-            )
+                ))
         {
             self.stream.advance(); // consume `(`
             let mut value_args: Vec<Expr> = Vec::new();
             if !self.stream.check(&TokenKind::RParen) {
                 loop {
-                    if !self.tick() || self.is_aborted() { break; }
+                    if !self.tick() || self.is_aborted() {
+                        break;
+                    }
                     let expr = self.parse_expr_no_struct()?;
                     value_args.push(expr);
                     if self.stream.consume(&TokenKind::Comma).is_none() {
@@ -2104,7 +2167,9 @@ impl<'a> RecursiveParser<'a> {
         // E052: Empty generic type arguments
         let args = if self.stream.check(&TokenKind::Gt) || self.pending_gt {
             // Emit error for empty generic arguments
-            return Err(ParseError::empty_generic_args(self.stream.make_span(start_pos)));
+            return Err(ParseError::empty_generic_args(
+                self.stream.make_span(start_pos),
+            ));
         } else {
             self.comma_separated(|p| {
                 // Minimum binding power for expressions inside generic args.
@@ -2142,8 +2207,9 @@ impl<'a> RecursiveParser<'a> {
                 // Integer, float literals, and array literals should NEVER be parsed as types
                 let is_definitely_const = matches!(
                     p.stream.peek_kind(),
-                    Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_))
-                    | Some(TokenKind::LBracket)
+                    Some(TokenKind::Integer(_))
+                        | Some(TokenKind::Float(_))
+                        | Some(TokenKind::LBracket)
                 );
 
                 if is_definitely_const {
@@ -2153,18 +2219,31 @@ impl<'a> RecursiveParser<'a> {
                     let mut expr = p.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
                     // Comparison heuristic: if `>` follows and has an RHS before another `>`,
                     // treat as comparison (e.g., Proof<3 > 0>)
-                    if matches!(p.stream.peek_kind(), Some(TokenKind::Gt) | Some(TokenKind::GtEq) | Some(TokenKind::LtEq)) {
+                    if matches!(
+                        p.stream.peek_kind(),
+                        Some(TokenKind::Gt) | Some(TokenKind::GtEq) | Some(TokenKind::LtEq)
+                    ) {
                         let cmp_cp = p.stream.position();
                         let cmp_tok = p.stream.peek_kind().cloned();
                         p.stream.advance();
-                        let has_rhs = matches!(p.stream.peek_kind(),
-                            Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_))
-                            | Some(TokenKind::Ident(_)) | Some(TokenKind::LParen)
-                            | Some(TokenKind::True) | Some(TokenKind::False)
-                            | Some(TokenKind::Minus) | Some(TokenKind::Bang));
+                        let has_rhs = matches!(
+                            p.stream.peek_kind(),
+                            Some(TokenKind::Integer(_))
+                                | Some(TokenKind::Float(_))
+                                | Some(TokenKind::Ident(_))
+                                | Some(TokenKind::LParen)
+                                | Some(TokenKind::True)
+                                | Some(TokenKind::False)
+                                | Some(TokenKind::Minus)
+                                | Some(TokenKind::Bang)
+                        );
                         if has_rhs {
                             let rhs = p.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
-                            if matches!(p.stream.peek_kind(), Some(TokenKind::Gt) | Some(TokenKind::GtGt)) || p.pending_gt {
+                            if matches!(
+                                p.stream.peek_kind(),
+                                Some(TokenKind::Gt) | Some(TokenKind::GtGt)
+                            ) || p.pending_gt
+                            {
                                 let op = match cmp_tok {
                                     Some(TokenKind::Gt) => verum_ast::BinOp::Gt,
                                     Some(TokenKind::GtEq) => verum_ast::BinOp::Ge,
@@ -2172,11 +2251,20 @@ impl<'a> RecursiveParser<'a> {
                                     _ => verum_ast::BinOp::Gt,
                                 };
                                 let span = p.stream.make_span(const_start);
-                                expr = verum_ast::Expr::new(verum_ast::ExprKind::Binary {
-                                    op, left: Heap::new(expr), right: Heap::new(rhs),
-                                }, span);
-                            } else { p.stream.reset_to(cmp_cp); }
-                        } else { p.stream.reset_to(cmp_cp); }
+                                expr = verum_ast::Expr::new(
+                                    verum_ast::ExprKind::Binary {
+                                        op,
+                                        left: Heap::new(expr),
+                                        right: Heap::new(rhs),
+                                    },
+                                    span,
+                                );
+                            } else {
+                                p.stream.reset_to(cmp_cp);
+                            }
+                        } else {
+                            p.stream.reset_to(cmp_cp);
+                        }
                     }
                     Ok(GenericArg::Const(expr))
                 } else {
@@ -2217,10 +2305,13 @@ impl<'a> RecursiveParser<'a> {
                         // If so, this should be a const expression, not a type
                         let is_arithmetic_continuation = matches!(
                             p.stream.peek_kind(),
-                            Some(TokenKind::Plus) | Some(TokenKind::Minus)
-                            | Some(TokenKind::Star) | Some(TokenKind::Slash)
-                            | Some(TokenKind::Percent) | Some(TokenKind::EqEq)
-                            | Some(TokenKind::BangEq)
+                            Some(TokenKind::Plus)
+                                | Some(TokenKind::Minus)
+                                | Some(TokenKind::Star)
+                                | Some(TokenKind::Slash)
+                                | Some(TokenKind::Percent)
+                                | Some(TokenKind::EqEq)
+                                | Some(TokenKind::BangEq)
                         );
                         if is_arithmetic_continuation {
                             // Reset and parse as const expression
@@ -2228,23 +2319,52 @@ impl<'a> RecursiveParser<'a> {
                             let arith_start = p.stream.position();
                             let mut expr = p.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
                             // Comparison heuristic for expressions inside generic args
-                            if matches!(p.stream.peek_kind(), Some(TokenKind::Gt) | Some(TokenKind::GtEq) | Some(TokenKind::LtEq)) {
+                            if matches!(
+                                p.stream.peek_kind(),
+                                Some(TokenKind::Gt) | Some(TokenKind::GtEq) | Some(TokenKind::LtEq)
+                            ) {
                                 let cmp_cp = p.stream.position();
                                 let cmp_tok = p.stream.peek_kind().cloned();
                                 p.stream.advance();
-                                let has_rhs = matches!(p.stream.peek_kind(),
-                                    Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_))
-                                    | Some(TokenKind::Ident(_)) | Some(TokenKind::LParen)
-                                    | Some(TokenKind::True) | Some(TokenKind::False)
-                                    | Some(TokenKind::Minus) | Some(TokenKind::Bang));
+                                let has_rhs = matches!(
+                                    p.stream.peek_kind(),
+                                    Some(TokenKind::Integer(_))
+                                        | Some(TokenKind::Float(_))
+                                        | Some(TokenKind::Ident(_))
+                                        | Some(TokenKind::LParen)
+                                        | Some(TokenKind::True)
+                                        | Some(TokenKind::False)
+                                        | Some(TokenKind::Minus)
+                                        | Some(TokenKind::Bang)
+                                );
                                 if has_rhs {
                                     let rhs = p.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
-                                    if matches!(p.stream.peek_kind(), Some(TokenKind::Gt) | Some(TokenKind::GtGt)) || p.pending_gt {
-                                        let op = match cmp_tok { Some(TokenKind::Gt) => verum_ast::BinOp::Gt, Some(TokenKind::GtEq) => verum_ast::BinOp::Ge, Some(TokenKind::LtEq) => verum_ast::BinOp::Le, _ => verum_ast::BinOp::Gt };
+                                    if matches!(
+                                        p.stream.peek_kind(),
+                                        Some(TokenKind::Gt) | Some(TokenKind::GtGt)
+                                    ) || p.pending_gt
+                                    {
+                                        let op = match cmp_tok {
+                                            Some(TokenKind::Gt) => verum_ast::BinOp::Gt,
+                                            Some(TokenKind::GtEq) => verum_ast::BinOp::Ge,
+                                            Some(TokenKind::LtEq) => verum_ast::BinOp::Le,
+                                            _ => verum_ast::BinOp::Gt,
+                                        };
                                         let span = p.stream.make_span(arith_start);
-                                        expr = verum_ast::Expr::new(verum_ast::ExprKind::Binary { op, left: Heap::new(expr), right: Heap::new(rhs) }, span);
-                                    } else { p.stream.reset_to(cmp_cp); }
-                                } else { p.stream.reset_to(cmp_cp); }
+                                        expr = verum_ast::Expr::new(
+                                            verum_ast::ExprKind::Binary {
+                                                op,
+                                                left: Heap::new(expr),
+                                                right: Heap::new(rhs),
+                                            },
+                                            span,
+                                        );
+                                    } else {
+                                        p.stream.reset_to(cmp_cp);
+                                    }
+                                } else {
+                                    p.stream.reset_to(cmp_cp);
+                                }
                             }
                             Ok(GenericArg::Const(expr))
                         } else {
@@ -2260,26 +2380,63 @@ impl<'a> RecursiveParser<'a> {
                             // strand Foo's `<…>` unclosed. Users who *do* want a comparison
                             // with a parenthesized rhs can wrap the whole predicate in
                             // an explicit refinement (`T{ n > (expr) }`).
-                            if matches!(p.stream.peek_kind(), Some(TokenKind::Gt) | Some(TokenKind::GtEq) | Some(TokenKind::LtEq)) {
+                            if matches!(
+                                p.stream.peek_kind(),
+                                Some(TokenKind::Gt) | Some(TokenKind::GtEq) | Some(TokenKind::LtEq)
+                            ) {
                                 let cmp_cp = p.stream.position();
                                 let cmp_tok = p.stream.peek_kind().cloned();
                                 p.stream.advance();
-                                let has_rhs = matches!(p.stream.peek_kind(),
-                                    Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_))
-                                    | Some(TokenKind::Ident(_))
-                                    | Some(TokenKind::True) | Some(TokenKind::False)
-                                    | Some(TokenKind::Minus) | Some(TokenKind::Bang));
+                                let has_rhs = matches!(
+                                    p.stream.peek_kind(),
+                                    Some(TokenKind::Integer(_))
+                                        | Some(TokenKind::Float(_))
+                                        | Some(TokenKind::Ident(_))
+                                        | Some(TokenKind::True)
+                                        | Some(TokenKind::False)
+                                        | Some(TokenKind::Minus)
+                                        | Some(TokenKind::Bang)
+                                );
                                 if has_rhs {
                                     let rhs = p.parse_expr_bp(GENERIC_ARG_MIN_BP)?;
-                                    if matches!(p.stream.peek_kind(), Some(TokenKind::Gt) | Some(TokenKind::GtGt)) || p.pending_gt {
+                                    if matches!(
+                                        p.stream.peek_kind(),
+                                        Some(TokenKind::Gt) | Some(TokenKind::GtGt)
+                                    ) || p.pending_gt
+                                    {
                                         // Convert type to expression and build comparison
                                         let lhs = match &ty.kind {
-                                            TypeKind::Path(path) => verum_ast::Expr::new(verum_ast::ExprKind::Path(path.clone()), ty.span),
-                                            _ => verum_ast::Expr::new(verum_ast::ExprKind::Path(verum_ast::Path::new(List::from(vec![verum_ast::ty::PathSegment::Name(Ident::new(Text::from("_"), ty.span))]), ty.span)), ty.span),
+                                            TypeKind::Path(path) => verum_ast::Expr::new(
+                                                verum_ast::ExprKind::Path(path.clone()),
+                                                ty.span,
+                                            ),
+                                            _ => verum_ast::Expr::new(
+                                                verum_ast::ExprKind::Path(verum_ast::Path::new(
+                                                    List::from(vec![
+                                                        verum_ast::ty::PathSegment::Name(
+                                                            Ident::new(Text::from("_"), ty.span),
+                                                        ),
+                                                    ]),
+                                                    ty.span,
+                                                )),
+                                                ty.span,
+                                            ),
                                         };
-                                        let op = match cmp_tok { Some(TokenKind::Gt) => verum_ast::BinOp::Gt, Some(TokenKind::GtEq) => verum_ast::BinOp::Ge, Some(TokenKind::LtEq) => verum_ast::BinOp::Le, _ => verum_ast::BinOp::Gt };
+                                        let op = match cmp_tok {
+                                            Some(TokenKind::Gt) => verum_ast::BinOp::Gt,
+                                            Some(TokenKind::GtEq) => verum_ast::BinOp::Ge,
+                                            Some(TokenKind::LtEq) => verum_ast::BinOp::Le,
+                                            _ => verum_ast::BinOp::Gt,
+                                        };
                                         let span = p.stream.make_span(checkpoint_before_type);
-                                        return Ok(GenericArg::Const(verum_ast::Expr::new(verum_ast::ExprKind::Binary { op, left: Heap::new(lhs), right: Heap::new(rhs) }, span)));
+                                        return Ok(GenericArg::Const(verum_ast::Expr::new(
+                                            verum_ast::ExprKind::Binary {
+                                                op,
+                                                left: Heap::new(lhs),
+                                                right: Heap::new(rhs),
+                                            },
+                                            span,
+                                        )));
                                     }
                                 }
                                 p.stream.reset_to(cmp_cp);
@@ -2307,7 +2464,7 @@ impl<'a> RecursiveParser<'a> {
                                 | Some(TokenKind::Forall)
                                 | Some(TokenKind::Pipe)         // Closure: |n| expr
                                 | Some(TokenKind::PipePipe)     // Closure: || expr
-                                | Some(TokenKind::Fn)           // Function type: fn(...) -> T
+                                | Some(TokenKind::Fn) // Function type: fn(...) -> T
                         );
 
                         // Quantified expressions (exists, forall) are valid in generic arguments
@@ -2349,7 +2506,9 @@ impl<'a> RecursiveParser<'a> {
 
         // E051: Unclosed constraint generic (missing >)
         if self.expect_gt().is_err() {
-            return Err(ParseError::unclosed_constraint_generic(self.stream.make_span(start_pos)));
+            return Err(ParseError::unclosed_constraint_generic(
+                self.stream.make_span(start_pos),
+            ));
         }
 
         Ok(args)
@@ -2398,7 +2557,10 @@ impl<'a> RecursiveParser<'a> {
                 // Check for named predicate: `identifier : expression`
                 // Grammar: refinement_predicate = identifier , ':' , expression | expression ;
                 if let Some(TokenKind::Ident(_)) = p.stream.peek_kind() {
-                    if matches!(p.stream.peek_nth(1).map(|t| &t.kind), Some(TokenKind::Colon)) {
+                    if matches!(
+                        p.stream.peek_nth(1).map(|t| &t.kind),
+                        Some(TokenKind::Colon)
+                    ) {
                         // Named predicate - skip the name and colon, use just the expression
                         p.stream.advance(); // consume identifier
                         p.stream.advance(); // consume ':'
@@ -2466,7 +2628,9 @@ impl<'a> RecursiveParser<'a> {
             // No commas found, check for && or || operators
             // SAFETY: exprs was initialized with first_expr, and we only reach here if len <= 1
             // Since len >= 1 (from initialization) and len <= 1 (from not entering if branch), len == 1
-            let mut result_expr = exprs.into_iter().next()
+            let mut result_expr = exprs
+                .into_iter()
+                .next()
                 .expect("exprs initialized with first_expr guarantees at least one element");
 
             // Continue parsing && or || operators with implicit it comparisons
@@ -2546,7 +2710,11 @@ impl<'a> RecursiveParser<'a> {
             } else {
                 // Skip optional 'value' keyword in refinement predicates
                 // This allows `where value self >= 0.0` as equivalent to `where self >= 0.0`
-                if let Some(Token { kind: TokenKind::Ident(name), .. }) = self.stream.peek() {
+                if let Some(Token {
+                    kind: TokenKind::Ident(name),
+                    ..
+                }) = self.stream.peek()
+                {
                     if name.as_str() == "value" {
                         self.stream.advance(); // consume 'value'
                     }
@@ -2600,7 +2768,9 @@ impl<'a> RecursiveParser<'a> {
                 // Combine all predicates with && if there are multiple
                 let expr = if exprs.len() == 1 {
                     // SAFETY: len() == 1 guarantees exactly one element
-                    exprs.into_iter().next()
+                    exprs
+                        .into_iter()
+                        .next()
                         .expect("exprs.len() == 1 guarantees one element")
                 } else {
                     use verum_ast::{BinOp, Expr, ExprKind};
@@ -2641,13 +2811,13 @@ impl<'a> RecursiveParser<'a> {
                 // (indicates malformed syntax like "x x > 0")
                 // Note: Comma is no longer valid here since we consumed all comma-separated predicates
                 let is_valid_terminator = match self.stream.peek_kind() {
-                    None => true,                    // End of input (past last token)
-                    Some(TokenKind::Eof) => true,    // Explicit EOF token
+                    None => true,                 // End of input (past last token)
+                    Some(TokenKind::Eof) => true, // Explicit EOF token
                     Some(TokenKind::Semicolon) => true,
                     Some(TokenKind::RBrace) => true,
                     Some(TokenKind::RParen) => true,
                     Some(TokenKind::RBracket) => true,
-                    Some(TokenKind::Gt) => true,     // Closing angle bracket for generics
+                    Some(TokenKind::Gt) => true, // Closing angle bracket for generics
                     Some(TokenKind::Where) => true,
                     Some(TokenKind::LBrace) => true, // Function body following
                     Some(TokenKind::Pipe) => true,   // Pattern alternative
@@ -2769,7 +2939,11 @@ impl<'a> RecursiveParser<'a> {
 
         // Continue parsing && or || operators with more implicit it comparisons
         loop {
-            if self.stream.consume(&TokenKind::AmpersandAmpersand).is_some() {
+            if self
+                .stream
+                .consume(&TokenKind::AmpersandAmpersand)
+                .is_some()
+            {
                 // After &&, try to parse another implicit it comparison
                 let right = if let Some(implicit_expr) =
                     self.optional(|p| p.parse_implicit_it_comparison())
@@ -2904,9 +3078,8 @@ impl<'a> RecursiveParser<'a> {
         };
 
         // E041: Missing generic closing bracket
-        self.expect_gt().map_err(|_| {
-            ParseError::missing_generic_close(self.stream.current_span())
-        })?;
+        self.expect_gt()
+            .map_err(|_| ParseError::missing_generic_close(self.stream.current_span()))?;
 
         // E069: Check for duplicate generic parameter names
         {
@@ -3078,7 +3251,9 @@ impl<'a> RecursiveParser<'a> {
                 let bounds = if self.stream.consume(&TokenKind::Colon).is_some() {
                     // E089: Leading plus after colon
                     if self.stream.check(&TokenKind::Plus) {
-                        return Err(ParseError::leading_pipe_no_context(self.stream.current_span()));
+                        return Err(ParseError::leading_pipe_no_context(
+                            self.stream.current_span(),
+                        ));
                     }
                     // E090: Check for missing constraint after colon
                     if matches!(
@@ -3088,7 +3263,9 @@ impl<'a> RecursiveParser<'a> {
                             | Some(TokenKind::RBrace)
                             | None
                     ) {
-                        return Err(ParseError::missing_constraint(self.stream.make_span(start_pos)));
+                        return Err(ParseError::missing_constraint(
+                            self.stream.make_span(start_pos),
+                        ));
                     }
                     if self.stream.check(&TokenKind::Bang)
                         || self.is_ident()
@@ -3124,29 +3301,34 @@ impl<'a> RecursiveParser<'a> {
 
             // E092: Check for double colon before consuming
             if self.stream.check(&TokenKind::ColonColon) {
-                return Err(ParseError::double_colon_constraint(self.stream.current_span()));
+                return Err(ParseError::double_colon_constraint(
+                    self.stream.current_span(),
+                ));
             }
 
             if self.stream.consume(&TokenKind::Colon).is_some() {
                 // E092: Check for double colon after first colon
                 if self.stream.check(&TokenKind::Colon) {
-                    return Err(ParseError::double_colon_constraint(self.stream.current_span()));
+                    return Err(ParseError::double_colon_constraint(
+                        self.stream.current_span(),
+                    ));
                 }
 
                 // E089: Leading plus after colon (like `T: + Clone`)
                 if self.stream.check(&TokenKind::Plus) {
-                    return Err(ParseError::leading_pipe_no_context(self.stream.current_span()));
+                    return Err(ParseError::leading_pipe_no_context(
+                        self.stream.current_span(),
+                    ));
                 }
 
                 // E090: Check for missing constraint after colon
                 if matches!(
                     self.stream.peek_kind(),
-                    Some(TokenKind::Gt)
-                        | Some(TokenKind::Comma)
-                        | Some(TokenKind::RBrace)
-                        | None
+                    Some(TokenKind::Gt) | Some(TokenKind::Comma) | Some(TokenKind::RBrace) | None
                 ) {
-                    return Err(ParseError::missing_constraint(self.stream.make_span(start_pos)));
+                    return Err(ParseError::missing_constraint(
+                        self.stream.make_span(start_pos),
+                    ));
                 }
 
                 // Check for universe level parameter: u: Level
@@ -3327,7 +3509,9 @@ impl<'a> RecursiveParser<'a> {
 
         // E089: Leading plus is not valid
         if self.stream.check(&TokenKind::Plus) {
-            return Err(ParseError::leading_pipe_no_context(self.stream.current_span()));
+            return Err(ParseError::leading_pipe_no_context(
+                self.stream.current_span(),
+            ));
         }
 
         loop {
@@ -3343,11 +3527,15 @@ impl<'a> RecursiveParser<'a> {
             if self.stream.consume(&TokenKind::Bang).is_some() {
                 // E093: Check for double negation
                 if self.stream.check(&TokenKind::Bang) {
-                    return Err(ParseError::double_negation_bound(self.stream.current_span()));
+                    return Err(ParseError::double_negation_bound(
+                        self.stream.current_span(),
+                    ));
                 }
                 // E090: Missing bound after `!`
                 if !self.is_ident() {
-                    return Err(ParseError::missing_constraint(self.stream.make_span(bound_start)));
+                    return Err(ParseError::missing_constraint(
+                        self.stream.make_span(bound_start),
+                    ));
                 }
                 let path = self.parse_path()?;
                 let span = self.stream.make_span(bound_start);
@@ -3424,7 +3612,9 @@ impl<'a> RecursiveParser<'a> {
 
         // E089: Leading plus is not valid
         if self.stream.check(&TokenKind::Plus) {
-            return Err(ParseError::leading_pipe_no_context(self.stream.current_span()));
+            return Err(ParseError::leading_pipe_no_context(
+                self.stream.current_span(),
+            ));
         }
 
         // Check for negative bound: !Protocol
@@ -3432,11 +3622,15 @@ impl<'a> RecursiveParser<'a> {
         let mut bounds = if self.stream.consume(&TokenKind::Bang).is_some() {
             // E093: Check for double negation
             if self.stream.check(&TokenKind::Bang) {
-                return Err(ParseError::double_negation_bound(self.stream.current_span()));
+                return Err(ParseError::double_negation_bound(
+                    self.stream.current_span(),
+                ));
             }
             // E090: Missing bound after `!`
             if !self.is_ident() {
-                return Err(ParseError::missing_constraint(self.stream.make_span(start_pos)));
+                return Err(ParseError::missing_constraint(
+                    self.stream.make_span(start_pos),
+                ));
             }
             let path = self.parse_path()?;
             let span = self.stream.make_span(start_pos);
@@ -3462,11 +3656,15 @@ impl<'a> RecursiveParser<'a> {
                 if self.stream.consume(&TokenKind::Bang).is_some() {
                     // E093: Check for double negation
                     if self.stream.check(&TokenKind::Bang) {
-                        return Err(ParseError::double_negation_bound(self.stream.current_span()));
+                        return Err(ParseError::double_negation_bound(
+                            self.stream.current_span(),
+                        ));
                     }
                     // E090: Missing bound after `!`
                     if !self.is_ident() {
-                        return Err(ParseError::missing_constraint(self.stream.make_span(bound_start)));
+                        return Err(ParseError::missing_constraint(
+                            self.stream.make_span(bound_start),
+                        ));
                     }
                     let path = self.parse_path()?;
                     let span = self.stream.make_span(bound_start);
@@ -3562,7 +3760,9 @@ impl<'a> RecursiveParser<'a> {
 
         // E076: Empty capability list
         if self.stream.check(&TokenKind::RBracket) {
-            return Err(ParseError::empty_capability(self.stream.make_span(start_pos)));
+            return Err(ParseError::empty_capability(
+                self.stream.make_span(start_pos),
+            ));
         }
 
         let mut capabilities = Vec::new();
@@ -3578,18 +3778,24 @@ impl<'a> RecursiveParser<'a> {
             }
             // E053: Double comma in capability list
             if self.stream.check(&TokenKind::Comma) {
-                return Err(ParseError::double_comma_capability(self.stream.make_span(start_pos)));
+                return Err(ParseError::double_comma_capability(
+                    self.stream.make_span(start_pos),
+                ));
             }
             // E054: Trailing comma in capability list
             if self.stream.check(&TokenKind::RBracket) {
-                return Err(ParseError::trailing_comma_capability(self.stream.make_span(start_pos)));
+                return Err(ParseError::trailing_comma_capability(
+                    self.stream.make_span(start_pos),
+                ));
             }
             capabilities.push(self.parse_capability_name()?);
         }
 
         // E075: Unclosed capability list
         if self.stream.consume(&TokenKind::RBracket).is_none() {
-            return Err(ParseError::unclosed_capability(self.stream.make_span(start_pos)));
+            return Err(ParseError::unclosed_capability(
+                self.stream.make_span(start_pos),
+            ));
         }
 
         let span = self.stream.make_span(start_pos);
@@ -3749,8 +3955,9 @@ impl<'a> RecursiveParser<'a> {
             }
 
             // E038: Invalid bound - `where type T: 123`
-            if let Some(TokenKind::Integer(_)) | Some(TokenKind::Float(_)) | Some(TokenKind::Text(_)) =
-                self.stream.peek_kind()
+            if let Some(TokenKind::Integer(_))
+            | Some(TokenKind::Float(_))
+            | Some(TokenKind::Text(_)) = self.stream.peek_kind()
             {
                 return Err(ParseError::invalid_where_clause(
                     "expected type constraint, found literal",
@@ -3977,7 +4184,9 @@ impl<'a> RecursiveParser<'a> {
                     | Some(TokenKind::Eq)
                     | None
             ) {
-                return Err(ParseError::dyn_no_protocol(self.stream.make_span(start_pos)));
+                return Err(ParseError::dyn_no_protocol(
+                    self.stream.make_span(start_pos),
+                ));
             }
 
             // Parse first protocol bound (just the path, without type arguments)

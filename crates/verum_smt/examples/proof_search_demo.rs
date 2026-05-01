@@ -13,6 +13,7 @@ use verum_ast::{
     literal::{IntLit, Literal, LiteralKind},
     span::Span,
 };
+use verum_common::Heap;
 use verum_smt::{
     Context,
     proof_search::{
@@ -20,7 +21,6 @@ use verum_smt::{
         TacticHint,
     },
 };
-use verum_common::Heap;
 
 fn main() {
     println!("=== Verum Proof Search and Automation Demo ===\n");

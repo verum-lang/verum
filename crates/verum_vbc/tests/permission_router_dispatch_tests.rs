@@ -18,8 +18,8 @@ use std::sync::Mutex;
 
 use verum_vbc::bytecode::{decode_instruction, encode_instruction};
 use verum_vbc::instruction::{Instruction, Reg};
-use verum_vbc::interpreter::permission::{PermissionDecision, PermissionScope};
 use verum_vbc::interpreter::InterpreterState;
+use verum_vbc::interpreter::permission::{PermissionDecision, PermissionScope};
 use verum_vbc::module::VbcModule;
 use verum_vbc::value::Value;
 
@@ -45,7 +45,10 @@ fn permission_assert_encodes_and_decodes_round_trip() {
     let mut offset = 0;
     let decoded = decode_instruction(&bytes, &mut offset).expect("decoder must succeed");
     match decoded {
-        Instruction::PermissionAssert { scope_tag, target_id } => {
+        Instruction::PermissionAssert {
+            scope_tag,
+            target_id,
+        } => {
             assert_eq!(scope_tag, 1);
             assert_eq!(target_id.0, 7);
         }
@@ -74,7 +77,11 @@ fn permission_check_wire_encodes_and_decodes_round_trip() {
     let mut offset = 0;
     let decoded = decode_instruction(&bytes, &mut offset).expect("decoder must succeed");
     match decoded {
-        Instruction::PermissionCheckWire { dst, scope_tag, target_id } => {
+        Instruction::PermissionCheckWire {
+            dst,
+            scope_tag,
+            target_id,
+        } => {
             assert_eq!(dst.0, 3);
             assert_eq!(scope_tag.0, 4);
             assert_eq!(target_id.0, 5);
@@ -325,15 +332,14 @@ fn permission_stats_field_selector_mapping_matches_router() {
     // stdlib's `permission_stats()` wrapper — this test pins
     // the selector → field mapping so a future refactor of
     // the Rust-side struct can't silently drift.
-    let mut router = verum_vbc::interpreter::permission::PermissionRouter::with_policy(
-        |scope, target| {
+    let mut router =
+        verum_vbc::interpreter::permission::PermissionRouter::with_policy(|scope, target| {
             if scope == PermissionScope::Network && target == 80 {
                 PermissionDecision::Deny
             } else {
                 PermissionDecision::Allow
             }
-        },
-    );
+        });
 
     // Drive deterministic activity:
     //  * 1 deny-policy invocation (Network/80)

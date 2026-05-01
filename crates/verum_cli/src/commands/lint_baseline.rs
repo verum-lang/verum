@@ -107,7 +107,12 @@ impl Baseline {
         // Stable sort so two identical corpora produce
         // byte-identical baseline files (deterministic CI diffs).
         entries.sort_by(|a, b| {
-            (a.file.to_string_lossy().to_string(), a.line, a.rule.clone(), a.message_hash.clone())
+            (
+                a.file.to_string_lossy().to_string(),
+                a.line,
+                a.rule.clone(),
+                a.message_hash.clone(),
+            )
                 .cmp(&(
                     b.file.to_string_lossy().to_string(),
                     b.line,
@@ -175,7 +180,12 @@ mod tests {
     fn round_trip_write_load_suppresses_exact_match() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("baseline.json");
-        let issues = vec![make_issue("todo-in-code", "src/a.vr", 10, "TODO comment in code")];
+        let issues = vec![make_issue(
+            "todo-in-code",
+            "src/a.vr",
+            10,
+            "TODO comment in code",
+        )];
         Baseline::write(&path, &issues).expect("write");
         let baseline = Baseline::load(&path).expect("load");
         assert!(baseline.suppresses(&issues[0]));
@@ -190,7 +200,10 @@ mod tests {
         let baseline = Baseline::load(&path).expect("load");
 
         let drifted = make_issue("todo-in-code", "src/a.vr", 13, "TODO comment");
-        assert!(baseline.suppresses(&drifted), "±3 drift should be tolerated");
+        assert!(
+            baseline.suppresses(&drifted),
+            "±3 drift should be tolerated"
+        );
 
         let too_far = make_issue("todo-in-code", "src/a.vr", 20, "TODO comment");
         assert!(!baseline.suppresses(&too_far), "±10 drift should NOT match");

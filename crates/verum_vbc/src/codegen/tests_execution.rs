@@ -67,11 +67,7 @@ fn execute_module(module: Arc<VbcModule>) -> Result<Value, InterpreterError> {
 fn assert_int_result(module: Arc<VbcModule>, expected: i64) {
     let result = execute_module(module).expect("Execution failed");
     match result.try_as_i64() {
-        Some(actual) => assert_eq!(
-            actual, expected,
-            "Expected {}, got {}",
-            expected, actual
-        ),
+        Some(actual) => assert_eq!(actual, expected, "Expected {}, got {}", expected, actual),
         None => panic!("Expected Int, got {:?}", result),
     }
 }
@@ -80,11 +76,7 @@ fn assert_int_result(module: Arc<VbcModule>, expected: i64) {
 fn assert_bool_result(module: Arc<VbcModule>, expected: bool) {
     let result = execute_module(module).expect("Execution failed");
     match result.try_as_bool() {
-        Some(actual) => assert_eq!(
-            actual, expected,
-            "Expected {}, got {}",
-            expected, actual
-        ),
+        Some(actual) => assert_eq!(actual, expected, "Expected {}, got {}", expected, actual),
         None => panic!("Expected Bool, got {:?}", result),
     }
 }
@@ -473,7 +465,7 @@ mod control_flow_execution_tests {
                     value: 42,
                 },
                 Instruction::Jmp { offset: skip_bytes }, // Skip next instruction
-                skip_instr.clone(), // Should be skipped
+                skip_instr.clone(),                      // Should be skipped
                 Instruction::Ret { value: Reg(0) },
             ],
             1,
@@ -562,7 +554,7 @@ mod control_flow_execution_tests {
         let module = create_executable_module(
             "if_else",
             vec![
-                Instruction::LoadTrue { dst: Reg(0) },   // condition
+                Instruction::LoadTrue { dst: Reg(0) }, // condition
                 Instruction::JmpNot {
                     cond: Reg(0),
                     offset: then_size + jmp_size,
@@ -598,13 +590,36 @@ mod loop_execution_tests {
         // r3 = zero constant
 
         // First, define all the instructions to calculate their sizes
-        let init1 = Instruction::LoadI { dst: Reg(0), value: 5 };
-        let init2 = Instruction::LoadI { dst: Reg(1), value: 0 };
-        let init3 = Instruction::LoadI { dst: Reg(3), value: 0 };
-        let cmp = Instruction::CmpI { op: CompareOp::Le, dst: Reg(2), a: Reg(0), b: Reg(3) };
+        let init1 = Instruction::LoadI {
+            dst: Reg(0),
+            value: 5,
+        };
+        let init2 = Instruction::LoadI {
+            dst: Reg(1),
+            value: 0,
+        };
+        let init3 = Instruction::LoadI {
+            dst: Reg(3),
+            value: 0,
+        };
+        let cmp = Instruction::CmpI {
+            op: CompareOp::Le,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(3),
+        };
         // JmpIf will be created with calculated offset
-        let body_add = Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(1), a: Reg(1), b: Reg(0) };
-        let body_dec = Instruction::UnaryI { op: UnaryIntOp::Dec, dst: Reg(0), src: Reg(0) };
+        let body_add = Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(1),
+            a: Reg(1),
+            b: Reg(0),
+        };
+        let body_dec = Instruction::UnaryI {
+            op: UnaryIntOp::Dec,
+            dst: Reg(0),
+            src: Reg(0),
+        };
         // Back jump will be created with calculated offset
         let ret = Instruction::Ret { value: Reg(1) };
 
@@ -628,7 +643,10 @@ mod loop_execution_tests {
 
         // Back jump needs to go backwards to cmp instruction
         // From after back_jmp to start of cmp: -(body_add + body_dec + back_jmp + jmpif + cmp)
-        let jmpif_placeholder = Instruction::JmpIf { cond: Reg(2), offset: 0 };
+        let jmpif_placeholder = Instruction::JmpIf {
+            cond: Reg(2),
+            offset: 0,
+        };
         let jmpif_size = instruction_byte_size(&jmpif_placeholder);
         let back_offset = -(cmp_size + jmpif_size + body_add_size + body_dec_size + back_jmp_size);
 
@@ -639,10 +657,15 @@ mod loop_execution_tests {
                 init2,
                 init3,
                 cmp.clone(),
-                Instruction::JmpIf { cond: Reg(2), offset: forward_jmp_offset },
+                Instruction::JmpIf {
+                    cond: Reg(2),
+                    offset: forward_jmp_offset,
+                },
                 body_add,
                 body_dec,
-                Instruction::Jmp { offset: back_offset },
+                Instruction::Jmp {
+                    offset: back_offset,
+                },
                 ret,
             ],
             4,
@@ -659,12 +682,35 @@ mod loop_execution_tests {
         // r2 = temp comparison
         // r3 = one constant
 
-        let init1 = Instruction::LoadI { dst: Reg(0), value: 5 };
-        let init2 = Instruction::LoadI { dst: Reg(1), value: 1 };
-        let init3 = Instruction::LoadI { dst: Reg(3), value: 1 };
-        let cmp = Instruction::CmpI { op: CompareOp::Lt, dst: Reg(2), a: Reg(0), b: Reg(3) };
-        let body_mul = Instruction::BinaryI { op: BinaryIntOp::Mul, dst: Reg(1), a: Reg(1), b: Reg(0) };
-        let body_dec = Instruction::UnaryI { op: UnaryIntOp::Dec, dst: Reg(0), src: Reg(0) };
+        let init1 = Instruction::LoadI {
+            dst: Reg(0),
+            value: 5,
+        };
+        let init2 = Instruction::LoadI {
+            dst: Reg(1),
+            value: 1,
+        };
+        let init3 = Instruction::LoadI {
+            dst: Reg(3),
+            value: 1,
+        };
+        let cmp = Instruction::CmpI {
+            op: CompareOp::Lt,
+            dst: Reg(2),
+            a: Reg(0),
+            b: Reg(3),
+        };
+        let body_mul = Instruction::BinaryI {
+            op: BinaryIntOp::Mul,
+            dst: Reg(1),
+            a: Reg(1),
+            b: Reg(0),
+        };
+        let body_dec = Instruction::UnaryI {
+            op: UnaryIntOp::Dec,
+            dst: Reg(0),
+            src: Reg(0),
+        };
         let ret = Instruction::Ret { value: Reg(1) };
 
         let cmp_size = instruction_byte_size(&cmp);
@@ -673,7 +719,10 @@ mod loop_execution_tests {
 
         let back_jmp_placeholder = Instruction::Jmp { offset: 0 };
         let back_jmp_size = instruction_byte_size(&back_jmp_placeholder);
-        let jmpif_placeholder = Instruction::JmpIf { cond: Reg(2), offset: 0 };
+        let jmpif_placeholder = Instruction::JmpIf {
+            cond: Reg(2),
+            offset: 0,
+        };
         let jmpif_size = instruction_byte_size(&jmpif_placeholder);
 
         let forward_jmp_offset = body_mul_size + body_dec_size + back_jmp_size;
@@ -686,10 +735,15 @@ mod loop_execution_tests {
                 init2,
                 init3,
                 cmp.clone(),
-                Instruction::JmpIf { cond: Reg(2), offset: forward_jmp_offset },
+                Instruction::JmpIf {
+                    cond: Reg(2),
+                    offset: forward_jmp_offset,
+                },
                 body_mul,
                 body_dec,
-                Instruction::Jmp { offset: back_offset },
+                Instruction::Jmp {
+                    offset: back_offset,
+                },
                 ret,
             ],
             4,
@@ -708,16 +762,48 @@ mod loop_execution_tests {
         // r4 = comparison result
         // r5 = zero constant
 
-        let init_n = Instruction::LoadI { dst: Reg(0), value: 10 };
-        let init_prev = Instruction::LoadI { dst: Reg(1), value: 0 };
-        let init_curr = Instruction::LoadI { dst: Reg(2), value: 1 };
-        let init_zero = Instruction::LoadI { dst: Reg(5), value: 0 };
-        let cmp = Instruction::CmpI { op: CompareOp::Le, dst: Reg(4), a: Reg(0), b: Reg(5) };
+        let init_n = Instruction::LoadI {
+            dst: Reg(0),
+            value: 10,
+        };
+        let init_prev = Instruction::LoadI {
+            dst: Reg(1),
+            value: 0,
+        };
+        let init_curr = Instruction::LoadI {
+            dst: Reg(2),
+            value: 1,
+        };
+        let init_zero = Instruction::LoadI {
+            dst: Reg(5),
+            value: 0,
+        };
+        let cmp = Instruction::CmpI {
+            op: CompareOp::Le,
+            dst: Reg(4),
+            a: Reg(0),
+            b: Reg(5),
+        };
         // body: temp = prev + curr, prev = curr, curr = temp, n--
-        let body_add = Instruction::BinaryI { op: BinaryIntOp::Add, dst: Reg(3), a: Reg(1), b: Reg(2) };
-        let body_mov1 = Instruction::Mov { dst: Reg(1), src: Reg(2) };
-        let body_mov2 = Instruction::Mov { dst: Reg(2), src: Reg(3) };
-        let body_dec = Instruction::UnaryI { op: UnaryIntOp::Dec, dst: Reg(0), src: Reg(0) };
+        let body_add = Instruction::BinaryI {
+            op: BinaryIntOp::Add,
+            dst: Reg(3),
+            a: Reg(1),
+            b: Reg(2),
+        };
+        let body_mov1 = Instruction::Mov {
+            dst: Reg(1),
+            src: Reg(2),
+        };
+        let body_mov2 = Instruction::Mov {
+            dst: Reg(2),
+            src: Reg(3),
+        };
+        let body_dec = Instruction::UnaryI {
+            op: UnaryIntOp::Dec,
+            dst: Reg(0),
+            src: Reg(0),
+        };
         let ret = Instruction::Ret { value: Reg(1) };
 
         let cmp_size = instruction_byte_size(&cmp);
@@ -728,7 +814,10 @@ mod loop_execution_tests {
 
         let back_jmp_placeholder = Instruction::Jmp { offset: 0 };
         let back_jmp_size = instruction_byte_size(&back_jmp_placeholder);
-        let jmpif_placeholder = Instruction::JmpIf { cond: Reg(4), offset: 0 };
+        let jmpif_placeholder = Instruction::JmpIf {
+            cond: Reg(4),
+            offset: 0,
+        };
         let jmpif_size = instruction_byte_size(&jmpif_placeholder);
 
         let body_size = body_add_size + body_mov1_size + body_mov2_size + body_dec_size;
@@ -743,12 +832,17 @@ mod loop_execution_tests {
                 init_curr,
                 init_zero,
                 cmp.clone(),
-                Instruction::JmpIf { cond: Reg(4), offset: forward_jmp_offset },
+                Instruction::JmpIf {
+                    cond: Reg(4),
+                    offset: forward_jmp_offset,
+                },
                 body_add,
                 body_mov1,
                 body_mov2,
                 body_dec,
-                Instruction::Jmp { offset: back_offset },
+                Instruction::Jmp {
+                    offset: back_offset,
+                },
                 ret,
             ],
             6,

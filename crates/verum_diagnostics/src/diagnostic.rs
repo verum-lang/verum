@@ -868,11 +868,11 @@ mod expansion_chain_tests {
     fn default_diagnostic_has_empty_expansion_chain() {
         // Pin: pre-#287 builders produce diagnostics with empty
         // expansion_chain — bit-identical to legacy behaviour.
-        let diag = DiagnosticBuilder::error()
-            .message("test error")
-            .build();
-        assert!(diag.expansion_chain().is_empty(),
-            "no-chain default must produce empty expansion_chain");
+        let diag = DiagnosticBuilder::error().message("test error").build();
+        assert!(
+            diag.expansion_chain().is_empty(),
+            "no-chain default must produce empty expansion_chain"
+        );
     }
 
     #[test]
@@ -933,8 +933,10 @@ mod expansion_chain_tests {
             .expansion_chain(vec!["macro expansion", "@derive expansion"])
             .build();
         let json = serde_json::to_string(&diag).expect("serialize");
-        assert!(json.contains("expansion_chain"),
-            "non-empty chain must serialize");
+        assert!(
+            json.contains("expansion_chain"),
+            "non-empty chain must serialize"
+        );
         let restored: Diagnostic = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(restored.expansion_chain().len(), 2);
         assert_eq!(restored.expansion_chain()[0].as_str(), "macro expansion");
@@ -945,11 +947,11 @@ mod expansion_chain_tests {
         // Pin: empty chain skipped from JSON output (skip_
         // serializing_if). User-source diagnostics produce
         // identical JSON to pre-#287 builds.
-        let diag = DiagnosticBuilder::error()
-            .message("test")
-            .build();
+        let diag = DiagnosticBuilder::error().message("test").build();
         let json = serde_json::to_string(&diag).expect("serialize");
-        assert!(!json.contains("expansion_chain"),
-            "empty chain must be skipped from JSON");
+        assert!(
+            !json.contains("expansion_chain"),
+            "empty chain must be skipped from JSON"
+        );
     }
 }

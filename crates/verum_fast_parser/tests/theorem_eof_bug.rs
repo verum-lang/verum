@@ -36,7 +36,10 @@ fn theorem_no_generic_proof_by_auto_semi_at_eof_with_newline() {
     let source = "theorem foo() proof by auto;\n";
     let r = try_parse(source);
     eprintln!("no-generic-with-newline: {:?}", r);
-    assert!(r.is_ok(), "no-generic theorem with trailing `;\\n` at EOF should parse");
+    assert!(
+        r.is_ok(),
+        "no-generic theorem with trailing `;\\n` at EOF should parse"
+    );
 }
 
 #[test]
@@ -44,7 +47,10 @@ fn theorem_no_generic_proof_by_auto_semi_at_eof_no_newline() {
     let source = "theorem foo() proof by auto;";
     let r = try_parse(source);
     eprintln!("no-generic-no-newline: {:?}", r);
-    assert!(r.is_ok(), "no-generic theorem with trailing `;` (no newline) at EOF should parse");
+    assert!(
+        r.is_ok(),
+        "no-generic theorem with trailing `;` (no newline) at EOF should parse"
+    );
 }
 
 #[test]
@@ -53,7 +59,10 @@ fn theorem_multiline_proof_body_at_eof() {
     let source = "theorem foo()\n    proof by auto;\n";
     let r = try_parse(source);
     eprintln!("multiline: {:?}", r);
-    assert!(r.is_ok(), "multiline theorem with trailing `;\\n` should parse");
+    assert!(
+        r.is_ok(),
+        "multiline theorem with trailing `;\\n` should parse"
+    );
 }
 
 #[test]
@@ -61,7 +70,10 @@ fn theorem_multiline_proof_body_no_trailing_newline() {
     let source = "theorem foo()\n    proof by auto;";
     let r = try_parse(source);
     eprintln!("multiline-no-trail: {:?}", r);
-    assert!(r.is_ok(), "multiline theorem with trailing `;` (no trailing \\n) should parse");
+    assert!(
+        r.is_ok(),
+        "multiline theorem with trailing `;` (no trailing \\n) should parse"
+    );
 }
 
 #[test]
@@ -69,7 +81,10 @@ fn theorem_with_generic_proof_by_auto_no_semi_at_eof() {
     let source = "theorem foo<T>() proof by auto";
     let r = try_parse(source);
     eprintln!("generic-no-semi: {:?}", r);
-    assert!(r.is_ok(), "generic theorem without trailing `;` at EOF should parse");
+    assert!(
+        r.is_ok(),
+        "generic theorem without trailing `;` at EOF should parse"
+    );
 }
 
 /// `REPRO` suffix preserves the link to the bug-reproduction history.
@@ -93,5 +108,8 @@ fn theorem_with_generic_proof_by_auto_semi_followed_by_item() {
     let source = "theorem foo<T>() proof by auto;\nfn main() { }";
     let r = try_parse(source);
     eprintln!("generic-semi-with-trailing-fn: {:?}", r);
-    assert!(r.is_ok(), "generic theorem with trailing `;` and following item should parse");
+    assert!(
+        r.is_ok(),
+        "generic theorem with trailing `;` and following item should parse"
+    );
 }

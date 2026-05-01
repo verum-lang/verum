@@ -168,14 +168,10 @@ pub fn check_eps_mu_coherence(
                         // diagnostic so the user can see exactly
                         // which variables drifted. We sort + join
                         // for stable output.
-                        let extra_lhs: Vec<&str> = lhs_fvs
-                            .difference(&rhs_fvs)
-                            .map(|t| t.as_str())
-                            .collect();
-                        let extra_rhs: Vec<&str> = rhs_fvs
-                            .difference(&lhs_fvs)
-                            .map(|t| t.as_str())
-                            .collect();
+                        let extra_lhs: Vec<&str> =
+                            lhs_fvs.difference(&rhs_fvs).map(|t| t.as_str()).collect();
+                        let extra_rhs: Vec<&str> =
+                            rhs_fvs.difference(&lhs_fvs).map(|t| t.as_str()).collect();
                         return Err(KernelError::EpsMuNaturalityFailed {
                             context: Text::from(format!(
                                 "{}: free-var mismatch — \
@@ -261,21 +257,22 @@ pub fn check_eps_mu_coherence_v3_final(
         return Ok(audit);
     }
     if let (CoreTerm::EpsilonOf(m_alpha), CoreTerm::AlphaOf(inner_rhs)) = (lhs, rhs)
-        && let CoreTerm::EpsilonOf(alpha_rhs) = inner_rhs.as_ref() {
-            // identity sub-case (structural).
-            if m_alpha.as_ref() == alpha_rhs.as_ref() {
-                return Ok(audit);
-            }
-            // gate (c) — β-equivalent identity sub-case.
-            if definitional_eq(m_alpha.as_ref(), alpha_rhs.as_ref()) {
-                return Ok(audit);
-            }
-            // Non-identity case: cleared all gates
-            // (depth + free-vars), but the σ_α / π_α witness
-            // construction itself is preprint-blocked. Record A-3.
-            admit_eps_mu_tau_witness(&mut audit, context, lhs);
+        && let CoreTerm::EpsilonOf(alpha_rhs) = inner_rhs.as_ref()
+    {
+        // identity sub-case (structural).
+        if m_alpha.as_ref() == alpha_rhs.as_ref() {
             return Ok(audit);
         }
+        // gate (c) — β-equivalent identity sub-case.
+        if definitional_eq(m_alpha.as_ref(), alpha_rhs.as_ref()) {
+            return Ok(audit);
+        }
+        // Non-identity case: cleared all gates
+        // (depth + free-vars), but the σ_α / π_α witness
+        // construction itself is preprint-blocked. Record A-3.
+        admit_eps_mu_tau_witness(&mut audit, context, lhs);
+        return Ok(audit);
+    }
 
     // admitted via some path we don't recognise here
     // — surface as A-3 admit conservatively (one-sided over-admit
@@ -306,8 +303,10 @@ mod v3_final_tests {
     fn v3_final_admits_structural_identity_with_empty_audit() {
         let f = var("F");
         let audit = check_eps_mu_coherence_v3_final(&f, &f, "structural id").unwrap();
-        assert!(audit.is_decidable(),
-            "structural identity must be decidable in V3-final");
+        assert!(
+            audit.is_decidable(),
+            "structural identity must be decidable in V3-final"
+        );
     }
 
     #[test]
@@ -316,10 +315,11 @@ mod v3_final_tests {
         let f = var("F");
         let lhs = eps(f.clone());
         let rhs = alpha(eps(f.clone()));
-        let audit = check_eps_mu_coherence_v3_final(&lhs, &rhs, "K-Eps-Mu identity")
-            .unwrap();
-        assert!(audit.is_decidable(),
-            "canonical identity sub-case must be decidable");
+        let audit = check_eps_mu_coherence_v3_final(&lhs, &rhs, "K-Eps-Mu identity").unwrap();
+        assert!(
+            audit.is_decidable(),
+            "canonical identity sub-case must be decidable"
+        );
     }
 
     #[test]
@@ -361,10 +361,11 @@ mod v3_final_tests {
         let alpha_rhs = CoreTerm::App(Heap::new(var("x")), Heap::new(var("F")));
         let lhs = eps(m_alpha);
         let rhs = alpha(eps(alpha_rhs));
-        let audit = check_eps_mu_coherence_v3_final(&lhs, &rhs, "non-identity")
-            .unwrap();
-        assert!(!audit.is_decidable(),
-            "non-identity case must record an A-3 admit");
+        let audit = check_eps_mu_coherence_v3_final(&lhs, &rhs, "non-identity").unwrap();
+        assert!(
+            !audit.is_decidable(),
+            "non-identity case must record an A-3 admit"
+        );
         let admits = audit.admits();
         assert_eq!(admits.len(), 1);
         assert_eq!(admits[0].bridge, BridgeId::EpsMuTauWitness);
@@ -381,8 +382,10 @@ mod v3_final_tests {
         let lhs = eps(CoreTerm::ModalBox(Heap::new(f.clone())));
         let rhs = alpha(eps(f));
         let result = check_eps_mu_coherence_v3_final(&lhs, &rhs, "depth-mismatch");
-        assert!(result.is_err(),
-            "depth-mismatch must be rejected by V3-final too");
+        assert!(
+            result.is_err(),
+            "depth-mismatch must be rejected by V3-final too"
+        );
     }
 
     #[test]
@@ -392,8 +395,10 @@ mod v3_final_tests {
         let lhs = eps(var("F"));
         let rhs = alpha(eps(var("G")));
         let result = check_eps_mu_coherence_v3_final(&lhs, &rhs, "free-var-mismatch");
-        assert!(result.is_err(),
-            "free-var-mismatch must be rejected by V3-final too");
+        assert!(
+            result.is_err(),
+            "free-var-mismatch must be rejected by V3-final too"
+        );
     }
 
     #[test]
@@ -420,8 +425,10 @@ mod v3_final_tests {
         let audit2 = check_eps_mu_coherence_v3_final(&lhs, &rhs, "ctx-B").unwrap();
         assert_eq!(audit1.admits().len(), 1);
         assert_eq!(audit2.admits().len(), 1);
-        assert_ne!(audit1.admits()[0].context.as_str(),
-                   audit2.admits()[0].context.as_str(),
-                   "different contexts must produce distinct audit entries");
+        assert_ne!(
+            audit1.admits()[0].context.as_str(),
+            audit2.admits()[0].context.as_str(),
+            "different contexts must produce distinct audit entries"
+        );
     }
 }

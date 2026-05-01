@@ -50,10 +50,7 @@ fn make_binary(op: BinOp, left: Expr, right: Expr) -> Expr {
 }
 
 fn make_tuple(elements: Vec<Expr>) -> Expr {
-    Expr::new(
-        ExprKind::Tuple(elements.into()),
-        dummy_span(),
-    )
+    Expr::new(ExprKind::Tuple(elements.into()), dummy_span())
 }
 
 // =============================================================================

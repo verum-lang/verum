@@ -1,11 +1,11 @@
 //! String and value comparison helpers for VBC interpreter dispatch.
 
+use super::super::super::error::InterpreterResult;
+use super::super::super::heap;
+use super::super::super::state::InterpreterState;
+use super::cbgr_helpers::{decode_cbgr_ref, is_cbgr_ref};
 use crate::types::TypeId;
 use crate::value::Value;
-use super::super::super::error::InterpreterResult;
-use super::super::super::state::InterpreterState;
-use super::super::super::heap;
-use super::cbgr_helpers::{is_cbgr_ref, decode_cbgr_ref};
 
 // ============================================================================
 // Value Comparison Helpers
@@ -81,7 +81,10 @@ pub(super) fn extract_string(value: &Value, _state: &InterpreterState) -> String
 
 /// Allocates a string on the heap or as a small string, returning a Value.
 /// Uses small-string optimization when the string fits in 6 bytes.
-pub(super) fn alloc_string_value(state: &mut InterpreterState, s: &str) -> InterpreterResult<Value> {
+pub(super) fn alloc_string_value(
+    state: &mut InterpreterState,
+    s: &str,
+) -> InterpreterResult<Value> {
     if let Some(sv) = Value::from_small_string(s) {
         return Ok(sv);
     }
@@ -129,7 +132,11 @@ pub(super) fn is_string_id(v: &Value, state: &InterpreterState) -> bool {
         return false;
     }
     let idx = v.as_i64();
-    (0..100000).contains(&idx) && state.module.get_string(crate::types::StringId(idx as u32)).is_some()
+    (0..100000).contains(&idx)
+        && state
+            .module
+            .get_string(crate::types::StringId(idx as u32))
+            .is_some()
 }
 
 /// Resolve a Value to its string content, handling all three representations:
@@ -325,8 +332,16 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
     }
     // Bool ↔ Int cross-type comparison: Bool is a 1-bit integer (false=0, true=1)
     if (va.is_bool() && vb.is_int()) || (va.is_int() && vb.is_bool()) {
-        let ia = if va.is_bool() { va.as_bool() as i64 } else { va.as_i64() };
-        let ib = if vb.is_bool() { vb.as_bool() as i64 } else { vb.as_i64() };
+        let ia = if va.is_bool() {
+            va.as_bool() as i64
+        } else {
+            va.as_i64()
+        };
+        let ib = if vb.is_bool() {
+            vb.as_bool() as i64
+        } else {
+            vb.as_i64()
+        };
         return ia == ib;
     }
     if va.is_unit() && vb.is_unit() {
@@ -395,14 +410,20 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
             let field_count = size_a.saturating_sub(8) / std::mem::size_of::<Value>();
             let payload_offset = OBJECT_HEADER_SIZE + 8;
             for i in 0..field_count {
-                let fa = unsafe { &*(ptr_a.add(payload_offset + i * std::mem::size_of::<Value>()) as *const Value) };
-                let fb = unsafe { &*(ptr_b.add(payload_offset + i * std::mem::size_of::<Value>()) as *const Value) };
+                let fa = unsafe {
+                    &*(ptr_a.add(payload_offset + i * std::mem::size_of::<Value>()) as *const Value)
+                };
+                let fb = unsafe {
+                    &*(ptr_b.add(payload_offset + i * std::mem::size_of::<Value>()) as *const Value)
+                };
                 if !deep_value_eq_depth(fa, fb, state, depth + 1) {
                     return false;
                 }
             }
             return true;
-        } else if (type_id_a == 0 || type_id_a == TypeId::TUPLE.0) && (type_id_b == 0 || type_id_b == TypeId::TUPLE.0) {
+        } else if (type_id_a == 0 || type_id_a == TypeId::TUPLE.0)
+            && (type_id_b == 0 || type_id_b == TypeId::TUPLE.0)
+        {
             // Both are tuple/pack objects (TypeId 0 or TypeId::TUPLE)
             let header_a = unsafe { &*(ptr_a as *const heap::ObjectHeader) };
             let header_b = unsafe { &*(ptr_b as *const heap::ObjectHeader) };
@@ -414,8 +435,12 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
             let field_count = size_a / std::mem::size_of::<Value>();
             let data_offset = OBJECT_HEADER_SIZE;
             for i in 0..field_count {
-                let fa = unsafe { &*(ptr_a.add(data_offset + i * std::mem::size_of::<Value>()) as *const Value) };
-                let fb = unsafe { &*(ptr_b.add(data_offset + i * std::mem::size_of::<Value>()) as *const Value) };
+                let fa = unsafe {
+                    &*(ptr_a.add(data_offset + i * std::mem::size_of::<Value>()) as *const Value)
+                };
+                let fb = unsafe {
+                    &*(ptr_b.add(data_offset + i * std::mem::size_of::<Value>()) as *const Value)
+                };
                 if !deep_value_eq_depth(fa, fb, state, depth + 1) {
                     return false;
                 }
@@ -431,8 +456,10 @@ fn deep_value_eq_depth(va: &Value, vb: &Value, state: &InterpreterState, depth: 
                 return false;
             }
             for i in 0..len_a {
-                let ea = super::super::get_array_element(ptr_a, header_a, i).unwrap_or(Value::nil());
-                let eb = super::super::get_array_element(ptr_b, header_b, i).unwrap_or(Value::nil());
+                let ea =
+                    super::super::get_array_element(ptr_a, header_a, i).unwrap_or(Value::nil());
+                let eb =
+                    super::super::get_array_element(ptr_b, header_b, i).unwrap_or(Value::nil());
                 if !deep_value_eq_depth(&ea, &eb, state, depth + 1) {
                     return false;
                 }

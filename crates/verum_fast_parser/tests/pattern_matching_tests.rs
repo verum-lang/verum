@@ -26,8 +26,8 @@
 //! - Rest patterns (..)
 
 use verum_ast::{FileId, Module};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 /// Parse patterns by wrapping code in a function body
 fn parse_pattern_in_context(source: &str) -> Module {

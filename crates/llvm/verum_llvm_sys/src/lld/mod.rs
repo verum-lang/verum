@@ -272,9 +272,7 @@ impl Linker {
     /// Set entry point
     pub fn entry(self, symbol: impl AsRef<str>) -> Self {
         match self.flavor {
-            LinkerFlavor::Elf | LinkerFlavor::Wasm => {
-                self.arg("-e").arg(symbol.as_ref())
-            }
+            LinkerFlavor::Elf | LinkerFlavor::Wasm => self.arg("-e").arg(symbol.as_ref()),
             LinkerFlavor::MachO => self.arg("-e").arg(symbol.as_ref()),
             LinkerFlavor::Coff => self.arg(format!("/ENTRY:{}", symbol.as_ref())),
         }
@@ -311,7 +309,9 @@ impl Linker {
     /// Add exported symbol
     pub fn export_symbol(self, symbol: impl AsRef<str>) -> Self {
         match self.flavor {
-            LinkerFlavor::Elf => self.arg(format!("-Wl,--export-dynamic-symbol={}", symbol.as_ref())),
+            LinkerFlavor::Elf => {
+                self.arg(format!("-Wl,--export-dynamic-symbol={}", symbol.as_ref()))
+            }
             LinkerFlavor::MachO => self.arg("-Wl,-exported_symbol").arg(symbol.as_ref()),
             LinkerFlavor::Coff => self.arg(format!("/EXPORT:{}", symbol.as_ref())),
             LinkerFlavor::Wasm => self.arg(format!("--export={}", symbol.as_ref())),
@@ -398,10 +398,7 @@ impl Linker {
 
         for candidate in &candidates {
             // Check in PATH first
-            if let Ok(path) = std::process::Command::new("which")
-                .arg(candidate)
-                .output()
-            {
+            if let Ok(path) = std::process::Command::new("which").arg(candidate).output() {
                 if path.status.success() {
                     let path_str = String::from_utf8_lossy(&path.stdout).trim().to_string();
                     if !path_str.is_empty() {
@@ -433,9 +430,13 @@ impl Linker {
         // Determine which linker to use
         let linker = std::env::var("CC").unwrap_or_else(|_| {
             #[cfg(target_os = "macos")]
-            { "clang".to_string() }
+            {
+                "clang".to_string()
+            }
             #[cfg(not(target_os = "macos"))]
-            { "cc".to_string() }
+            {
+                "cc".to_string()
+            }
         });
 
         debug!("Using system linker: {}", linker);
@@ -505,9 +506,7 @@ pub fn link_executable(
     libraries: &[impl AsRef<str>],
     output: impl AsRef<Path>,
 ) -> LinkerResult<LinkOutput> {
-    let mut linker = Linker::native()
-        .gc_sections()
-        .output(&output);
+    let mut linker = Linker::native().gc_sections().output(&output);
 
     for obj in objects {
         linker = linker.add_object(obj);
@@ -527,10 +526,7 @@ pub fn link_shared_library(
     output: impl AsRef<Path>,
     soname: Option<&str>,
 ) -> LinkerResult<LinkOutput> {
-    let mut linker = Linker::native()
-        .shared()
-        .gc_sections()
-        .output(&output);
+    let mut linker = Linker::native().shared().gc_sections().output(&output);
 
     if let Some(name) = soname {
         linker = linker.soname(name);

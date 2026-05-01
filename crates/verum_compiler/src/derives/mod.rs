@@ -102,7 +102,10 @@ impl DeriveRegistry {
         // Builder pattern derive for fluent construction APIs
         registry.register("Builder", Box::new(DeriveBuilder));
         // ShellRender — auto-generate `render()` for typed command DSLs
-        registry.register("ShellRender", Box::new(self::shell_render::DeriveShellRender));
+        registry.register(
+            "ShellRender",
+            Box::new(self::shell_render::DeriveShellRender),
+        );
 
         registry
     }

@@ -197,6 +197,8 @@ pub mod api;
 pub mod language_features;
 
 // Core modules
+pub mod camg; // #103: Content-Addressed Module Graph — fundamental rewrite of module loading
+pub mod cfg_eval; // #106: pure cfg-predicate evaluation extracted from pipeline.rs
 pub mod compilation_metrics;
 pub mod interpolation;
 pub mod lint;
@@ -204,20 +206,18 @@ pub mod literal_parsers;
 pub mod literal_registry;
 pub mod options;
 pub mod pipeline;
-pub mod target_spec; // Audit-E2: cross-compile-aware target spec for cfg evaluation
-pub mod cfg_eval;    // #106: pure cfg-predicate evaluation extracted from pipeline.rs
-pub mod camg;        // #103: Content-Addressed Module Graph — fundamental rewrite of module loading
-pub mod stdlib_symbol_manifest; // #102: Build-time per-module symbol table (target-independent)
+pub mod stdlib_symbol_manifest;
+pub mod target_spec; // Audit-E2: cross-compile-aware target spec for cfg evaluation // #102: Build-time per-module symbol table (target-independent)
 // Centralised hardcoded-stdlib-name registry for the unifier.
 // Temporary scaffold pending #101 protocol-based discovery — keeping
 // the architectural violation in one identifiable file rather than
 // scattered through pipeline.rs Pass 5.5.
-pub mod stdlib_coercion_registry;
+pub mod linker_config;
 pub mod profile_cmd;
 pub mod repl;
 pub mod session;
+pub mod stdlib_coercion_registry;
 pub mod unified_dashboard;
-pub mod linker_config;
 pub mod verification_profiler;
 pub mod verify_cmd;
 
@@ -227,40 +227,43 @@ pub mod verify_cmd;
 // Meta-system modules: unified compile-time computation (meta fn, @derive, @tagged_literal)
 pub mod asset_registry;
 pub mod derives;
-pub mod hygiene;  // Sets-of-scopes hygiene for macro expansion
-pub mod meta;  // Consolidated meta-system (context, evaluator, builtins, sandbox, registry, etc.)
+pub mod hygiene; // Sets-of-scopes hygiene for macro expansion
+pub mod meta; // Consolidated meta-system (context, evaluator, builtins, sandbox, registry, etc.)
 pub mod quote;
 pub mod quote_macro;
 pub mod token_stream;
 
-
 // Compilation pipeline modules: phases 0-7.5 from parsing through code generation
-pub mod compilation_path;  // Dual-path compilation (CPU/GPU) infrastructure
+pub mod compilation_path; // Dual-path compilation (CPU/GPU) infrastructure
+pub mod content_addressed_storage; // Persistent content-addressed storage (CAS) for semantic cache
 pub mod contract_integration;
+pub mod core_cache; // Industrial-grade stdlib compilation caching
+pub mod core_compiler;
+pub mod core_loader;
+pub mod core_source; // Unified stdlib source abstraction (embedded VFS / local FS)
 pub mod diagnostics_engine;
+pub mod embedded_stdlib; // Embedded stdlib archive (zstd-compressed core/*.vr in binary)
 pub mod graceful_fallback;
+pub mod hash; // Unified Blake3-based hashing infrastructure
 pub mod incremental_compiler;
-pub mod module_utils;  // Shared module utilities (cfg handling, path conversion)
+pub mod module_utils; // Shared module utilities (cfg handling, path conversion)
 pub mod passes;
 pub mod phases;
 pub mod profile_system;
-pub mod staged_pipeline;  // N-level staged metaprogramming pipeline
-pub mod hash;         // Unified Blake3-based hashing infrastructure
 pub mod semantic_query; // Semantic query layer for content-addressed caching
-pub mod content_addressed_storage; // Persistent content-addressed storage (CAS) for semantic cache
-pub mod core_cache;   // Industrial-grade stdlib compilation caching
-pub mod core_compiler;
-pub mod core_loader;
-pub mod core_source;  // Unified stdlib source abstraction (embedded VFS / local FS)
-pub mod embedded_stdlib; // Embedded stdlib archive (zstd-compressed core/*.vr in binary)
-pub mod stdlib_index;    // Module-path index over the embedded stdlib (lazy loader keystone)
+pub mod staged_pipeline; // N-level staged metaprogramming pipeline
 pub mod stdlib_dep_graph; // Pre-built mount-edge graph over the embedded stdlib (BFS reachability)
+pub mod stdlib_index; // Module-path index over the embedded stdlib (lazy loader keystone)
 pub mod stdlib_reachability; // AST-walking → reachable stdlib subset (Phase 2 of on-demand loader)
 
 // Re-export main types
 pub use compilation_metrics::{
     Bottleneck, BottleneckKind, CompilationProfileReport, CompilationStats, ModuleMetrics,
     PhasePerformanceMetrics,
+};
+pub use linker_config::{
+    CogSection, LinkerSection, LinkerTomlConfig, PlatformLinkerSection, ProfileConfig,
+    ProjectConfig,
 };
 pub use literal_registry::{LiteralRegistry, ParsedLiteral, TaggedLiteralHandler};
 pub use options::{CompilerOptions, OutputFormat, VerifyMode};
@@ -276,10 +279,6 @@ pub use unified_dashboard::{
     OutputFormat as DashboardOutputFormat, Recommendation, ReferenceBreakdown, RuntimeMetrics,
     UnifiedDashboard, VerificationCost,
 };
-pub use linker_config::{
-    LinkerSection, LinkerTomlConfig, CogSection, PlatformLinkerSection, ProfileConfig,
-    ProjectConfig,
-};
 pub use verification_profiler::{
     CacheStatistics as ProfilerCacheStats, FileLocation, ProfileEntry, SmtSolver,
     VerificationProfiler, VerificationReport as ProfilerReport,
@@ -291,46 +290,53 @@ pub use verify_cmd::{
 
 // Re-export meta-system types (all from consolidated meta/ module)
 pub use meta::{
-    // Async executor
-    MetaAsyncExecutor, ParallelTaskBuilder, TaskDependencyGraph,
-    // Context and values
-    ConstValue,
-    MetaContext,
-    MetaError,
-    // Core types
-    ProtocolImplementation,
-    TypeDefinition,
     // Reflection API types (aligned with core/meta/reflection.vr)
     AssociatedTypeInfo,
+    // Builtin function type
+    BuiltinMetaFn,
+    // Context and values
+    ConstValue,
     FieldInfo,
     FieldOffset,
     FunctionInfo,
     GenericParam,
     GenericParamKind,
     LifetimeParam,
+    // Registry
+    MacroDefinition,
+    MacroKind,
+    // Async executor
+    MetaAsyncExecutor,
+    MetaContext,
+    MetaError,
+    // Metrics
+    MetaEvalMetrics,
+    MetaFunction,
+    MetaRegistry,
+    // Sandbox
+    MetaSandbox,
+    // Value operations
+    MetaValueOps,
     MethodResolution,
     MethodSource,
     OwnershipInfo,
+    ParallelTaskBuilder,
     ParamInfo,
     PrimitiveType,
+    // Core types
+    ProtocolImplementation,
     ProtocolInfo,
+    SandboxError,
+    SandboxOperation,
     SelfKind,
+    TaskDependencyGraph,
     TraitBound,
+    TypeDefinition,
     TypeInfo,
     TypeKind,
     VariantInfo,
     VariantKind,
     Visibility,
-    // Builtin function type
-    BuiltinMetaFn,
-    // Metrics
-    MetaEvalMetrics,
-    // Registry
-    MacroDefinition, MacroKind, MetaFunction, MetaRegistry,
-    // Sandbox
-    MetaSandbox, SandboxOperation, SandboxError,
-    // Value operations
-    MetaValueOps,
 };
 pub use quote::{ToTokens, TokenStream};
 pub use quote_macro::{
@@ -344,27 +350,38 @@ pub use diagnostics_engine::DiagnosticsEngine;
 pub use graceful_fallback::GracefulFallback;
 pub use incremental_compiler::{CacheStats, IncrementalCompiler, TypeCheckResult};
 pub use phases::{
-    CompilationPhase, ExecutionTier, LanguageProfile, OptimizationLevel, PhaseContext, PhaseInput, PhaseMetrics,
-    PhaseOutput, VerifyMode as PhaseVerifyMode,
+    CompilationPhase, ExecutionTier, LanguageProfile, OptimizationLevel, PhaseContext, PhaseInput,
+    PhaseMetrics, PhaseOutput, VerifyMode as PhaseVerifyMode,
 };
 pub use profile_system::{Feature, Profile, ProfileManager};
 
 // Re-export stdlib loader types
 pub use core_loader::{
-    convert_archive_to_metadata, load_archive, load_archive_from_bytes, load_core_metadata,
-    load_core_metadata_from_bytes, CoreLoadError,
+    CoreLoadError, convert_archive_to_metadata, load_archive, load_archive_from_bytes,
+    load_core_metadata, load_core_metadata_from_bytes,
 };
 
 // Re-export stdlib compiler types (for unified pipeline)
-pub use core_compiler::{StdlibCompilationResult, CoreConfig};
+pub use core_compiler::{CoreConfig, StdlibCompilationResult};
 
 // Re-export stdlib cache types (industrial-grade caching)
 pub use core_cache::{
-    CoreCache, CoreCacheEntry, CoreCacheKey, CoreCacheStore,
-    CachedCoreMetadata, CachedTypeEntry, CachedFunctionEntry, CachedModuleEntry,
+    CachedCoreMetadata,
+    CachedDeriveEntry,
+    CachedFunctionEntry,
+    CachedMacroEntry,
     // Meta-system cache types
-    CachedMetaFunctionEntry, CachedMetaParam, CachedMacroEntry, CachedDeriveEntry,
-    init_global_cache, global_cache, global_cache_or_init,
+    CachedMetaFunctionEntry,
+    CachedMetaParam,
+    CachedModuleEntry,
+    CachedTypeEntry,
+    CoreCache,
+    CoreCacheEntry,
+    CoreCacheKey,
+    CoreCacheStore,
+    global_cache,
+    global_cache_or_init,
+    init_global_cache,
 };
 
 // Re-export staged pipeline types (N-level metaprogramming)
@@ -379,7 +396,6 @@ pub use api::{
     CompilationErrorKind, CompilationResult, CompilerConfig, OutputType, PipelineMetrics,
     SourceFile,
 };
-
 
 /// Compiler version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

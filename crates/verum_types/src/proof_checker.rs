@@ -23,8 +23,8 @@ use verum_ast::expr::{Expr, ExprKind};
 use verum_ast::pattern::{Pattern, PatternKind};
 use verum_ast::span::{Span, Spanned};
 use verum_ast::ty::{GenericParam, GenericParamKind, Ident};
-use verum_common::{Heap, List, Map, Maybe, Text};
 use verum_common::ToText;
+use verum_common::{Heap, List, Map, Maybe, Text};
 
 /// Proof checker for validating theorems and proofs.
 ///
@@ -686,10 +686,9 @@ impl ProofChecker {
             // Combinators
             TacticExpr::Try(inner) => self.check_tactic(inner, goal, ctx, type_checker, span),
 
-            TacticExpr::TryElse { body, fallback } => {
-                self.check_tactic(body, goal, ctx, type_checker, span)
-                    .or_else(|_| self.check_tactic(fallback, goal, ctx, type_checker, span))
-            }
+            TacticExpr::TryElse { body, fallback } => self
+                .check_tactic(body, goal, ctx, type_checker, span)
+                .or_else(|_| self.check_tactic(fallback, goal, ctx, type_checker, span)),
 
             TacticExpr::Repeat(inner) => self.check_tactic(inner, goal, ctx, type_checker, span),
 
@@ -751,7 +750,11 @@ impl ProofChecker {
 
             // Conditional tactic — both branches must be well-typed against
             // the goal; the condition is a boolean expression.
-            TacticExpr::If { cond, then_branch, else_branch } => {
+            TacticExpr::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
                 type_checker.infer(cond, InferMode::Synth)?;
                 self.check_tactic(then_branch, goal, ctx, type_checker, span)?;
                 if let Maybe::Some(else_b) = else_branch {
@@ -855,7 +858,8 @@ impl ProofChecker {
                 Ok(())
             }
 
-            PatternKind::Paren(inner) => self.bind_pattern(inner, ty, ctx, type_checker, span),            PatternKind::View { pattern, .. } => {
+            PatternKind::Paren(inner) => self.bind_pattern(inner, ty, ctx, type_checker, span),
+            PatternKind::View { pattern, .. } => {
                 self.bind_pattern(pattern, ty, ctx, type_checker, span)
             }
 
@@ -889,7 +893,10 @@ impl ProofChecker {
                 Ok(())
             }
 
-            PatternKind::Stream { head_patterns, rest } => {
+            PatternKind::Stream {
+                head_patterns,
+                rest,
+            } => {
                 // Stream pattern: stream[first, second, ...rest]
                 // Type system improvements: refinement evidence tracking, flow-sensitive propagation, prototype mode — Section 18.3 - Stream Pattern Matching
                 //
@@ -956,7 +963,11 @@ impl ProofChecker {
                 Ok(())
             }
 
-            GenericParamKind::HigherKinded { name, arity, bounds } => {
+            GenericParamKind::HigherKinded {
+                name,
+                arity,
+                bounds,
+            } => {
                 // Higher-kinded type parameters (e.g., F<_>: Functor)
                 // Create a type constructor variable
                 let type_var = TypeVar::fresh();

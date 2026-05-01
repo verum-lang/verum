@@ -89,7 +89,7 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 use tokio::sync::{Mutex, Semaphore};
 use verum_common::{List, Map, Set, Text};
-use verum_compiler::{CompilationPipeline, Session, CompilerOptions, OutputFormat};
+use verum_compiler::{CompilationPipeline, CompilerOptions, OutputFormat, Session};
 
 /// Error type for the test runner.
 #[derive(Debug, Error)]
@@ -184,7 +184,11 @@ impl Default for RunnerConfig {
         Self {
             test_paths: vec![PathBuf::from("specs")].into(),
             test_pattern: "**/*.vr".to_string().into(),
-            exclude_patterns: vec!["**/skip/**".to_string().into(), "**/wip/**".to_string().into()].into(),
+            exclude_patterns: vec![
+                "**/skip/**".to_string().into(),
+                "**/wip/**".to_string().into(),
+            ]
+            .into(),
             include_tags: Set::new(),
             exclude_tags: Set::new(),
             levels: Set::new(),
@@ -429,7 +433,8 @@ impl VTestRunner {
         // causing contention and intermittent failures.
         // We use the first test's path so find_workspace_root() resolves correctly.
         if verum_compiler::get_cached_stdlib_registry().is_none() {
-            let warmup_path = tests.first()
+            let warmup_path = tests
+                .first()
                 .map(|t| PathBuf::from(&t.source_path))
                 .unwrap_or_else(|| PathBuf::from("warmup.vr"));
             let options = CompilerOptions {
@@ -542,7 +547,8 @@ impl VTestRunner {
                                 outcomes: vec![TestOutcome::Error {
                                     tier: Tier::Tier0,
                                     error: e.to_string().into(),
-                                }].into(),
+                                }]
+                                .into(),
                                 total_duration: Duration::ZERO,
                             }
                         }
@@ -561,7 +567,8 @@ impl VTestRunner {
                                 outcomes: vec![TestOutcome::Error {
                                     tier: Tier::Tier0,
                                     error: e.to_string().into(),
-                                }].into(),
+                                }]
+                                .into(),
                                 total_duration: Duration::ZERO,
                             },
                         };
@@ -718,7 +725,9 @@ impl VTestRunner {
                             outcomes[0] = TestOutcome::Fail {
                                 tier: outcomes[0].tier(),
                                 reason,
-                                expected: Some("All tiers produce identical results".to_string().into()),
+                                expected: Some(
+                                    "All tiers produce identical results".to_string().into(),
+                                ),
                                 actual: Some("Tier results differ".to_string().into()),
                                 duration: outcomes[0].duration().unwrap_or_default(),
                             };
@@ -888,7 +897,11 @@ impl Default for DiscoveryConfig {
         Self {
             paths: default_paths(),
             pattern: default_pattern(),
-            exclude: vec!["**/skip/**".to_string().into(), "**/wip/**".to_string().into()].into(),
+            exclude: vec![
+                "**/skip/**".to_string().into(),
+                "**/wip/**".to_string().into(),
+            ]
+            .into(),
         }
     }
 }

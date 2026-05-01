@@ -85,7 +85,10 @@ impl MechanisationStatus {
     /// `OutOfScopeForMsfs` is excluded — those entries are tracking
     /// future work, not MSFS gaps.
     pub fn is_satisfied(self) -> bool {
-        matches!(self, MechanisationStatus::Mechanised | MechanisationStatus::Partial)
+        matches!(
+            self,
+            MechanisationStatus::Mechanised | MechanisationStatus::Partial
+        )
     }
 
     /// True iff this entry counts against the MSFS dependency closure.
@@ -231,9 +234,13 @@ pub fn htt_roadmap() -> Vec<RoadmapEntry> {
         },
         RoadmapEntry {
             section: Text::from("HTT App. A (model-categorical foundations)"),
-            title: Text::from("Quillen model structures + simplicial sets — peripheral to MSFS (one of four equivalent presentations, paper §A); not cited as load-bearing"),
+            title: Text::from(
+                "Quillen model structures + simplicial sets — peripheral to MSFS (one of four equivalent presentations, paper §A); not cited as load-bearing",
+            ),
             status: MechanisationStatus::OutOfScopeForMsfs,
-            kernel_modules: Text::from("framework axioms in core.math.frameworks.lurie_htt (legacy admissions)"),
+            kernel_modules: Text::from(
+                "framework axioms in core.math.frameworks.lurie_htt (legacy admissions)",
+            ),
         },
     ]
 }
@@ -261,9 +268,13 @@ pub fn adamek_rosicky_roadmap() -> Vec<RoadmapEntry> {
         },
         RoadmapEntry {
             section: Text::from("AR 2.39 (locally presentable)"),
-            title: Text::from("Characterisation of locally presentable categories — MSFS uses LP-categories ABSTRACTLY (κ-presentable + filtered colimits, both mechanised); the meta-characterisation 2.39 itself is informal App. A background, not invoked as a proof step"),
+            title: Text::from(
+                "Characterisation of locally presentable categories — MSFS uses LP-categories ABSTRACTLY (κ-presentable + filtered colimits, both mechanised); the meta-characterisation 2.39 itself is informal App. A background, not invoked as a proof step",
+            ),
             status: MechanisationStatus::OutOfScopeForMsfs,
-            kernel_modules: Text::from("(meta-characterisation; constructive content captured by AR 1.26 + AR 5.5.4)"),
+            kernel_modules: Text::from(
+                "(meta-characterisation; constructive content captured by AR 1.26 + AR 5.5.4)",
+            ),
         },
         RoadmapEntry {
             section: Text::from("AR 5.5.4 (Adjoint Functor)"),
@@ -273,19 +284,27 @@ pub fn adamek_rosicky_roadmap() -> Vec<RoadmapEntry> {
         },
         RoadmapEntry {
             section: Text::from("AR Ch.4 (sketches)"),
-            title: Text::from("Sketches and accessible models — MSFS uses Ch.2 (locally presentable categories), NOT Ch.4; reserved for Diakrisis"),
+            title: Text::from(
+                "Sketches and accessible models — MSFS uses Ch.2 (locally presentable categories), NOT Ch.4; reserved for Diakrisis",
+            ),
             status: MechanisationStatus::OutOfScopeForMsfs,
             kernel_modules: Text::from(""),
         },
         RoadmapEntry {
             section: Text::from("AR Ch.2 (locally presentable categories)"),
-            title: Text::from("Adámek-Rosický 1994 Chapter 2 — accessibility-theoretic treatment of locally presentable categories (MSFS App. A informal cite)"),
+            title: Text::from(
+                "Adámek-Rosický 1994 Chapter 2 — accessibility-theoretic treatment of locally presentable categories (MSFS App. A informal cite)",
+            ),
             status: MechanisationStatus::Partial,
-            kernel_modules: Text::from("accessibility::build_filtered_colimit + adjoint_functor::build_adjunction"),
+            kernel_modules: Text::from(
+                "accessibility::build_filtered_colimit + adjoint_functor::build_adjunction",
+            ),
         },
         RoadmapEntry {
             section: Text::from("AR App. (set-theoretic prerequisites)"),
-            title: Text::from("Vopěnka's principle, large cardinals beyond κ_2 — NOT cited by MSFS (paper convention is ZFC + 2 inaccessibles only); reserved for Diakrisis advanced extensions"),
+            title: Text::from(
+                "Vopěnka's principle, large cardinals beyond κ_2 — NOT cited by MSFS (paper convention is ZFC + 2 inaccessibles only); reserved for Diakrisis advanced extensions",
+            ),
             status: MechanisationStatus::OutOfScopeForMsfs,
             kernel_modules: Text::from("zfc_self_recognition (κ_1, κ_2 only)"),
         },
@@ -500,10 +519,15 @@ mod tests {
         ];
         let r = CoverageReport::compute(&entries);
         assert_eq!(r.msfs_scope_total(), 1);
-        assert!(r.msfs_self_contained(),
-            "Single mechanised + 1 out-of-scope should be MSFS-self-contained");
-        assert_eq!(r.coverage_ratio(), 1.0,
-            "Coverage ratio excludes out-of-scope from denominator");
+        assert!(
+            r.msfs_self_contained(),
+            "Single mechanised + 1 out-of-scope should be MSFS-self-contained"
+        );
+        assert_eq!(
+            r.coverage_ratio(),
+            1.0,
+            "Coverage ratio excludes out-of-scope from denominator"
+        );
     }
 
     #[test]
@@ -518,8 +542,10 @@ mod tests {
             },
         ];
         let r = CoverageReport::compute(&entries);
-        assert!(!r.msfs_self_contained(),
-            "AxiomCited entry must defeat MSFS self-containment");
+        assert!(
+            !r.msfs_self_contained(),
+            "AxiomCited entry must defeat MSFS self-containment"
+        );
     }
 
     // ----- AR roadmap -----
@@ -542,7 +568,11 @@ mod tests {
         let report = CoverageReport::compute(&roadmap);
         assert_eq!(
             report.total,
-            report.mechanised + report.partial + report.axiom_cited + report.pending + report.out_of_scope
+            report.mechanised
+                + report.partial
+                + report.axiom_cited
+                + report.pending
+                + report.out_of_scope
         );
     }
 

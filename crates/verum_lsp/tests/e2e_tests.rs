@@ -38,8 +38,8 @@ use std::time::Duration;
 use tokio::sync::{RwLock, mpsc};
 use tower_lsp::lsp_types::*;
 use tower_lsp::{LanguageServer, LspService};
-use verum_lsp::Backend;
 use verum_common::{List, Map, Text};
+use verum_lsp::Backend;
 
 // ============================================================================
 // MockDiagnosticsReceiver - Captures diagnostics published by the LSP server
@@ -1437,9 +1437,9 @@ async fn test_incremental_sync_mode() {
 #[test]
 fn test_semantic_types_in_diagnostics() {
     // Verify that List is used instead of Vec in public APIs
+    use verum_common::List;
     use verum_diagnostics::Diagnostic;
     use verum_lsp::diagnostics::convert_diagnostics;
-    use verum_common::List;
 
     let diagnostics: List<Diagnostic> = List::new();
     let text = "test";

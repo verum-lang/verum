@@ -40,8 +40,14 @@ fn build_module_with_perm_assert(scope_tag: u8) -> VbcModule {
     desc.register_count = 4;
     desc.return_type = verum_vbc::types::TypeRef::concrete(verum_vbc::types::TypeId::INT);
     let instructions = vec![
-        Instruction::LoadI { dst: Reg(0), value: 42 },
-        Instruction::PermissionAssert { scope_tag, target_id: Reg(0) },
+        Instruction::LoadI {
+            dst: Reg(0),
+            value: 42,
+        },
+        Instruction::PermissionAssert {
+            scope_tag,
+            target_id: Reg(0),
+        },
         Instruction::Ret { value: Reg(0) },
     ];
     desc.instructions = Some(instructions);
@@ -50,10 +56,7 @@ fn build_module_with_perm_assert(scope_tag: u8) -> VbcModule {
 }
 
 /// Lower `module` under `policy` and return the textual LLVM IR.
-fn lower_with_policy(
-    module: &VbcModule,
-    policy: Option<AotPermissionPolicy>,
-) -> String {
+fn lower_with_policy(module: &VbcModule, policy: Option<AotPermissionPolicy>) -> String {
     let context = Context::create();
     let config = LoweringConfig::debug("perm_test").with_permission_policy(policy);
     let mut lowering = VbcToLlvmLowering::new(&context, config);

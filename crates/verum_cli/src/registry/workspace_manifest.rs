@@ -143,17 +143,11 @@ pub enum ManifestError {
         source: io::Error,
     },
     /// TOML parse failure.
-    ParseError {
-        path: PathBuf,
-        reason: String,
-    },
+    ParseError { path: PathBuf, reason: String },
     /// `members` list was empty.
     EmptyMembers { path: PathBuf },
     /// `default-members` mentions a name not present in `members`.
-    DefaultNotInMembers {
-        path: PathBuf,
-        missing: String,
-    },
+    DefaultNotInMembers { path: PathBuf, missing: String },
     /// A member glob pattern was malformed.
     InvalidGlob {
         path: PathBuf,
@@ -162,15 +156,9 @@ pub enum ManifestError {
     },
     /// A member entry was an absolute path (workspace members must be
     /// relative to the workspace root for portability).
-    AbsoluteMember {
-        path: PathBuf,
-        member: String,
-    },
+    AbsoluteMember { path: PathBuf, member: String },
     /// A member entry contained `..` (escapes the workspace root).
-    MemberEscapesRoot {
-        path: PathBuf,
-        member: String,
-    },
+    MemberEscapesRoot { path: PathBuf, member: String },
 }
 
 impl std::fmt::Display for ManifestError {
@@ -180,7 +168,11 @@ impl std::fmt::Display for ManifestError {
                 write!(f, "workspace manifest {op} on {}: {source}", path.display())
             }
             Self::ParseError { path, reason } => {
-                write!(f, "workspace manifest {} is malformed: {reason}", path.display())
+                write!(
+                    f,
+                    "workspace manifest {} is malformed: {reason}",
+                    path.display()
+                )
             }
             Self::EmptyMembers { path } => write!(
                 f,
@@ -192,7 +184,11 @@ impl std::fmt::Display for ManifestError {
                 "workspace manifest {}: `default-members` entry {missing:?} is not declared in `members`",
                 path.display()
             ),
-            Self::InvalidGlob { path, pattern, reason } => write!(
+            Self::InvalidGlob {
+                path,
+                pattern,
+                reason,
+            } => write!(
                 f,
                 "workspace manifest {}: glob pattern {pattern:?} is invalid: {reason}",
                 path.display()
@@ -297,10 +293,7 @@ impl WorkspaceManifest {
                 continue;
             }
             // Glob expansion. We resolve relative to workspace_root.
-            let pattern = workspace_root
-                .join(entry)
-                .to_string_lossy()
-                .into_owned();
+            let pattern = workspace_root.join(entry).to_string_lossy().into_owned();
             let walk = glob::glob(&pattern).map_err(|e| ManifestError::InvalidGlob {
                 path: workspace_root.join(MANIFEST_FILENAME),
                 pattern: entry.clone(),
@@ -603,7 +596,9 @@ description = "test"
         let path = write_manifest(&tmp, "[workspace]\nmembers = [\"crates/*\"]\n");
         let m = WorkspaceManifest::from_file(&path).unwrap();
         let err = m.member_dirs(tmp.path()).unwrap_err();
-        assert!(matches!(err, ManifestError::InvalidGlob { reason, .. } if reason.contains("no directories")));
+        assert!(
+            matches!(err, ManifestError::InvalidGlob { reason, .. } if reason.contains("no directories"))
+        );
     }
 
     #[test]

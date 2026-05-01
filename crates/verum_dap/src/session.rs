@@ -132,11 +132,7 @@ impl DebugSession {
     ///
 
     /// Returns the list of breakpoints with verified status.
-    pub fn set_breakpoints(
-        &mut self,
-        file_path: &str,
-        requested_lines: &[i64],
-    ) -> Vec<Breakpoint> {
+    pub fn set_breakpoints(&mut self, file_path: &str, requested_lines: &[i64]) -> Vec<Breakpoint> {
         // Clear existing breakpoints for this file.
         self.breakpoints.remove(file_path);
 
@@ -259,10 +255,7 @@ impl DebugSession {
     ///
 
     /// Returns `(file_path, line, column)` if found.
-    pub fn lookup_source_location(
-        &self,
-        bytecode_offset: u32,
-    ) -> Option<(String, i64, i64)> {
+    pub fn lookup_source_location(&self, bytecode_offset: u32) -> Option<(String, i64, i64)> {
         let module = self.module.as_ref()?;
         let source_map = module.source_map.as_ref()?;
 
@@ -270,9 +263,10 @@ impl DebugSession {
         let mut best: Option<&SourceMapEntry> = None;
         for entry in &source_map.entries {
             if entry.bytecode_offset <= bytecode_offset
-                && best.is_none_or(|b| entry.bytecode_offset > b.bytecode_offset) {
-                    best = Some(entry);
-                }
+                && best.is_none_or(|b| entry.bytecode_offset > b.bytecode_offset)
+            {
+                best = Some(entry);
+            }
         }
 
         let entry = best?;

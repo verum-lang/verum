@@ -425,7 +425,8 @@ impl Fuzzer {
                         let mut hasher = std::collections::hash_map::DefaultHasher::new();
                         std::hash::Hash::hash(&stderr, &mut hasher);
                         std::hash::Hasher::finish(&hasher)
-                    }).into();
+                    })
+                    .into();
 
                     return FuzzResult::Crash(Crash {
                         id,
@@ -444,7 +445,8 @@ impl Fuzzer {
                         let mut hasher = std::collections::hash_map::DefaultHasher::new();
                         std::hash::Hash::hash(&stderr, &mut hasher);
                         std::hash::Hasher::finish(&hasher)
-                    }).into();
+                    })
+                    .into();
 
                     return FuzzResult::Crash(Crash {
                         id,

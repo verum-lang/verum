@@ -84,8 +84,7 @@
 use serde::{Deserialize, Serialize};
 
 use verum_ast::decl::{
-    ProofBody, ProofMethod, ProofStep, ProofStepKind, ProofStructure, TacticExpr,
-    TheoremDecl,
+    ProofBody, ProofMethod, ProofStep, ProofStepKind, ProofStructure, TacticExpr, TheoremDecl,
 };
 
 use crate::reflection::ReflectedTerm;
@@ -167,10 +166,7 @@ impl ProofGoal {
 
     /// Construct a goal with the given proposition and explicit
     /// hypothesis list.
-    pub fn with_hypotheses(
-        proposition: ReflectedTerm,
-        hypotheses: Vec<NamedHypothesis>,
-    ) -> Self {
+    pub fn with_hypotheses(proposition: ReflectedTerm, hypotheses: Vec<NamedHypothesis>) -> Self {
         Self {
             proposition,
             hypotheses,
@@ -455,7 +451,11 @@ fn walk_tactic(tactic: &TacticExpr, wrapper_comment: &str, out: &mut Vec<ProofSt
             }
         }
         TacticExpr::Try(inner) => {
-            walk_tactic(inner.as_ref(), &combine_comment(wrapper_comment, "wrapped in try"), out);
+            walk_tactic(
+                inner.as_ref(),
+                &combine_comment(wrapper_comment, "wrapped in try"),
+                out,
+            );
         }
         TacticExpr::TryElse { body, fallback } => {
             walk_tactic(
@@ -480,10 +480,7 @@ fn walk_tactic(tactic: &TacticExpr, wrapper_comment: &str, out: &mut Vec<ProofSt
             for (i, item) in items.iter().enumerate() {
                 walk_tactic(
                     item,
-                    &combine_comment(
-                        wrapper_comment,
-                        &format!("wrapped in alt branch {}", i),
-                    ),
+                    &combine_comment(wrapper_comment, &format!("wrapped in alt branch {}", i)),
                     out,
                 );
             }
@@ -531,12 +528,12 @@ fn walk_structure(structure: &ProofStructure, out: &mut Vec<ProofStepSnapshot>) 
 /// Walk one [`ProofStep`].
 fn walk_step(step: &ProofStep, out: &mut Vec<ProofStepSnapshot>) {
     match &step.kind {
-        ProofStepKind::Have { name, justification, .. } => {
-            walk_tactic(
-                justification,
-                &format!("have {}", name.as_str()),
-                out,
-            );
+        ProofStepKind::Have {
+            name,
+            justification,
+            ..
+        } => {
+            walk_tactic(justification, &format!("have {}", name.as_str()), out);
         }
         ProofStepKind::Show { justification, .. } => {
             walk_tactic(justification, "show", out);
@@ -722,7 +719,9 @@ fn describe_leaf_tactic(tactic: &TacticExpr) -> (&'static str, String) {
                 },
             )
         }
-        TacticExpr::Rewrite { hypothesis, rev, .. } => {
+        TacticExpr::Rewrite {
+            hypothesis, rev, ..
+        } => {
             let target = render_apply_target(hypothesis);
             let direction = if *rev { "reverse" } else { "forward" };
             (
@@ -794,14 +793,8 @@ fn describe_leaf_tactic(tactic: &TacticExpr) -> (&'static str, String) {
                 format!("invoke `{}` with {} argument(s)", name.as_str(), args.len()),
             )
         }
-        TacticExpr::Let { name, .. } => (
-            "let",
-            format!("bind {}", name.as_str()),
-        ),
-        TacticExpr::Match { arms, .. } => (
-            "match",
-            format!("{} arm(s)", arms.len()),
-        ),
+        TacticExpr::Let { name, .. } => ("let", format!("bind {}", name.as_str())),
+        TacticExpr::Match { arms, .. } => ("match", format!("{} arm(s)", arms.len())),
         TacticExpr::Fail { .. } => ("fail", "explicit failure".to_string()),
         TacticExpr::If { .. } => ("if", "conditional tactic".to_string()),
         TacticExpr::Done => ("done", String::new()),
@@ -829,9 +822,7 @@ fn render_apply_target(expr: &verum_ast::expr::Expr) -> String {
                 .segments
                 .iter()
                 .filter_map(|seg| match seg {
-                    verum_ast::ty::PathSegment::Name(ident) => {
-                        Some(ident.as_str().to_string())
-                    }
+                    verum_ast::ty::PathSegment::Name(ident) => Some(ident.as_str().to_string()),
                     _ => None,
                 })
                 .collect();
@@ -880,11 +871,7 @@ fn combine_comment(wrapper: &str, inner: &str) -> String {
 /// empty and `1` once any step has been emitted (V0 doesn't
 /// simulate multi-goal proofs).
 fn snapshot_step_count(out: &[ProofStepSnapshot]) -> usize {
-    if out.is_empty() {
-        1
-    } else {
-        1
-    }
+    if out.is_empty() { 1 } else { 1 }
 }
 
 /// placeholder for "we couldn't reflect the real type". Always
@@ -902,15 +889,14 @@ pub fn opaque_placeholder() -> ReflectedTerm {
 mod tests {
     use super::*;
 
+    use verum_ast::Ident;
     use verum_ast::decl::{
-        ProofBody, ProofMethod, ProofStep, ProofStepKind, ProofStructure, TacticExpr,
-        TheoremDecl,
+        ProofBody, ProofMethod, ProofStep, ProofStepKind, ProofStructure, TacticExpr, TheoremDecl,
     };
     use verum_ast::expr::{Expr, ExprKind};
     use verum_ast::literal::Literal;
     use verum_ast::span::Span;
     use verum_ast::ty::Path;
-    use verum_ast::Ident;
     use verum_common::{Heap, List, Maybe};
 
     // -------------------------------------------------------------------------
@@ -923,7 +909,10 @@ mod tests {
 
     /// Build a trivial `true` proposition expression.
     fn trivial_proposition() -> Expr {
-        Expr::new(ExprKind::Literal(Literal::bool(true, dummy_span())), dummy_span())
+        Expr::new(
+            ExprKind::Literal(Literal::bool(true, dummy_span())),
+            dummy_span(),
+        )
     }
 
     /// Build a `Path` expression like `foo` or `lemma_name`.

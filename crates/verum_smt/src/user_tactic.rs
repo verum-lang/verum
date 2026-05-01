@@ -44,9 +44,7 @@
 
 use verum_common::{List, Text};
 
-use crate::tactics::{
-    TacticCombinator, TacticKind, TacticParams, StrategyBuilder,
-};
+use crate::tactics::{StrategyBuilder, TacticCombinator, TacticKind, TacticParams};
 
 /// A parsed tactic expression from the surface syntax.
 /// Mirrors the `tactic_expr` rule in `grammar/verum.ebnf`.
@@ -56,10 +54,7 @@ pub enum TacticExpr {
     Named(Text),
 
     /// A named tactic with arguments: `rewrite(lemma)`, `apply(h)`, `exact(term)`
-    NamedWithArgs {
-        name: Text,
-        args: List<Text>,
-    },
+    NamedWithArgs { name: Text, args: List<Text> },
 
     /// Sequential composition: `t1; t2`
     Seq(Box<TacticExpr>, Box<TacticExpr>),
@@ -89,10 +84,7 @@ pub enum TacticExpr {
     },
 
     /// User-defined tactic invocation: `my_tactic(args...)`
-    UserDefined {
-        name: Text,
-        args: List<Text>,
-    },
+    UserDefined { name: Text, args: List<Text> },
 
     /// LLM-oracle tactic: propose proof candidates via language model,
     /// sample above confidence threshold, verify via SMT.
@@ -201,30 +193,20 @@ fn compile_tactic_raw(expr: &TacticExpr) -> CompileResult {
     match expr {
         TacticExpr::Named(name) => compile_named_tactic(name),
 
-        TacticExpr::NamedWithArgs { name, args } => {
-            compile_named_tactic_with_args(name, args)
-        }
+        TacticExpr::NamedWithArgs { name, args } => compile_named_tactic_with_args(name, args),
 
-        TacticExpr::Seq(left, right) => {
-            match (compile_tactic(left), compile_tactic(right)) {
-                (CompileResult::Ok(l), CompileResult::Ok(r)) => {
-                    CompileResult::Ok(TacticCombinator::AndThen(
-                        Box::new(l),
-                        Box::new(r),
-                    ))
-                }
-                (CompileResult::Ok(_), err) => err,
-                (err, _) => err,
+        TacticExpr::Seq(left, right) => match (compile_tactic(left), compile_tactic(right)) {
+            (CompileResult::Ok(l), CompileResult::Ok(r)) => {
+                CompileResult::Ok(TacticCombinator::AndThen(Box::new(l), Box::new(r)))
             }
-        }
+            (CompileResult::Ok(_), err) => err,
+            (err, _) => err,
+        },
 
         TacticExpr::TryElse { primary, fallback } => {
             match (compile_tactic(primary), compile_tactic(fallback)) {
                 (CompileResult::Ok(p), CompileResult::Ok(f)) => {
-                    CompileResult::Ok(TacticCombinator::OrElse(
-                        Box::new(p),
-                        Box::new(f),
-                    ))
+                    CompileResult::Ok(TacticCombinator::OrElse(Box::new(p), Box::new(f)))
                 }
                 (CompileResult::Ok(_), err) => err,
                 (err, _) => err,
@@ -235,10 +217,7 @@ fn compile_tactic_raw(expr: &TacticExpr) -> CompileResult {
             match compile_tactic(body) {
                 CompileResult::Ok(b) => {
                     let max_iter = count.unwrap_or(100); // default max 100 iterations
-                    CompileResult::Ok(TacticCombinator::Repeat(
-                        Box::new(b),
-                        max_iter,
-                    ))
+                    CompileResult::Ok(TacticCombinator::Repeat(Box::new(b), max_iter))
                 }
                 err => err,
             }
@@ -258,10 +237,7 @@ fn compile_tactic_raw(expr: &TacticExpr) -> CompileResult {
                 // Chain alternatives with OrElse
                 let mut result = compiled.pop().unwrap();
                 while let Some(prev) = compiled.pop() {
-                    result = TacticCombinator::OrElse(
-                        Box::new(prev),
-                        Box::new(result),
-                    );
+                    result = TacticCombinator::OrElse(Box::new(prev), Box::new(result));
                 }
                 CompileResult::Ok(result)
             }
@@ -278,20 +254,19 @@ fn compile_tactic_raw(expr: &TacticExpr) -> CompileResult {
             }
         }
 
-        TacticExpr::Focus { goal_index: _, body } => {
+        TacticExpr::Focus {
+            goal_index: _,
+            body,
+        } => {
             // Focus restricts to a single goal — in the Z3 backend,
             // we just run the inner tactic (goal selection is handled
             // by the proof state manager, not the SMT solver).
             compile_tactic(body)
         }
 
-        TacticExpr::UserDefined { name, args } => {
-            compile_named_tactic_with_args(name, args)
-        }
+        TacticExpr::UserDefined { name, args } => compile_named_tactic_with_args(name, args),
 
-        TacticExpr::Oracle { confidence, .. } => {
-            CompileResult::Ok(oracle_strategy(*confidence))
-        }
+        TacticExpr::Oracle { confidence, .. } => CompileResult::Ok(oracle_strategy(*confidence)),
 
         // Quote is inert at compilation time — returning the inner
         // tactic's compiled form would leak the Quote's "don't
@@ -332,7 +307,7 @@ fn compile_named_tactic(name: &str) -> CompileResult {
         "simp" | "simplify" => TacticKind::Simplify,
         "ring" => TacticKind::Ring,
         "field" => TacticKind::Field,
-        "omega" => TacticKind::LIA,  // linear integer arithmetic
+        "omega" => TacticKind::LIA, // linear integer arithmetic
         "smt" => TacticKind::SMT,
         "blast" => TacticKind::Blast,
         "trivial" => TacticKind::Simplify,
@@ -388,10 +363,9 @@ fn compile_named_tactic_with_args(name: &str, args: &[Text]) -> CompileResult {
             // rewrite(lemma_name) → simplify with specific rewrite rules
             let mut params = TacticParams::default();
             if let Some(lemma) = args.first() {
-                params.options.insert(
-                    Text::from(format!("rewrite:{}", lemma)),
-                    true,
-                );
+                params
+                    .options
+                    .insert(Text::from(format!("rewrite:{}", lemma)), true);
             }
             CompileResult::Ok(TacticCombinator::WithParams(
                 Box::new(TacticCombinator::Single(TacticKind::Simplify)),
@@ -452,9 +426,9 @@ fn compile_named_tactic_with_args(name: &str, args: &[Text]) -> CompileResult {
             // We encode the confidence threshold in the custom tactic name so
             // the proof_search dispatcher can recover it without needing a
             // separate wrapper type.
-            CompileResult::Ok(TacticCombinator::Single(TacticKind::Custom(
-                Text::from(format!("oracle:{}", confidence)),
-            )))
+            CompileResult::Ok(TacticCombinator::Single(TacticKind::Custom(Text::from(
+                format!("oracle:{}", confidence),
+            ))))
         }
 
         _ => compile_named_tactic(name),
@@ -476,10 +450,7 @@ fn compile_named_tactic_with_args(name: &str, args: &[Text]) -> CompileResult {
 /// that path keeps the combinator enum small. The semantic is
 /// identical.
 fn skip_strategy() -> TacticCombinator {
-    TacticCombinator::Repeat(
-        Box::new(TacticCombinator::Single(TacticKind::Simplify)),
-        0,
-    )
+    TacticCombinator::Repeat(Box::new(TacticCombinator::Single(TacticKind::Simplify)), 0)
 }
 
 /// The `auto` strategy: try multiple approaches in sequence.
@@ -501,9 +472,9 @@ fn auto_strategy() -> TacticCombinator {
 /// path does not fire.
 fn oracle_strategy(confidence: f64) -> TacticCombinator {
     TacticCombinator::OrElse(
-        Box::new(TacticCombinator::Single(TacticKind::Custom(
-            Text::from(format!("oracle:{}", confidence)),
-        ))),
+        Box::new(TacticCombinator::Single(TacticKind::Custom(Text::from(
+            format!("oracle:{}", confidence),
+        )))),
         Box::new(auto_strategy()),
     )
 }
@@ -527,14 +498,16 @@ fn norm_num_strategy() -> TacticCombinator {
 /// 4. Univalence computation (transport(ua(e), x) ↦ e.fwd(x))
 fn cubical_strategy() -> TacticCombinator {
     TacticCombinator::AndThen(
-        Box::new(TacticCombinator::Single(TacticKind::Custom(
-            Text::from("cubical_normalize"),
-        ))),
-        Box::new(StrategyBuilder::new()
-            .then(TacticKind::Simplify)
-            .then(TacticKind::SolveEqs)
-            .or_else(TacticKind::SMT)
-            .build()),
+        Box::new(TacticCombinator::Single(TacticKind::Custom(Text::from(
+            "cubical_normalize",
+        )))),
+        Box::new(
+            StrategyBuilder::new()
+                .then(TacticKind::Simplify)
+                .then(TacticKind::SolveEqs)
+                .or_else(TacticKind::SMT)
+                .build(),
+        ),
     )
 }
 
@@ -549,9 +522,9 @@ fn cubical_strategy() -> TacticCombinator {
 fn category_strategy() -> TacticCombinator {
     TacticCombinator::Repeat(
         Box::new(TacticCombinator::OrElse(
-            Box::new(TacticCombinator::Single(TacticKind::Custom(
-                Text::from("category_rewrite"),
-            ))),
+            Box::new(TacticCombinator::Single(TacticKind::Custom(Text::from(
+                "category_rewrite",
+            )))),
             Box::new(TacticCombinator::Single(TacticKind::Simplify)),
         )),
         50, // max 50 rewrites
@@ -561,13 +534,13 @@ fn category_strategy() -> TacticCombinator {
 /// The `descent_check` strategy: Čech descent verification.
 fn descent_strategy() -> TacticCombinator {
     TacticCombinator::AndThen(
-        Box::new(TacticCombinator::Single(TacticKind::Custom(
-            Text::from("cech_nerve_compute"),
-        ))),
+        Box::new(TacticCombinator::Single(TacticKind::Custom(Text::from(
+            "cech_nerve_compute",
+        )))),
         Box::new(TacticCombinator::AndThen(
-            Box::new(TacticCombinator::Single(TacticKind::Custom(
-                Text::from("cocycle_verify"),
-            ))),
+            Box::new(TacticCombinator::Single(TacticKind::Custom(Text::from(
+                "cocycle_verify",
+            )))),
             Box::new(TacticCombinator::Single(TacticKind::SMT)),
         )),
     )
@@ -602,13 +575,9 @@ pub fn proof_by_tactic(
             }
         }
         CompileResult::UnknownTactic(name) => {
-            ProofByResult::Error(
-                Text::from(format!("unknown tactic: {}", name)),
-            )
+            ProofByResult::Error(Text::from(format!("unknown tactic: {}", name)))
         }
-        CompileResult::Error(msg) => {
-            ProofByResult::Error(msg)
-        }
+        CompileResult::Error(msg) => ProofByResult::Error(msg),
     }
 }
 
@@ -705,18 +674,16 @@ mod tests {
     #[test]
     fn test_compile_oracle_no_args() {
         match compile_tactic(&TacticExpr::Named(Text::from("oracle"))) {
-            CompileResult::Ok(TacticCombinator::OrElse(inner, _fallback)) => {
-                match *inner {
-                    TacticCombinator::Single(TacticKind::Custom(tag)) => {
-                        assert!(
-                            tag.starts_with("oracle:"),
-                            "tag should start with oracle:, got {}",
-                            tag
-                        );
-                    }
-                    ref other => panic!("expected Single(Custom(oracle:...)), got {:?}", other),
+            CompileResult::Ok(TacticCombinator::OrElse(inner, _fallback)) => match *inner {
+                TacticCombinator::Single(TacticKind::Custom(tag)) => {
+                    assert!(
+                        tag.starts_with("oracle:"),
+                        "tag should start with oracle:, got {}",
+                        tag
+                    );
                 }
-            }
+                ref other => panic!("expected Single(Custom(oracle:...)), got {:?}", other),
+            },
             ref other => panic!("expected OrElse, got {:?}", other),
         }
     }
@@ -752,14 +719,12 @@ mod tests {
             confidence: 0.85,
         };
         match compile_tactic(&expr) {
-            CompileResult::Ok(TacticCombinator::OrElse(ref inner, _)) => {
-                match inner.as_ref() {
-                    TacticCombinator::Single(TacticKind::Custom(tag)) => {
-                        assert!(tag.starts_with("oracle:"), "tag should start with oracle:");
-                    }
-                    other => panic!("expected Single(Custom(oracle:...)), got {:?}", other),
+            CompileResult::Ok(TacticCombinator::OrElse(ref inner, _)) => match inner.as_ref() {
+                TacticCombinator::Single(TacticKind::Custom(tag)) => {
+                    assert!(tag.starts_with("oracle:"), "tag should start with oracle:");
                 }
-            }
+                other => panic!("expected Single(Custom(oracle:...)), got {:?}", other),
+            },
             ref other => panic!("expected OrElse, got {:?}", other),
         }
     }
@@ -833,10 +798,7 @@ mod tests {
     #[test]
     fn seq_with_goal_intro_does_not_alter_downstream_tactic() {
         let real = TacticExpr::Named(Text::from("auto"));
-        let seq = TacticExpr::Seq(
-            Box::new(TacticExpr::GoalIntro),
-            Box::new(real.clone()),
-        );
+        let seq = TacticExpr::Seq(Box::new(TacticExpr::GoalIntro), Box::new(real.clone()));
         // Both must compile (the Seq just wraps a skip + real tactic).
         assert!(matches!(compile_tactic(&seq), CompileResult::Ok(_)));
         assert!(matches!(compile_tactic(&real), CompileResult::Ok(_)));

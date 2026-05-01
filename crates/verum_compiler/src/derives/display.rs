@@ -36,13 +36,13 @@
 //! --show-expansions compiler flag.
 
 use super::common::{DeriveContext, FieldInfo, path_from_str};
-use super::{DeriveMacro, DeriveResult, ident_expr, method_call, string_lit, self_ref};
+use super::{DeriveMacro, DeriveResult, ident_expr, method_call, self_ref, string_lit};
+use verum_ast::Span;
 use verum_ast::attr::{Attribute, AttributeListExt};
 use verum_ast::decl::{FunctionDecl, Item};
 use verum_ast::expr::{Block, Expr, ExprKind, UnOp};
 use verum_ast::pattern::{FieldPattern, MatchArm, Pattern, PatternKind, VariantPatternData};
 use verum_ast::ty::{Ident, Path, PathSegment, Type, TypeKind};
-use verum_ast::Span;
 use verum_common::{List, Text};
 
 /// Display derive implementation
@@ -187,17 +187,9 @@ impl DeriveDisplay {
                 },
                 span,
             );
-            let display_fmt = method_call(
-                field_ref,
-                "fmt",
-                vec![f_expr.clone()].into(),
-                span,
-            );
+            let display_fmt = method_call(field_ref, "fmt", vec![f_expr.clone()].into(), span);
             // Use ? operator for propagation
-            let try_expr = Expr::new(
-                ExprKind::Try(Box::new(display_fmt)),
-                span,
-            );
+            let try_expr = Expr::new(ExprKind::Try(Box::new(display_fmt)), span);
             stmts.push(verum_ast::Stmt::new(
                 verum_ast::StmtKind::Expr {
                     expr: try_expr,
@@ -306,7 +298,8 @@ impl DeriveDisplay {
                 vec![
                     PathSegment::SelfValue,
                     PathSegment::Name(Ident::new(Text::from(variant_name), span)),
-                ].into(),
+                ]
+                .into(),
                 span,
             );
 
@@ -523,7 +516,9 @@ impl DeriveDisplay {
         for (text, field_name) in parts.iter() {
             if let Some(field_name) = field_name {
                 // Check if field exists
-                let _field_exists = fields.iter().any(|f| f.name.as_str() == field_name.as_str());
+                let _field_exists = fields
+                    .iter()
+                    .any(|f| f.name.as_str() == field_name.as_str());
 
                 // Write the field using Display
                 let field_var = ident_expr(field_name, span);
@@ -614,7 +609,7 @@ impl DeriveDisplay {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use verum_ast::decl::{TypeDecl, TypeDeclBody, Variant, VariantData, RecordField, Visibility};
+    use verum_ast::decl::{RecordField, TypeDecl, TypeDeclBody, Variant, VariantData, Visibility};
     use verum_common::List;
 
     fn create_simple_enum() -> TypeDecl {
@@ -642,18 +637,16 @@ mod tests {
             name: Ident::new("Result", span),
             generics: List::new(),
             attributes: List::new(),
-            body: TypeDeclBody::Variant(List::from(vec![
-                Variant::new(
-                    Ident::new("Error", span),
-                    Some(VariantData::Record(List::from(vec![RecordField::new(
-                        Visibility::Private,
-                        Ident::new("message", span),
-                        Type::text(span),
-                        span,
-                    )]))),
+            body: TypeDeclBody::Variant(List::from(vec![Variant::new(
+                Ident::new("Error", span),
+                Some(VariantData::Record(List::from(vec![RecordField::new(
+                    Visibility::Private,
+                    Ident::new("message", span),
+                    Type::text(span),
                     span,
-                ),
-            ])),
+                )]))),
+                span,
+            )])),
             resource_modifier: None,
             generic_where_clause: None,
             meta_where_clause: None,
@@ -684,7 +677,10 @@ mod tests {
     #[test]
     fn test_humanize_variant_name() {
         let derive = DeriveDisplay;
-        assert_eq!(derive.humanize_variant_name("NotFound").as_str(), "Not found");
+        assert_eq!(
+            derive.humanize_variant_name("NotFound").as_str(),
+            "Not found"
+        );
         // IOError becomes "I o error" due to camelCase splitting - for acronyms,
         // use @display("I/O Error") custom format instead
         assert_eq!(derive.humanize_variant_name("IoError").as_str(), "Io error");

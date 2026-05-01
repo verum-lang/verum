@@ -15,8 +15,8 @@
 //! Edge case tests for verum_fast_parser
 
 use verum_ast::span::FileId;
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 #[test]
 fn test_empty_function_body() {
@@ -141,7 +141,10 @@ fn test_is_keyword_reserved() {
     let lexer = Lexer::new(input, file_id);
     let parser = VerumParser::new();
     let result = parser.parse_module(lexer, file_id);
-    assert!(result.is_err(), "'is' is reserved and cannot be used as function name");
+    assert!(
+        result.is_err(),
+        "'is' is reserved and cannot be used as function name"
+    );
 }
 
 /// Test 'default' is contextual (CAN be function name)
@@ -152,7 +155,10 @@ fn test_default_contextual_keyword() {
     let lexer = Lexer::new(input, file_id);
     let parser = VerumParser::new();
     let result = parser.parse_module(lexer, file_id);
-    assert!(result.is_ok(), "'default' is contextual and CAN be used as function name");
+    assert!(
+        result.is_ok(),
+        "'default' is contextual and CAN be used as function name"
+    );
 }
 
 /// Test trailing comma in tuples
@@ -321,13 +327,7 @@ fn test_complex_operator_chain() {
 /// Test range operators
 #[test]
 fn test_range_operators() {
-    let cases = [
-        "0..10",
-        "0..=10",
-        "..10",
-        "0..",
-        "..",
-    ];
+    let cases = ["0..10", "0..=10", "..10", "0..", ".."];
 
     for input in cases {
         let file_id = FileId::new(0);
@@ -344,7 +344,10 @@ fn test_optional_chain_with_coalesce() {
     let file_id = FileId::new(0);
     let parser = VerumParser::new();
     let result = parser.parse_expr_str(input, file_id);
-    assert!(result.is_ok(), "Optional chain with null coalesce should parse");
+    assert!(
+        result.is_ok(),
+        "Optional chain with null coalesce should parse"
+    );
 }
 
 // ============================================================================
@@ -473,7 +476,11 @@ fn test_raw_multiline_string_literals() {
         let file_id = FileId::new(0);
         let parser = VerumParser::new();
         let result = parser.parse_expr_str(input, file_id);
-        assert!(result.is_ok(), "Raw multiline string '{}' should parse", input);
+        assert!(
+            result.is_ok(),
+            "Raw multiline string '{}' should parse",
+            input
+        );
     }
 }
 
@@ -484,7 +491,10 @@ fn test_unicode_char_literal() {
     let file_id = FileId::new(0);
     let parser = VerumParser::new();
     let result = parser.parse_expr_str(input, file_id);
-    assert!(result.is_ok(), "Unicode escape in char literal should parse");
+    assert!(
+        result.is_ok(),
+        "Unicode escape in char literal should parse"
+    );
 }
 
 // ============================================================================

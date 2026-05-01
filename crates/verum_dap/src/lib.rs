@@ -34,11 +34,11 @@
 //! verum_dap::run_tcp(4711).unwrap();
 //! ```
 
-pub mod types;
-pub mod session;
-pub mod variables;
 pub mod adapter;
 pub mod server;
+pub mod session;
+pub mod types;
+pub mod variables;
 
 // Re-export the main entry points.
 pub use server::{run_stdio, run_tcp};

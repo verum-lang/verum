@@ -160,7 +160,11 @@ impl MetaPattern {
     /// Create a slice pattern
     #[inline]
     pub fn slice(before: List<MetaPattern>, rest: Maybe<Text>, after: List<MetaPattern>) -> Self {
-        MetaPattern::Slice { before, rest, after }
+        MetaPattern::Slice {
+            before,
+            rest,
+            after,
+        }
     }
 
     /// Create a record pattern
@@ -181,7 +185,11 @@ impl MetaPattern {
     /// Create a range pattern
     #[inline]
     pub fn range(start: Maybe<MetaValue>, end: Maybe<MetaValue>, inclusive: bool) -> Self {
-        MetaPattern::Range { start, end, inclusive }
+        MetaPattern::Range {
+            start,
+            end,
+            inclusive,
+        }
     }
 
     /// Create a rest pattern
@@ -222,7 +230,9 @@ impl MetaPattern {
         match self {
             MetaPattern::Wildcard | MetaPattern::Ident(_) | MetaPattern::Rest(_) => true,
             MetaPattern::IdentAt { subpattern, .. } => subpattern.is_irrefutable(),
-            MetaPattern::Literal(_) | MetaPattern::Range { .. } | MetaPattern::TypeTest { .. } => false,
+            MetaPattern::Literal(_) | MetaPattern::Range { .. } | MetaPattern::TypeTest { .. } => {
+                false
+            }
             MetaPattern::Tuple(pats) | MetaPattern::Array(pats) => {
                 pats.iter().all(|p| p.is_irrefutable())
             }
@@ -259,7 +269,11 @@ impl MetaPattern {
                     pat.collect_identifiers(names);
                 }
             }
-            MetaPattern::Slice { before, rest, after } => {
+            MetaPattern::Slice {
+                before,
+                rest,
+                after,
+            } => {
                 for pat in before {
                     pat.collect_identifiers(names);
                 }
@@ -314,16 +328,23 @@ impl MetaPattern {
             MetaPattern::Literal(v) => v.type_name().as_str() == type_name,
             MetaPattern::Tuple(_) => type_name == "Tuple" || type_name.starts_with('('),
             MetaPattern::Array(_) | MetaPattern::Slice { .. } => {
-                type_name == type_names::ARRAY || type_name == type_names::LIST || type_name.starts_with('[')
+                type_name == type_names::ARRAY
+                    || type_name == type_names::LIST
+                    || type_name.starts_with('[')
             }
             MetaPattern::Record { name, .. } => name.as_str() == type_name,
             MetaPattern::Variant { .. } => true, // Depends on enum definition
-            MetaPattern::Range { .. } => matches!(type_name, type_names::INT | "UInt" | type_names::CHAR),
+            MetaPattern::Range { .. } => {
+                matches!(type_name, type_names::INT | "UInt" | type_names::CHAR)
+            }
             MetaPattern::Rest(_) => true,
             MetaPattern::Or(pats) => pats.iter().any(|p| p.could_match_type(type_name)),
             MetaPattern::And(pats) => pats.iter().all(|p| p.could_match_type(type_name)),
             MetaPattern::Reference { .. } => type_name.starts_with('&'),
-            MetaPattern::TypeTest { type_name: expected, .. } => expected.as_str() == type_name,
+            MetaPattern::TypeTest {
+                type_name: expected,
+                ..
+            } => expected.as_str() == type_name,
         }
     }
 }
@@ -349,36 +370,44 @@ mod tests {
 
     #[test]
     fn test_tuple_irrefutability() {
-        let irrefutable = MetaPattern::tuple(vec![
-            MetaPattern::wildcard(),
-            MetaPattern::ident(Text::from("x")),
-        ].into());
+        let irrefutable = MetaPattern::tuple(
+            vec![MetaPattern::wildcard(), MetaPattern::ident(Text::from("x"))].into(),
+        );
         assert!(irrefutable.is_irrefutable());
 
-        let refutable = MetaPattern::tuple(vec![
-            MetaPattern::wildcard(),
-            MetaPattern::literal(MetaValue::Int(1)),
-        ].into());
+        let refutable = MetaPattern::tuple(
+            vec![
+                MetaPattern::wildcard(),
+                MetaPattern::literal(MetaValue::Int(1)),
+            ]
+            .into(),
+        );
         assert!(!refutable.is_irrefutable());
     }
 
     #[test]
     fn test_or_irrefutability() {
         // Or is irrefutable if any branch is irrefutable
-        let irrefutable = MetaPattern::or(vec![
-            MetaPattern::literal(MetaValue::Int(1)),
-            MetaPattern::wildcard(),
-        ].into());
+        let irrefutable = MetaPattern::or(
+            vec![
+                MetaPattern::literal(MetaValue::Int(1)),
+                MetaPattern::wildcard(),
+            ]
+            .into(),
+        );
         assert!(irrefutable.is_irrefutable());
     }
 
     #[test]
     fn test_bound_identifiers() {
-        let pat = MetaPattern::tuple(vec![
-            MetaPattern::ident(Text::from("a")),
-            MetaPattern::ident(Text::from("b")),
-            MetaPattern::wildcard(),
-        ].into());
+        let pat = MetaPattern::tuple(
+            vec![
+                MetaPattern::ident(Text::from("a")),
+                MetaPattern::ident(Text::from("b")),
+                MetaPattern::wildcard(),
+            ]
+            .into(),
+        );
         let names = pat.bound_identifiers();
         assert_eq!(names.len(), 2);
         assert!(names.contains(&Text::from("a")));
@@ -417,7 +446,8 @@ mod tests {
             vec![
                 (Text::from("x"), MetaPattern::ident(Text::from("px"))),
                 (Text::from("y"), MetaPattern::ident(Text::from("py"))),
-            ].into(),
+            ]
+            .into(),
             false,
         );
         let names = rec_pat.bound_identifiers();

@@ -40,10 +40,10 @@
 //! ```
 
 pub mod app;
-pub mod session;
-pub mod ui;
 pub mod keybindings;
 pub mod persistence;
+pub mod session;
+pub mod ui;
 
 pub use app::PlaybookApp;
-pub use session::{Cell, CellId, CellKind, CellOutput, TensorStats, SessionState};
+pub use session::{Cell, CellId, CellKind, CellOutput, SessionState, TensorStats};

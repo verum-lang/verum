@@ -238,12 +238,15 @@ impl RegisterFile {
         debug_assert!(
             idx < self.top,
             "get_unchecked: register r{} (absolute idx {}) out of bounds (top={})",
-            reg.0, idx, self.top
+            reg.0,
+            idx,
+            self.top
         );
         debug_assert!(
             idx < self.registers.len(),
             "get_unchecked: register idx {} exceeds register file size {}",
-            idx, self.registers.len()
+            idx,
+            self.registers.len()
         );
         // SAFETY: Caller guarantees idx is in bounds; debug_assert verifies in debug.
         unsafe { *self.registers.get_unchecked(idx) }
@@ -263,15 +266,20 @@ impl RegisterFile {
         debug_assert!(
             idx < self.top,
             "set_unchecked: register r{} (absolute idx {}) out of bounds (top={})",
-            reg.0, idx, self.top
+            reg.0,
+            idx,
+            self.top
         );
         debug_assert!(
             idx < self.registers.len(),
             "set_unchecked: register idx {} exceeds register file size {}",
-            idx, self.registers.len()
+            idx,
+            self.registers.len()
         );
         // SAFETY: Caller guarantees idx is in bounds; debug_assert verifies in debug.
-        unsafe { *self.registers.get_unchecked_mut(idx) = value; }
+        unsafe {
+            *self.registers.get_unchecked_mut(idx) = value;
+        }
     }
 
     /// Gets a register value by absolute index (no base offset).
@@ -282,7 +290,11 @@ impl RegisterFile {
     #[inline(always)]
     pub fn get_absolute(&self, abs_index: u32) -> Value {
         let idx = abs_index as usize;
-        debug_assert!(idx < self.top, "Absolute register index {} out of bounds", abs_index);
+        debug_assert!(
+            idx < self.top,
+            "Absolute register index {} out of bounds",
+            abs_index
+        );
         self.registers[idx]
     }
 
@@ -294,7 +306,11 @@ impl RegisterFile {
     #[inline(always)]
     pub fn set_absolute(&mut self, abs_index: u32, value: Value) {
         let idx = abs_index as usize;
-        debug_assert!(idx < self.top, "Absolute register index {} out of bounds", abs_index);
+        debug_assert!(
+            idx < self.top,
+            "Absolute register index {} out of bounds",
+            abs_index
+        );
         self.registers[idx] = value;
     }
 
@@ -306,7 +322,11 @@ impl RegisterFile {
     #[inline(always)]
     pub fn get_generation(&self, abs_index: u32) -> u32 {
         let idx = abs_index as usize;
-        debug_assert!(idx < self.top, "Generation index {} out of bounds", abs_index);
+        debug_assert!(
+            idx < self.top,
+            "Generation index {} out of bounds",
+            abs_index
+        );
         self.slot_generations[idx]
     }
 
@@ -323,7 +343,11 @@ impl RegisterFile {
     #[inline(always)]
     pub fn bump_generation(&mut self, abs_index: u32) {
         let idx = abs_index as usize;
-        debug_assert!(idx < self.top, "Generation index {} out of bounds", abs_index);
+        debug_assert!(
+            idx < self.top,
+            "Generation index {} out of bounds",
+            abs_index
+        );
 
         let current_gen = self.slot_generations[idx];
         if current_gen >= GEN_MAX {
@@ -356,7 +380,11 @@ impl RegisterFile {
     #[inline(always)]
     pub fn get_generation_epoch(&self, abs_index: u32) -> (u32, u16) {
         let idx = abs_index as usize;
-        debug_assert!(idx < self.top, "Generation/epoch index {} out of bounds", abs_index);
+        debug_assert!(
+            idx < self.top,
+            "Generation/epoch index {} out of bounds",
+            abs_index
+        );
         (self.slot_generations[idx], self.slot_epochs[idx])
     }
 
@@ -403,7 +431,14 @@ impl RegisterFile {
     ///
 
     /// Used for argument passing during function calls.
-    pub fn copy_range(&mut self, src_base: u32, src_start: Reg, dst_base: u32, dst_start: Reg, count: u16) {
+    pub fn copy_range(
+        &mut self,
+        src_base: u32,
+        src_start: Reg,
+        dst_base: u32,
+        dst_start: Reg,
+        count: u16,
+    ) {
         for i in 0..count {
             let src_idx = (src_base + src_start.0 as u32 + i as u32) as usize;
             let dst_idx = (dst_base + dst_start.0 as u32 + i as u32) as usize;

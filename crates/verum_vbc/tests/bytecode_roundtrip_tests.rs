@@ -20,8 +20,8 @@
 
 use verum_vbc::bytecode::{decode_instruction, encode_instruction};
 use verum_vbc::instruction::{
-    BinaryFloatOp, BinaryGenericOp, BinaryIntOp, BitwiseOp, CompareOp, FloatToIntMode,
-    Instruction, Opcode, Reg, RegRange, UnaryFloatOp, UnaryIntOp,
+    BinaryFloatOp, BinaryGenericOp, BinaryIntOp, BitwiseOp, CompareOp, FloatToIntMode, Instruction,
+    Opcode, Reg, RegRange, UnaryFloatOp, UnaryIntOp,
 };
 use verum_vbc::types::TypeId;
 
@@ -622,7 +622,10 @@ fn test_encoding_deterministic() {
     let mut bytes2 = Vec::new();
     encode_instruction(&instr, &mut bytes1);
     encode_instruction(&instr, &mut bytes2);
-    assert_eq!(bytes1, bytes2, "Same instruction must produce identical bytes");
+    assert_eq!(
+        bytes1, bytes2,
+        "Same instruction must produce identical bytes"
+    );
 }
 
 // =============================================================================
@@ -789,13 +792,35 @@ fn test_roundtrip_all_conversion_modes() {
 fn test_roundtrip_conversion_sequence() {
     // Encode multiple conversions in sequence and verify they all decode correctly
     let instructions = vec![
-        Instruction::CvtIF { dst: Reg(0), src: Reg(1) },
-        Instruction::CvtFI { mode: FloatToIntMode::Trunc, dst: Reg(2), src: Reg(3) },
-        Instruction::CvtIC { dst: Reg(4), src: Reg(5) },
-        Instruction::CvtCI { dst: Reg(6), src: Reg(7) },
-        Instruction::CvtBI { dst: Reg(8), src: Reg(9) },
-        Instruction::CvtToI { dst: Reg(10), src: Reg(11) },
-        Instruction::CvtToF { dst: Reg(12), src: Reg(13) },
+        Instruction::CvtIF {
+            dst: Reg(0),
+            src: Reg(1),
+        },
+        Instruction::CvtFI {
+            mode: FloatToIntMode::Trunc,
+            dst: Reg(2),
+            src: Reg(3),
+        },
+        Instruction::CvtIC {
+            dst: Reg(4),
+            src: Reg(5),
+        },
+        Instruction::CvtCI {
+            dst: Reg(6),
+            src: Reg(7),
+        },
+        Instruction::CvtBI {
+            dst: Reg(8),
+            src: Reg(9),
+        },
+        Instruction::CvtToI {
+            dst: Reg(10),
+            src: Reg(11),
+        },
+        Instruction::CvtToF {
+            dst: Reg(12),
+            src: Reg(13),
+        },
     ];
 
     let mut bytes = Vec::new();

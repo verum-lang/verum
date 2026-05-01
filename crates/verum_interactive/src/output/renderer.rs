@@ -48,7 +48,11 @@ impl RenderedOutput {
     }
 
     /// Creates a formatted output.
-    pub fn formatted(text: impl Into<Text>, formatted: impl Into<Text>, type_info: impl Into<Text>) -> Self {
+    pub fn formatted(
+        text: impl Into<Text>,
+        formatted: impl Into<Text>,
+        type_info: impl Into<Text>,
+    ) -> Self {
         Self {
             text: text.into(),
             formatted: Some(formatted.into()),
@@ -103,7 +107,7 @@ pub struct DefaultRenderer;
 
 impl OutputRenderer for DefaultRenderer {
     fn render(&self, value: &Value, type_info: &Text, format: OutputFormat) -> RenderedOutput {
-        use crate::execution::{format_value, ValueDisplayOptions};
+        use crate::execution::{ValueDisplayOptions, format_value};
 
         let options = ValueDisplayOptions::default();
         let text = format_value(value, &options);
@@ -199,7 +203,14 @@ fn html_format_value(value: &Value, text: &Text) -> Text {
         "value"
     };
 
-    Text::from(format!("<span class=\"{}\">{}<!-- raw HTML omitted --></span>", class, html_escape(text.as_str())).as_str())
+    Text::from(
+        format!(
+            "<span class=\"{}\">{}<!-- raw HTML omitted --></span>",
+            class,
+            html_escape(text.as_str())
+        )
+        .as_str(),
+    )
 }
 
 /// Formats a value for Markdown output.
@@ -245,7 +256,8 @@ impl RendererRegistry {
     pub fn register<R: OutputRenderer + Send + Sync + 'static>(&mut self, renderer: R) {
         self.renderers.push(Box::new(renderer));
         // Sort by priority (highest first)
-        self.renderers.sort_by_key(|r| std::cmp::Reverse(r.priority()));
+        self.renderers
+            .sort_by_key(|r| std::cmp::Reverse(r.priority()));
     }
 
     /// Finds the best renderer for a value.
@@ -261,7 +273,8 @@ impl RendererRegistry {
 
     /// Renders a value using the best available renderer.
     pub fn render(&self, value: &Value, type_info: &Text, format: OutputFormat) -> RenderedOutput {
-        self.find_renderer(value, type_info).render(value, type_info, format)
+        self.find_renderer(value, type_info)
+            .render(value, type_info, format)
     }
 }
 

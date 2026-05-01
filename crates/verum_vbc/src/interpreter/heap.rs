@@ -45,14 +45,14 @@
 //! └─────────────────────────────────────────────────────────────────┘
 //! ```
 
-use std::alloc::{alloc, dealloc, Layout};
+use std::alloc::{Layout, alloc, dealloc};
 use std::ptr::NonNull;
 
 use bitflags::bitflags;
 
+use super::error::{CbgrViolationKind, InterpreterError, InterpreterResult};
 use crate::types::TypeId;
 use crate::value::Value;
-use super::error::{CbgrViolationKind, InterpreterError, InterpreterResult};
 
 /// Size of object header in bytes.
 pub const OBJECT_HEADER_SIZE: usize = 24;
@@ -436,11 +436,12 @@ impl Heap {
         }
 
         let total_size = OBJECT_HEADER_SIZE + size;
-        let layout = Layout::from_size_align(total_size, MIN_ALIGNMENT)
-            .map_err(|_| InterpreterError::OutOfMemory {
+        let layout = Layout::from_size_align(total_size, MIN_ALIGNMENT).map_err(|_| {
+            InterpreterError::OutOfMemory {
                 requested: total_size,
                 available: self.threshold.saturating_sub(self.allocated),
-            })?;
+            }
+        })?;
 
         // Check threshold (simple GC trigger)
         if self.allocated + total_size > self.threshold {
@@ -491,7 +492,11 @@ impl Heap {
     }
 
     /// Allocates an array of values.
-    pub fn alloc_array(&mut self, element_type: TypeId, length: usize) -> InterpreterResult<Object> {
+    pub fn alloc_array(
+        &mut self,
+        element_type: TypeId,
+        length: usize,
+    ) -> InterpreterResult<Object> {
         let size = length * std::mem::size_of::<Value>();
         self.alloc(element_type, size)
     }
@@ -544,10 +549,7 @@ impl Heap {
             let new_epoch = verum_common::cbgr::advance_epoch();
 
             // Verify epoch actually advanced (protects against epoch counter exhaustion)
-            debug_assert!(
-                new_epoch > 0,
-                "Epoch advance must produce a non-zero epoch"
-            );
+            debug_assert!(new_epoch > 0, "Epoch advance must produce a non-zero epoch");
 
             self.generation = verum_common::cbgr::GEN_INITIAL;
         } else {
@@ -731,9 +733,13 @@ impl Heap {
 
     /// O(n) where n = serialized data size. Just a single memcpy.
     pub fn alloc_token_stream(&mut self, serialized_data: &[u8]) -> InterpreterResult<Object> {
-        self.alloc_with_init(crate::types::TypeId::TOKEN_STREAM, serialized_data.len(), |buf| {
-            buf.copy_from_slice(serialized_data);
-        })
+        self.alloc_with_init(
+            crate::types::TypeId::TOKEN_STREAM,
+            serialized_data.len(),
+            |buf| {
+                buf.copy_from_slice(serialized_data);
+            },
+        )
     }
 }
 
@@ -743,7 +749,6 @@ impl Drop for Heap {
         unsafe { self.clear() };
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -776,9 +781,11 @@ mod tests {
     fn test_alloc_with_init() {
         let mut heap = Heap::new();
 
-        let obj = heap.alloc_with_init(TypeId::TEXT, 16, |data| {
-            data.copy_from_slice(b"Hello, World!!\0\0");
-        }).unwrap();
+        let obj = heap
+            .alloc_with_init(TypeId::TEXT, 16, |data| {
+                data.copy_from_slice(b"Hello, World!!\0\0");
+            })
+            .unwrap();
 
         let data = unsafe { std::slice::from_raw_parts(obj.data_ptr(), 16) };
         assert_eq!(data, b"Hello, World!!\0\0");

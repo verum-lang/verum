@@ -139,8 +139,8 @@ use verum_ast::decl::{ContextDecl, FunctionBody, FunctionDecl, ImplDecl, Item, I
 use verum_ast::stmt::StmtKind;
 use verum_ast::visitor::{Visitor, walk_expr, walk_stmt};
 use verum_ast::{Expr, ExprKind, Module, Stmt};
-use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
 use verum_common::{List, Text};
+use verum_diagnostics::{Diagnostic, DiagnosticBuilder, Severity};
 use verum_types::di::{ContextGroup, ContextGroupRegistry, ContextRef};
 
 use super::{CompilationPhase, PhaseData, PhaseInput, PhaseMetrics, PhaseOutput};
@@ -190,7 +190,10 @@ impl ContextValidationPhase {
                     .map(|ctx| {
                         // Extract context name from the requirement's path
                         use verum_ast::ty::PathSegment;
-                        let name = ctx.path.segments.first()
+                        let name = ctx
+                            .path
+                            .segments
+                            .first()
                             .map(|seg| match seg {
                                 PathSegment::Name(ident) => ident.name.to_string(),
                                 PathSegment::SelfValue => "self".to_string(),
@@ -202,7 +205,10 @@ impl ContextValidationPhase {
                         let prefix = if ctx.is_negative { "!" } else { "" };
                         // Create a ContextRef with the context name
                         // TypeId is not used in expansion, so we use a placeholder
-                        ContextRef::new(format!("{}{}", prefix, name).into(), std::any::TypeId::of::<()>())
+                        ContextRef::new(
+                            format!("{}{}", prefix, name).into(),
+                            std::any::TypeId::of::<()>(),
+                        )
                     })
                     .collect();
 
@@ -218,7 +224,10 @@ impl ContextValidationPhase {
 
     /// Validate contexts in a module
     /// Public entry point for context validation from the pipeline.
-    pub fn validate_module_public(&self, module: &Module) -> Result<List<Diagnostic>, List<Diagnostic>> {
+    pub fn validate_module_public(
+        &self,
+        module: &Module,
+    ) -> Result<List<Diagnostic>, List<Diagnostic>> {
         self.validate_module(module)
     }
 
@@ -235,10 +244,16 @@ impl ContextValidationPhase {
         // Build function → required contexts map for transitive negative checking.
         // This allows checking that calling a function which requires context X
         // from a function that excludes context X is a compile-time error.
-        let function_contexts = std::sync::Arc::new(self.build_function_contexts_map(module, &context_registry));
+        let function_contexts =
+            std::sync::Arc::new(self.build_function_contexts_map(module, &context_registry));
 
         for item in &module.items {
-            match self.validate_item_with_context_info(item, &context_registry, &context_decls, &function_contexts) {
+            match self.validate_item_with_context_info(
+                item,
+                &context_registry,
+                &context_decls,
+                &function_contexts,
+            ) {
                 Ok(item_warnings) => warnings.extend(item_warnings),
                 Err(item_errors) => errors.extend(item_errors),
             }
@@ -276,7 +291,8 @@ impl ContextValidationPhase {
                     if let Some(props) = inferred.get(&name) {
                         if !props.is_pure() {
                             // Pure function has inferred impure properties
-                            let impure_list: Vec<String> = props.iter()
+                            let impure_list: Vec<String> = props
+                                .iter()
                                 .filter(|p| !matches!(p, ComputationalProperty::Pure))
                                 .map(|p| format!("{:?}", p))
                                 .collect();
@@ -298,7 +314,12 @@ impl ContextValidationPhase {
         }
     }
 
-    fn validate_di_types(&self, module: &Module, warnings: &mut List<Diagnostic>, errors: &mut List<Diagnostic>) {
+    fn validate_di_types(
+        &self,
+        module: &Module,
+        warnings: &mut List<Diagnostic>,
+        errors: &mut List<Diagnostic>,
+    ) {
         use verum_types::dependency_injection::{DITypeChecker, DependencyRef};
         let mut checker = DITypeChecker::new();
         let mut found = false;
@@ -310,39 +331,77 @@ impl ContextValidationPhase {
                     if attr.name.as_str() == "injectable" {
                         found = true;
                         let scope = self.extract_di_scope(attr);
-                        let _ = checker.register_injectable(td.name.name.as_str(), scope, item.span);
+                        let _ =
+                            checker.register_injectable(td.name.name.as_str(), scope, item.span);
                         injectable_type_names.insert(td.name.name.as_str().to_string());
                     }
                 }
             }
         }
-        if !found { return; }
+        if !found {
+            return;
+        }
         for item in &module.items {
             if let ItemKind::Impl(impl_decl) = &item.kind {
                 let tname = match &impl_decl.kind {
                     verum_ast::decl::ImplKind::Inherent(ty) => {
-                        if let verum_ast::ty::TypeKind::Path(p) = &ty.kind { p.as_ident().map(|i| i.as_str().to_string()).unwrap_or_default() } else { String::new() }
+                        if let verum_ast::ty::TypeKind::Path(p) = &ty.kind {
+                            p.as_ident()
+                                .map(|i| i.as_str().to_string())
+                                .unwrap_or_default()
+                        } else {
+                            String::new()
+                        }
                     }
                     verum_ast::decl::ImplKind::Protocol { for_type, .. } => {
-                        if let verum_ast::ty::TypeKind::Path(p) = &for_type.kind { p.as_ident().map(|i| i.as_str().to_string()).unwrap_or_default() } else { String::new() }
+                        if let verum_ast::ty::TypeKind::Path(p) = &for_type.kind {
+                            p.as_ident()
+                                .map(|i| i.as_str().to_string())
+                                .unwrap_or_default()
+                        } else {
+                            String::new()
+                        }
                     }
                 };
                 for ii in &impl_decl.items {
                     if let verum_ast::decl::ImplItemKind::Function(f) = &ii.kind {
                         if ii.attributes.iter().any(|a| a.name.as_str() == "inject") {
-                            let deps: verum_common::List<DependencyRef> = f.params.iter().filter_map(|p| {
-                                if let verum_ast::decl::FunctionParamKind::Regular { ty, .. } = &p.kind {
-                                    Some(DependencyRef::Direct { type_name: verum_common::Text::from(format!("{:?}", ty)) })
-                                } else { None }
-                            }).collect();
-                            let _ = checker.register_constructor(tname.as_str(), f.name.as_str(), deps, f.span);
+                            let deps: verum_common::List<DependencyRef> = f
+                                .params
+                                .iter()
+                                .filter_map(|p| {
+                                    if let verum_ast::decl::FunctionParamKind::Regular {
+                                        ty, ..
+                                    } = &p.kind
+                                    {
+                                        Some(DependencyRef::Direct {
+                                            type_name: verum_common::Text::from(format!(
+                                                "{:?}",
+                                                ty
+                                            )),
+                                        })
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
+                            let _ = checker.register_constructor(
+                                tname.as_str(),
+                                f.name.as_str(),
+                                deps,
+                                f.span,
+                            );
                         }
                     }
                 }
             }
         }
         if let Err(e) = checker.check_all() {
-            warnings.push(DiagnosticBuilder::new(Severity::Warning).message(format!("DI: {}", e)).build());
+            warnings.push(
+                DiagnosticBuilder::new(Severity::Warning)
+                    .message(format!("DI: {}", e))
+                    .build(),
+            );
         }
 
         // Phase 6: Scope thread-safety validation
@@ -360,9 +419,8 @@ impl ContextValidationPhase {
 
     /// Known types that are NOT Send or Sync — structural thread-safety check.
     /// These types produce hard errors when found in Singleton-scoped injectables.
-    const NON_SEND_SYNC_TYPES: &'static [&'static str] = &[
-        "RawPtr", "Cell", "RefCell", "UnsafeCell", "Rc",
-    ];
+    const NON_SEND_SYNC_TYPES: &'static [&'static str] =
+        &["RawPtr", "Cell", "RefCell", "UnsafeCell", "Rc"];
 
     /// Collect non-Send/Sync field type names for injectable types.
     fn collect_non_send_fields(
@@ -382,7 +440,9 @@ impl ContextValidationPhase {
                     for field in fields.iter() {
                         if let Some(non_send) = self.extract_non_send_type_name(&field.ty) {
                             bad_fields.push(verum_common::Text::from(format!(
-                                "{}: {}", field.name.as_str(), non_send
+                                "{}: {}",
+                                field.name.as_str(),
+                                non_send
                             )));
                         }
                     }
@@ -429,14 +489,21 @@ impl ContextValidationPhase {
         }
     }
 
-    fn extract_di_scope(&self, attr: &verum_ast::attr::Attribute) -> verum_types::dependency_injection::Scope {
+    fn extract_di_scope(
+        &self,
+        attr: &verum_ast::attr::Attribute,
+    ) -> verum_types::dependency_injection::Scope {
         use verum_types::dependency_injection::Scope as S;
         if let verum_common::Maybe::Some(ref args) = attr.args {
             for arg in args.iter() {
                 if let verum_ast::expr::ExprKind::Field { expr: obj, field } = &arg.kind {
                     if let verum_ast::expr::ExprKind::Path(p) = &obj.kind {
                         if p.as_ident().map(|i| i.as_str()) == Some("Scope") {
-                            return match field.as_str() { "Singleton" => S::Singleton, "Request" => S::Request, _ => S::Transient };
+                            return match field.as_str() {
+                                "Singleton" => S::Singleton,
+                                "Request" => S::Request,
+                                _ => S::Transient,
+                            };
                         }
                     }
                 }
@@ -457,18 +524,27 @@ impl ContextValidationPhase {
             if let ItemKind::Function(func) = &item.kind {
                 let mut contexts = HashSet::new();
                 for ctx in &func.contexts {
-                    if ctx.is_negative { continue; }
+                    if ctx.is_negative {
+                        continue;
+                    }
                     // Skip conditional contexts whose condition is false
                     if let verum_common::Maybe::Some(ref cond) = ctx.condition {
-                        if !evaluate_compile_time_condition(cond) { continue; }
+                        if !evaluate_compile_time_condition(cond) {
+                            continue;
+                        }
                     }
-                    let name = ctx.path.segments.last()
+                    let name = ctx
+                        .path
+                        .segments
+                        .last()
                         .and_then(|seg| match seg {
                             verum_ast::ty::PathSegment::Name(ident) => Some(ident.name.to_string()),
                             _ => None,
                         })
                         .unwrap_or_default();
-                    if name.is_empty() { continue; }
+                    if name.is_empty() {
+                        continue;
+                    }
                     // Expand groups
                     if registry.has_group(&name) {
                         if let Ok(expanded) = registry.expand(&name) {
@@ -514,12 +590,18 @@ impl ContextValidationPhase {
         function_contexts: &std::sync::Arc<HashMap<String, HashSet<String>>>,
     ) -> Result<List<Diagnostic>, List<Diagnostic>> {
         match &item.kind {
-            ItemKind::Function(func) => {
-                self.validate_function_with_context_info(func, registry, context_decls, function_contexts)
-            }
-            ItemKind::Impl(impl_decl) => {
-                self.validate_impl_with_context_info(impl_decl, registry, context_decls, function_contexts)
-            }
+            ItemKind::Function(func) => self.validate_function_with_context_info(
+                func,
+                registry,
+                context_decls,
+                function_contexts,
+            ),
+            ItemKind::Impl(impl_decl) => self.validate_impl_with_context_info(
+                impl_decl,
+                registry,
+                context_decls,
+                function_contexts,
+            ),
             _ => Ok(List::new()),
         }
     }
@@ -553,7 +635,14 @@ impl ContextValidationPhase {
         // A pure function cannot: mutate external state, perform I/O, call impure functions.
         // This is enforced via the transitive negative context checking system.
         if func.is_pure {
-            for impure in &["IO", "Mutates", "WritesExternal", "ReadsExternal", "Spawns", "FFI"] {
+            for impure in &[
+                "IO",
+                "Mutates",
+                "WritesExternal",
+                "ReadsExternal",
+                "Spawns",
+                "FFI",
+            ] {
                 excluded_contexts.insert(impure.to_string());
             }
         }
@@ -580,7 +669,8 @@ impl ContextValidationPhase {
                 if !evaluate_compile_time_condition(condition_expr) {
                     tracing::debug!(
                         "Skipping conditional context '{}' in function '{}' — condition false",
-                        context_name, func.name
+                        context_name,
+                        func.name
                     );
                     continue;
                 }
@@ -683,7 +773,8 @@ impl ContextValidationPhase {
             declared_contexts.clone(),
             excluded_contexts,
             self.allow_undefined,
-        ).with_function_contexts(function_contexts.clone());
+        )
+        .with_function_contexts(function_contexts.clone());
 
         // Walk the function body to validate context usage
         match body {
@@ -809,7 +900,12 @@ impl ContextValidationPhase {
 
         for impl_item in &impl_decl.items {
             if let verum_ast::decl::ImplItemKind::Function(func) = &impl_item.kind {
-                match self.validate_function_with_context_info(func, registry, context_decls, function_contexts) {
+                match self.validate_function_with_context_info(
+                    func,
+                    registry,
+                    context_decls,
+                    function_contexts,
+                ) {
                     Ok(w) => warnings.extend(w),
                     Err(e) => errors.extend(e),
                 }
@@ -998,7 +1094,10 @@ impl ContextUsageValidator {
     }
 
     /// Set the function contexts map for transitive negative checking.
-    fn with_function_contexts(mut self, fc: std::sync::Arc<HashMap<String, HashSet<String>>>) -> Self {
+    fn with_function_contexts(
+        mut self,
+        fc: std::sync::Arc<HashMap<String, HashSet<String>>>,
+    ) -> Self {
         self.function_contexts = fc;
         self
     }
@@ -1383,7 +1482,10 @@ fn evaluate_compile_time_condition(expr: &verum_ast::expr::Expr) -> bool {
 
     match &expr.kind {
         // cfg.identifier — config flags
-        ExprKind::Field { expr: object, field } => {
+        ExprKind::Field {
+            expr: object,
+            field,
+        } => {
             if let ExprKind::Path(path) = &object.kind {
                 if let Some(ident) = path.as_ident() {
                     let prefix = ident.name.as_str();
@@ -1437,20 +1539,21 @@ fn evaluate_compile_time_condition(expr: &verum_ast::expr::Expr) -> bool {
         }
 
         // Binary: a && b, a || b
-        ExprKind::Binary { op, left, right } => {
-            match op {
-                verum_ast::expr::BinOp::And => {
-                    evaluate_compile_time_condition(left) && evaluate_compile_time_condition(right)
-                }
-                verum_ast::expr::BinOp::Or => {
-                    evaluate_compile_time_condition(left) || evaluate_compile_time_condition(right)
-                }
-                _ => false,
+        ExprKind::Binary { op, left, right } => match op {
+            verum_ast::expr::BinOp::And => {
+                evaluate_compile_time_condition(left) && evaluate_compile_time_condition(right)
             }
-        }
+            verum_ast::expr::BinOp::Or => {
+                evaluate_compile_time_condition(left) || evaluate_compile_time_condition(right)
+            }
+            _ => false,
+        },
 
         _ => {
-            tracing::debug!("Unsupported compile-time condition expression: {:?}", expr.kind);
+            tracing::debug!(
+                "Unsupported compile-time condition expression: {:?}",
+                expr.kind
+            );
             false
         }
     }
@@ -1525,13 +1628,21 @@ impl InferredProperties {
                 let type_name = match &impl_decl.kind {
                     verum_ast::decl::ImplKind::Inherent(ty) => {
                         if let verum_ast::ty::TypeKind::Path(p) = &ty.kind {
-                            p.as_ident().map(|i| i.as_str().to_string()).unwrap_or_default()
-                        } else { String::new() }
+                            p.as_ident()
+                                .map(|i| i.as_str().to_string())
+                                .unwrap_or_default()
+                        } else {
+                            String::new()
+                        }
                     }
                     verum_ast::decl::ImplKind::Protocol { for_type, .. } => {
                         if let verum_ast::ty::TypeKind::Path(p) = &for_type.kind {
-                            p.as_ident().map(|i| i.as_str().to_string()).unwrap_or_default()
-                        } else { String::new() }
+                            p.as_ident()
+                                .map(|i| i.as_str().to_string())
+                                .unwrap_or_default()
+                        } else {
+                            String::new()
+                        }
                     }
                 };
                 for ii in &impl_decl.items {
@@ -1586,7 +1697,10 @@ impl InferredProperties {
 
     /// Check if a function is inferred as pure.
     pub fn is_pure(&self, name: &str) -> bool {
-        self.functions.get(name).map(|p| p.is_pure()).unwrap_or(false)
+        self.functions
+            .get(name)
+            .map(|p| p.is_pure())
+            .unwrap_or(false)
     }
 }
 
@@ -1595,7 +1709,9 @@ fn infer_direct_properties(func: &FunctionDecl) -> PropertySet {
     let mut props = Vec::new();
 
     // Signature-level properties
-    if func.is_async { props.push(ComputationalProperty::Async); }
+    if func.is_async {
+        props.push(ComputationalProperty::Async);
+    }
     if func.is_pure { /* Pure is the default when no other properties */ }
 
     // Body-level inference
@@ -1633,10 +1749,16 @@ fn find_callees_in_module(module: &Module, func_name: &str) -> Vec<String> {
                 if let Some(ref body) = func.body {
                     match body {
                         verum_ast::FunctionBody::Block(block) => {
-                            for stmt in &block.stmts { finder.visit_stmt(stmt); }
-                            if let Some(ref expr) = block.expr { finder.visit_expr(expr); }
+                            for stmt in &block.stmts {
+                                finder.visit_stmt(stmt);
+                            }
+                            if let Some(ref expr) = block.expr {
+                                finder.visit_expr(expr);
+                            }
                         }
-                        verum_ast::FunctionBody::Expr(expr) => { finder.visit_expr(expr); }
+                        verum_ast::FunctionBody::Expr(expr) => {
+                            finder.visit_expr(expr);
+                        }
                     }
                 }
                 return finder.callees;
@@ -1652,7 +1774,11 @@ struct PropertyCollector {
 }
 
 impl PropertyCollector {
-    fn new() -> Self { Self { properties: Vec::new() } }
+    fn new() -> Self {
+        Self {
+            properties: Vec::new(),
+        }
+    }
 }
 
 impl Visitor for PropertyCollector {
@@ -1663,8 +1789,8 @@ impl Visitor for PropertyCollector {
                 if let ExprKind::Path(path) = &func.kind {
                     if let Some(ident) = path.as_ident() {
                         match ident.as_str() {
-                            "print" | "println" | "eprint" | "eprintln"
-                            | "read_line" | "read_to_string" => {
+                            "print" | "println" | "eprint" | "eprintln" | "read_line"
+                            | "read_to_string" => {
                                 self.properties.push(ComputationalProperty::IO);
                             }
                             "panic" | "unreachable" | "abort" => {
@@ -1683,8 +1809,13 @@ impl Visitor for PropertyCollector {
             ExprKind::MethodCall { method, .. } => {
                 // Methods ending with ! or known mutating patterns
                 let name = method.as_str();
-                if name == "push" || name == "pop" || name == "insert" || name == "remove"
-                    || name == "set" || name == "clear" || name == "sort"
+                if name == "push"
+                    || name == "pop"
+                    || name == "insert"
+                    || name == "remove"
+                    || name == "set"
+                    || name == "clear"
+                    || name == "sort"
                 {
                     self.properties.push(ComputationalProperty::Mutates);
                 }
@@ -1721,7 +1852,11 @@ struct CalleeFinder {
 }
 
 impl CalleeFinder {
-    fn new() -> Self { Self { callees: Vec::new() } }
+    fn new() -> Self {
+        Self {
+            callees: Vec::new(),
+        }
+    }
 }
 
 impl Visitor for CalleeFinder {
@@ -1805,12 +1940,8 @@ mod tests {
         let mut declared = HashSet::new();
         declared.insert("Logger".to_string());
 
-        let mut validator = ContextUsageValidator::new(
-            Text::from("test_func"),
-            declared,
-            HashSet::new(),
-            false,
-        );
+        let mut validator =
+            ContextUsageValidator::new(Text::from("test_func"), declared, HashSet::new(), false);
 
         // Initially one scope
         assert_eq!(validator.provided_contexts.len(), 1);
@@ -1837,12 +1968,8 @@ mod tests {
         declared.insert("Logger".to_string());
         declared.insert("Database".to_string());
 
-        let mut validator = ContextUsageValidator::new(
-            Text::from("test_func"),
-            declared,
-            HashSet::new(),
-            false,
-        );
+        let mut validator =
+            ContextUsageValidator::new(Text::from("test_func"), declared, HashSet::new(), false);
 
         // Initially no contexts provided
         assert!(!validator.is_context_provided("Logger"));
@@ -1894,12 +2021,8 @@ mod tests {
         let mut declared = HashSet::new();
         declared.insert("Logger".to_string());
 
-        let mut validator = ContextUsageValidator::new(
-            Text::from("test_func"),
-            declared,
-            HashSet::new(),
-            false,
-        );
+        let mut validator =
+            ContextUsageValidator::new(Text::from("test_func"), declared, HashSet::new(), false);
 
         // Check accessing declared but unprovided context
         validator.check_context_access("Logger", verum_ast::Span::default());
@@ -1945,12 +2068,8 @@ mod tests {
         let mut excluded = HashSet::new();
         excluded.insert("Database".to_string());
 
-        let mut validator = ContextUsageValidator::new(
-            Text::from("test_func"),
-            declared,
-            excluded,
-            false,
-        );
+        let mut validator =
+            ContextUsageValidator::new(Text::from("test_func"), declared, excluded, false);
 
         // Check accessing excluded context
         validator.check_context_access("Database", verum_ast::Span::default());
@@ -1973,12 +2092,8 @@ mod tests {
         let mut excluded = HashSet::new();
         excluded.insert("Database".to_string()); // But excluded
 
-        let mut validator = ContextUsageValidator::new(
-            Text::from("test_func"),
-            declared,
-            excluded,
-            false,
-        );
+        let mut validator =
+            ContextUsageValidator::new(Text::from("test_func"), declared, excluded, false);
 
         // Check accessing context that is both declared and excluded
         validator.check_context_access("Database", verum_ast::Span::default());

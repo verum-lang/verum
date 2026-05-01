@@ -42,11 +42,7 @@ impl ImportFormat {
         match s.to_ascii_lowercase().as_str() {
             "owl2-fs" | "owl2_fs" | "ofn" => Ok(Self::Owl2Fs),
             other => Err(CliError::InvalidArgument(
-                format!(
-                    "--from must be one of: owl2-fs / ofn (got '{}')",
-                    other
-                )
-                .into(),
+                format!("--from must be one of: owl2-fs / ofn (got '{}')", other).into(),
             )),
         }
     }
@@ -62,22 +58,16 @@ pub struct ImportOptions {
 
 /// Entry point for `verum import --from <format> <input>`.
 pub fn run(options: ImportOptions) -> Result<()> {
-    let bytes = fs::read_to_string(&options.input).map_err(|e| {
-        CliError::Custom(
-            format!("read {}: {}", options.input.display(), e).into(),
-        )
-    })?;
+    let bytes = fs::read_to_string(&options.input)
+        .map_err(|e| CliError::Custom(format!("read {}: {}", options.input.display(), e).into()))?;
     let vr_source = match options.format {
         ImportFormat::Owl2Fs => import_owl2_fs(&bytes)?,
     };
-    let out_path = options.output.unwrap_or_else(|| {
-        options.input.with_extension("vr")
-    });
-    fs::write(&out_path, vr_source).map_err(|e| {
-        CliError::Custom(
-            format!("write {}: {}", out_path.display(), e).into(),
-        )
-    })?;
+    let out_path = options
+        .output
+        .unwrap_or_else(|| options.input.with_extension("vr"));
+    fs::write(&out_path, vr_source)
+        .map_err(|e| CliError::Custom(format!("write {}: {}", out_path.display(), e).into()))?;
     println!("imported → {}", out_path.display());
     Ok(())
 }
@@ -103,10 +93,7 @@ pub fn import_owl2_fs(source: &str) -> Result<String> {
 enum OwlSExpr {
     Atom(String),
     Str(String),
-    List {
-        head: String,
-        args: Vec<OwlSExpr>,
-    },
+    List { head: String, args: Vec<OwlSExpr> },
 }
 
 /// Tokenise + parse OWL 2 FS source into a flat list of top-level
@@ -205,9 +192,7 @@ fn tokenize_owl2_fs(source: &str) -> Vec<Tok> {
 
 fn parse_one(tokens: &[Tok], pos: &mut usize) -> Result<OwlSExpr> {
     if *pos >= tokens.len() {
-        return Err(CliError::Custom(
-            "owl2-fs: unexpected end of input".into(),
-        ));
+        return Err(CliError::Custom("owl2-fs: unexpected end of input".into()));
     }
     match &tokens[*pos] {
         Tok::Atom(a) => {
@@ -218,22 +203,16 @@ fn parse_one(tokens: &[Tok], pos: &mut usize) -> Result<OwlSExpr> {
             // never take args; only operator atoms (Class, ObjectProperty,
             // SubClassOf, …) do, so a colon-/angle-prefixed head must
             // be returned as a bare atom even if Open follows.
-            let takes_args = !head.starts_with(':')
-                && !head.starts_with('<')
-                && !head.contains(':');
-            if takes_args
-                && *pos < tokens.len()
-                && matches!(tokens[*pos], Tok::Open)
-            {
+            let takes_args =
+                !head.starts_with(':') && !head.starts_with('<') && !head.contains(':');
+            if takes_args && *pos < tokens.len() && matches!(tokens[*pos], Tok::Open) {
                 *pos += 1;
                 let mut args = Vec::new();
                 while *pos < tokens.len() && !matches!(tokens[*pos], Tok::Close) {
                     args.push(parse_one(tokens, pos)?);
                 }
                 if *pos >= tokens.len() {
-                    return Err(CliError::Custom(
-                        "owl2-fs: unmatched '('".into(),
-                    ));
+                    return Err(CliError::Custom("owl2-fs: unmatched '('".into()));
                 }
                 *pos += 1; // consume Close
                 Ok(OwlSExpr::List { head, args })
@@ -254,9 +233,7 @@ fn parse_one(tokens: &[Tok], pos: &mut usize) -> Result<OwlSExpr> {
                 args.push(parse_one(tokens, pos)?);
             }
             if *pos >= tokens.len() {
-                return Err(CliError::Custom(
-                    "owl2-fs: unmatched '('".into(),
-                ));
+                return Err(CliError::Custom("owl2-fs: unmatched '('".into()));
             }
             *pos += 1;
             Ok(OwlSExpr::List {
@@ -264,9 +241,7 @@ fn parse_one(tokens: &[Tok], pos: &mut usize) -> Result<OwlSExpr> {
                 args,
             })
         }
-        Tok::Close => Err(CliError::Custom(
-            "owl2-fs: unexpected ')'".into(),
-        )),
+        Tok::Close => Err(CliError::Custom("owl2-fs: unexpected ')'".into())),
     }
 }
 
@@ -304,11 +279,7 @@ fn process_ontology_body(args: &[OwlSExpr], graph: &mut Owl2Graph) -> Result<()>
     Ok(())
 }
 
-fn process_ontology_axiom(
-    head: &str,
-    args: &[OwlSExpr],
-    graph: &mut Owl2Graph,
-) -> Result<()> {
+fn process_ontology_axiom(head: &str, args: &[OwlSExpr], graph: &mut Owl2Graph) -> Result<()> {
     match head {
         "Declaration" => {
             // Declaration(Class(:Name)) | Declaration(ObjectProperty(:Name))
@@ -321,9 +292,7 @@ fn process_ontology_axiom(
                     .first()
                     .and_then(extract_local_name)
                     .ok_or_else(|| {
-                        CliError::Custom(
-                            "owl2-fs: Declaration missing entity name".into(),
-                        )
+                        CliError::Custom("owl2-fs: Declaration missing entity name".into())
                     })?;
                 match inner_head.as_str() {
                     "Class" => {
@@ -362,8 +331,7 @@ fn process_ontology_axiom(
         "EquivalentClasses" => {
             // Symmetric pairs — emit (a,b) and (b,a) for every pair
             // of distinct elements in the equivalence list.
-            let names: Vec<String> =
-                args.iter().filter_map(extract_local_name).collect();
+            let names: Vec<String> = args.iter().filter_map(extract_local_name).collect();
             for i in 0..names.len() {
                 for j in (i + 1)..names.len() {
                     let a = Text::from(names[i].clone());
@@ -374,8 +342,7 @@ fn process_ontology_axiom(
             }
         }
         "DisjointClasses" => {
-            let names: Vec<String> =
-                args.iter().filter_map(extract_local_name).collect();
+            let names: Vec<String> = args.iter().filter_map(extract_local_name).collect();
             for i in 0..names.len() {
                 for j in (i + 1)..names.len() {
                     let a = Text::from(names[i].clone());
@@ -394,7 +361,8 @@ fn process_ontology_axiom(
                 let mut key: Vec<Text> = Vec::new();
                 for arg in args.iter().skip(1) {
                     if let OwlSExpr::List {
-                        head: _, args: inner,
+                        head: _,
+                        args: inner,
                     } = arg
                     {
                         for a in inner {
@@ -408,16 +376,9 @@ fn process_ontology_axiom(
                 }
                 if !key.is_empty() {
                     let class_key = Text::from(class_name);
-                    let entry = graph
-                        .entities
-                        .entry(class_key.clone())
-                        .or_insert_with(|| {
-                            Owl2Entity::new_class(
-                                class_key,
-                                None,
-                                PathBuf::from("imported.ofn"),
-                            )
-                        });
+                    let entry = graph.entities.entry(class_key.clone()).or_insert_with(|| {
+                        Owl2Entity::new_class(class_key, None, PathBuf::from("imported.ofn"))
+                    });
                     entry.keys.push(key);
                 }
             }
@@ -467,19 +428,16 @@ fn process_ontology_axiom(
             ) {
                 let p_text = Text::from(p);
                 let q_text = Text::from(q);
-                let entry = graph
-                    .entities
-                    .entry(p_text.clone())
-                    .or_insert_with(|| {
-                        Owl2Entity::new_property(
-                            p_text,
-                            PathBuf::from("imported.ofn"),
-                            None,
-                            None,
-                            None,
-                            BTreeSet::new(),
-                        )
-                    });
+                let entry = graph.entities.entry(p_text.clone()).or_insert_with(|| {
+                    Owl2Entity::new_property(
+                        p_text,
+                        PathBuf::from("imported.ofn"),
+                        None,
+                        None,
+                        None,
+                        BTreeSet::new(),
+                    )
+                });
                 entry.property_inverse_of = Some(q_text);
             }
         }
@@ -503,11 +461,7 @@ fn process_ontology_axiom(
             attach_characteristic(graph, args, Owl2Characteristic::Functional);
         }
         "InverseFunctionalObjectProperty" => {
-            attach_characteristic(
-                graph,
-                args,
-                Owl2Characteristic::InverseFunctional,
-            );
+            attach_characteristic(graph, args, Owl2Characteristic::InverseFunctional);
         }
         // Out-of-scope axioms (DataProperty*, Annotation*, etc.) are
         // accepted silently — round-trip preserves the in-scope
@@ -517,11 +471,7 @@ fn process_ontology_axiom(
     Ok(())
 }
 
-fn attach_characteristic(
-    graph: &mut Owl2Graph,
-    args: &[OwlSExpr],
-    flag: Owl2Characteristic,
-) {
+fn attach_characteristic(graph: &mut Owl2Graph, args: &[OwlSExpr], flag: Owl2Characteristic) {
     if let Some(name) = args.first().and_then(extract_local_name) {
         let key = Text::from(name);
         let entry = graph.entities.entry(key.clone()).or_insert_with(|| {
@@ -544,9 +494,7 @@ fn attach_characteristic(
 fn extract_local_name(expr: &OwlSExpr) -> Option<String> {
     match expr {
         OwlSExpr::Atom(a) => Some(strip_iri_decoration(a)),
-        OwlSExpr::List { args, .. } => {
-            args.first().and_then(extract_local_name)
-        }
+        OwlSExpr::List { args, .. } => args.first().and_then(extract_local_name),
         OwlSExpr::Str(_) => None,
     }
 }
@@ -559,10 +507,7 @@ fn strip_iri_decoration(raw: &str) -> String {
     }
     // Angle-bracket IRI — strip and use last fragment after '#' or '/'.
     if let Some(rest) = s.strip_prefix('<').and_then(|r| r.strip_suffix('>')) {
-        let fragment = rest
-            .rsplit(['#', '/'])
-            .next()
-            .unwrap_or(rest);
+        let fragment = rest.rsplit(['#', '/']).next().unwrap_or(rest);
         return fragment.to_string();
     }
     // Prefixed name `prefix:LocalName` — keep local part.
@@ -652,8 +597,7 @@ fn emit_class(out: &mut String, name: &Text, e: &Owl2Entity, graph: &Owl2Graph) 
 
     // @owl2_has_key for every key tuple.
     for key in &e.keys {
-        let parts: Vec<String> =
-            key.iter().map(|t| t.as_str().to_string()).collect();
+        let parts: Vec<String> = key.iter().map(|t| t.as_str().to_string()).collect();
         out.push_str(&format!("@owl2_has_key({})\n", parts.join(", ")));
     }
 

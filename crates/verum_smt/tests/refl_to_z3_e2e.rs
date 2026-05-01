@@ -23,9 +23,7 @@
 use verum_common::{List, Text};
 
 use verum_smt::proof_search::ProofSearchEngine;
-use verum_smt::refinement_reflection::{
-    ReflectedFunction, RefinementReflectionRegistry,
-};
+use verum_smt::refinement_reflection::{RefinementReflectionRegistry, ReflectedFunction};
 
 fn add_def() -> ReflectedFunction {
     ReflectedFunction {
@@ -89,10 +87,7 @@ fn engine_with_registry_survives_to_proof_time() {
     assert_eq!(engine.reflection_registry().len(), 1);
     let cert = engine.reflection_registry().lookup(&Text::from("add"));
     assert!(cert.is_some());
-    assert_eq!(
-        cert.unwrap().body_smtlib.as_str(),
-        "(+ a b)"
-    );
+    assert_eq!(cert.unwrap().body_smtlib.as_str(), "(+ a b)");
 }
 
 #[test]

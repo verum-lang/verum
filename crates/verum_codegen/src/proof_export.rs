@@ -71,7 +71,11 @@ pub mod lean {
                 )
             }
 
-            CoreTerm::Pi { binder, domain, codomain } => {
+            CoreTerm::Pi {
+                binder,
+                domain,
+                codomain,
+            } => {
                 format!(
                     "({} : {}) → {}",
                     binder.as_str(),
@@ -80,7 +84,11 @@ pub mod lean {
                 )
             }
 
-            CoreTerm::Lam { binder, domain, body } => {
+            CoreTerm::Lam {
+                binder,
+                domain,
+                body,
+            } => {
                 format!(
                     "fun ({} : {}) => {}",
                     binder.as_str(),
@@ -98,7 +106,11 @@ pub mod lean {
             CoreTerm::Axiom { name, .. } => name.as_str().to_string(),
 
             // Sigma / Pair / Fst / Snd — direct Lean 4 mappings.
-            CoreTerm::Sigma { binder, fst_ty, snd_ty } => {
+            CoreTerm::Sigma {
+                binder,
+                fst_ty,
+                snd_ty,
+            } => {
                 format!(
                     "Sigma (fun ({} : {}) => {})",
                     binder.as_str(),
@@ -135,7 +147,11 @@ pub mod lean {
             // Refinement — emit the base type with a comment naming
             // the predicate. Lean 4's subtype `{x : T // p x}` is the
             // closest match; the predicate is opaque at this layer.
-            CoreTerm::Refine { base, binder, predicate } => {
+            CoreTerm::Refine {
+                base,
+                binder,
+                predicate,
+            } => {
                 format!(
                     "{{{} : {} // {}}}",
                     binder.as_str(),
@@ -155,7 +171,11 @@ pub mod lean {
             UniverseLevel::Prop => "0".to_string(),
             UniverseLevel::Variable(name) => name.as_str().to_string(),
             UniverseLevel::Succ(inner) => format!("({} + 1)", lower_universe(inner.as_ref())),
-            UniverseLevel::Max(a, b) => format!("(max {} {})", lower_universe(a.as_ref()), lower_universe(b.as_ref())),
+            UniverseLevel::Max(a, b) => format!(
+                "(max {} {})",
+                lower_universe(a.as_ref()),
+                lower_universe(b.as_ref())
+            ),
         }
     }
 }
@@ -191,7 +211,11 @@ pub mod coq {
                 )
             }
 
-            CoreTerm::Pi { binder, domain, codomain } => {
+            CoreTerm::Pi {
+                binder,
+                domain,
+                codomain,
+            } => {
                 format!(
                     "forall ({} : {}), {}",
                     binder.as_str(),
@@ -200,7 +224,11 @@ pub mod coq {
                 )
             }
 
-            CoreTerm::Lam { binder, domain, body } => {
+            CoreTerm::Lam {
+                binder,
+                domain,
+                body,
+            } => {
                 format!(
                     "fun ({} : {}) => {}",
                     binder.as_str(),
@@ -217,7 +245,11 @@ pub mod coq {
 
             CoreTerm::Axiom { name, .. } => name.as_str().to_string(),
 
-            CoreTerm::Sigma { binder, fst_ty, snd_ty } => {
+            CoreTerm::Sigma {
+                binder,
+                fst_ty,
+                snd_ty,
+            } => {
                 format!(
                     "{{{} : {} & {}}}",
                     binder.as_str(),
@@ -226,7 +258,11 @@ pub mod coq {
                 )
             }
             CoreTerm::Pair(a, b) => {
-                format!("(existT _ {} {})", lower_term(a.as_ref()), lower_term(b.as_ref()))
+                format!(
+                    "(existT _ {} {})",
+                    lower_term(a.as_ref()),
+                    lower_term(b.as_ref())
+                )
             }
             CoreTerm::Fst(p) => format!("(projT1 {})", lower_term(p.as_ref())),
             CoreTerm::Snd(p) => format!("(projT2 {})", lower_term(p.as_ref())),
@@ -244,7 +280,11 @@ pub mod coq {
 
             CoreTerm::Inductive { path, .. } => path.as_str().to_string(),
 
-            CoreTerm::Refine { base, binder, predicate } => {
+            CoreTerm::Refine {
+                base,
+                binder,
+                predicate,
+            } => {
                 format!(
                     "{{{} : {} | {}}}",
                     binder.as_str(),
@@ -263,7 +303,11 @@ pub mod coq {
             UniverseLevel::Prop => "0".to_string(),
             UniverseLevel::Variable(name) => name.as_str().to_string(),
             UniverseLevel::Succ(inner) => format!("{} + 1", lower_universe(inner.as_ref())),
-            UniverseLevel::Max(a, b) => format!("max {} {}", lower_universe(a.as_ref()), lower_universe(b.as_ref())),
+            UniverseLevel::Max(a, b) => format!(
+                "max {} {}",
+                lower_universe(a.as_ref()),
+                lower_universe(b.as_ref())
+            ),
         }
     }
 }
@@ -298,7 +342,11 @@ pub mod agda {
                 )
             }
 
-            CoreTerm::Pi { binder, domain, codomain } => {
+            CoreTerm::Pi {
+                binder,
+                domain,
+                codomain,
+            } => {
                 format!(
                     "({} : {}) → {}",
                     binder.as_str(),
@@ -307,7 +355,11 @@ pub mod agda {
                 )
             }
 
-            CoreTerm::Lam { binder, domain, body } => {
+            CoreTerm::Lam {
+                binder,
+                domain,
+                body,
+            } => {
                 format!(
                     "λ ({} : {}) → {}",
                     binder.as_str(),
@@ -324,7 +376,11 @@ pub mod agda {
 
             CoreTerm::Axiom { name, .. } => name.as_str().to_string(),
 
-            CoreTerm::Sigma { binder, fst_ty, snd_ty } => {
+            CoreTerm::Sigma {
+                binder,
+                fst_ty,
+                snd_ty,
+            } => {
                 format!(
                     "Σ {} ∶ {} , {}",
                     binder.as_str(),
@@ -351,7 +407,11 @@ pub mod agda {
 
             CoreTerm::Inductive { path, .. } => path.as_str().to_string(),
 
-            CoreTerm::Refine { base, binder, predicate } => {
+            CoreTerm::Refine {
+                base,
+                binder,
+                predicate,
+            } => {
                 format!(
                     "Σ ({} : {}) , {}",
                     binder.as_str(),
@@ -370,7 +430,11 @@ pub mod agda {
             UniverseLevel::Prop => "0".to_string(),
             UniverseLevel::Variable(name) => name.as_str().to_string(),
             UniverseLevel::Succ(inner) => format!("(suc {})", lower_universe(inner.as_ref())),
-            UniverseLevel::Max(a, b) => format!("({} ⊔ {})", lower_universe(a.as_ref()), lower_universe(b.as_ref())),
+            UniverseLevel::Max(a, b) => format!(
+                "({} ⊔ {})",
+                lower_universe(a.as_ref()),
+                lower_universe(b.as_ref())
+            ),
         }
     }
 }
@@ -387,14 +451,22 @@ pub mod dedukti {
 
             CoreTerm::Universe(UniverseLevel::Prop) => "prop".to_string(),
             CoreTerm::Universe(UniverseLevel::Concrete(n)) => {
-                if *n == 0 { "Type".to_string() } else { format!("(Type {})", n) }
+                if *n == 0 {
+                    "Type".to_string()
+                } else {
+                    format!("(Type {})", n)
+                }
             }
             CoreTerm::Universe(UniverseLevel::Variable(name)) => name.as_str().to_string(),
             CoreTerm::Universe(UniverseLevel::Succ(_)) => "(s _)".to_string(),
             CoreTerm::Universe(UniverseLevel::Max(_, _)) => "(max _ _)".to_string(),
 
             // Dedukti: `binder : Domain -> Codomain` is dependent product.
-            CoreTerm::Pi { binder, domain, codomain } => {
+            CoreTerm::Pi {
+                binder,
+                domain,
+                codomain,
+            } => {
                 format!(
                     "{} : {} -> {}",
                     binder.as_str(),
@@ -404,7 +476,11 @@ pub mod dedukti {
             }
 
             // Dedukti: `binder : Domain => body` is λ-abstraction.
-            CoreTerm::Lam { binder, domain, body } => {
+            CoreTerm::Lam {
+                binder,
+                domain,
+                body,
+            } => {
                 format!(
                     "{} : {} => {}",
                     binder.as_str(),
@@ -421,7 +497,11 @@ pub mod dedukti {
 
             CoreTerm::Axiom { name, .. } => name.as_str().to_string(),
 
-            CoreTerm::Sigma { binder, fst_ty, snd_ty } => {
+            CoreTerm::Sigma {
+                binder,
+                fst_ty,
+                snd_ty,
+            } => {
                 format!(
                     "(sig ({}) ({} : {} => {}))",
                     lower_term(fst_ty.as_ref()),
@@ -431,7 +511,11 @@ pub mod dedukti {
                 )
             }
             CoreTerm::Pair(a, b) => {
-                format!("(pair {} {})", lower_term(a.as_ref()), lower_term(b.as_ref()))
+                format!(
+                    "(pair {} {})",
+                    lower_term(a.as_ref()),
+                    lower_term(b.as_ref())
+                )
             }
             CoreTerm::Fst(p) => format!("(proj1 {})", lower_term(p.as_ref())),
             CoreTerm::Snd(p) => format!("(proj2 {})", lower_term(p.as_ref())),
@@ -449,7 +533,11 @@ pub mod dedukti {
 
             CoreTerm::Inductive { path, .. } => path.as_str().replace('.', "__"),
 
-            CoreTerm::Refine { base, binder, predicate } => {
+            CoreTerm::Refine {
+                base,
+                binder,
+                predicate,
+            } => {
                 format!(
                     "(refine ({}) ({} : {} => {}))",
                     lower_term(base.as_ref()),
@@ -478,13 +566,21 @@ pub mod metamath {
 
             CoreTerm::Universe(UniverseLevel::Prop) => "wff".to_string(),
             CoreTerm::Universe(UniverseLevel::Concrete(n)) => {
-                if *n == 0 { "set".to_string() } else { format!("class{}", n) }
+                if *n == 0 {
+                    "set".to_string()
+                } else {
+                    format!("class{}", n)
+                }
             }
             CoreTerm::Universe(UniverseLevel::Variable(name)) => name.as_str().to_string(),
             CoreTerm::Universe(UniverseLevel::Succ(_)) => "succU".to_string(),
             CoreTerm::Universe(UniverseLevel::Max(_, _)) => "maxU".to_string(),
 
-            CoreTerm::Pi { binder, domain, codomain } => {
+            CoreTerm::Pi {
+                binder,
+                domain,
+                codomain,
+            } => {
                 format!(
                     "( wpi {} {} {} )",
                     binder.as_str(),
@@ -493,7 +589,11 @@ pub mod metamath {
                 )
             }
 
-            CoreTerm::Lam { binder, domain, body } => {
+            CoreTerm::Lam {
+                binder,
+                domain,
+                body,
+            } => {
                 format!(
                     "( wlam {} {} {} )",
                     binder.as_str(),
@@ -503,14 +603,22 @@ pub mod metamath {
             }
 
             CoreTerm::App(f, a) => {
-                format!("( wapp {} {} )", lower_term(f.as_ref()), lower_term(a.as_ref()))
+                format!(
+                    "( wapp {} {} )",
+                    lower_term(f.as_ref()),
+                    lower_term(a.as_ref())
+                )
             }
 
             CoreTerm::Refl(t) => format!("( wrefl {} )", lower_term(t.as_ref())),
 
             CoreTerm::Axiom { name, .. } => name.as_str().to_string(),
 
-            CoreTerm::Sigma { binder, fst_ty, snd_ty } => {
+            CoreTerm::Sigma {
+                binder,
+                fst_ty,
+                snd_ty,
+            } => {
                 format!(
                     "( wsigma {} {} {} )",
                     binder.as_str(),
@@ -519,7 +627,11 @@ pub mod metamath {
                 )
             }
             CoreTerm::Pair(a, b) => {
-                format!("( wpair {} {} )", lower_term(a.as_ref()), lower_term(b.as_ref()))
+                format!(
+                    "( wpair {} {} )",
+                    lower_term(a.as_ref()),
+                    lower_term(b.as_ref())
+                )
             }
             CoreTerm::Fst(p) => format!("( wfst {} )", lower_term(p.as_ref())),
             CoreTerm::Snd(p) => format!("( wsnd {} )", lower_term(p.as_ref())),
@@ -537,7 +649,11 @@ pub mod metamath {
 
             CoreTerm::Inductive { path, .. } => path.as_str().replace('.', "_"),
 
-            CoreTerm::Refine { base, binder, predicate } => {
+            CoreTerm::Refine {
+                base,
+                binder,
+                predicate,
+            } => {
                 format!(
                     "( wrefine {} {} {} )",
                     binder.as_str(),
@@ -653,7 +769,10 @@ mod tests {
 
     #[test]
     fn lean_refl() {
-        assert_eq!(lean::lower_term(&CoreTerm::Refl(Heap::new(var("a")))), "rfl");
+        assert_eq!(
+            lean::lower_term(&CoreTerm::Refl(Heap::new(var("a")))),
+            "rfl"
+        );
     }
 
     // ---- Coq lowering ----
@@ -670,7 +789,10 @@ mod tests {
 
     #[test]
     fn coq_refl_uses_eq_refl() {
-        assert_eq!(coq::lower_term(&CoreTerm::Refl(Heap::new(var("a")))), "eq_refl");
+        assert_eq!(
+            coq::lower_term(&CoreTerm::Refl(Heap::new(var("a")))),
+            "eq_refl"
+        );
     }
 
     #[test]
@@ -707,7 +829,10 @@ mod tests {
 
     #[test]
     fn agda_refl_lowercase() {
-        assert_eq!(agda::lower_term(&CoreTerm::Refl(Heap::new(var("a")))), "refl");
+        assert_eq!(
+            agda::lower_term(&CoreTerm::Refl(Heap::new(var("a")))),
+            "refl"
+        );
     }
 
     // ---- Fallback ----
@@ -796,7 +921,10 @@ mod tests {
 
     #[test]
     fn dedukti_refl_lowercase() {
-        assert_eq!(dedukti::lower_term(&CoreTerm::Refl(Heap::new(var("a")))), "refl");
+        assert_eq!(
+            dedukti::lower_term(&CoreTerm::Refl(Heap::new(var("a")))),
+            "refl"
+        );
     }
 
     #[test]

@@ -598,10 +598,7 @@ pub enum OperatorError {
     /// No protocol defined for this operator
     NoProtocolForOperator { op: Text },
     /// Type does not implement the required protocol
-    TypeDoesNotImplement {
-        ty: crate::ty::Type,
-        protocol: Text,
-    },
+    TypeDoesNotImplement { ty: crate::ty::Type, protocol: Text },
     /// Operator types are incompatible
     IncompatibleTypes {
         left: crate::ty::Type,
@@ -617,7 +614,11 @@ impl std::fmt::Display for OperatorError {
                 write!(f, "no protocol defined for operator '{}'", op)
             }
             OperatorError::TypeDoesNotImplement { ty, protocol } => {
-                write!(f, "type '{}' does not implement protocol '{}'", ty, protocol)
+                write!(
+                    f,
+                    "type '{}' does not implement protocol '{}'",
+                    ty, protocol
+                )
             }
             OperatorError::IncompatibleTypes { left, right, op } => {
                 write!(

@@ -149,12 +149,16 @@ impl DependencyGraph {
         // Check for cycles first
         if let Some(cycle) = self.detect_cycle() {
             let cycle_paths = self.cycle_to_paths(&cycle);
-            return Err(ModuleError::circular_dependency_with_paths(cycle, cycle_paths));
+            return Err(ModuleError::circular_dependency_with_paths(
+                cycle,
+                cycle_paths,
+            ));
         }
 
         // Perform topological sort
         let sorted = toposort(&self.graph, None).map_err(|_| {
-            let cycle = self.detect_cycle()
+            let cycle = self
+                .detect_cycle()
                 .unwrap_or_else(|| List::from(vec![ModuleId::new(0)]));
             let cycle_paths = self.cycle_to_paths(&cycle);
             ModuleError::circular_dependency_with_paths(cycle, cycle_paths)
@@ -817,8 +821,7 @@ pub fn compute_content_hash(content: &str) -> u64 {
     // Truncate to u64 for cache keys (sufficient for change detection)
     let bytes = hash.as_bytes();
     u64::from_le_bytes([
-        bytes[0], bytes[1], bytes[2], bytes[3],
-        bytes[4], bytes[5], bytes[6], bytes[7],
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
     ])
 }
 

@@ -36,8 +36,8 @@ use verum_ast::{
     span::FileId,
 };
 use verum_common::List;
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 /// Helper to parse Verum source code
 fn parse(source: &str) -> Result<List<verum_ast::Item>, String> {

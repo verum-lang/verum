@@ -20,18 +20,18 @@
 //! Uses mark/unmark operations on syntax contexts for proper scoping.
 
 use verum_ast::{
+    Span,
     expr::{Block, Expr, ExprKind},
     pattern::{Pattern, PatternKind},
     stmt::{Stmt, StmtKind},
     ty::Path,
-    Span,
 };
 use verum_common::{List, Map, Text};
 
+use super::HygieneContext;
 use super::expander::StageContext;
 use super::scope::{BindingInfo, BindingKind, HygienicIdent, ScopeId, ScopeKind, ScopeSet};
 use super::violations::{HygieneViolation, HygieneViolations};
-use super::HygieneContext;
 
 /// Configuration for hygiene checking
 #[derive(Debug, Clone)]
@@ -251,9 +251,7 @@ impl HygieneChecker {
                 }
             }
 
-            ExprKind::MethodCall {
-                receiver, args, ..
-            } => {
+            ExprKind::MethodCall { receiver, args, .. } => {
                 self.check_expr_internal(receiver);
                 for arg in args {
                     self.check_expr_internal(arg);
@@ -299,7 +297,10 @@ impl HygieneChecker {
                 }
             }
 
-            ExprKind::Match { expr: scrutinee, arms } => {
+            ExprKind::Match {
+                expr: scrutinee,
+                arms,
+            } => {
                 self.check_expr_internal(scrutinee);
                 for arm in arms {
                     self.enter_scope(ScopeKind::MatchArm);
@@ -312,11 +313,7 @@ impl HygieneChecker {
                 }
             }
 
-            ExprKind::Closure {
-                params,
-                body,
-                ..
-            } => {
+            ExprKind::Closure { params, body, .. } => {
                 self.enter_scope(ScopeKind::Function);
                 for param in params {
                     self.check_pattern_bindings(&param.pattern);
@@ -325,10 +322,7 @@ impl HygieneChecker {
                 self.exit_scope();
             }
 
-            ExprKind::Loop {
-                body,
-                ..
-            } => {
+            ExprKind::Loop { body, .. } => {
                 self.enter_scope(ScopeKind::Loop);
                 for stmt in &body.stmts {
                     self.check_stmt_internal(stmt);
@@ -371,7 +365,10 @@ impl HygieneChecker {
                 self.exit_scope();
             }
 
-            ExprKind::Quote { target_stage, tokens } => {
+            ExprKind::Quote {
+                target_stage,
+                tokens,
+            } => {
                 // For quote expressions, check hygiene of tokens
                 self.enter_scope(ScopeKind::Quote);
                 self.check_quote_tokens(tokens, *target_stage, expr.span);
@@ -393,9 +390,8 @@ impl HygieneChecker {
             ExprKind::Lift { expr: inner } => {
                 // Check lift expression
                 if !self.in_quote() {
-                    self.violations.push(HygieneViolation::UnquoteOutsideQuote {
-                        span: expr.span,
-                    });
+                    self.violations
+                        .push(HygieneViolation::UnquoteOutsideQuote { span: expr.span });
                 }
                 self.check_expr_internal(inner);
             }
@@ -406,19 +402,17 @@ impl HygieneChecker {
                 }
             }
 
-            ExprKind::Array(array_expr) => {
-                match array_expr {
-                    verum_ast::expr::ArrayExpr::List(elements) => {
-                        for elem in elements {
-                            self.check_expr_internal(elem);
-                        }
-                    }
-                    verum_ast::expr::ArrayExpr::Repeat { value, count } => {
-                        self.check_expr_internal(value);
-                        self.check_expr_internal(count);
+            ExprKind::Array(array_expr) => match array_expr {
+                verum_ast::expr::ArrayExpr::List(elements) => {
+                    for elem in elements {
+                        self.check_expr_internal(elem);
                     }
                 }
-            }
+                verum_ast::expr::ArrayExpr::Repeat { value, count } => {
+                    self.check_expr_internal(value);
+                    self.check_expr_internal(count);
+                }
+            },
 
             ExprKind::Record { fields, base, .. } => {
                 for field in fields {
@@ -526,11 +520,7 @@ impl HygieneChecker {
     /// Check a statement
     fn check_stmt_internal(&mut self, stmt: &Stmt) {
         match &stmt.kind {
-            StmtKind::Let {
-                pattern,
-                value,
-                ..
-            } => {
+            StmtKind::Let { pattern, value, .. } => {
                 if let verum_common::Maybe::Some(val) = value {
                     self.check_expr_internal(val);
                 }
@@ -699,7 +689,11 @@ impl HygieneChecker {
                 }
             }
 
-            PatternKind::Slice { before, rest, after } => {
+            PatternKind::Slice {
+                before,
+                rest,
+                after,
+            } => {
                 for pat in before {
                     self.check_pattern_bindings(pat);
                 }
@@ -876,10 +870,7 @@ impl HygieneChecker {
     /// The caller passes the tokens *after* expansion. Violations are
     /// accumulated on the checker; consumers that want hard-fail
     /// behaviour should drain `take_violations()` after the call.
-    pub fn check_post_splice_tokens(
-        &mut self,
-        tokens: &List<verum_ast::expr::TokenTree>,
-    ) {
+    pub fn check_post_splice_tokens(&mut self, tokens: &List<verum_ast::expr::TokenTree>) {
         self.walk_quote_tokens(tokens);
     }
 
@@ -904,10 +895,7 @@ impl HygieneChecker {
     pub fn seed_outer_binding(&mut self, name: Text, _span: Span) {
         let scope_id = self.current_scope_id();
         let scopes = self.current_scopes();
-        let entry = BindingEntry {
-            scope_id,
-            scopes,
-        };
+        let entry = BindingEntry { scope_id, scopes };
         self.bindings
             .entry(name)
             .or_insert_with(List::new)
@@ -948,9 +936,15 @@ impl HygieneChecker {
         // that wire shadow recovery in (`allow_shadow_recovery = true`)
         // intentionally accept the redefinition, so noise here would
         // be wrong.
-        if self.config.allow_shadow_recovery { return; }
-        let Some(entries) = self.bindings.get(name) else { return; };
-        if entries.is_empty() { return; }
+        if self.config.allow_shadow_recovery {
+            return;
+        }
+        let Some(entries) = self.bindings.get(name) else {
+            return;
+        };
+        if entries.is_empty() {
+            return;
+        }
         let scopes = entries[0].scopes.clone();
         let shadowed = super::scope::HygienicIdent::new(name.clone(), scopes, span);
         self.violations.push(HygieneViolation::ShadowConflict {
@@ -1197,10 +1191,8 @@ mod tests {
     }
 
     fn push_recoverable(checker: &mut HygieneChecker) {
-        let ident = super::super::scope::HygienicIdent::unhygienic(
-            Text::from("x"),
-            Span::default(),
-        );
+        let ident =
+            super::super::scope::HygienicIdent::unhygienic(Text::from("x"), Span::default());
         checker.violations.push(HygieneViolation::ShadowConflict {
             shadowed: ident,
             introduced_at: Span::default(),
@@ -1208,9 +1200,11 @@ mod tests {
     }
 
     fn push_fatal(checker: &mut HygieneChecker) {
-        checker.violations.push(HygieneViolation::UnquoteOutsideQuote {
-            span: Span::default(),
-        });
+        checker
+            .violations
+            .push(HygieneViolation::UnquoteOutsideQuote {
+                span: Span::default(),
+            });
     }
 
     #[test]

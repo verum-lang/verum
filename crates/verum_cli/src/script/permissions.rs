@@ -157,12 +157,18 @@ impl fmt::Display for ParseError {
             Self::Empty => f.write_str("permission scope is empty"),
             Self::UnknownKind(k) => write!(f, "unknown permission kind {k:?}"),
             Self::BlanketOnlyAcceptsNoValue(k) => {
-                write!(f, "permission {k} grants blanket access only — drop the `=value`")
+                write!(
+                    f,
+                    "permission {k} grants blanket access only — drop the `=value`"
+                )
             }
             Self::EmptyTargetList(k) => write!(f, "permission {k}= requires at least one target"),
             Self::EmptyTarget(k) => write!(f, "permission {k} has an empty target between commas"),
             Self::WhitespaceInTarget(k, t) => {
-                write!(f, "permission {k} target {t:?} contains whitespace; use commas to separate")
+                write!(
+                    f,
+                    "permission {k} target {t:?} contains whitespace; use commas to separate"
+                )
             }
         }
     }
@@ -275,7 +281,10 @@ impl PermissionRequest<'_> {
         match self {
             Self::FsRead(p) => format!("fs:read {}", p.display()),
             Self::FsWrite(p) => format!("fs:write {}", p.display()),
-            Self::Net { host, port: Some(p) } => format!("net {host}:{p}"),
+            Self::Net {
+                host,
+                port: Some(p),
+            } => format!("net {host}:{p}"),
             Self::Net { host, port: None } => format!("net {host}"),
             Self::Env(n) => format!("env {n}"),
             Self::Run(n) => format!("run {n}"),
@@ -498,7 +507,9 @@ mod tests {
         );
         assert_eq!(
             Permission::parse("random=/dev/urandom"),
-            Err(ParseError::BlanketOnlyAcceptsNoValue(PermissionKind::Random))
+            Err(ParseError::BlanketOnlyAcceptsNoValue(
+                PermissionKind::Random
+            ))
         );
     }
 
@@ -531,23 +542,27 @@ mod tests {
     #[test]
     fn fs_read_blanket_matches_any_path() {
         let set = PermissionSet::from_strings(["fs:read"]).unwrap();
-        assert!(set
-            .check(&PermissionRequest::FsRead(Path::new("/etc/passwd")))
-            .is_ok());
+        assert!(
+            set.check(&PermissionRequest::FsRead(Path::new("/etc/passwd")))
+                .is_ok()
+        );
     }
 
     #[test]
     fn fs_read_target_prefix_match() {
         let set = PermissionSet::from_strings(["fs:read=./data"]).unwrap();
-        assert!(set
-            .check(&PermissionRequest::FsRead(Path::new("./data/file.txt")))
-            .is_ok());
-        assert!(set
-            .check(&PermissionRequest::FsRead(Path::new("./data")))
-            .is_ok());
-        assert!(set
-            .check(&PermissionRequest::FsRead(Path::new("./other/file")))
-            .is_err());
+        assert!(
+            set.check(&PermissionRequest::FsRead(Path::new("./data/file.txt")))
+                .is_ok()
+        );
+        assert!(
+            set.check(&PermissionRequest::FsRead(Path::new("./data")))
+                .is_ok()
+        );
+        assert!(
+            set.check(&PermissionRequest::FsRead(Path::new("./other/file")))
+                .is_err()
+        );
     }
 
     #[test]
@@ -556,7 +571,9 @@ mod tests {
         let denied = set
             .check(&PermissionRequest::FsWrite(Path::new("/x")))
             .unwrap_err();
-        assert!(matches!(denied, DeniedReason::NotGranted { kind } if kind == PermissionKind::FsWrite));
+        assert!(
+            matches!(denied, DeniedReason::NotGranted { kind } if kind == PermissionKind::FsWrite)
+        );
     }
 
     // ── matches: net ─────────────────────────────────────────────────
@@ -564,81 +581,91 @@ mod tests {
     #[test]
     fn net_blanket_matches_any_endpoint() {
         let set = PermissionSet::from_strings(["net"]).unwrap();
-        assert!(set
-            .check(&PermissionRequest::Net {
+        assert!(
+            set.check(&PermissionRequest::Net {
                 host: "example.com",
                 port: Some(443),
             })
-            .is_ok());
+            .is_ok()
+        );
     }
 
     #[test]
     fn net_host_only_matches_any_port() {
         let set = PermissionSet::from_strings(["net=api.example.com"]).unwrap();
-        assert!(set
-            .check(&PermissionRequest::Net {
+        assert!(
+            set.check(&PermissionRequest::Net {
                 host: "api.example.com",
                 port: Some(443),
             })
-            .is_ok());
-        assert!(set
-            .check(&PermissionRequest::Net {
+            .is_ok()
+        );
+        assert!(
+            set.check(&PermissionRequest::Net {
                 host: "api.example.com",
                 port: None,
             })
-            .is_ok());
-        assert!(set
-            .check(&PermissionRequest::Net {
+            .is_ok()
+        );
+        assert!(
+            set.check(&PermissionRequest::Net {
                 host: "other.example.com",
                 port: Some(443),
             })
-            .is_err());
+            .is_err()
+        );
     }
 
     #[test]
     fn net_host_port_matches_only_exact() {
         let set = PermissionSet::from_strings(["net=api.example.com:443"]).unwrap();
-        assert!(set
-            .check(&PermissionRequest::Net {
+        assert!(
+            set.check(&PermissionRequest::Net {
                 host: "api.example.com",
                 port: Some(443),
             })
-            .is_ok());
-        assert!(set
-            .check(&PermissionRequest::Net {
+            .is_ok()
+        );
+        assert!(
+            set.check(&PermissionRequest::Net {
                 host: "api.example.com",
                 port: Some(80),
             })
-            .is_err());
-        assert!(set
-            .check(&PermissionRequest::Net {
+            .is_err()
+        );
+        assert!(
+            set.check(&PermissionRequest::Net {
                 host: "api.example.com",
                 port: None,
             })
-            .is_err());
+            .is_err()
+        );
     }
 
     #[test]
     fn net_bare_port_matches_any_host() {
         let set = PermissionSet::from_strings(["net=:443"]).unwrap();
-        assert!(set
-            .check(&PermissionRequest::Net {
+        assert!(
+            set.check(&PermissionRequest::Net {
                 host: "api.example.com",
                 port: Some(443),
             })
-            .is_ok());
-        assert!(set
-            .check(&PermissionRequest::Net {
+            .is_ok()
+        );
+        assert!(
+            set.check(&PermissionRequest::Net {
                 host: "any-host.x",
                 port: Some(443),
             })
-            .is_ok());
-        assert!(set
-            .check(&PermissionRequest::Net {
+            .is_ok()
+        );
+        assert!(
+            set.check(&PermissionRequest::Net {
                 host: "api.example.com",
                 port: Some(80),
             })
-            .is_err());
+            .is_err()
+        );
     }
 
     // ── matches: env / run / ffi / time / random ──────────────────────
@@ -667,41 +694,41 @@ mod tests {
     fn empty_set_denies_everything() {
         let set = PermissionSet::empty();
         assert!(matches!(
-            set.check(&PermissionRequest::Net { host: "x", port: None }),
+            set.check(&PermissionRequest::Net {
+                host: "x",
+                port: None
+            }),
             Err(DeniedReason::NotGranted { .. })
         ));
     }
 
     #[test]
     fn multiple_grants_unioned() {
-        let set = PermissionSet::from_strings([
-            "net=api.example.com:443",
-            "net=fallback.example.com",
-        ])
-        .unwrap();
+        let set =
+            PermissionSet::from_strings(["net=api.example.com:443", "net=fallback.example.com"])
+                .unwrap();
         // First grant authorises:
-        assert!(set
-            .check(&PermissionRequest::Net {
+        assert!(
+            set.check(&PermissionRequest::Net {
                 host: "api.example.com",
                 port: Some(443),
             })
-            .is_ok());
+            .is_ok()
+        );
         // Second grant authorises:
-        assert!(set
-            .check(&PermissionRequest::Net {
+        assert!(
+            set.check(&PermissionRequest::Net {
                 host: "fallback.example.com",
                 port: Some(80),
             })
-            .is_ok());
+            .is_ok()
+        );
     }
 
     #[test]
     fn out_of_scope_reports_granted_targets() {
-        let set = PermissionSet::from_strings([
-            "net=api.example.com:443",
-            "net=cdn.example.com",
-        ])
-        .unwrap();
+        let set = PermissionSet::from_strings(["net=api.example.com:443", "net=cdn.example.com"])
+            .unwrap();
         let err = set
             .check(&PermissionRequest::Net {
                 host: "evil.example.com",
@@ -709,7 +736,11 @@ mod tests {
             })
             .unwrap_err();
         match err {
-            DeniedReason::OutOfScope { granted, requested, kind } => {
+            DeniedReason::OutOfScope {
+                granted,
+                requested,
+                kind,
+            } => {
                 assert_eq!(kind, PermissionKind::Net);
                 assert!(requested.contains("evil.example.com"));
                 assert!(granted.iter().any(|g| g == "api.example.com:443"));
@@ -725,9 +756,10 @@ mod tests {
         let b = PermissionSet::from_strings(["fs:read=./data"]).unwrap();
         a.extend(b);
         assert_eq!(a.len(), 2);
-        assert!(a
-            .check(&PermissionRequest::FsRead(Path::new("./data/x")))
-            .is_ok());
+        assert!(
+            a.check(&PermissionRequest::FsRead(Path::new("./data/x")))
+                .is_ok()
+        );
     }
 
     #[test]

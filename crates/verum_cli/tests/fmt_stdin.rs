@@ -93,7 +93,10 @@ fn stdin_warns_on_parse_failure_via_stderr() {
     // to whitespace normalisation and warns on stderr (not stdout,
     // which is reserved for the formatted output stream).
     let out = run_stdin("this is not valid verum @@@\n", &[]);
-    assert!(out.status.success(), "stdin path must not fail on parse error");
+    assert!(
+        out.status.success(),
+        "stdin path must not fail on parse error"
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("parse failed") || stderr.contains("warning"),

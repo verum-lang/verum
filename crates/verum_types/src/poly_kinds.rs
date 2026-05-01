@@ -80,9 +80,7 @@ impl Kind {
                 Some(k) => k.apply(subst),
                 None => self.clone(),
             },
-            Kind::Arrow(a, b) => {
-                Kind::Arrow(Box::new(a.apply(subst)), Box::new(b.apply(subst)))
-            }
+            Kind::Arrow(a, b) => Kind::Arrow(Box::new(a.apply(subst)), Box::new(b.apply(subst))),
             Kind::Type | Kind::Constraint => self.clone(),
         }
     }
@@ -248,12 +246,10 @@ pub fn unify(a: &Kind, b: &Kind) -> Result<KindSubst, KindError> {
         }
 
         // Concrete arrow vs non-arrow.
-        (l @ Kind::Arrow(_, _), r) | (l, r @ Kind::Arrow(_, _)) => {
-            Err(KindError::ArityMismatch {
-                left: l.clone(),
-                right: r.clone(),
-            })
-        }
+        (l @ Kind::Arrow(_, _), r) | (l, r @ Kind::Arrow(_, _)) => Err(KindError::ArityMismatch {
+            left: l.clone(),
+            right: r.clone(),
+        }),
 
         // Anything else is a hard mismatch.
         _ => Err(KindError::Mismatch {
@@ -291,10 +287,7 @@ mod tests {
 
     #[test]
     fn type_does_not_unify_with_constraint() {
-        assert!(matches!(
-            unify(&t(), &c()),
-            Err(KindError::Mismatch { .. })
-        ));
+        assert!(matches!(unify(&t(), &c()), Err(KindError::Mismatch { .. })));
     }
 
     #[test]
@@ -340,10 +333,7 @@ mod tests {
         s.insert(Text::from("a"), Kind::Type);
         s.insert(Text::from("b"), Kind::Constraint);
         let result = kind.apply(&s);
-        assert_eq!(
-            result,
-            Kind::arrow(t(), Kind::arrow(c(), t()))
-        );
+        assert_eq!(result, Kind::arrow(t(), Kind::arrow(c(), t())));
     }
 
     #[test]

@@ -6,8 +6,8 @@
 use verum_common::Text;
 use verum_vbc::value::Value;
 
-use crate::execution::{format_value, ValueDisplayOptions};
 use super::renderer::{OutputFormat, RenderedOutput};
+use crate::execution::{ValueDisplayOptions, format_value};
 
 /// Renders a struct/record value.
 pub fn render_struct(
@@ -20,9 +20,7 @@ pub fn render_struct(
     // Build field strings
     let field_strs: Vec<String> = fields
         .iter()
-        .map(|(name, value)| {
-            format!("{}: {}", name, format_value(value, &options))
-        })
+        .map(|(name, value)| format!("{}: {}", name, format_value(value, &options)))
         .collect();
 
     let text = if fields.len() <= 3 {
@@ -210,11 +208,7 @@ pub fn render_tuple(elements: &[Value], format: OutputFormat) -> RenderedOutput 
 
     let type_sig = format!(
         "({})",
-        elements
-            .iter()
-            .map(|_| "_")
-            .collect::<Vec<_>>()
-            .join(", ")
+        elements.iter().map(|_| "_").collect::<Vec<_>>().join(", ")
     );
 
     let formatted = match format {
@@ -238,18 +232,12 @@ pub fn render_tuple(elements: &[Value], format: OutputFormat) -> RenderedOutput 
 
 fn colorize_struct(text: &str, type_name: &str) -> String {
     // Color the type name in magenta
-    text.replace(
-        type_name,
-        &format!("\x1b[35m{}\x1b[0m", type_name),
-    )
+    text.replace(type_name, &format!("\x1b[35m{}\x1b[0m", type_name))
 }
 
 fn colorize_variant(text: &str, variant_name: &str) -> String {
     // Color the variant name in cyan
-    text.replace(
-        variant_name,
-        &format!("\x1b[36m{}\x1b[0m", variant_name),
-    )
+    text.replace(variant_name, &format!("\x1b[36m{}\x1b[0m", variant_name))
 }
 
 fn colorize_collection(text: &str) -> String {
@@ -309,10 +297,7 @@ mod tests {
 
     #[test]
     fn test_render_struct_small() {
-        let fields = vec![
-            ("x", Value::from_i64(1)),
-            ("y", Value::from_i64(2)),
-        ];
+        let fields = vec![("x", Value::from_i64(1)), ("y", Value::from_i64(2))];
         let result = render_struct("Point", &fields, OutputFormat::Plain);
 
         assert!(result.text.as_str().contains("Point"));
@@ -350,11 +335,7 @@ mod tests {
 
     #[test]
     fn test_render_collection_small() {
-        let elements = vec![
-            Value::from_i64(1),
-            Value::from_i64(2),
-            Value::from_i64(3),
-        ];
+        let elements = vec![Value::from_i64(1), Value::from_i64(2), Value::from_i64(3)];
         let result = render_collection("List", "Int", &elements, OutputFormat::Plain);
 
         assert!(result.text.as_str().contains("[1, 2, 3]"));
@@ -363,10 +344,7 @@ mod tests {
 
     #[test]
     fn test_render_tuple() {
-        let elements = vec![
-            Value::from_i64(1),
-            Value::from_bool(true),
-        ];
+        let elements = vec![Value::from_i64(1), Value::from_bool(true)];
         let result = render_tuple(&elements, OutputFormat::Plain);
 
         assert!(result.text.as_str().contains("(1, true)"));

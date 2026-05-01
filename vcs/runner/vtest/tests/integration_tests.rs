@@ -172,7 +172,10 @@ fn main() {
 
     let directives = TestDirectives::parse(content, "test.vr".into()).unwrap();
 
-    assert_eq!(directives.skip, Some("GPU not available in CI".to_string().into()));
+    assert_eq!(
+        directives.skip,
+        Some("GPU not available in CI".to_string().into())
+    );
 }
 
 /// Test parsing with requires directive
@@ -215,7 +218,10 @@ fn cbgr_check() {
 
     assert_eq!(directives.test_type, TestType::Benchmark);
     assert_eq!(directives.level, Level::L4);
-    assert_eq!(directives.expected_performance, Some("< 15ns".to_string().into()));
+    assert_eq!(
+        directives.expected_performance,
+        Some("< 15ns".to_string().into())
+    );
     assert_eq!(directives.timeout_ms, Some(60000));
 }
 
@@ -742,7 +748,8 @@ fn test_console_report() {
         outcomes: vec![TestOutcome::Pass {
             tier: Tier::Tier0,
             duration: Duration::from_millis(10),
-        }].into(),
+        }]
+        .into(),
         total_duration: Duration::from_millis(10),
     };
 
@@ -777,7 +784,8 @@ fn test_json_report() {
         outcomes: vec![TestOutcome::Pass {
             tier: Tier::Tier0,
             duration: Duration::from_millis(10),
-        }].into(),
+        }]
+        .into(),
         total_duration: Duration::from_millis(10),
     };
 

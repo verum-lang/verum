@@ -16,11 +16,11 @@ use crate::error::{ModuleError, ModuleResult};
 use crate::path::{ModuleId, ModulePath};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
-use verum_ast::{FileId, Module as AstModule};
 use verum_ast::cfg::{CfgEvaluator, TargetConfig};
+use verum_ast::{FileId, Module as AstModule};
 use verum_common::{List, Map, Maybe, Shared, Text};
-use verum_lexer::Lexer;
 use verum_fast_parser::VerumParser;
+use verum_lexer::Lexer;
 
 /// MOD-MED-1 — header-validation diagnostic.
 ///
@@ -161,10 +161,7 @@ pub fn validate_module_headers_against_filesystem(
     };
     // The "secondary" sibling dir is `<parent>/<file_stem>` —
     // applies to non-mod files only.
-    let file_stem = file_path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
+    let file_stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let is_mod_file = file_stem == "mod";
     let secondary_dir: Option<PathBuf> = if is_mod_file || file_stem.is_empty() {
         None
@@ -174,8 +171,7 @@ pub fn validate_module_headers_against_filesystem(
 
     for item in ast.items.iter() {
         if let verum_ast::ItemKind::Module(module_decl) = &item.kind {
-            let submodule_name: Text =
-                Text::from(module_decl.name.name.as_str());
+            let submodule_name: Text = Text::from(module_decl.name.name.as_str());
             let span = module_decl.span;
 
             match &module_decl.items {
@@ -183,19 +179,13 @@ pub fn validate_module_headers_against_filesystem(
                     // Forward decl. Check that at least one of the
                     // expected source files exists.
                     let mut candidates: List<PathBuf> = List::new();
-                    let primary_file =
-                        parent_dir.join(format!("{}.vr", submodule_name.as_str()));
-                    let primary_mod = parent_dir
-                        .join(submodule_name.as_str())
-                        .join("mod.vr");
+                    let primary_file = parent_dir.join(format!("{}.vr", submodule_name.as_str()));
+                    let primary_mod = parent_dir.join(submodule_name.as_str()).join("mod.vr");
                     candidates.push(primary_file.clone());
                     candidates.push(primary_mod.clone());
                     if let Some(sec) = &secondary_dir {
-                        let secondary_file =
-                            sec.join(format!("{}.vr", submodule_name.as_str()));
-                        let secondary_mod = sec
-                            .join(submodule_name.as_str())
-                            .join("mod.vr");
+                        let secondary_file = sec.join(format!("{}.vr", submodule_name.as_str()));
+                        let secondary_mod = sec.join(submodule_name.as_str()).join("mod.vr");
                         candidates.push(secondary_file);
                         candidates.push(secondary_mod);
                     }
@@ -213,14 +203,15 @@ pub fn validate_module_headers_against_filesystem(
                     // Inline body. Check whether a filesystem
                     // directory of the same name exists adjacent to
                     // the file — that's the overlap case.
-                    let primary_dir =
-                        parent_dir.join(submodule_name.as_str());
+                    let primary_dir = parent_dir.join(submodule_name.as_str());
                     let secondary_dir_opt = secondary_dir
                         .as_ref()
                         .map(|s| s.join(submodule_name.as_str()));
                     let overlapping = if primary_dir.exists() && primary_dir.is_dir() {
                         Some(primary_dir)
-                    } else { secondary_dir_opt.filter(|sec| sec.exists() && sec.is_dir()) };
+                    } else {
+                        secondary_dir_opt.filter(|sec| sec.exists() && sec.is_dir())
+                    };
                     if let Some(conflicting_dir) = overlapping {
                         warnings.push(ModuleHeaderWarning::InlineFilesystemOverlap {
                             file: file_path.to_path_buf(),
@@ -525,7 +516,9 @@ impl ModuleLoader {
         // Cross-cog resolution: if first segment matches an external cog,
         // search in the cog's root directory instead of the local root.
         // Clone the resolved root to avoid borrow conflict with &mut self.
-        let cross_cog_target: Option<(PathBuf, ModulePath)> = if let Some(ref cog_resolver) = self.cog_resolver {
+        let cross_cog_target: Option<(PathBuf, ModulePath)> = if let Some(ref cog_resolver) =
+            self.cog_resolver
+        {
             let segments = module_path.segments();
             if !segments.is_empty() {
                 let first_segment = segments[0].as_str();
@@ -554,8 +547,7 @@ impl ModuleLoader {
         }
 
         let candidates = self.find_module_file(module_path)?;
-        Self::resolve_unique_candidate(module_path, &candidates)
-            .and_then(|p| self.load_file(&p))
+        Self::resolve_unique_candidate(module_path, &candidates).and_then(|p| self.load_file(&p))
     }
 
     /// Load a module from a specific root directory (used for cross-cog resolution).
@@ -565,8 +557,7 @@ impl ModuleLoader {
         module_path: &ModulePath,
     ) -> ModuleResult<ModuleSource> {
         let candidates = self.find_module_file_in_root(root, module_path)?;
-        Self::resolve_unique_candidate(module_path, &candidates)
-            .and_then(|p| self.load_file(&p))
+        Self::resolve_unique_candidate(module_path, &candidates).and_then(|p| self.load_file(&p))
     }
 
     /// Walk every candidate path and return the unique one that exists,
@@ -583,11 +574,7 @@ impl ModuleLoader {
         module_path: &ModulePath,
         candidates: &List<PathBuf>,
     ) -> ModuleResult<PathBuf> {
-        let existing: Vec<PathBuf> = candidates
-            .iter()
-            .filter(|p| p.exists())
-            .cloned()
-            .collect();
+        let existing: Vec<PathBuf> = candidates.iter().filter(|p| p.exists()).cloned().collect();
         match existing.len() {
             0 => Err(ModuleError::module_not_found(
                 module_path.clone(),
@@ -609,7 +596,11 @@ impl ModuleLoader {
     }
 
     /// Find module file candidates in a specific root directory.
-    fn find_module_file_in_root(&self, root: &std::path::Path, module_path: &ModulePath) -> ModuleResult<List<PathBuf>> {
+    fn find_module_file_in_root(
+        &self,
+        root: &std::path::Path,
+        module_path: &ModulePath,
+    ) -> ModuleResult<List<PathBuf>> {
         let mut candidates = List::new();
 
         if module_path.is_root() {
@@ -639,7 +630,10 @@ impl ModuleLoader {
 
     /// Filter candidate paths to ensure none escape the given root directory.
     /// This prevents path traversal attacks via crafted module names.
-    fn filter_safe_paths(candidates: &List<PathBuf>, root: &std::path::Path) -> ModuleResult<List<PathBuf>> {
+    fn filter_safe_paths(
+        candidates: &List<PathBuf>,
+        root: &std::path::Path,
+    ) -> ModuleResult<List<PathBuf>> {
         let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
         let mut safe = List::new();
         for candidate in candidates.iter() {
@@ -848,8 +842,8 @@ impl ModuleLoader {
         // Sandbox: the canonical resolved file MUST lie
         // inside the cog root. Canonicalise the root too
         // so the comparison is symlink-stable.
-        let canonical_root = std::fs::canonicalize(&self.root_path)
-            .unwrap_or_else(|_| self.root_path.clone());
+        let canonical_root =
+            std::fs::canonicalize(&self.root_path).unwrap_or_else(|_| self.root_path.clone());
         if !canonical.starts_with(&canonical_root) {
             return Err(ModuleError::Other {
                 message: Text::from(format!(
@@ -961,8 +955,7 @@ impl ModuleLoader {
         // emits diagnostics so the user sees dangling forward-decls
         // and inline-vs-filesystem overlaps without breaking the
         // build.
-        let header_warnings =
-            validate_module_headers_against_filesystem(&source.file_path, &ast);
+        let header_warnings = validate_module_headers_against_filesystem(&source.file_path, &ast);
 
         let mut info = ModuleInfo::new(
             module_id,
@@ -1054,7 +1047,7 @@ impl ModuleLoader {
     fn create_prelude_import(&self, file_id: verum_ast::FileId) -> verum_ast::Item {
         use verum_ast::span::Span;
         use verum_ast::{
-            Ident, MountDecl, MountTree, MountTreeKind, Item, ItemKind, Path, PathSegment,
+            Ident, Item, ItemKind, MountDecl, MountTree, MountTreeKind, Path, PathSegment,
         };
 
         // Create the path: std.prelude
@@ -1325,7 +1318,10 @@ mod tests {
     }
 
     fn make_ident_path(name: &str, span: Span) -> verum_ast::ty::Path {
-        use verum_ast::{Ident, ty::{Path, PathSegment}};
+        use verum_ast::{
+            Ident,
+            ty::{Path, PathSegment},
+        };
         Path::new(
             List::from(vec![PathSegment::Name(Ident::new(Text::from(name), span))]),
             span,
@@ -1416,7 +1412,10 @@ mod tests {
         let mut loader = ModuleLoader::new("/tmp");
 
         // Test mutable access
-        loader.cfg_evaluator_mut().config_mut().set_custom("my_cfg", "enabled");
+        loader
+            .cfg_evaluator_mut()
+            .config_mut()
+            .set_custom("my_cfg", "enabled");
 
         // Verify custom cfg is set
         assert!(loader.cfg_evaluator().config().is_set("my_cfg"));
@@ -1488,10 +1487,7 @@ mod tests {
         std::fs::write(&importing, "module inside;\n").unwrap();
 
         let mut loader = ModuleLoader::new(root.path());
-        let result = loader.load_file_mount(
-            "../../../../../../../../../etc/passwd.vr",
-            &importing,
-        );
+        let result = loader.load_file_mount("../../../../../../../../../etc/passwd.vr", &importing);
         assert!(
             result.is_err(),
             "escape attempt must be rejected by the sandbox"

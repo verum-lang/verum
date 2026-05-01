@@ -14,7 +14,7 @@ use verum_ast::{
     ty::{Ident, Path, PathSegment, RefinementPredicate, Type, TypeKind},
 };
 use verum_common::{Heap, Maybe};
-use verum_smt::{Context, VerifyMode, verify_refinement, clear_cache};
+use verum_smt::{Context, VerifyMode, clear_cache, verify_refinement};
 
 fn create_int_literal(value: i64) -> Expr {
     Expr::new(

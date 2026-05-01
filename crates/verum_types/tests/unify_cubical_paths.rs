@@ -2,8 +2,8 @@
 //! Interval) — verifies that the cubical normalizer is exercised on the
 //! unification hot path.
 
-use verum_ast::ty::{Ident, Path};
 use verum_ast::Span;
+use verum_ast::ty::{Ident, Path};
 use verum_common::{List, Text};
 use verum_types::cubical::{CubicalTerm, DimVar, IntervalEndpoint};
 use verum_types::ty::Type;
@@ -16,14 +16,16 @@ fn boxed_val(s: &str) -> Box<CubicalTerm> {
 }
 
 fn boxed_refl(s: &str) -> Box<CubicalTerm> {
-    Box::new(CubicalTerm::Refl(Box::new(CubicalTerm::Value(Text::from(s)))))
+    Box::new(CubicalTerm::Refl(Box::new(CubicalTerm::Value(Text::from(
+        s,
+    )))))
 }
 
 fn boxed_transport_refl(line: &str, val: &str) -> Box<CubicalTerm> {
     Box::new(CubicalTerm::Transport {
-        line: Box::new(CubicalTerm::Refl(Box::new(CubicalTerm::Value(
-            Text::from(line),
-        )))),
+        line: Box::new(CubicalTerm::Refl(Box::new(CubicalTerm::Value(Text::from(
+            line,
+        ))))),
         value: Box::new(CubicalTerm::Value(Text::from(val))),
     })
 }
@@ -69,11 +71,7 @@ fn pathtype_unifies_identical() {
 #[test]
 fn pathtype_unifies_up_to_cubical_normalization() {
     // `transport (refl A) x ≡ x`, so these path types should unify.
-    let lhs = path(
-        bool_ty(),
-        boxed_val("x"),
-        boxed_transport_refl("A", "x"),
-    );
+    let lhs = path(bool_ty(), boxed_val("x"), boxed_transport_refl("A", "x"));
     let rhs = path(bool_ty(), boxed_val("x"), boxed_val("x"));
     let mut u = Unifier::new();
     assert!(

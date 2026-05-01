@@ -9,16 +9,16 @@
 
 //! This file tests the GPU path (VBC → MLIR).
 
-use verum_codegen::{MlirContext, MlirCodegen, MlirConfig, GpuTarget};
-use verum_vbc::codegen::VbcCodegen;
-use verum_ast::{Module as AstModule, Item, ItemKind, Attribute};
-use verum_ast::decl::{FunctionDecl, FunctionParam, FunctionParamKind, FunctionBody, Visibility};
-use verum_ast::pattern::{Pattern, PatternKind};
-use verum_ast::ty::{Type, TypeKind, Ident};
+use verum_ast::decl::{FunctionBody, FunctionDecl, FunctionParam, FunctionParamKind, Visibility};
 use verum_ast::expr::{Expr, ExprKind};
-use verum_ast::literal::{Literal, LiteralKind, IntLit};
-use verum_ast::span::{Span, FileId};
-use verum_common::{List, Text, Maybe};
+use verum_ast::literal::{IntLit, Literal, LiteralKind};
+use verum_ast::pattern::{Pattern, PatternKind};
+use verum_ast::span::{FileId, Span};
+use verum_ast::ty::{Ident, Type, TypeKind};
+use verum_ast::{Attribute, Item, ItemKind, Module as AstModule};
+use verum_codegen::{GpuTarget, MlirCodegen, MlirConfig, MlirContext};
+use verum_common::{List, Maybe, Text};
+use verum_vbc::codegen::VbcCodegen;
 
 /// Create a dummy span for testing.
 fn dummy_span() -> Span {
@@ -179,7 +179,7 @@ fn test_mlir_context_creation() {
 
 #[test]
 fn test_pass_pipeline_creation() {
-    use verum_codegen::{PassPipeline, PassConfig};
+    use verum_codegen::{PassConfig, PassPipeline};
 
     let mlir_ctx = MlirContext::new().unwrap();
     let context = mlir_ctx.context();
@@ -203,7 +203,10 @@ fn test_vbc_to_mlir_lowering_basic() {
     let vbc_module = vbc_codegen.compile_module(&ast_module).unwrap();
 
     // Verify VBC module was created
-    assert!(!vbc_module.functions.is_empty(), "VBC module should have functions");
+    assert!(
+        !vbc_module.functions.is_empty(),
+        "VBC module should have functions"
+    );
 
     // Step 3: Lower VBC to MLIR for GPU
     let mlir_ctx = MlirContext::new().unwrap();
@@ -211,7 +214,11 @@ fn test_vbc_to_mlir_lowering_basic() {
     let mut mlir_codegen = MlirCodegen::new(&mlir_ctx, config).unwrap();
 
     let result = mlir_codegen.lower_vbc_module(&vbc_module, GpuTarget::Cuda);
-    assert!(result.is_ok(), "VBC → MLIR lowering failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "VBC → MLIR lowering failed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -234,10 +241,26 @@ fn test_vbc_to_mlir_multiple_functions() {
         .iter()
         .filter_map(|f| vbc_module.get_string(f.name).map(|s| s.to_string()))
         .collect();
-    assert!(user_fn_names.contains(&"foo".to_string()), "Should contain 'foo', got: {:?}", user_fn_names);
-    assert!(user_fn_names.contains(&"bar".to_string()), "Should contain 'bar', got: {:?}", user_fn_names);
-    assert!(user_fn_names.contains(&"main".to_string()), "Should contain 'main', got: {:?}", user_fn_names);
-    assert!(vbc_module.functions.len() >= 3, "Should have at least 3 functions, got {}", vbc_module.functions.len());
+    assert!(
+        user_fn_names.contains(&"foo".to_string()),
+        "Should contain 'foo', got: {:?}",
+        user_fn_names
+    );
+    assert!(
+        user_fn_names.contains(&"bar".to_string()),
+        "Should contain 'bar', got: {:?}",
+        user_fn_names
+    );
+    assert!(
+        user_fn_names.contains(&"main".to_string()),
+        "Should contain 'main', got: {:?}",
+        user_fn_names
+    );
+    assert!(
+        vbc_module.functions.len() >= 3,
+        "Should have at least 3 functions, got {}",
+        vbc_module.functions.len()
+    );
 
     // Lower to MLIR
     let mlir_ctx = MlirContext::new().unwrap();
@@ -245,7 +268,11 @@ fn test_vbc_to_mlir_multiple_functions() {
     let mut mlir_codegen = MlirCodegen::new(&mlir_ctx, config).unwrap();
 
     let result = mlir_codegen.lower_vbc_module(&vbc_module, GpuTarget::Cuda);
-    assert!(result.is_ok(), "VBC → MLIR lowering failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "VBC → MLIR lowering failed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -260,7 +287,11 @@ fn test_vbc_to_mlir_function_with_params() {
     let mut mlir_codegen = MlirCodegen::new(&mlir_ctx, config).unwrap();
 
     let result = mlir_codegen.lower_vbc_module(&vbc_module, GpuTarget::Cuda);
-    assert!(result.is_ok(), "VBC → MLIR lowering failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "VBC → MLIR lowering failed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
@@ -274,11 +305,17 @@ fn test_vbc_to_mlir_verification() {
     let config = MlirConfig::new("test_module");
     let mut mlir_codegen = MlirCodegen::new(&mlir_ctx, config).unwrap();
 
-    mlir_codegen.lower_vbc_module(&vbc_module, GpuTarget::Cuda).unwrap();
+    mlir_codegen
+        .lower_vbc_module(&vbc_module, GpuTarget::Cuda)
+        .unwrap();
 
     // Verify MLIR module
     let verify_result = mlir_codegen.verify();
-    assert!(verify_result.is_ok(), "MLIR verification failed: {:?}", verify_result.err());
+    assert!(
+        verify_result.is_ok(),
+        "MLIR verification failed: {:?}",
+        verify_result.err()
+    );
 }
 
 #[test]
@@ -292,13 +329,19 @@ fn test_vbc_to_mlir_string_output() {
     let config = MlirConfig::new("test_module");
     let mut mlir_codegen = MlirCodegen::new(&mlir_ctx, config).unwrap();
 
-    mlir_codegen.lower_vbc_module(&vbc_module, GpuTarget::Cuda).unwrap();
+    mlir_codegen
+        .lower_vbc_module(&vbc_module, GpuTarget::Cuda)
+        .unwrap();
 
     // Get MLIR string representation
     let mlir_str = mlir_codegen.get_mlir_string().unwrap();
 
     // Should contain module structure
-    assert!(mlir_str.as_str().contains("module"), "MLIR output should contain module: {}", mlir_str.as_str());
+    assert!(
+        mlir_str.as_str().contains("module"),
+        "MLIR output should contain module: {}",
+        mlir_str.as_str()
+    );
 }
 
 // =============================================================================
@@ -371,10 +414,7 @@ fn test_gpu_target_metal() {
 
 #[test]
 fn test_vbc_codegen_stats() {
-    let ast_module = test_module(vec![
-        simple_function("foo", 1),
-        simple_function("bar", 2),
-    ]);
+    let ast_module = test_module(vec![simple_function("foo", 1), simple_function("bar", 2)]);
 
     let mut vbc_codegen = VbcCodegen::new();
     let vbc_module = vbc_codegen.compile_module(&ast_module).unwrap();
@@ -387,8 +427,20 @@ fn test_vbc_codegen_stats() {
         .iter()
         .filter_map(|f| vbc_module.get_string(f.name).map(|s| s.to_string()))
         .collect();
-    assert!(user_fn_names.contains(&"foo".to_string()), "Should contain 'foo', got: {:?}", user_fn_names);
-    assert!(user_fn_names.contains(&"bar".to_string()), "Should contain 'bar', got: {:?}", user_fn_names);
-    assert!(vbc_module.functions.len() >= 2, "Should have at least 2 functions, got {}", vbc_module.functions.len());
+    assert!(
+        user_fn_names.contains(&"foo".to_string()),
+        "Should contain 'foo', got: {:?}",
+        user_fn_names
+    );
+    assert!(
+        user_fn_names.contains(&"bar".to_string()),
+        "Should contain 'bar', got: {:?}",
+        user_fn_names
+    );
+    assert!(
+        vbc_module.functions.len() >= 2,
+        "Should have at least 2 functions, got {}",
+        vbc_module.functions.len()
+    );
     assert!(!vbc_module.name.is_empty(), "Module should have a name");
 }

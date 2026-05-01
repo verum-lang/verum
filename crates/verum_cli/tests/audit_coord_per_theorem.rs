@@ -83,11 +83,7 @@ public fn main() {}
         "expected yoneda axiom row: {}",
         combined,
     );
-    assert!(
-        combined.contains("ν=ω"),
-        "lurie_htt is ν=ω: {}",
-        combined,
-    );
+    assert!(combined.contains("ν=ω"), "lurie_htt is ν=ω: {}", combined,);
 }
 
 #[test]

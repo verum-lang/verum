@@ -151,11 +151,7 @@ pub fn render_tensor(
     }
 
     // Preview for collapsed view
-    let preview = format!(
-        "{}: {} elements",
-        stats.type_signature(),
-        stats.numel
-    );
+    let preview = format!("{}: {} elements", stats.type_signature(), stats.numel);
 
     // Format-specific rendering
     let formatted = match format {
@@ -235,10 +231,15 @@ fn format_2d(data: &[f64], rows: usize, cols: usize, options: &TensorPreview) ->
 
         let row_str = format_1d(&row_data, row_data.len(), options);
         let prefix = if i == 0 { " " } else { "  " };
-        lines.push(format!("{}{}{}",
+        lines.push(format!(
+            "{}{}{}",
             prefix,
             row_str,
-            if i < show_rows - 1 || rows > show_rows { "," } else { "" }
+            if i < show_rows - 1 || rows > show_rows {
+                ","
+            } else {
+                ""
+            }
         ));
     }
 
@@ -260,11 +261,7 @@ fn format_nd(data: &[f64], shape: &[usize], options: &TensorPreview) -> String {
         .map(|&v| format_number(v, options))
         .collect();
 
-    format!(
-        "shape={:?}\ndata=[{}, ...]",
-        shape,
-        sample.join(", ")
-    )
+    format!("shape={:?}\ndata=[{}, ...]", shape, sample.join(", "))
 }
 
 /// Formats a single number.
@@ -272,7 +269,11 @@ fn format_number(v: f64, options: &TensorPreview) -> String {
     if v.is_nan() {
         "nan".to_string()
     } else if v.is_infinite() {
-        if v.is_sign_positive() { "inf".to_string() } else { "-inf".to_string() }
+        if v.is_sign_positive() {
+            "inf".to_string()
+        } else {
+            "-inf".to_string()
+        }
     } else if v.abs() >= options.scientific_notation_threshold || (v != 0.0 && v.abs() < 1e-4) {
         format!("{:.*e}", options.precision.min(2), v)
     } else {
@@ -312,9 +313,15 @@ fn html_format_tensor(text: &str, stats: &TensorStats) -> String {
                 .replace('>', "&gt;");
 
             if i == 0 {
-                format!("<span class=\"tensor-type\">{}<!-- raw HTML omitted --></span>", escaped)
+                format!(
+                    "<span class=\"tensor-type\">{}<!-- raw HTML omitted --></span>",
+                    escaped
+                )
             } else if line.starts_with("  mean=") || line.starts_with("  std=") {
-                format!("<span class=\"tensor-stats\">{}<!-- raw HTML omitted --></span>", escaped)
+                format!(
+                    "<span class=\"tensor-stats\">{}<!-- raw HTML omitted --></span>",
+                    escaped
+                )
             } else {
                 escaped
             }

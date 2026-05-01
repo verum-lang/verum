@@ -86,8 +86,15 @@ impl<'ctx> PointerValue<'ctx> {
 
     // REVIEW: Should this be on array value too?
     /// GEP is very likely to segfault if indexes are used incorrectly, and is therefore an unsafe function. Maybe we can change this in the future.
-    pub unsafe fn const_gep<T: BasicType<'ctx>>(self, ty: T, ordered_indexes: &[IntValue<'ctx>]) -> PointerValue<'ctx> {
-        let mut index_values: Vec<LLVMValueRef> = ordered_indexes.iter().map(|val| val.as_value_ref()).collect();
+    pub unsafe fn const_gep<T: BasicType<'ctx>>(
+        self,
+        ty: T,
+        ordered_indexes: &[IntValue<'ctx>],
+    ) -> PointerValue<'ctx> {
+        let mut index_values: Vec<LLVMValueRef> = ordered_indexes
+            .iter()
+            .map(|val| val.as_value_ref())
+            .collect();
 
         let value = {
             LLVMConstGEP2(
@@ -107,7 +114,10 @@ impl<'ctx> PointerValue<'ctx> {
         ty: T,
         ordered_indexes: &[IntValue<'ctx>],
     ) -> PointerValue<'ctx> {
-        let mut index_values: Vec<LLVMValueRef> = ordered_indexes.iter().map(|val| val.as_value_ref()).collect();
+        let mut index_values: Vec<LLVMValueRef> = ordered_indexes
+            .iter()
+            .map(|val| val.as_value_ref())
+            .collect();
 
         let value = {
             LLVMConstInBoundsGEP2(
@@ -124,15 +134,30 @@ impl<'ctx> PointerValue<'ctx> {
 
 impl<'ctx> PointerValue<'ctx> {
     pub fn const_to_int(self, int_type: IntType<'ctx>) -> IntValue<'ctx> {
-        unsafe { IntValue::new(LLVMConstPtrToInt(self.as_value_ref(), int_type.as_type_ref())) }
+        unsafe {
+            IntValue::new(LLVMConstPtrToInt(
+                self.as_value_ref(),
+                int_type.as_type_ref(),
+            ))
+        }
     }
 
     pub fn const_cast(self, ptr_type: PointerType<'ctx>) -> PointerValue<'ctx> {
-        unsafe { PointerValue::new(LLVMConstPointerCast(self.as_value_ref(), ptr_type.as_type_ref())) }
+        unsafe {
+            PointerValue::new(LLVMConstPointerCast(
+                self.as_value_ref(),
+                ptr_type.as_type_ref(),
+            ))
+        }
     }
 
     pub fn const_address_space_cast(self, ptr_type: PointerType<'ctx>) -> PointerValue<'ctx> {
-        unsafe { PointerValue::new(LLVMConstAddrSpaceCast(self.as_value_ref(), ptr_type.as_type_ref())) }
+        unsafe {
+            PointerValue::new(LLVMConstAddrSpaceCast(
+                self.as_value_ref(),
+                ptr_type.as_type_ref(),
+            ))
+        }
     }
 
     pub fn replace_all_uses_with(self, other: PointerValue<'ctx>) {

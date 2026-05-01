@@ -124,8 +124,8 @@ impl<'s> CompilationPipeline<'s> {
     /// Extract profile name from an expression (handles both string
     /// and identifier forms).
     pub(super) fn extract_profile_name(&self, expr: &verum_ast::expr::Expr) -> Option<String> {
-        use verum_ast::expr::ExprKind;
         use verum_ast::LiteralKind;
+        use verum_ast::expr::ExprKind;
 
         match &expr.kind {
             ExprKind::Literal(lit) => match &lit.kind {
@@ -146,8 +146,8 @@ impl<'s> CompilationPipeline<'s> {
 
     /// Convert an import to a module-path string.
     pub(super) fn import_to_module_path(&self, import: &verum_ast::decl::MountDecl) -> Text {
-        use verum_ast::decl::MountTreeKind;
         use verum_ast::PathSegment;
+        use verum_ast::decl::MountTreeKind;
 
         let path = match &import.tree.kind {
             MountTreeKind::Path(path) => path,
@@ -240,19 +240,19 @@ impl<'s> CompilationPipeline<'s> {
                             GenericArg::Type(t) => self.type_to_text(t).to_string(),
                             GenericArg::Const(e) => format!("{:?}", e),
                             GenericArg::Lifetime(_) => "'_".to_string(),
-                            GenericArg::Binding(binding) => format!(
-                                "{}={}",
-                                binding.name.name,
-                                self.type_to_text(&binding.ty)
-                            ),
+                            GenericArg::Binding(binding) => {
+                                format!("{}={}", binding.name.name, self.type_to_text(&binding.ty))
+                            }
                         })
                         .collect();
                     Text::from(format!("{}<{}>", base_text, args_str.join(", ")))
                 }
             }
             TypeKind::Tuple(types) => {
-                let type_strs: Vec<String> =
-                    types.iter().map(|t| self.type_to_text(t).to_string()).collect();
+                let type_strs: Vec<String> = types
+                    .iter()
+                    .map(|t| self.type_to_text(t).to_string())
+                    .collect();
                 Text::from(format!("({})", type_strs.join(", ")))
             }
             TypeKind::Reference { inner, mutable, .. } => {

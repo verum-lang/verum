@@ -2161,7 +2161,6 @@ pub enum TensorSubOpcode {
     // These handle intrinsic calls where all arguments are registers.
     // Values 0x01-0x09 are RESERVED for TensorExtSubOpcode fallthrough.
     // ========================================================================
-
     /// Create zero tensor from register args.
     ///
 
@@ -2481,7 +2480,6 @@ pub enum TensorSubOpcode {
     // ========================================================================
     // Extended Tensor Operations (0x80-0x8F)
     // ========================================================================
-
     /// Repeat tensor along new dimension.
     ///
 
@@ -2581,7 +2579,6 @@ pub enum TensorSubOpcode {
     // ========================================================================
     // Tokenizer Operations (0x90-0x9F)
     // ========================================================================
-
     /// Load BPE tokenizer from files.
     ///
 
@@ -2627,7 +2624,6 @@ pub enum TensorSubOpcode {
     // ========================================================================
     // Sampling Operations (0xA0-0xAF)
     // ========================================================================
-
     /// Top-p (nucleus) sampling.
     ///
 
@@ -2649,7 +2645,6 @@ pub enum TensorSubOpcode {
     // ========================================================================
     // Inference Utility Operations (0xB0-0xBF)
     // ========================================================================
-
     /// Parse tool call from action string.
     ///
 
@@ -2707,7 +2702,6 @@ pub enum TensorSubOpcode {
     // ========================================================================
     // Distributed/Collective Operations (0xC0-0xCF)
     // ========================================================================
-
     /// All-reduce: reduce tensor across all ranks and distribute result.
     ///
 
@@ -2778,7 +2772,6 @@ pub enum TensorSubOpcode {
     // ========================================================================
     // Process Group Operations (0xCB-0xCD)
     // ========================================================================
-
     /// Get the world process group (all ranks).
     ///
 
@@ -2803,7 +2796,6 @@ pub enum TensorSubOpcode {
     // ========================================================================
     // Point-to-Point Operations (0xCE-0xCF)
     // ========================================================================
-
     /// Send tensor to a specific rank.
     ///
 
@@ -2821,7 +2813,6 @@ pub enum TensorSubOpcode {
     // ========================================================================
     // Additional Collective Operations (0xD0-0xD1)
     // ========================================================================
-
     /// Collective gather: collect tensors from all ranks to one rank.
     ///
 
@@ -2839,7 +2830,6 @@ pub enum TensorSubOpcode {
     // ========================================================================
     // Gradient Operations (0xD2-0xD5)
     // ========================================================================
-
     /// Bucket gradients for communication efficiency.
     ///
 
@@ -2871,7 +2861,6 @@ pub enum TensorSubOpcode {
     // ========================================================================
     // Actor Mesh Operations (0xD6-0xD7)
     // ========================================================================
-
     /// Select actors from a mesh by coordinates.
     ///
 
@@ -2889,7 +2878,6 @@ pub enum TensorSubOpcode {
     // ========================================================================
     // RDMA Operations (0xD8-0xDB)
     // ========================================================================
-
     /// Create an RDMA reference to a tensor.
     ///
 
@@ -2921,7 +2909,6 @@ pub enum TensorSubOpcode {
     // ========================================================================
     // Shape Manipulation Operations (0xDC-0xDF)
     // ========================================================================
-
     /// Unsqueeze tensor (add dimension of size 1).
     ///
 
@@ -2950,7 +2937,6 @@ pub enum TensorSubOpcode {
     // ========================================================================
     // Regex Operations (0xE0-0xE3)
     // ========================================================================
-
     /// Find all matches of a regex pattern in text.
     ///
 
@@ -2983,7 +2969,6 @@ pub enum TensorSubOpcode {
     // Tensor Creation & Utility Operations (0xE4-0xFF)
     // These operations provide tensor factory methods and utilities.
     // ========================================================================
-
     /// Create tensor with evenly spaced values (arange).
     ///
 
@@ -3228,7 +3213,6 @@ pub enum TensorExtSubOpcode {
     // match counterparts landed, so these three placed in the ext-extended
     // space (TensorExtended 0xFC + sub_op 0xFF + ext_sub_op).
     // ========================================================================
-
     /// Find the FIRST regex match in text.
     ///
 
@@ -3835,7 +3819,6 @@ pub enum MlSubOpcode {
     // ========================================================================
     // Tokenizer Operations (0x00-0x0F)
     // ========================================================================
-
     /// Load BPE tokenizer from files.
     ///
 
@@ -3881,7 +3864,6 @@ pub enum MlSubOpcode {
     // ========================================================================
     // Sampling Operations (0x10-0x1F)
     // ========================================================================
-
     /// Top-p (nucleus) sampling.
     ///
 
@@ -3921,7 +3903,6 @@ pub enum MlSubOpcode {
     // ========================================================================
     // Inference Utility Operations (0x20-0x2F)
     // ========================================================================
-
     /// Parse tool call from action string.
     ///
 
@@ -3980,7 +3961,6 @@ pub enum MlSubOpcode {
     // ========================================================================
     // Distributed/Collective Operations (0x30-0x3F)
     // ========================================================================
-
     /// All-reduce: reduce tensor across all ranks and distribute result.
     ///
 
@@ -4051,7 +4031,6 @@ pub enum MlSubOpcode {
     // ========================================================================
     // Process Group Operations (0x40-0x4F)
     // ========================================================================
-
     /// Get the world process group (all ranks).
     ///
 
@@ -4085,7 +4064,6 @@ pub enum MlSubOpcode {
     // ========================================================================
     // Point-to-Point Operations (0x50-0x5F)
     // ========================================================================
-
     /// Send tensor to a specific rank.
     ///
 
@@ -4119,7 +4097,6 @@ pub enum MlSubOpcode {
     // ========================================================================
     // Gradient Operations (0x60-0x6F)
     // ========================================================================
-
     /// Bucket gradients for communication efficiency.
     ///
 
@@ -4189,7 +4166,6 @@ pub enum MlSubOpcode {
     // ========================================================================
     // Actor/Mesh Operations (0x70-0x7F)
     // ========================================================================
-
     /// Select actors from a mesh by coordinates.
     ///
 
@@ -4217,7 +4193,6 @@ pub enum MlSubOpcode {
     // ========================================================================
     // RDMA Operations (0x80-0x8F)
     // ========================================================================
-
     /// Create an RDMA reference to a tensor.
     ///
 
@@ -4848,7 +4823,6 @@ pub enum FfiSubOpcode {
 
     // These are semantically equivalent to Rust's `*const T` and `*mut T`.
     // ========================================================================
-
     /// Read value through raw pointer (no CBGR validation).
     ///
 
@@ -5052,7 +5026,6 @@ pub enum FfiSubOpcode {
     // =========================================================================
     // Mach Kernel Operations (macOS)
     // =========================================================================
-
     /// Mach vm_allocate (safe wrapper).
     ///
 
@@ -5588,7 +5561,6 @@ pub enum ArithSubOpcode {
     // High-performance type-dispatched arithmetic for generic intrinsics.
     // These check the first operand's type at runtime and dispatch to the
     // appropriate integer or float operation. Overhead: ~1-2 cycles for type check.
-
     /// Polymorphic addition - dispatches to AddI or AddF based on operand type.
     ///
 
@@ -5676,7 +5648,6 @@ pub enum ArithSubOpcode {
     // Operations that saturate at MIN/MAX instead of wrapping on overflow.
     // Format includes bit-width: `dst:reg, a:reg, b:reg, width:u8`
     // Width values: 8, 16, 32, 64 (128 for Int128/UInt128)
-
     /// Saturating addition - clamps to MAX on overflow, MIN on underflow.
     ///
 
@@ -5723,7 +5694,6 @@ pub enum ArithSubOpcode {
     // ========================================================================
     // Operations that wrap around on overflow (modular arithmetic).
     // Format includes bit-width: `dst:reg, a:reg, b:reg, width:u8`
-
     /// Wrapping addition - result mod 2^width.
     ///
 
@@ -5763,7 +5733,6 @@ pub enum ArithSubOpcode {
     // ========================================================================
     // Bit Counting Operations (0x50-0x5F) - Leading/trailing zeros, popcount
     // ========================================================================
-
     /// Count leading zeros - number of 0 bits from MSB.
     ///
 
@@ -5834,7 +5803,6 @@ pub enum ArithSubOpcode {
     // ========================================================================
     // Standard binary floating-point operations that require two operands.
     // These are float-only operations (no integer dispatch).
-
     /// atan2(y, x) - Two-argument arctangent.
     ///
 
@@ -5915,7 +5883,6 @@ pub enum ArithSubOpcode {
     // ========================================================================
     // Operations that change the bit width or precision of values.
     // These map directly to LLVM sext/zext/trunc/fptrunc/fpext instructions.
-
     /// Sign-extend integer to wider type.
     ///
 
@@ -6158,8 +6125,13 @@ impl ArithSubOpcode {
     pub fn is_checked(self) -> bool {
         matches!(
             self,
-            Self::CheckedAddI | Self::CheckedSubI | Self::CheckedMulI | Self::CheckedDivI
-                | Self::CheckedAddU | Self::CheckedSubU | Self::CheckedMulU
+            Self::CheckedAddI
+                | Self::CheckedSubI
+                | Self::CheckedMulI
+                | Self::CheckedDivI
+                | Self::CheckedAddU
+                | Self::CheckedSubU
+                | Self::CheckedMulU
         )
     }
 
@@ -6175,7 +6147,12 @@ impl ArithSubOpcode {
     pub fn is_polymorphic(self) -> bool {
         matches!(
             self,
-            Self::PolyAdd | Self::PolySub | Self::PolyMul | Self::PolyDiv | Self::PolyNeg | Self::PolyRem
+            Self::PolyAdd
+                | Self::PolySub
+                | Self::PolyMul
+                | Self::PolyDiv
+                | Self::PolyNeg
+                | Self::PolyRem
         )
     }
 
@@ -6825,8 +6802,12 @@ impl MathSubOpcode {
             Self::PowF64 | Self::PowiF64 | Self::PowF32 | Self::PowiF32 => 2,
             Self::HypotF64 | Self::HypotF32 => 2,
             Self::CopysignF64 | Self::CopysignF32 => 2,
-            Self::FmodF64 | Self::RemainderF64 | Self::FdimF64
-            | Self::FmodF32 | Self::RemainderF32 | Self::FdimF32 => 2,
+            Self::FmodF64
+            | Self::RemainderF64
+            | Self::FdimF64
+            | Self::FmodF32
+            | Self::RemainderF32
+            | Self::FdimF32 => 2,
             Self::MinnumF64 | Self::MaxnumF64 | Self::MinnumF32 | Self::MaxnumF32 => 2,
             // Ternary operations (three operands)
             Self::FmaF64 | Self::FmaF32 => 3,
@@ -7366,22 +7347,64 @@ impl SimdSubOpcode {
             // Nullary (0 operands)
             Self::MaskAll | Self::MaskNone => 0,
             // Unary (1 operand)
-            Self::Neg | Self::Abs | Self::Sqrt | Self::Recip | Self::Rsqrt
-            | Self::BitwiseNot | Self::Reverse
-            | Self::ReduceAdd | Self::ReduceMul | Self::ReduceMin | Self::ReduceMax
-            | Self::ReduceAnd | Self::ReduceOr | Self::ReduceXor
-            | Self::MaskAny | Self::MaskCount | Self::MaskFirstTrue
-            | Self::Cast | Self::ConvertF32ToF64 | Self::ConvertF64ToF32
-            | Self::ConvertIntToFloat | Self::ConvertFloatToInt | Self::Bitcast
-            | Self::Splat | Self::LoadAligned | Self::LoadUnaligned => 1,
+            Self::Neg
+            | Self::Abs
+            | Self::Sqrt
+            | Self::Recip
+            | Self::Rsqrt
+            | Self::BitwiseNot
+            | Self::Reverse
+            | Self::ReduceAdd
+            | Self::ReduceMul
+            | Self::ReduceMin
+            | Self::ReduceMax
+            | Self::ReduceAnd
+            | Self::ReduceOr
+            | Self::ReduceXor
+            | Self::MaskAny
+            | Self::MaskCount
+            | Self::MaskFirstTrue
+            | Self::Cast
+            | Self::ConvertF32ToF64
+            | Self::ConvertF64ToF32
+            | Self::ConvertIntToFloat
+            | Self::ConvertFloatToInt
+            | Self::Bitcast
+            | Self::Splat
+            | Self::LoadAligned
+            | Self::LoadUnaligned => 1,
             // Binary (2 operands)
-            Self::Add | Self::Sub | Self::Mul | Self::Div | Self::Min | Self::Max | Self::Rem
-            | Self::CmpEq | Self::CmpNe | Self::CmpLt | Self::CmpLe | Self::CmpGt | Self::CmpGe
-            | Self::BitwiseAnd | Self::BitwiseOr | Self::BitwiseXor | Self::AndNot
-            | Self::ShiftLeft | Self::ShiftRight | Self::ShiftRightArith
-            | Self::Shuffle | Self::Permute | Self::InterleaveLow | Self::InterleaveHigh
-            | Self::StoreAligned | Self::StoreUnaligned | Self::Extract
-            | Self::Compress | Self::Expand | Self::Concat | Self::Rotate => 2,
+            Self::Add
+            | Self::Sub
+            | Self::Mul
+            | Self::Div
+            | Self::Min
+            | Self::Max
+            | Self::Rem
+            | Self::CmpEq
+            | Self::CmpNe
+            | Self::CmpLt
+            | Self::CmpLe
+            | Self::CmpGt
+            | Self::CmpGe
+            | Self::BitwiseAnd
+            | Self::BitwiseOr
+            | Self::BitwiseXor
+            | Self::AndNot
+            | Self::ShiftLeft
+            | Self::ShiftRight
+            | Self::ShiftRightArith
+            | Self::Shuffle
+            | Self::Permute
+            | Self::InterleaveLow
+            | Self::InterleaveHigh
+            | Self::StoreAligned
+            | Self::StoreUnaligned
+            | Self::Extract
+            | Self::Compress
+            | Self::Expand
+            | Self::Concat
+            | Self::Rotate => 2,
             // Ternary (3 operands)
             Self::Fma | Self::Select | Self::Insert | Self::MaskedLoad | Self::MaskedStore => 3,
             // Special
@@ -7429,8 +7452,9 @@ impl SimdSubOpcode {
             Self::Fma => Some("math.fma"),
             Self::Min => Some("arith.minimumf"),
             Self::Max => Some("arith.maximumf"),
-            Self::CmpEq | Self::CmpNe | Self::CmpLt | Self::CmpLe | Self::CmpGt | Self::CmpGe
-                => Some("arith.cmpf"),
+            Self::CmpEq | Self::CmpNe | Self::CmpLt | Self::CmpLe | Self::CmpGt | Self::CmpGe => {
+                Some("arith.cmpf")
+            }
             Self::Select => Some("arith.select"),
             Self::LoadAligned | Self::LoadUnaligned => Some("vector.load"),
             Self::StoreAligned | Self::StoreUnaligned => Some("vector.store"),
@@ -7959,10 +7983,7 @@ impl CbgrSubOpcode {
 
     /// Returns true if this operation is a validation check.
     pub fn is_validation(self) -> bool {
-        matches!(
-            self,
-            Self::CapCheck | Self::ValidateEpoch | Self::IsValid
-        )
+        matches!(self, Self::CapCheck | Self::ValidateEpoch | Self::IsValid)
     }
 }
 
@@ -8788,10 +8809,7 @@ impl TextSubOpcode {
 
     /// Returns true if this operation returns a Text value.
     pub fn returns_text(self) -> bool {
-        matches!(
-            self,
-            Self::FromStatic | Self::IntToText | Self::FloatToText
-        )
+        matches!(self, Self::FromStatic | Self::IntToText | Self::FloatToText)
     }
 
     /// Returns true if this operation parses input.
@@ -8804,7 +8822,10 @@ impl TextSubOpcode {
 // If this fails, from_byte's transmute is unsound.
 const _: () = {
     // The enum must be exactly 1 byte (u8-sized)
-    assert!(std::mem::size_of::<Opcode>() == 1, "Opcode must be repr(u8) and 1 byte");
+    assert!(
+        std::mem::size_of::<Opcode>() == 1,
+        "Opcode must be repr(u8) and 1 byte"
+    );
 };
 
 /// Sub-opcodes for the general-purpose `Opcode::Extended` (`0x1F`) instruction
@@ -9890,7 +9911,6 @@ pub enum Instruction {
     // GenNext (0x9F) resumes execution from the saved state; Yield saves state and returns.
     // GenHasNext (0xC9) checks if the generator can produce more values (status != Completed).
     // Generators implement the Iterator protocol for lazy value production.
-
     /// Create a generator from a generator function.
     ///
 
@@ -11758,7 +11778,6 @@ pub enum Instruction {
     // ========================================================================
     // TensorExtended Operations (via TensorSubOpcode)
     // ========================================================================
-
     /// Argmin along axis.
     TensorArgmin {
         /// Destination register (index tensor).
@@ -11914,7 +11933,6 @@ pub enum Instruction {
     // ========================================================================
     // V-LLSI System Operations
     // ========================================================================
-
     /// Raw Linux syscall: `dst = syscall(num, a1, a2, a3, a4, a5, a6)`
     /// In VBC interpreter: dispatches to libc syscall
     /// In AOT: compiles to inline syscall instruction
@@ -13976,7 +13994,12 @@ mod tests {
             field_count: 3,
         };
 
-        if let Instruction::New { dst, type_id, field_count } = instr {
+        if let Instruction::New {
+            dst,
+            type_id,
+            field_count,
+        } = instr
+        {
             assert_eq!(dst, Reg(0));
             assert_eq!(type_id, 42);
             assert_eq!(field_count, 3);
@@ -14071,7 +14094,12 @@ mod tests {
             type_hint: 0,
         };
 
-        if let Instruction::Len { dst, arr, type_hint } = instr {
+        if let Instruction::Len {
+            dst,
+            arr,
+            type_hint,
+        } = instr
+        {
             assert_eq!(dst, Reg(0));
             assert_eq!(arr, Reg(1));
             assert_eq!(type_hint, 0);

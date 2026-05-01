@@ -824,8 +824,12 @@ impl ParseError {
 
     /// Create a missing semicolon error with context-aware help.
     pub fn missing_semicolon(span: Span, after_what: &str) -> Self {
-        Self::with_error_code(ParseErrorKind::MissingSemicolon, span, ErrorCode::MissingSemicolon)
-            .with_help(Text::from(format!("add `;` after the {}", after_what)))
+        Self::with_error_code(
+            ParseErrorKind::MissingSemicolon,
+            span,
+            ErrorCode::MissingSemicolon,
+        )
+        .with_help(Text::from(format!("add `;` after the {}", after_what)))
     }
 
     /// Create an unclosed delimiter error with helpful suggestion.
@@ -844,11 +848,15 @@ impl ParseError {
             '<' => ErrorCode::UnclosedGenericArgs,
             _ => ErrorCode::UnclosedAttribute,
         };
-        Self::with_error_code(ParseErrorKind::UnclosedDelimiter(delimiter), current_span, code)
-            .with_help(Text::from(format!(
-                "add '{}' to close the '{}' opened at line {}:{}",
-                closing, delimiter, opening_span.start, opening_span.end
-            )))
+        Self::with_error_code(
+            ParseErrorKind::UnclosedDelimiter(delimiter),
+            current_span,
+            code,
+        )
+        .with_help(Text::from(format!(
+            "add '{}' to close the '{}' opened at line {}:{}",
+            closing, delimiter, opening_span.start, opening_span.end
+        )))
     }
 
     /// Create a helpful error for expected token with suggestions.
@@ -878,7 +886,9 @@ impl ParseError {
     /// E001: Unterminated character literal
     pub fn unterminated_char(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidLiteral { message: "unterminated character literal".into() },
+            ParseErrorKind::InvalidLiteral {
+                message: "unterminated character literal".into(),
+            },
             span,
             ErrorCode::UnterminatedChar,
         )
@@ -887,7 +897,9 @@ impl ParseError {
     /// E001: Unterminated string literal (same error code as unterminated char)
     pub fn unterminated_string(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidLiteral { message: "unterminated string literal".into() },
+            ParseErrorKind::InvalidLiteral {
+                message: "unterminated string literal".into(),
+            },
             span,
             ErrorCode::UnterminatedChar, // E001 covers both unterminated char and string
         )
@@ -896,7 +908,9 @@ impl ParseError {
     /// E002: Invalid escape sequence
     pub fn invalid_escape(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidLiteral { message: message.into() },
+            ParseErrorKind::InvalidLiteral {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidEscape,
         )
@@ -905,7 +919,9 @@ impl ParseError {
     /// E003: Invalid number literal
     pub fn invalid_number(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidLiteral { message: message.into() },
+            ParseErrorKind::InvalidLiteral {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidNumber,
         )
@@ -914,7 +930,9 @@ impl ParseError {
     /// E004: Empty character literal
     pub fn empty_char(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidLiteral { message: "empty character literal".into() },
+            ParseErrorKind::InvalidLiteral {
+                message: "empty character literal".into(),
+            },
             span,
             ErrorCode::EmptyChar,
         )
@@ -923,7 +941,9 @@ impl ParseError {
     /// E005: Invalid interpolation syntax
     pub fn invalid_interpolation(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidInterpolation,
         )
@@ -932,7 +952,9 @@ impl ParseError {
     /// E006: Unknown token
     pub fn unknown_token(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "unknown token".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "unknown token".into(),
+            },
             span,
             ErrorCode::UnknownToken,
         )
@@ -951,7 +973,9 @@ impl ParseError {
     /// E012: Invalid attribute arguments
     pub fn invalid_attribute_args(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidAttribute { message: message.into() },
+            ParseErrorKind::InvalidAttribute {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidAttributeArgs,
         )
@@ -960,7 +984,9 @@ impl ParseError {
     /// E013: Missing attribute name
     pub fn missing_attribute_name(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidAttribute { message: "missing attribute name after @".into() },
+            ParseErrorKind::InvalidAttribute {
+                message: "missing attribute name after @".into(),
+            },
             span,
             ErrorCode::MissingAttributeName,
         )
@@ -969,7 +995,9 @@ impl ParseError {
     /// E014: Invalid nested attribute
     pub fn invalid_nested_attribute(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidAttribute { message: "invalid nested attribute".into() },
+            ParseErrorKind::InvalidAttribute {
+                message: "invalid nested attribute".into(),
+            },
             span,
             ErrorCode::InvalidNestedAttribute,
         )
@@ -978,7 +1006,9 @@ impl ParseError {
     /// E015: Invalid empty cfg attribute
     pub fn invalid_empty_cfg(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidAttribute { message: "empty cfg attribute".into() },
+            ParseErrorKind::InvalidAttribute {
+                message: "empty cfg attribute".into(),
+            },
             span,
             ErrorCode::InvalidEmptyCfg,
         )
@@ -987,7 +1017,9 @@ impl ParseError {
     /// E016: Invalid empty requires clause
     pub fn invalid_empty_requires(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidAttribute { message: "empty requires clause".into() },
+            ParseErrorKind::InvalidAttribute {
+                message: "empty requires clause".into(),
+            },
             span,
             ErrorCode::InvalidEmptyRequires,
         )
@@ -996,7 +1028,9 @@ impl ParseError {
     /// E017: Invalid empty ensures clause
     pub fn invalid_empty_ensures(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidAttribute { message: "empty ensures clause".into() },
+            ParseErrorKind::InvalidAttribute {
+                message: "empty ensures clause".into(),
+            },
             span,
             ErrorCode::InvalidEmptyEnsures,
         )
@@ -1006,7 +1040,9 @@ impl ParseError {
     /// E020: Invalid theorem declaration
     pub fn invalid_theorem(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidTheorem,
         )
@@ -1015,7 +1051,9 @@ impl ParseError {
     /// E021: Missing theorem name
     pub fn missing_theorem_name(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "missing theorem name".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "missing theorem name".into(),
+            },
             span,
             ErrorCode::MissingTheoremName,
         )
@@ -1024,7 +1062,9 @@ impl ParseError {
     /// E022: Invalid lemma declaration
     pub fn invalid_lemma(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidLemma,
         )
@@ -1051,7 +1091,9 @@ impl ParseError {
     /// E025: Invalid proof keyword usage
     pub fn invalid_proof_keyword(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidProofKeyword,
         )
@@ -1060,7 +1102,9 @@ impl ParseError {
     /// E026: Invalid assert expression
     pub fn invalid_assert(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidAssert,
         )
@@ -1069,7 +1113,9 @@ impl ParseError {
     /// E027: Invalid assume expression
     pub fn invalid_assume(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidAssume,
         )
@@ -1078,7 +1124,9 @@ impl ParseError {
     /// E028: Malformed tactic declaration
     pub fn malformed_tactic(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::MalformedTactic,
         )
@@ -1097,34 +1145,45 @@ impl ParseError {
     /// E030: Missing function name
     pub fn missing_fn_name(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "expected function name after `fn`".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "expected function name after `fn`".into(),
+            },
             span,
             ErrorCode::MissingFnName,
-        ).with_help("provide a function name: `fn my_function()`")
+        )
+        .with_help("provide a function name: `fn my_function()`")
     }
 
     /// E031: Missing function parameter list
     pub fn missing_fn_params(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "expected `(` to start parameter list".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "expected `(` to start parameter list".into(),
+            },
             span,
             ErrorCode::MissingFnParams,
-        ).with_help("functions require parentheses: `fn name()` or `fn name(x: Int)`")
+        )
+        .with_help("functions require parentheses: `fn name()` or `fn name(x: Int)`")
     }
 
     /// E032: Missing function body
     pub fn missing_fn_body(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "expected `{` to start function body or `;` for declaration".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "expected `{` to start function body or `;` for declaration".into(),
+            },
             span,
             ErrorCode::MissingFnBody,
-        ).with_help("add a body: `fn name() { ... }` or use `;` for protocol method signatures")
+        )
+        .with_help("add a body: `fn name() { ... }` or use `;` for protocol method signatures")
     }
 
     /// E033: Invalid function visibility
     pub fn invalid_fn_visibility(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidFnVisibility,
         )
@@ -1134,65 +1193,86 @@ impl ParseError {
     pub fn duplicate_fn_modifier(modifier: impl Into<Text>, span: Span) -> Self {
         let mod_text: Text = modifier.into();
         Self::with_error_code(
-            ParseErrorKind::DuplicateModifier { modifier: mod_text.clone() },
+            ParseErrorKind::DuplicateModifier {
+                modifier: mod_text.clone(),
+            },
             span,
             ErrorCode::DuplicateFnModifier,
-        ).with_help(format!("remove the duplicate `{}` modifier", mod_text))
+        )
+        .with_help(format!("remove the duplicate `{}` modifier", mod_text))
     }
 
     /// E035: Invalid function parameter
     pub fn invalid_fn_param(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidFnParam,
-        ).with_help("parameters have the form `name: Type` or `mut name: Type`")
+        )
+        .with_help("parameters have the form `name: Type` or `mut name: Type`")
     }
 
     /// E036: Missing parameter type
     pub fn missing_param_type(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "expected `:` and type after parameter name".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "expected `:` and type after parameter name".into(),
+            },
             span,
             ErrorCode::MissingParamType,
-        ).with_help("add type annotation: `name: Type`")
+        )
+        .with_help("add type annotation: `name: Type`")
     }
 
     /// E037: Invalid return type syntax
     pub fn invalid_return_type(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidReturnType,
-        ).with_help("return type uses `->`: `fn name() -> ReturnType`")
+        )
+        .with_help("return type uses `->`: `fn name() -> ReturnType`")
     }
 
     /// E038: Invalid where clause syntax
     pub fn invalid_where_clause(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidWhereClauseSyntax,
-        ).with_help("where clause syntax: `where T: Protocol, U: OtherProtocol`")
+        )
+        .with_help("where clause syntax: `where T: Protocol, U: OtherProtocol`")
     }
 
     /// E039: Invalid using clause syntax
     pub fn invalid_using_clause(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidUsingClauseSyntax,
-        ).with_help("using clause syntax: `using [Context1, Context2]`")
+        )
+        .with_help("using clause syntax: `using [Context1, Context2]`")
     }
 
     // Type definition errors (E040-E049)
     /// E040: Invalid throws clause syntax
     pub fn invalid_throws_clause(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidThrowsClause,
-        ).with_help("throws clause syntax: `throws(ErrorType)` or `throws(E1, E2)`")
+        )
+        .with_help("throws clause syntax: `throws(ErrorType)` or `throws(E1, E2)`")
     }
 
     /// E041: Missing generic closing bracket
@@ -1201,43 +1281,59 @@ impl ParseError {
             ParseErrorKind::UnclosedDelimiter('<'),
             span,
             ErrorCode::MissingGenericClose,
-        ).with_help("add `>` to close the generic parameters")
+        )
+        .with_help("add `>` to close the generic parameters")
     }
 
     /// E042: Empty generic parameters
     pub fn empty_generic_params(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "generic parameters `<>` cannot be empty".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "generic parameters `<>` cannot be empty".into(),
+            },
             span,
             ErrorCode::EmptyGenericParams,
-        ).with_help("add at least one type parameter: `<T>` or remove the angle brackets")
+        )
+        .with_help("add at least one type parameter: `<T>` or remove the angle brackets")
     }
 
     /// E069: Duplicate generic parameter name
     pub fn duplicate_generic_param(name: &str, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: format!("duplicate generic parameter `{}`", name).into() },
+            ParseErrorKind::InvalidSyntax {
+                message: format!("duplicate generic parameter `{}`", name).into(),
+            },
             span,
             ErrorCode::DuplicateGenericParam,
-        ).with_help(format!("each generic parameter must have a unique name; `{}` was already declared", name))
+        )
+        .with_help(format!(
+            "each generic parameter must have a unique name; `{}` was already declared",
+            name
+        ))
     }
 
     /// E043: Missing type name
     pub fn missing_type_name(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "expected type name after `type`".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "expected type name after `type`".into(),
+            },
             span,
             ErrorCode::MissingTypeName,
-        ).with_help("provide a type name: `type MyType is ...`")
+        )
+        .with_help("provide a type name: `type MyType is ...`")
     }
 
     /// E044: Missing type 'is' keyword
     pub fn missing_type_is(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "expected `is` keyword in type definition".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "expected `is` keyword in type definition".into(),
+            },
             span,
             ErrorCode::MissingTypeIs,
-        ).with_help("Verum uses `type Name is ...` syntax, not `type Name = ...` or `struct Name`")
+        )
+        .with_help("Verum uses `type Name is ...` syntax, not `type Name = ...` or `struct Name`")
     }
 
     /// E045: Missing type body
@@ -1252,136 +1348,183 @@ impl ParseError {
     /// E046: Invalid record field syntax
     pub fn invalid_record_field(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidRecordField,
-        ).with_help("record fields have the form `name: Type`")
+        )
+        .with_help("record fields have the form `name: Type`")
     }
 
     /// E047: Missing field type
     pub fn missing_field_type(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "expected `:` and type after field name".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "expected `:` and type after field name".into(),
+            },
             span,
             ErrorCode::MissingFieldType,
-        ).with_help("add type annotation: `field_name: FieldType`")
+        )
+        .with_help("add type annotation: `field_name: FieldType`")
     }
 
     /// E048: Invalid variant syntax
     pub fn invalid_variant_syntax(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidVariantSyntax,
-        ).with_help("sum type variants: `A | B | C(payload)` or `A | B { fields }`")
+        )
+        .with_help("sum type variants: `A | B | C(payload)` or `A | B { fields }`")
     }
 
     /// E049: Duplicate field name
     pub fn duplicate_field_name(name: impl Into<Text>, span: Span) -> Self {
         let field: Text = name.into();
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: format!("field `{}` is defined multiple times", field).into() },
+            ParseErrorKind::InvalidSyntax {
+                message: format!("field `{}` is defined multiple times", field).into(),
+            },
             span,
             ErrorCode::DuplicateFieldName,
-        ).with_help(format!("rename one of the `{}` fields to have a unique name", field))
+        )
+        .with_help(format!(
+            "rename one of the `{}` fields to have a unique name",
+            field
+        ))
     }
 
     // Protocol/implement errors (E050-E059)
     /// E050: Invalid generic constraint
     pub fn invalid_generic_constraint(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidGenericConstraint,
-        ).with_help("constraint syntax: `T: Protocol` or `T: P1 + P2`")
+        )
+        .with_help("constraint syntax: `T: Protocol` or `T: P1 + P2`")
     }
 
     /// E051: Missing protocol opening brace
     pub fn missing_protocol_brace(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "expected `{` to start protocol body".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "expected `{` to start protocol body".into(),
+            },
             span,
             ErrorCode::MissingProtocolBrace,
-        ).with_help("protocol syntax: `type Name is protocol { fn method(); ... }`")
+        )
+        .with_help("protocol syntax: `type Name is protocol { fn method(); ... }`")
     }
 
     /// E052: Invalid protocol method
     pub fn invalid_protocol_method(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidProtocolMethod,
-        ).with_help("protocol methods use `fn name(params) -> Type;` (note the semicolon, no body)")
+        )
+        .with_help("protocol methods use `fn name(params) -> Type;` (note the semicolon, no body)")
     }
 
     /// E053: Invalid refinement syntax
     pub fn invalid_refinement_syntax(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidRefinementSyntax,
-        ).with_help("refinement syntax: `{ v: BaseType | predicate(v) }`")
+        )
+        .with_help("refinement syntax: `{ v: BaseType | predicate(v) }`")
     }
 
     /// E054: Missing impl type
     pub fn missing_impl_type(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "expected type after `implement`".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "expected type after `implement`".into(),
+            },
             span,
             ErrorCode::MissingImplType,
-        ).with_help("syntax: `implement MyType { ... }` or `implement Protocol for MyType { ... }`")
+        )
+        .with_help("syntax: `implement MyType { ... }` or `implement Protocol for MyType { ... }`")
     }
 
     /// E055: Missing 'for' in trait impl
     pub fn missing_impl_for(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "expected `for` keyword after protocol name".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "expected `for` keyword after protocol name".into(),
+            },
             span,
             ErrorCode::MissingImplFor,
-        ).with_help("protocol implementation syntax: `implement Protocol for TargetType { ... }`")
+        )
+        .with_help("protocol implementation syntax: `implement Protocol for TargetType { ... }`")
     }
 
     /// E056: Invalid impl method
     pub fn invalid_impl_method(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidImplMethod,
-        ).with_help("implement blocks contain function definitions: `fn method() { ... }`")
+        )
+        .with_help("implement blocks contain function definitions: `fn method() { ... }`")
     }
 
     /// E057: Missing impl opening brace
     pub fn missing_impl_brace(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "expected `{` to start implement block".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "expected `{` to start implement block".into(),
+            },
             span,
             ErrorCode::MissingImplBrace,
-        ).with_help("implement syntax: `implement Type { fn method() { ... } }`")
+        )
+        .with_help("implement syntax: `implement Type { fn method() { ... } }`")
     }
 
     /// E058: Missing context name
     pub fn missing_context_name(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "expected context name after `context`".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "expected context name after `context`".into(),
+            },
             span,
             ErrorCode::MissingContextName,
-        ).with_help("context syntax: `context MyContext { ... }`")
+        )
+        .with_help("context syntax: `context MyContext { ... }`")
     }
 
     /// E059: Missing context body
     pub fn missing_context_body(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "expected `{` to start context body".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "expected `{` to start context body".into(),
+            },
             span,
             ErrorCode::MissingContextBody,
-        ).with_help("context syntax: `context Name { type T; fn get() -> T; }`")
+        )
+        .with_help("context syntax: `context Name { type T; fn get() -> T; }`")
     }
 
     // Context/module/const errors (E060-E069)
     /// E060: Invalid context method
     pub fn invalid_context_method(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidContextMethod,
         )
@@ -1390,7 +1533,9 @@ impl ParseError {
     /// E061: Missing module name
     pub fn missing_module_name(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "expected module name after `mod`".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "expected module name after `mod`".into(),
+            },
             span,
             ErrorCode::MissingModuleName,
         )
@@ -1399,7 +1544,9 @@ impl ParseError {
     /// E062: Missing module opening brace
     pub fn missing_module_brace(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "missing opening brace in module declaration".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "missing opening brace in module declaration".into(),
+            },
             span,
             ErrorCode::MissingModuleBrace,
         )
@@ -1408,7 +1555,9 @@ impl ParseError {
     /// E063: Invalid mount syntax
     pub fn invalid_mount_syntax(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidMountSyntax,
         )
@@ -1417,7 +1566,9 @@ impl ParseError {
     /// E064: Invalid pub use syntax
     pub fn invalid_pub_use_syntax(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidPubUseSyntax,
         )
@@ -1426,7 +1577,9 @@ impl ParseError {
     /// E065: Missing const type
     pub fn missing_const_type(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "missing type annotation in const declaration".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "missing type annotation in const declaration".into(),
+            },
             span,
             ErrorCode::MissingConstType,
         )
@@ -1435,7 +1588,9 @@ impl ParseError {
     /// E066: Missing const value
     pub fn missing_const_value(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "missing value in const declaration".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "missing value in const declaration".into(),
+            },
             span,
             ErrorCode::MissingConstValue,
         )
@@ -1444,7 +1599,9 @@ impl ParseError {
     /// E067: Missing static type
     pub fn missing_static_type(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "missing type annotation in static declaration".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "missing type annotation in static declaration".into(),
+            },
             span,
             ErrorCode::MissingStaticType,
         )
@@ -1457,43 +1614,56 @@ impl ParseError {
             ParseErrorKind::UnclosedDelimiter('['),
             span,
             ErrorCode::UnclosedArrayType,
-        ).with_help("add `]` to close the array type: `[T; N]`")
+        )
+        .with_help("add `]` to close the array type: `[T; N]`")
     }
 
     /// E071: Array type missing size
     pub fn array_missing_size(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "expected array size after `;`".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "expected array size after `;`".into(),
+            },
             span,
             ErrorCode::ArrayMissingSize,
-        ).with_help("array syntax: `[ElementType; size]`, e.g., `[Int; 10]`")
+        )
+        .with_help("array syntax: `[ElementType; size]`, e.g., `[Int; 10]`")
     }
 
     /// E072: Array type with negative size
     pub fn array_negative_size(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "array size must be a non-negative integer".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "array size must be a non-negative integer".into(),
+            },
             span,
             ErrorCode::ArrayNegativeSize,
-        ).with_help("use a non-negative size: `[T; 0]` or `[T; 10]`")
+        )
+        .with_help("use a non-negative size: `[T; 0]` or `[T; 10]`")
     }
 
     /// E073: Array type with double semicolon
     pub fn array_double_semicolon(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "found `;;` but expected single `;` in array type".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "found `;;` but expected single `;` in array type".into(),
+            },
             span,
             ErrorCode::ArrayDoubleSemicolon,
-        ).with_help("use single semicolon: `[T; N]`, not `[T;; N]`")
+        )
+        .with_help("use single semicolon: `[T; N]`, not `[T;; N]`")
     }
 
     /// E074: Array missing element type
     pub fn array_missing_element(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "expected element type in array".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "expected element type in array".into(),
+            },
             span,
             ErrorCode::ArrayMissingElement,
-        ).with_help("specify element type: `[Int; 10]` or `[MyType; N]`")
+        )
+        .with_help("specify element type: `[Int; 10]` or `[MyType; N]`")
     }
 
     /// E075: Unclosed capability list
@@ -1502,25 +1672,32 @@ impl ParseError {
             ParseErrorKind::UnclosedDelimiter(']'),
             span,
             ErrorCode::UnclosedCapability,
-        ).with_help("add `]` to close the capability list")
+        )
+        .with_help("add `]` to close the capability list")
     }
 
     /// E076: Empty capability list
     pub fn empty_capability(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "capability list `[]` cannot be empty".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "capability list `[]` cannot be empty".into(),
+            },
             span,
             ErrorCode::EmptyCapability,
-        ).with_help("add at least one capability or remove the brackets")
+        )
+        .with_help("add at least one capability or remove the brackets")
     }
 
     /// E077: Capability syntax without 'with' keyword
     pub fn capability_no_with(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "capability type requires `with` keyword".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "capability type requires `with` keyword".into(),
+            },
             span,
             ErrorCode::CapabilityNoWith,
-        ).with_help("syntax: `Type with [Cap1, Cap2]`")
+        )
+        .with_help("syntax: `Type with [Cap1, Cap2]`")
     }
 
     /// E078: Unclosed refinement type
@@ -1529,16 +1706,20 @@ impl ParseError {
             ParseErrorKind::UnclosedDelimiter('{'),
             span,
             ErrorCode::UnclosedRefinement,
-        ).with_help("add `}` to close the refinement type")
+        )
+        .with_help("add `}` to close the refinement type")
     }
 
     /// E079: Refinement without base type
     pub fn refinement_no_base(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "refinement type requires a base type".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "refinement type requires a base type".into(),
+            },
             span,
             ErrorCode::RefinementNoBase,
-        ).with_help("syntax: `{ v: BaseType | predicate(v) }`")
+        )
+        .with_help("syntax: `{ v: BaseType | predicate(v) }`")
     }
 
     // Reference/pointer type errors (E080-E089)
@@ -1546,10 +1727,13 @@ impl ParseError {
     pub fn invalid_int_suffix(suffix: impl Into<Text>, span: Span) -> Self {
         let suf: Text = suffix.into();
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: format!("invalid integer type suffix `{}`", suf).into() },
+            ParseErrorKind::InvalidSyntax {
+                message: format!("invalid integer type suffix `{}`", suf).into(),
+            },
             span,
             ErrorCode::InvalidIntSuffix,
-        ).with_help("valid suffixes: i8, i16, i32, i64, i128, u8, u16, u32, u64, u128")
+        )
+        .with_help("valid suffixes: i8, i16, i32, i64, i128, u8, u16, u32, u64, u128")
     }
 
     /// E081: Unclosed type constraint generic
@@ -1558,49 +1742,66 @@ impl ParseError {
             ParseErrorKind::UnclosedDelimiter('<'),
             span,
             ErrorCode::UnclosedConstraintGeneric,
-        ).with_help("add `>` to close the generic constraint")
+        )
+        .with_help("add `>` to close the generic constraint")
     }
 
     /// E082: Empty generic type arguments
     pub fn empty_generic_args(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "generic type arguments `<>` cannot be empty".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "generic type arguments `<>` cannot be empty".into(),
+            },
             span,
             ErrorCode::EmptyGenericArgs,
-        ).with_help("provide at least one type argument: `Type<T>` or remove the angle brackets")
+        )
+        .with_help("provide at least one type argument: `Type<T>` or remove the angle brackets")
     }
 
     /// E083: Double comma in capability list
     pub fn double_comma_capability(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "found `,,` but expected single comma between capabilities".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "found `,,` but expected single comma between capabilities".into(),
+            },
             span,
             ErrorCode::DoubleCommaCapability,
-        ).with_help("use single commas: `[Cap1, Cap2]`")
+        )
+        .with_help("use single commas: `[Cap1, Cap2]`")
     }
 
     /// E084: Trailing comma in capability list
     pub fn trailing_comma_capability(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "trailing comma in capability list".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "trailing comma in capability list".into(),
+            },
             span,
             ErrorCode::TrailingCommaCapability,
-        ).with_help("remove the trailing comma or add another capability")
+        )
+        .with_help("remove the trailing comma or add another capability")
     }
 
     /// E085: Double opening angle bracket
     pub fn double_angle_bracket(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "found `<<` but expected single `<` for generics".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "found `<<` but expected single `<` for generics".into(),
+            },
             span,
             ErrorCode::DoubleAngleBracket,
-        ).with_help("use single angle bracket: `Type<T>`, not `Type<<T>>`; `<<` is a bit-shift operator")
+        )
+        .with_help(
+            "use single angle bracket: `Type<T>`, not `Type<<T>>`; `<<` is a bit-shift operator",
+        )
     }
 
     /// E086: Invalid double ampersand in reference
     pub fn double_ampersand_ref(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "double ampersand `&&` in reference type".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "double ampersand `&&` in reference type".into(),
+            },
             span,
             ErrorCode::DoubleAmpersandRef,
         )
@@ -1609,7 +1810,9 @@ impl ParseError {
     /// E087: Reference without type
     pub fn ref_without_type(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "reference `&` without type".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "reference `&` without type".into(),
+            },
             span,
             ErrorCode::RefWithoutType,
         )
@@ -1618,10 +1821,13 @@ impl ParseError {
     /// E088: Double checked in reference
     pub fn double_checked_ref(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "duplicate reference modifier (e.g., `checked checked`)".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "duplicate reference modifier (e.g., `checked checked`)".into(),
+            },
             span,
             ErrorCode::DoubleCheckedRef,
-        ).with_help("use a single modifier: `&checked T`, `&mut T`, or `&unsafe T`")
+        )
+        .with_help("use a single modifier: `&checked T`, `&mut T`, or `&unsafe T`")
     }
 
     /// E089: Conflicting reference modifiers
@@ -1637,10 +1843,13 @@ impl ParseError {
     /// E0A0: Throw without expression
     pub fn throw_no_expression(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "`throw` requires an expression to throw".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "`throw` requires an expression to throw".into(),
+            },
             span,
             ErrorCode::ThrowNoExpression,
-        ).with_help("syntax: `throw error_value` or `throw MyError(\"message\")`")
+        )
+        .with_help("syntax: `throw error_value` or `throw MyError(\"message\")`")
     }
 
     /// E0A8: Unclosed select
@@ -1649,7 +1858,8 @@ impl ParseError {
             ParseErrorKind::UnclosedDelimiter('{'),
             span,
             ErrorCode::UnclosedSelect,
-        ).with_help("add `}` to close the select expression")
+        )
+        .with_help("add `}` to close the select expression")
     }
 
     // Expression syntax errors (E0B0-E0BF)
@@ -1659,34 +1869,44 @@ impl ParseError {
             ParseErrorKind::UnclosedDelimiter('<'),
             span,
             ErrorCode::UnclosedGenericArgs,
-        ).with_help("add `>` to close the generic type arguments")
+        )
+        .with_help("add `>` to close the generic type arguments")
     }
 
     /// E0B7: Invalid closure
     pub fn invalid_closure(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidClosure,
-        ).with_help("closure syntax: `|params| body` or `|x: Int| -> Int { x + 1 }`")
+        )
+        .with_help("closure syntax: `|params| body` or `|x: Int| -> Int { x + 1 }`")
     }
 
     /// E0B8: Invalid match expression
     pub fn invalid_match(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidMatch,
-        ).with_help("match syntax: `match expr { pattern => result, ... }`")
+        )
+        .with_help("match syntax: `match expr { pattern => result, ... }`")
     }
 
     /// E0C9: Invalid let pattern
     pub fn invalid_let_pattern(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::InvalidLetPattern,
-        ).with_help("let syntax: `let pattern = value` or `let name: Type = value`")
+        )
+        .with_help("let syntax: `let pattern = value` or `let name: Type = value`")
     }
 
     // Function type errors (E090-E099)
@@ -1708,25 +1928,36 @@ impl ParseError {
             ParseErrorKind::UnclosedDelimiter('('),
             span,
             ErrorCode::UnclosedFnParams,
-        ).with_help("add `)` to close the parameter list")
+        )
+        .with_help("add `)` to close the parameter list")
     }
 
     /// E092: Function type missing return type
     pub fn fn_type_missing_return(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "function type missing return type after `->` arrow".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "function type missing return type after `->` arrow".into(),
+            },
             span,
             ErrorCode::FnTypeMissingReturn,
-        ).with_help("specify the return type, e.g., `fn(Int) -> Int` or use `()` for no return value")
+        )
+        .with_help(
+            "specify the return type, e.g., `fn(Int) -> Int` or use `()` for no return value",
+        )
     }
 
     /// E093: Wrong arrow operator (=> instead of ->)
     pub fn wrong_arrow_operator(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "found `=>` but expected `->` for function return type".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "found `=>` but expected `->` for function return type".into(),
+            },
             span,
             ErrorCode::WrongArrowOperator,
-        ).with_help("use `->` for function return types: `fn(x: Int) -> Int`; `=>` is used for match arms")
+        )
+        .with_help(
+            "use `->` for function return types: `fn(x: Int) -> Int`; `=>` is used for match arms",
+        )
     }
 
     /// E094: Unclosed throws clause in function type
@@ -1735,25 +1966,32 @@ impl ParseError {
             ParseErrorKind::UnclosedDelimiter('('),
             span,
             ErrorCode::UnclosedThrows,
-        ).with_help("close the throws clause with `)`, e.g., `throws(Error1, Error2)`")
+        )
+        .with_help("close the throws clause with `)`, e.g., `throws(Error1, Error2)`")
     }
 
     /// E095: Using clause without context list
     pub fn using_without_context(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "`using` keyword requires a context list".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "`using` keyword requires a context list".into(),
+            },
             span,
             ErrorCode::UsingWithoutContext,
-        ).with_help("specify contexts in brackets: `using [Database, Logger]`")
+        )
+        .with_help("specify contexts in brackets: `using [Database, Logger]`")
     }
 
     /// E096: Async keyword in wrong position
     pub fn async_wrong_position(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "`async` modifier appears in an invalid position".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "`async` modifier appears in an invalid position".into(),
+            },
             span,
             ErrorCode::AsyncWrongPosition,
-        ).with_help("`async` should come before `fn`: `async fn name() -> T`")
+        )
+        .with_help("`async` should come before `fn`: `async fn name() -> T`")
     }
 
     /// E097: Unclosed tuple type
@@ -1768,7 +2006,10 @@ impl ParseError {
     /// E098: Single element tuple invalid
     pub fn single_element_tuple(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "single element tuple is not valid, use parentheses or add trailing comma".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "single element tuple is not valid, use parentheses or add trailing comma"
+                    .into(),
+            },
             span,
             ErrorCode::SingleElementTuple,
         )
@@ -1777,7 +2018,9 @@ impl ParseError {
     /// E099: Unit type with content
     pub fn unit_with_content(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "unit type `()` cannot contain content".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "unit type `()` cannot contain content".into(),
+            },
             span,
             ErrorCode::UnitWithContent,
         )
@@ -1787,74 +2030,100 @@ impl ParseError {
     /// Variant pipe errors (for union types)
     pub fn empty_variant_pipe(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "empty variant between `|` pipes in sum type".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "empty variant between `|` pipes in sum type".into(),
+            },
             span,
-            ErrorCode::InvalidVariantSyntax,  // E048
-        ).with_help("each `|` must separate variant names: `type T is A | B | C`")
+            ErrorCode::InvalidVariantSyntax, // E048
+        )
+        .with_help("each `|` must separate variant names: `type T is A | B | C`")
     }
 
     pub fn trailing_pipe_union(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "trailing `|` in sum type without a following variant".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "trailing `|` in sum type without a following variant".into(),
+            },
             span,
-            ErrorCode::InvalidVariantSyntax,  // E048
-        ).with_help("remove the trailing `|` or add another variant")
+            ErrorCode::InvalidVariantSyntax, // E048
+        )
+        .with_help("remove the trailing `|` or add another variant")
     }
 
     pub fn leading_pipe_no_context(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "unexpected leading `|` in type expression".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "unexpected leading `|` in type expression".into(),
+            },
             span,
-            ErrorCode::InvalidVariantSyntax,  // E048
-        ).with_help("leading `|` is only allowed in `type` definitions, not in type expressions")
+            ErrorCode::InvalidVariantSyntax, // E048
+        )
+        .with_help("leading `|` is only allowed in `type` definitions, not in type expressions")
     }
 
     /// Constraint/bound errors (reuse function type errors)
     pub fn missing_constraint(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "expected a type constraint after `:`".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "expected a type constraint after `:`".into(),
+            },
             span,
-            ErrorCode::InvalidGenericConstraint,  // E050
-        ).with_help("specify a protocol bound: `T: Protocol` or multiple bounds: `T: Proto1 + Proto2`")
+            ErrorCode::InvalidGenericConstraint, // E050
+        )
+        .with_help(
+            "specify a protocol bound: `T: Protocol` or multiple bounds: `T: Proto1 + Proto2`",
+        )
     }
 
     pub fn double_colon_constraint(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "found `::` but expected `:` for type constraint".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "found `::` but expected `:` for type constraint".into(),
+            },
             span,
-            ErrorCode::InvalidGenericConstraint,  // E050
-        ).with_help("use single colon for constraints: `T: Protocol`; `::` is for path access")
+            ErrorCode::InvalidGenericConstraint, // E050
+        )
+        .with_help("use single colon for constraints: `T: Protocol`; `::` is for path access")
     }
 
     pub fn double_negation_bound(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "double negation `!!` is not valid in type bounds".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "double negation `!!` is not valid in type bounds".into(),
+            },
             span,
-            ErrorCode::InvalidGenericConstraint,  // E050
-        ).with_help("use single negation for negative bounds: `T: !Send`")
+            ErrorCode::InvalidGenericConstraint, // E050
+        )
+        .with_help("use single negation for negative bounds: `T: !Send`")
     }
 
     pub fn dyn_no_protocol(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "`dyn` requires at least one protocol bound".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "`dyn` requires at least one protocol bound".into(),
+            },
             span,
-            ErrorCode::InvalidProtocolMethod,  // E052
+            ErrorCode::InvalidProtocolMethod, // E052
         )
     }
 
     pub fn existential_no_bounds(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "existential type requires bounds after colon".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "existential type requires bounds after colon".into(),
+            },
             span,
-            ErrorCode::InvalidGenericConstraint,  // E050
+            ErrorCode::InvalidGenericConstraint, // E050
         )
     }
 
     pub fn existential_missing_colon(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "existential type requires colon between type parameter and bounds".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "existential type requires colon between type parameter and bounds".into(),
+            },
             span,
-            ErrorCode::InvalidGenericConstraint,  // E050
+            ErrorCode::InvalidGenericConstraint, // E050
         )
     }
 
@@ -1865,7 +2134,9 @@ impl ParseError {
     /// E070: Invalid @ binding pattern (missing identifier before @, etc.)
     pub fn pattern_invalid_at(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::PatternInvalidAt,
         )
@@ -1874,7 +2145,9 @@ impl ParseError {
     /// E071: Invalid identifier in pattern
     pub fn pattern_invalid_identifier(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::PatternInvalidIdentifier,
         )
@@ -1883,7 +2156,9 @@ impl ParseError {
     /// E072: Invalid rest/spread pattern position
     pub fn pattern_invalid_rest(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::PatternInvalidRest,
         )
@@ -1892,7 +2167,9 @@ impl ParseError {
     /// E073: Invalid mut pattern
     pub fn pattern_invalid_mut(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::PatternInvalidMut,
         )
@@ -1901,7 +2178,9 @@ impl ParseError {
     /// E074: Empty tuple pattern with trailing comma
     pub fn pattern_empty_tuple(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "empty tuple pattern is not valid".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "empty tuple pattern is not valid".into(),
+            },
             span,
             ErrorCode::PatternEmptyTuple,
         )
@@ -1910,7 +2189,9 @@ impl ParseError {
     /// E074: Unclosed active pattern (missing closing parenthesis)
     pub fn pattern_unclosed_active(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::PatternEmptyTuple, // Reuses E074 for unclosed active patterns
         )
@@ -1919,7 +2200,9 @@ impl ParseError {
     /// E075: Invalid active pattern arguments
     pub fn pattern_invalid_active_args(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::PatternInvalidActiveArgs,
         )
@@ -1928,7 +2211,9 @@ impl ParseError {
     /// E076: Invalid field pattern syntax
     pub fn pattern_invalid_field(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::PatternInvalidField,
         )
@@ -1938,7 +2223,10 @@ impl ParseError {
     pub fn pattern_duplicate_field(field_name: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
             ParseErrorKind::InvalidSyntax {
-                message: Text::from(format!("duplicate field '{}' in pattern", field_name.into())),
+                message: Text::from(format!(
+                    "duplicate field '{}' in pattern",
+                    field_name.into()
+                )),
             },
             span,
             ErrorCode::PatternDuplicateField,
@@ -1948,7 +2236,9 @@ impl ParseError {
     /// E078: Nested or-pattern without parentheses
     pub fn pattern_nested_or(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "nested or-pattern requires parentheses".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "nested or-pattern requires parentheses".into(),
+            },
             span,
             ErrorCode::PatternNestedOr,
         )
@@ -1957,7 +2247,9 @@ impl ParseError {
     /// E078: Rest pattern in invalid position
     pub fn pattern_rest_position(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::PatternNestedOr, // Reuses E078 for rest position errors
         )
@@ -1966,7 +2258,9 @@ impl ParseError {
     /// E079: Or-pattern with inconsistent bindings
     pub fn pattern_or_binding(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::PatternOrBinding,
         )
@@ -1975,7 +2269,9 @@ impl ParseError {
     /// E080: Invalid pattern type annotation
     pub fn pattern_invalid_type(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::PatternInvalidType,
         )
@@ -1984,7 +2280,9 @@ impl ParseError {
     /// E081: Invalid slice pattern syntax
     pub fn pattern_invalid_slice(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::PatternInvalidSlice,
         )
@@ -1993,7 +2291,9 @@ impl ParseError {
     /// E082: Invalid unicode pattern
     pub fn pattern_invalid_unicode(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::PatternInvalidUnicode,
         )
@@ -2002,7 +2302,9 @@ impl ParseError {
     /// E083: Invalid variant pattern arguments
     pub fn pattern_invalid_variant_args(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::PatternInvalidVariantArgs,
         )
@@ -2011,7 +2313,9 @@ impl ParseError {
     /// E084: Invalid and-pattern (combination)
     pub fn pattern_invalid_and(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::PatternInvalidAnd,
         )
@@ -2020,7 +2324,9 @@ impl ParseError {
     /// E085: Trailing pipe in pattern (also used for missing guard expression)
     pub fn pattern_trailing_pipe(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "trailing pipe in pattern".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "trailing pipe in pattern".into(),
+            },
             span,
             ErrorCode::PatternTrailingPipe,
         )
@@ -2029,7 +2335,9 @@ impl ParseError {
     /// E085: Missing guard expression (if/where without expression)
     pub fn pattern_missing_guard(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::PatternTrailingPipe,
         )
@@ -2038,7 +2346,9 @@ impl ParseError {
     /// E086: Invalid guard expression
     pub fn pattern_invalid_guard(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::PatternInvalidGuard,
         )
@@ -2047,7 +2357,9 @@ impl ParseError {
     /// E086: Invalid slice pattern syntax (double rest, triple dots, etc.)
     pub fn pattern_invalid_slice_syntax(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::PatternInvalidGuard, // Reuses E086
         )
@@ -2056,7 +2368,9 @@ impl ParseError {
     /// E087: Invalid match arm syntax
     pub fn pattern_invalid_match_arm(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::PatternInvalidMatchArm,
         )
@@ -2065,7 +2379,9 @@ impl ParseError {
     /// E088: Invalid let pattern
     pub fn pattern_invalid_let(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::PatternInvalidLet,
         )
@@ -2074,7 +2390,9 @@ impl ParseError {
     /// E089: Empty or-pattern (consecutive pipes)
     pub fn pattern_empty_or(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "empty or-pattern (consecutive pipes)".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "empty or-pattern (consecutive pipes)".into(),
+            },
             span,
             ErrorCode::PatternEmptyOr,
         )
@@ -2114,7 +2432,9 @@ impl ParseError {
     /// E040: Missing let pattern
     pub fn let_missing_pattern(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "missing pattern in let statement".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "missing pattern in let statement".into(),
+            },
             span,
             ErrorCode::LetMissingPattern,
         )
@@ -2123,7 +2443,9 @@ impl ParseError {
     /// E041: Missing let value / assignment RHS
     pub fn let_missing_value(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "missing value after '=' in let statement".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "missing value after '=' in let statement".into(),
+            },
             span,
             ErrorCode::LetMissingValue,
         )
@@ -2132,7 +2454,9 @@ impl ParseError {
     /// E042: Missing let equals sign
     pub fn let_missing_equals(span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: "missing '=' in let statement".into() },
+            ParseErrorKind::InvalidSyntax {
+                message: "missing '=' in let statement".into(),
+            },
             span,
             ErrorCode::LetMissingEquals,
         )
@@ -2141,7 +2465,9 @@ impl ParseError {
     /// E043: Invalid let type or pattern
     pub fn let_invalid_type_or_pattern(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::LetInvalidTypeOrPattern,
         )
@@ -2150,7 +2476,9 @@ impl ParseError {
     /// E044: Invalid provide statement
     pub fn provide_invalid(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::ProvideInvalid,
         )
@@ -2159,7 +2487,9 @@ impl ParseError {
     /// E045: Invalid defer/errdefer statement
     pub fn defer_invalid(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::DeferInvalid,
         )
@@ -2168,7 +2498,9 @@ impl ParseError {
     /// E046: Invalid assignment (chained, invalid LHS)
     pub fn assignment_invalid(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::AssignmentInvalid,
         )
@@ -2177,7 +2509,9 @@ impl ParseError {
     /// E047: Invalid compound assignment operator
     pub fn compound_assign_invalid(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::CompoundAssignInvalid,
         )
@@ -2186,7 +2520,9 @@ impl ParseError {
     /// E048: Invalid expression statement
     pub fn expr_stmt_invalid(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::ExprStmtInvalid,
         )
@@ -2195,7 +2531,9 @@ impl ParseError {
     /// E049: Invalid control flow statement
     pub fn control_flow_invalid(message: impl Into<Text>, span: Span) -> Self {
         Self::with_error_code(
-            ParseErrorKind::InvalidSyntax { message: message.into() },
+            ParseErrorKind::InvalidSyntax {
+                message: message.into(),
+            },
             span,
             ErrorCode::ControlFlowInvalid,
         )
@@ -2225,10 +2563,7 @@ impl ParseError {
     pub fn empty_construct(construct: &str, expected: &str, span: Span) -> Self {
         Self::with_error_code(
             ParseErrorKind::InvalidSyntax {
-                message: Text::from(format!(
-                    "empty {} - {}",
-                    construct, expected
-                )),
+                message: Text::from(format!("empty {} - {}", construct, expected)),
             },
             span,
             ErrorCode::EmptyConstruct,
@@ -2265,10 +2600,7 @@ impl ParseError {
     pub fn missing_block_expr(construct: &str, span: Span) -> Self {
         Self::with_error_code(
             ParseErrorKind::InvalidSyntax {
-                message: Text::from(format!(
-                    "{} requires a block expression",
-                    construct
-                )),
+                message: Text::from(format!("{} requires a block expression", construct)),
             },
             span,
             ErrorCode::MissingBlockExpr,
@@ -2279,7 +2611,9 @@ impl ParseError {
     pub fn empty_shape_params(span: Span) -> Self {
         Self::with_error_code(
             ParseErrorKind::InvalidSyntax {
-                message: "tensor shape parameters cannot be empty - expected at least one dimension".into(),
+                message:
+                    "tensor shape parameters cannot be empty - expected at least one dimension"
+                        .into(),
             },
             span,
             ErrorCode::EmptyShapeParams,
@@ -2291,17 +2625,10 @@ impl ParseError {
     // =========================================================================
 
     /// E0E0: Rust keyword used instead of Verum equivalent
-    pub fn rust_keyword_used(
-        rust_keyword: &str,
-        verum_equivalent: &str,
-        span: Span,
-    ) -> Self {
+    pub fn rust_keyword_used(rust_keyword: &str, verum_equivalent: &str, span: Span) -> Self {
         Self::with_error_code(
             ParseErrorKind::InvalidSyntax {
-                message: Text::from(format!(
-                    "'{}' is not a Verum keyword",
-                    rust_keyword
-                )),
+                message: Text::from(format!("'{}' is not a Verum keyword", rust_keyword)),
             },
             span,
             ErrorCode::RustKeywordUsed,
@@ -2313,17 +2640,10 @@ impl ParseError {
     }
 
     /// E0E1: Rust type name used instead of Verum semantic type
-    pub fn rust_type_used(
-        rust_type: &str,
-        verum_type: &str,
-        span: Span,
-    ) -> Self {
+    pub fn rust_type_used(rust_type: &str, verum_type: &str, span: Span) -> Self {
         Self::with_error_code(
             ParseErrorKind::InvalidSyntax {
-                message: Text::from(format!(
-                    "'{}' is a Rust type, not a Verum type",
-                    rust_type
-                )),
+                message: Text::from(format!("'{}' is a Rust type, not a Verum type", rust_type)),
             },
             span,
             ErrorCode::RustTypeUsed,
@@ -2390,7 +2710,8 @@ impl ParseError {
     pub fn meta_duplicate_using(span: Span) -> Self {
         Self::with_error_code(
             ParseErrorKind::InvalidSyntax {
-                message: "duplicate using clause - functions can have at most one using clause".into(),
+                message: "duplicate using clause - functions can have at most one using clause"
+                    .into(),
             },
             span,
             ErrorCode::MetaDuplicateUsing,
@@ -2636,77 +2957,91 @@ impl ParseError {
     pub fn rust_struct_syntax(span: Span) -> Self {
         Self::with_error_code(
             ParseErrorKind::InvalidSyntax {
-                message: "Verum uses `type Name is { ... }` instead of `struct Name { ... }`".into()
+                message: "Verum uses `type Name is { ... }` instead of `struct Name { ... }`"
+                    .into(),
             },
             span,
             ErrorCode::UnexpectedToken,
-        ).with_help("replace `struct Point { x: f64, y: f64 }` with `type Point is { x: Float, y: Float }`")
+        )
+        .with_help(
+            "replace `struct Point { x: f64, y: f64 }` with `type Point is { x: Float, y: Float }`",
+        )
     }
 
     /// Create an error when user tries to use Rust's `enum` keyword
     pub fn rust_enum_syntax(span: Span) -> Self {
         Self::with_error_code(
             ParseErrorKind::InvalidSyntax {
-                message: "Verum uses `type Name is A | B` instead of `enum Name { A, B }`".into()
+                message: "Verum uses `type Name is A | B` instead of `enum Name { A, B }`".into(),
             },
             span,
             ErrorCode::UnexpectedToken,
-        ).with_help("replace `enum Option { None, Some(T) }` with `type Option<T> is None | Some(T)`")
+        )
+        .with_help(
+            "replace `enum Option { None, Some(T) }` with `type Option<T> is None | Some(T)`",
+        )
     }
 
     /// Create an error when user tries to use Rust's `trait` keyword
     pub fn rust_trait_syntax(span: Span) -> Self {
         Self::with_error_code(
             ParseErrorKind::InvalidSyntax {
-                message: "Verum uses `type Name is protocol { ... }` instead of `trait Name { ... }`".into()
+                message:
+                    "Verum uses `type Name is protocol { ... }` instead of `trait Name { ... }`"
+                        .into(),
             },
             span,
             ErrorCode::UnexpectedToken,
-        ).with_help("replace `trait Iterator { ... }` with `type Iterator is protocol { ... }`")
+        )
+        .with_help("replace `trait Iterator { ... }` with `type Iterator is protocol { ... }`")
     }
 
     /// Create an error when user tries to use Rust's `impl` keyword
     pub fn rust_impl_syntax(span: Span) -> Self {
         Self::with_error_code(
             ParseErrorKind::InvalidSyntax {
-                message: "Verum uses `implement` instead of `impl`".into()
+                message: "Verum uses `implement` instead of `impl`".into(),
             },
             span,
             ErrorCode::UnexpectedToken,
-        ).with_help("replace `impl MyType { ... }` with `implement MyType { ... }`")
+        )
+        .with_help("replace `impl MyType { ... }` with `implement MyType { ... }`")
     }
 
     /// Create an error when user tries to use Rust's `use` keyword for imports
     pub fn rust_use_syntax(span: Span) -> Self {
         Self::with_error_code(
             ParseErrorKind::InvalidSyntax {
-                message: "Verum uses `mount` instead of `use` for imports".into()
+                message: "Verum uses `mount` instead of `use` for imports".into(),
             },
             span,
             ErrorCode::UnexpectedToken,
-        ).with_help("replace `use foo::bar` with `mount foo.bar`")
+        )
+        .with_help("replace `use foo::bar` with `mount foo.bar`")
     }
 
     /// Create an error when user tries to use Rust's `crate` keyword
     pub fn rust_crate_syntax(span: Span) -> Self {
         Self::with_error_code(
             ParseErrorKind::InvalidSyntax {
-                message: "Verum uses `cog` instead of `crate`".into()
+                message: "Verum uses `cog` instead of `crate`".into(),
             },
             span,
             ErrorCode::UnexpectedToken,
-        ).with_help("replace `crate::module` with `cog.module`")
+        )
+        .with_help("replace `crate::module` with `cog.module`")
     }
 
     /// Create an error when user tries to use Rust's `::` path separator
     pub fn rust_path_separator(span: Span) -> Self {
         Self::with_error_code(
             ParseErrorKind::InvalidSyntax {
-                message: "Verum uses `.` instead of `::` for path access".into()
+                message: "Verum uses `.` instead of `::` for path access".into(),
             },
             span,
             ErrorCode::UnexpectedToken,
-        ).with_help("replace `std::io::Read` with `std.io.Read`")
+        )
+        .with_help("replace `std::io::Read` with `std.io.Read`")
     }
 
     /// Create an error when user tries to use Rust macro syntax with `!`
@@ -2727,65 +3062,71 @@ impl ParseError {
     pub fn rust_attribute_syntax(span: Span) -> Self {
         Self::with_error_code(
             ParseErrorKind::InvalidSyntax {
-                message: "Verum uses `@attribute(...)` instead of `#[attribute(...)]`".into()
+                message: "Verum uses `@attribute(...)` instead of `#[attribute(...)]`".into(),
             },
             span,
             ErrorCode::UnexpectedToken,
-        ).with_help("replace `#[derive(Debug)]` with `@derive(Debug)`")
+        )
+        .with_help("replace `#[derive(Debug)]` with `@derive(Debug)`")
     }
 
     /// Create an error when user tries to use Rust's `Vec<T>` type
     pub fn rust_vec_type(span: Span) -> Self {
         Self::with_error_code(
             ParseErrorKind::InvalidSyntax {
-                message: "Verum uses `List<T>` instead of `Vec<T>`".into()
+                message: "Verum uses `List<T>` instead of `Vec<T>`".into(),
             },
             span,
             ErrorCode::UnexpectedToken,
-        ).with_help("replace `Vec<Int>` with `List<Int>`")
+        )
+        .with_help("replace `Vec<Int>` with `List<Int>`")
     }
 
     /// Create an error when user tries to use Rust's `String` type
     pub fn rust_string_type(span: Span) -> Self {
         Self::with_error_code(
             ParseErrorKind::InvalidSyntax {
-                message: "Verum uses `Text` instead of `String`".into()
+                message: "Verum uses `Text` instead of `String`".into(),
             },
             span,
             ErrorCode::UnexpectedToken,
-        ).with_help("replace `String` with `Text`")
+        )
+        .with_help("replace `String` with `Text`")
     }
 
     /// Create an error when user tries to use Rust's `Box<T>` type
     pub fn rust_box_type(span: Span) -> Self {
         Self::with_error_code(
             ParseErrorKind::InvalidSyntax {
-                message: "Verum uses `Heap<T>` instead of `Box<T>`".into()
+                message: "Verum uses `Heap<T>` instead of `Box<T>`".into(),
             },
             span,
             ErrorCode::UnexpectedToken,
-        ).with_help("replace `Box<MyType>` with `Heap<MyType>`")
+        )
+        .with_help("replace `Box<MyType>` with `Heap<MyType>`")
     }
 
     /// Create an error when user tries to use Rust's `HashMap<K, V>` type
     pub fn rust_hashmap_type(span: Span) -> Self {
         Self::with_error_code(
             ParseErrorKind::InvalidSyntax {
-                message: "Verum uses `Map<K, V>` instead of `HashMap<K, V>`".into()
+                message: "Verum uses `Map<K, V>` instead of `HashMap<K, V>`".into(),
             },
             span,
             ErrorCode::UnexpectedToken,
-        ).with_help("replace `HashMap<Text, Int>` with `Map<Text, Int>`")
+        )
+        .with_help("replace `HashMap<Text, Int>` with `Map<Text, Int>`")
     }
 
     /// Create an error when user tries to use Rust's `Option<T>` type
     pub fn rust_option_type(span: Span) -> Self {
         Self::with_error_code(
             ParseErrorKind::InvalidSyntax {
-                message: "Verum uses `Maybe<T>` instead of `Option<T>`".into()
+                message: "Verum uses `Maybe<T>` instead of `Option<T>`".into(),
             },
             span,
             ErrorCode::UnexpectedToken,
-        ).with_help("replace `Option<Int>` with `Maybe<Int>`")
+        )
+        .with_help("replace `Option<Int>` with `Maybe<Int>`")
     }
 }
