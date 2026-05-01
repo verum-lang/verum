@@ -324,7 +324,13 @@ public type VfsProtocol is protocol {
     fn delete(&self, path: &Text, sync_dir: Bool) -> Result<(), VfsError>;
     fn access(&self, path: &Text, kind: AccessKind) -> Result<Bool, VfsError>;
     fn full_pathname(&self, path: &Text) -> Result<Text, VfsError>;
-    fn random_bytes(&self, len: Int) -> List<Byte>;
+    /// Cryptographic-grade entropy from the OS.  Errors are
+    /// surfaced as `Err(VfsError::IoError)` rather than swallowed
+    /// — pre-fix the signature returned a bare `List<Byte>` and
+    /// callers receiving an empty list (entropy-source failure)
+    /// silently used zero bytes for WAL salts, an exploitable
+    /// determinism vector.
+    fn random_bytes(&self, len: Int) -> Result<List<Byte>, VfsError>;
     fn current_time(&self) -> Timestamp;
     fn get_last_error(&self) -> Maybe<VfsError>;
 

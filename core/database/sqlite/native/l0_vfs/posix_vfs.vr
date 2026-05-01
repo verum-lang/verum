@@ -491,28 +491,31 @@ implement VfsProtocol for PosixVfs {
         Ok(path.clone())
     }
 
-    fn random_bytes(&self, len: Int) -> List<Byte> {
+    fn random_bytes(&self, len: Int) -> Result<List<Byte>, VfsError> {
         // Cryptographic-grade entropy from the kernel — getrandom on
         // Linux, getentropy on Darwin, BCryptGenRandom on Windows.
         // Required for unpredictable WAL header salts (sqlite-native.md
-        // §6.5); the deterministic stub previously here let an attacker
-        // forge WAL frames with matching checksums.
+        // §6.5).
+        //
+        // Pre-fix the signature returned a bare `List<Byte>` and
+        // funnelled entropy-source failures into an empty list,
+        // which callers (WAL salt generator) would silently use as
+        // zero bytes — letting an attacker forge WAL frames with
+        // predictable checksums.  Now every entropy-fetch failure
+        // surfaces as `Err(VfsError::IoError)` so callers MUST
+        // explicitly handle the no-entropy case.
         if len <= 0 {
-            return List.new();
+            return Ok(List.new());
         }
         let mut out: List<Byte> = List.with_capacity(len);
         out.resize(len, 0 as Byte);
         let slice: &mut [Byte] = out.as_mut_slice();
         match sys_random_bytes(slice) {
-            Ok(_) => out,
-            Err(_) => {
-                // Hard-fail to a fresh empty list rather than silently
-                // returning predictable bytes — the caller surfaces
-                // `Err(VfsError::IoError)` via VFS error mapping when
-                // the buffer length is wrong, which is strictly safer
-                // than a side-channel-leaking fallback.
-                List.new()
-            }
+            Ok(_) => Ok(out),
+            Err(_) => Err(VfsError {
+                kind: IoError,
+                message: "PosixVfs.random_bytes: kernel entropy fetch failed".clone(),
+            }),
         }
     }
 
