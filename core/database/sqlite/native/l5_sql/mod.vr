@@ -88,6 +88,7 @@ public mount .compile.{
     CompileError, compile, compile_raw, compile_with_schema,
     CompileOptions, CompileOutput,
     compile_options_default, compile_options_cost_aware,
+    compile_options_ssa_canonical,
     compile_with_options,
 };
 

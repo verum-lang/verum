@@ -1,0 +1,130 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l4_vdbe, ssa, l5_sql, canonical, pipeline
+// @timeout: 15000
+// @description: SSA-canonical compile pipeline — exercises lift →
+//               resolve_pending_phis → optimize_ssa → lower round
+//               trip + SsaBuilder direct emission (#156 closure).
+//
+// Spec: internal/specs/sqlite-native.md §4.4
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l5_sql.{
+    CompileOptions, CompileOutput,
+    compile_options_default, compile_options_cost_aware,
+    compile_options_ssa_canonical,
+    compile_with_options,
+};
+mount core.database.sqlite.native.l6_session.schema_cache.{
+    SchemaCache, schema_cache_new,
+};
+mount core.database.sqlite.native.l4_vdbe.ssa.value.{
+    SkInt, SkBool, SkAny, SkNull,
+};
+mount core.database.sqlite.native.l4_vdbe.ssa.block.block_id;
+mount core.database.sqlite.native.l4_vdbe.ssa.program.{SsaProgram, ssa_program_new};
+mount core.database.sqlite.native.l4_vdbe.ssa.optimizer.optimize_ssa;
+mount core.database.sqlite.native.l4_vdbe.ssa.builder.{
+    SsaBuilder, ssa_builder_new,
+    ArithOp, AoAdd,
+    emit_int_imm, emit_null, emit_arith,
+    emit_result_row, emit_halt, emit_jump,
+};
+
+// -----------------------------------------------------------------------------
+// 1. SSA-canonical preset has both ssa+cost+optimizer enabled
+// -----------------------------------------------------------------------------
+
+fn ssa_preset_enables_ssa() {
+    let opts = compile_options_ssa_canonical();
+    assert(opts.use_ssa_pipeline);
+    assert(opts.use_cost_annotation);
+    assert(opts.run_optimizer);
+}
+
+// -----------------------------------------------------------------------------
+// 2. Default + cost-aware presets DON'T enable SSA pipeline
+// -----------------------------------------------------------------------------
+
+fn defaults_skip_ssa() {
+    let d = compile_options_default();
+    let c = compile_options_cost_aware();
+    assert(!d.use_ssa_pipeline);
+    assert(!c.use_ssa_pipeline);
+}
+
+// -----------------------------------------------------------------------------
+// 3. compile_with_options(SSA-canonical) round-trips a SELECT
+// -----------------------------------------------------------------------------
+
+fn ssa_pipeline_round_trips() {
+    let schema = schema_cache_new();
+    let opts = compile_options_ssa_canonical();
+    match compile_with_options(&"SELECT 1".clone(), &schema, &opts) {
+        Ok(out) => {
+            // Program should compile through SSA round-trip; the
+            // SSA optimizer typically removes 0+ instructions and
+            // never inflates the count beyond what codegen emitted.
+            assert(out.program.instruction_count() >= 1);
+            // explain_trace populated since cost annotation was on.
+            match &out.explain_trace {
+                Some(_) => {},
+                None => panic("SSA-canonical opts include cost annotation"),
+            }
+        }
+        Err(_) => panic("SSA-canonical compile failed for SELECT 1"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 4. SsaBuilder direct emission — basic emit + finalize
+// -----------------------------------------------------------------------------
+
+fn ssa_builder_emit_finalize() {
+    let mut b = ssa_builder_new("INSERT INTO t VALUES (1, 2)".clone());
+    // Emit an int imm into reg 0.
+    let v0 = emit_int_imm(&mut b, 0, 1_i64);
+    assert(v0.id.0 >= 1);
+    // Emit another int imm into reg 1.
+    let _v1 = emit_int_imm(&mut b, 1, 2_i64);
+    // Add reg 0 + reg 1 → reg 2.
+    let _vsum = emit_arith(&mut b, AoAdd, 2, 0, 1);
+    // Emit a result row of 1 column starting at reg 2.
+    emit_result_row(&mut b, 2, 1);
+    // Halt.
+    let _ = emit_halt(&mut b, 0, "".clone());
+    // Finalize.
+    let prog: SsaProgram = b.finalize();
+    // Program should have at least entry block + a halt-terminated
+    // tail block; cell counts grew with each emit.
+    assert(prog.block_count() >= 1);
+    assert(prog.value_count >= 4);
+}
+
+// -----------------------------------------------------------------------------
+// 5. SsaBuilder + optimize_ssa runs without errors
+// -----------------------------------------------------------------------------
+
+fn ssa_builder_optimize_runs() {
+    let mut b = ssa_builder_new("SELECT 0".clone());
+    // Mint a never-read value (DCE should remove it).
+    let _dead = emit_int_imm(&mut b, 0, 999_i64);
+    // Emit a halt (terminator).
+    let _ = emit_halt(&mut b, 0, "".clone());
+    let mut prog = b.finalize();
+    let report = optimize_ssa(&mut prog);
+    // Pipeline should converge in at most a few iterations.
+    assert(report.iterations >= 1);
+    assert(report.iterations <= 4);
+}
+
+fn main() {
+    ssa_preset_enables_ssa();
+    defaults_skip_ssa();
+    ssa_pipeline_round_trips();
+    ssa_builder_emit_finalize();
+    ssa_builder_optimize_runs();
+}

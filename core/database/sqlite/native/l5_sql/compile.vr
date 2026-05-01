@@ -47,6 +47,14 @@ mount core.database.sqlite.native.l5_sql.cost_annotated.{
 mount core.database.sqlite.native.l4_vdbe.{
     VdbeProgram, optimize,
 };
+mount core.database.sqlite.native.l4_vdbe.ssa.from_register_vm.{
+    lift_vdbe_to_ssa, LiftResult,
+};
+mount core.database.sqlite.native.l4_vdbe.ssa.phi_insertion.resolve_pending_phis;
+mount core.database.sqlite.native.l4_vdbe.ssa.optimizer.{
+    optimize_ssa, SsaOptimizerReport,
+};
+mount core.database.sqlite.native.l4_vdbe.ssa.to_register_vm.lower_ssa_to_vdbe;
 
 // -----------------------------------------------------------------------------
 // Error type
@@ -137,23 +145,45 @@ public type CompileOptions is {
     /// `true` → run the L4 optimiser passes (thread_jumps, DCE,
     /// noop_elim, move-chain).  Equivalent to historical default.
     run_optimizer: Bool,
+    /// `true` → route through the SSA-canonical pipeline per spec
+    /// §4.4: codegen → lift_vdbe_to_ssa → resolve_pending_phis →
+    /// optimize_ssa (DCE + jump-threading) → lower_ssa_to_vdbe.
+    /// Adds O(N) lift+lower cost at compile time but unblocks the
+    /// SSA-level optimizations.  Recommended for production paths
+    /// once the SSA optimizer is wired through every codegen
+    /// branch (currently passes optimize most opcodes correctly;
+    /// rare opcodes are left untouched).
+    use_ssa_pipeline: Bool,
 };
 
-/// Defaults: cost annotation OFF, optimizer ON — exact match to
-/// historical `compile()` behaviour.
+/// Defaults: cost annotation OFF, optimizer ON, SSA pipeline OFF —
+/// exact match to historical `compile()` behaviour.
 public fn compile_options_default() -> CompileOptions {
     CompileOptions {
         use_cost_annotation: false,
         run_optimizer: true,
+        use_ssa_pipeline: false,
     }
 }
 
-/// Cost-aware preset: cost annotation ON, optimizer ON.  Recommended
-/// for production paths once the codegen integration lands.
+/// Cost-aware preset: cost annotation ON, optimizer ON.
 public fn compile_options_cost_aware() -> CompileOptions {
     CompileOptions {
         use_cost_annotation: true,
         run_optimizer: true,
+        use_ssa_pipeline: false,
+    }
+}
+
+/// SSA-canonical preset: cost annotation ON, SSA pipeline ON, L4
+/// peephole optimizer ON.  Recommended once the production runtime
+/// has soaked the SSA optimizer for a release cycle.  Equivalent
+/// to spec §4.4's "SSA as canonical IR" promise.
+public fn compile_options_ssa_canonical() -> CompileOptions {
+    CompileOptions {
+        use_cost_annotation: true,
+        run_optimizer: true,
+        use_ssa_pipeline: true,
     }
 }
 
@@ -204,6 +234,22 @@ public fn compile_with_options(
         Ok(p)  => p,
         Err(e) => { return Err(CeCodegen(e)); }
     };
+
+    // SSA-canonical pipeline: lift → resolve phis → optimize_ssa
+    // (DCE + jump-threading + branch fold) → lower back to a fresh
+    // VdbeProgram.  Adds O(N) lift+lower cost but enables the SSA
+    // optimizer to see the full program shape.  Spec §4.4 promise.
+    if opts.use_ssa_pipeline {
+        let mut lifted = lift_vdbe_to_ssa(&program);
+        resolve_pending_phis(&mut lifted);
+        let _report = optimize_ssa(&mut lifted.prog);
+        program = lower_ssa_to_vdbe(&lifted.prog);
+    }
+
+    // L4 peephole optimizer (thread_jumps / DCE / noop_elim /
+    // move-chain) over the final VdbeProgram — runs AFTER the SSA
+    // pipeline so it can clean up any artifacts introduced by the
+    // round-trip.
     if opts.run_optimizer {
         let _ = optimize(&mut program);
     }

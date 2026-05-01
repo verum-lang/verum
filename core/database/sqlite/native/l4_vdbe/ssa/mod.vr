@@ -44,3 +44,4 @@ mount core.database.sqlite.native.l4_vdbe.ssa.to_register_vm;
 mount core.database.sqlite.native.l4_vdbe.ssa.dce;
 mount core.database.sqlite.native.l4_vdbe.ssa.jump_threading;
 mount core.database.sqlite.native.l4_vdbe.ssa.optimizer;
+mount core.database.sqlite.native.l4_vdbe.ssa.builder;

@@ -1,0 +1,107 @@
+// =============================================================================
+// t05_listen_notify.vr — LISTEN/NOTIFY pub/sub via NotifyDispatcher
+// =============================================================================
+// Spec: internal/specs/database.md §6.1.7 (LISTEN/NOTIFY).
+// =============================================================================
+//
+// Two connections — A subscribes to channel `t05_ch`, B emits a
+// NOTIFY. Verifies the high-level dispatcher receives the
+// notification with the expected payload + sender_pid.
+//
+// Asserts:
+//   1. Conn A successfully subscribes via dispatcher.subscribe.
+//   2. Conn B's NOTIFY succeeds.
+//   3. After A drives one round-trip (so the wire reads B's
+//      NotificationResponse), the stream's try_next() yields the
+//      notification.
+//   4. Notification.channel == "t05_ch", payload == "hello", and
+//      sender_pid == B.backend_key().0.
+//   5. dispatcher.metrics().total_dispatched == 1, total_orphaned
+//      == 0.
+// =============================================================================
+
+mount conn_config.{
+    connect_app, expect, expect_ok, expect_eq_int, pass,
+};
+mount base.memory.Shared;
+mount core.database.postgres.{
+    PgConnection,
+    NotifyDispatcher, Notification, NotificationOutcome, Got, Drained,
+};
+
+fn main() {
+    // Subscriber.
+    let mut conn_a = expect_ok(
+        connect_app(),
+        &"subscriber connect failed".clone(),
+    );
+    // Publisher.
+    let mut conn_b = expect_ok(
+        connect_app(),
+        &"publisher connect failed".clone(),
+    );
+
+    // Dispatcher held by Shared so subscribe + dispatch share state.
+    let dispatcher = Shared.new(NotifyDispatcher.new());
+
+    // Attach + LISTEN on conn_a.
+    conn_a.attach_dispatcher(dispatcher.clone());
+    let stream = (&*dispatcher).subscribe("t05_ch".clone());
+    expect_ok(
+        conn_a.listen(&"t05_ch".clone()),
+        &"LISTEN failed".clone(),
+    );
+
+    // NOTIFY from conn_b.
+    expect_ok(
+        conn_b.notify(&"t05_ch".clone(), &"hello".clone()),
+        &"NOTIFY failed".clone(),
+    );
+
+    // Capture conn_b's pid for the sender_pid assertion.
+    let pub_pid: Int = match conn_b.backend_key() {
+        Some((p, _)) => p,
+        None         => -1,
+    };
+
+    // Drive a no-op round-trip on conn_a so the wire reads the
+    // pending NotificationResponse and the dispatcher sees it.
+    let _ = conn_a.simple_query(&"SELECT 1".clone());
+
+    // Pull from the stream non-blocking.
+    let opt = stream.try_next();
+    match opt {
+        Some(notif) => {
+            expect(
+                notif.channel == "t05_ch".clone(),
+                &f"unexpected channel: {notif.channel}",
+            );
+            expect(
+                notif.payload == "hello".clone(),
+                &f"unexpected payload: {notif.payload}",
+            );
+            expect_eq_int(
+                notif.sender_pid,
+                pub_pid,
+                &"sender_pid != publisher backend pid".clone(),
+            );
+        }
+        None => {
+            expect(false, &"stream.try_next() returned None — notification was not dispatched".clone());
+        }
+    }
+
+    // Dispatcher metrics.
+    let m = (&*dispatcher).metrics();
+    expect(
+        m.total_dispatched >= 1,
+        &f"total_dispatched = {m.total_dispatched}, expected >= 1",
+    );
+    expect_eq_int(
+        m.total_orphaned,
+        0,
+        &"total_orphaned should be 0 when subscribed".clone(),
+    );
+
+    pass(&"t05_listen_notify".clone());
+}

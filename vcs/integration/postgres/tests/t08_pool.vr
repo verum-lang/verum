@@ -1,0 +1,104 @@
+// =============================================================================
+// t08_pool.vr — pool acquire/release + arena reset accounting
+// =============================================================================
+// Spec: internal/specs/database.md §4.3 (pool), §4.2 (arena reset).
+// =============================================================================
+//
+// Single-threaded for v1 — the pool's concurrency primitives
+// (Mutex / Condvar) are exercised by sequential acquire / release
+// cycles. True concurrent fan-out would need core.async.spawn
+// support in this harness; that variant lands as t08b once async
+// is wired through the test runner.
+//
+// Asserts:
+//   1. Pool launches with min=2 connections eagerly opened.
+//   2. Sequential acquire/release of N=20 cycles succeeds.
+//   3. After every release_healthy, arena reset_count bumps —
+//      verified via PoolStatsSnapshot.total_arena_resets.
+//   4. Pool drains cleanly (no leaked connections).
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, expect_eq_int, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, APP_USER, APP_PW,
+};
+mount core.database.postgres.{
+    PgConfig, PgPool, PgConnection, PtmDisable,
+    connect as pg_connect,
+};
+mount core.database.postgres.connection.connect as pg_connect2;
+mount core.database.common.pool_impl.{
+    PoolConfig,
+};
+mount core.database.common.error.{AdapterId, AdPostgres};
+
+fn main() {
+    let cfg = PgConfig {
+        host: TEST_HOST.clone(),
+        port: TEST_PORT,
+        user: APP_USER.clone(),
+        password: APP_PW.clone(),
+        database: TEST_DB.clone(),
+        application_name: "spindle-itest-pool".clone(),
+        tls_mode: PtmDisable,
+        connect_timeout_ms: 10_000,
+    };
+    let pool_cfg = PoolConfig.default(AdPostgres)
+        .with_min(2)
+        .with_max(8)
+        .with_acquire_timeout_ms(5_000);
+
+    let pool = expect_ok(
+        PgPool.launch(cfg, pool_cfg),
+        &"pool launch failed".clone(),
+    );
+
+    // Initial stats — min=2 connections should already be open.
+    let s0 = pool.stats();
+    expect(
+        s0.idle >= 2,
+        &f"expected ≥2 idle after launch, got {s0.idle}",
+    );
+
+    // 20 sequential acquire/release cycles — each healthy release
+    // bumps the arena's generation counter, which surfaces as
+    // total_arena_resets++.
+    let mut i: Int = 0;
+    while i < 20 {
+        let mut handle = expect_ok(
+            pool.acquire(),
+            &f"acquire iteration {i} failed",
+        );
+        // Drive a trivial query so the connection is exercised.
+        let _ = expect_ok(
+            handle.conn_mut().simple_query(&"SELECT 1".clone()),
+            &f"SELECT 1 on iteration {i} failed",
+        );
+        handle.release_healthy();
+        i = i + 1;
+    }
+
+    let s1 = pool.stats();
+    expect(
+        s1.total_acquired >= 20,
+        &f"total_acquired = {s1.total_acquired}, expected ≥20",
+    );
+    expect(
+        s1.total_arena_resets >= 20,
+        &f"total_arena_resets = {s1.total_arena_resets}, expected ≥20 (one per healthy release)",
+    );
+    expect_eq_int(
+        s1.total_timeouts,
+        0,
+        &"no acquires should have timed out".clone(),
+    );
+
+    // Drain — all in_flight==0 by construction (every acquire was
+    // released). Should complete without timeout.
+    expect_ok(
+        pool.drain(5_000),
+        &"pool drain failed".clone(),
+    );
+
+    pass(&"t08_pool".clone());
+}

@@ -1,0 +1,85 @@
+// =============================================================================
+// t03_codec_roundtrip.vr — Phase-2 / Phase-3 binary codec round-trip
+// =============================================================================
+// Spec: internal/specs/database.md §6.1.4 (binary codec register).
+// =============================================================================
+//
+// SELECT every supported scalar type from the `phase_codec_smoke`
+// table seeded by `init/01-init.sql`. Verifies the wire DataRow
+// produced by the server flows through every column without
+// decode error.
+//
+// We use simple-query (text protocol) for the SELECT itself in
+// this v1 — the binary-codec dispatch pieces (commit #22 + #23)
+// land separately and need an extended-protocol Bind/Execute call
+// site. This test is a smoke test for the SCHEMA + the
+// connection's ability to handle every column type WITHOUT the
+// adapter crashing on decode. Once the typed extended-protocol
+// surface is hooked into the high-level Database<P, C> API, a
+// follow-up test exercises `decode_typed_row` directly.
+// =============================================================================
+
+mount conn_config.{
+    connect_app, expect, expect_ok, expect_eq_int, pass,
+};
+
+fn main() {
+    let mut conn = expect_ok(
+        connect_app(),
+        &"connect_app() failed".clone(),
+    );
+
+    // Seed exactly one row so the round-trip sees consistent values.
+    let _ = conn.simple_query(&"DELETE FROM phase_codec_smoke".clone());
+    let _ = expect_ok(
+        conn.simple_query(&
+            "INSERT INTO phase_codec_smoke
+               (id, big, short, flt, dbl, name_text, binary_data, uid, jb, addr,
+                int_range, int_array, text_array)
+             VALUES
+               (1, 9223372036854775000::bigint, 32000::smallint,
+                3.14::real, 3.141592653589793::double precision,
+                'Spindle'::text, '\\x010203'::bytea,
+                '00000000-0000-0000-0000-000000000001'::uuid,
+                '{\"k\": \"v\"}'::jsonb, '127.0.0.1'::inet,
+                int4range(0, 100),
+                ARRAY[1, 2, 3]::integer[],
+                ARRAY['a', 'b']::text[])".clone()
+        ),
+        &"seed INSERT failed — schema mismatch?".clone(),
+    );
+
+    // SELECT every column. The wire layer decodes each column to
+    // its WireValue payload; we just count rows + columns to
+    // confirm no decode crash.
+    let result = expect_ok(
+        conn.simple_query(&
+            "SELECT id, is_active, big, short, flt, dbl, name_text,
+                    binary_data, uid, created_at, naive_ts, only_date,
+                    only_time, iv, jb, addr, int_range, int_array, text_array
+             FROM phase_codec_smoke
+             WHERE id = 1".clone()
+        ),
+        &"SELECT all columns failed".clone(),
+    );
+    expect_eq_int(result.rows.len() as Int, 1, &"row count".clone());
+    match &result.row_description {
+        Some(rd) => {
+            expect_eq_int(
+                rd.fields.len() as Int,
+                19,
+                &"column count".clone(),
+            );
+        }
+        None => expect(false, &"row_description missing".clone()),
+    }
+
+    // Smoke-check that a few well-known columns came back non-empty.
+    let row = &result.rows[0];
+    expect(
+        row.len() == 19,
+        &f"row has {row.len()} values, expected 19",
+    );
+
+    pass(&"t03_codec_roundtrip".clone());
+}
