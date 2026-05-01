@@ -6790,6 +6790,150 @@ impl TypeChecker {
         ))))
     }
 
+    /// Walk a module and validate every call site's classification
+    /// down-flow contract (#294).  Returns the list of
+    /// `TypeError::Other` diagnostics for every leak detected;
+    /// the empty list means every call respected the contract.
+    ///
+    /// This is a separate gate from synth_call's main check loop —
+    /// keeping it module-level + post-checking lets callers opt
+    /// into MLS enforcement without invasive changes to the core
+    /// type-checker dispatch. Embedders that want strict MLS run
+    /// this as a phase after type-checking; embedders that don't
+    /// need it (default Public-floor manifest) skip it for zero
+    /// overhead.
+    ///
+    /// Coverage in this Phase 2b-Final-Integration:
+    ///   - Top-level `Path(fn)(args)` calls in function bodies.
+    ///   - Method calls (`x.method(args)`) — the receiver's
+    ///     classification joins the args.
+    /// Method dispatch fully + nested calls within complex
+    /// expressions are #294-Followup.
+    pub fn check_module_call_classifications(
+        &self,
+        module: &verum_ast::Module,
+    ) -> Vec<TypeError> {
+        let mut errors = Vec::new();
+        for item in &module.items {
+            if let verum_ast::ItemKind::Function(func) = &item.kind {
+                if let verum_common::Maybe::Some(body) = &func.body {
+                    self.walk_body_for_call_classifications(body, &mut errors);
+                }
+            }
+        }
+        errors
+    }
+
+    fn walk_body_for_call_classifications(
+        &self,
+        body: &verum_ast::decl::FunctionBody,
+        errors: &mut Vec<TypeError>,
+    ) {
+        match body {
+            verum_ast::decl::FunctionBody::Block(blk) => {
+                self.walk_block_for_call_classifications(blk, errors);
+            }
+            verum_ast::decl::FunctionBody::Expr(e) => {
+                self.walk_expr_for_call_classifications(e, errors);
+            }
+        }
+    }
+
+    fn walk_block_for_call_classifications(
+        &self,
+        block: &verum_ast::expr::Block,
+        errors: &mut Vec<TypeError>,
+    ) {
+        for stmt in &block.stmts {
+            match &stmt.kind {
+                verum_ast::stmt::StmtKind::Expr { expr, .. } => {
+                    self.walk_expr_for_call_classifications(expr, errors);
+                }
+                verum_ast::stmt::StmtKind::Let { value, .. } => {
+                    if let verum_common::Maybe::Some(v) = value {
+                        self.walk_expr_for_call_classifications(v, errors);
+                    }
+                }
+                _ => {}
+            }
+        }
+        if let verum_common::Maybe::Some(e) = &block.expr {
+            self.walk_expr_for_call_classifications(e, errors);
+        }
+    }
+
+    fn walk_expr_for_call_classifications(
+        &self,
+        expr: &verum_ast::expr::Expr,
+        errors: &mut Vec<TypeError>,
+    ) {
+        use verum_ast::expr::ExprKind;
+        match &expr.kind {
+            ExprKind::Call { func, args, .. } => {
+                // Recurse first so nested calls are checked.
+                self.walk_expr_for_call_classifications(func, errors);
+                for a in args.iter() {
+                    self.walk_expr_for_call_classifications(a, errors);
+                }
+                // Then check this call's down-flow.
+                if let ExprKind::Path(path) = &func.kind {
+                    if let Some(fn_ident) = path.as_ident() {
+                        let fn_name = fn_ident.name.clone();
+                        if let Some(param_classifications) =
+                            self.function_param_classifications.get(&fn_name)
+                        {
+                            // Get parameter NAMES too for nicer
+                            // diagnostics (when available).
+                            let param_names = self
+                                .function_param_names
+                                .get(&fn_name)
+                                .cloned();
+                            for (i, arg) in args.iter().enumerate() {
+                                let param_level = param_classifications
+                                    .get(i)
+                                    .copied()
+                                    .unwrap_or(verum_common::mls::MlsLevel::Public);
+                                let arg_level = self.expr_classification(arg);
+                                let param_name = param_names
+                                    .as_ref()
+                                    .and_then(|names| names.get(i))
+                                    .map(|t| t.as_str().to_string())
+                                    .unwrap_or_else(|| format!("arg{}", i));
+                                if let Err(e) = self.check_classification_downflow(
+                                    arg_level,
+                                    param_level,
+                                    fn_name.as_str(),
+                                    i,
+                                    &param_name,
+                                ) {
+                                    errors.push(e);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            ExprKind::Binary { left, right, .. } => {
+                self.walk_expr_for_call_classifications(left, errors);
+                self.walk_expr_for_call_classifications(right, errors);
+            }
+            ExprKind::Unary { expr, .. } => {
+                self.walk_expr_for_call_classifications(expr, errors);
+            }
+            ExprKind::Paren(inner) => {
+                self.walk_expr_for_call_classifications(inner, errors);
+            }
+            ExprKind::Block(block) => {
+                self.walk_block_for_call_classifications(block, errors);
+            }
+            // Other expression kinds: leaves or shapes the Phase
+            // 2b-Final-Integration doesn't yet recurse into.
+            // #294-Followup extends this to cover If / Match /
+            // Lambda / Loop / etc.
+            _ => {}
+        }
+    }
+
     /// Compute the MLS classification of an expression (#292
     /// propagation foundation).
     ///
@@ -58139,6 +58283,226 @@ mod mount_cycle_tests {
         );
         assert!(result.is_err(),
             "TopSecret arg into Secret param must reject (under-protection)");
+    }
+
+    // ============================================================
+    // MLS Phase 2b-Final-Integration pin tests (#294) — module
+    // walker that calls check_classification_downflow at every
+    // detected call site.
+    // ============================================================
+
+    /// Build a Module with a single function whose body is a
+    /// statement-expression call.
+    fn mk_module_with_call(
+        callee_name: &str,
+        callee_param: (&str, Option<&str>),
+        caller_arg_path: &str,
+        caller_classified_locals: Vec<(&str, &str)>,
+    ) -> verum_ast::Module {
+        use verum_ast::expr::{Expr, ExprKind};
+
+        // The callee declaration:
+        let mut callee_params = List::new();
+        callee_params.push(mk_param(callee_param.0, callee_param.1));
+        let callee = {
+            let mut decl = mk_function_decl_2b(callee_params);
+            decl.name = verum_ast::ty::Ident::new(callee_name, Span::default());
+            decl
+        };
+
+        // The caller body: just one call expression `callee(arg)`.
+        let func_path = verum_ast::ty::Path::single(
+            verum_ast::ty::Ident::new(callee_name, Span::default()),
+        );
+        let func_expr = Expr::new(ExprKind::Path(func_path), Span::default());
+        let arg_path = verum_ast::ty::Path::single(
+            verum_ast::ty::Ident::new(caller_arg_path, Span::default()),
+        );
+        let arg_expr = Expr::new(ExprKind::Path(arg_path), Span::default());
+        let mut args = List::new();
+        args.push(arg_expr);
+        let call_expr = Expr::new(
+            ExprKind::Call {
+                func: verum_common::Heap::new(func_expr),
+                args,
+                type_args: List::new(),
+            },
+            Span::default(),
+        );
+        let call_stmt = verum_ast::stmt::Stmt {
+            kind: verum_ast::stmt::StmtKind::Expr {
+                expr: call_expr,
+                has_semi: false,
+            },
+            attributes: Vec::new(),
+            span: Span::default(),
+        };
+        let mut stmts = List::new();
+        stmts.push(call_stmt);
+        let body = verum_ast::expr::Block {
+            stmts,
+            expr: Maybe::None,
+            span: Span::default(),
+        };
+
+        // The caller declaration with classified locals as
+        // parameters.
+        let mut caller_params = List::new();
+        for (name, level) in caller_classified_locals {
+            caller_params.push(mk_param(name, Some(level)));
+        }
+        let caller = {
+            let mut decl = mk_function_decl_2b(caller_params);
+            decl.name = verum_ast::ty::Ident::new("caller", Span::default());
+            decl.body = Some(verum_ast::decl::FunctionBody::Block(body));
+            decl
+        };
+
+        let mut items = List::new();
+        items.push(verum_ast::decl::Item::new(
+            verum_ast::ItemKind::Function(callee),
+            Span::default(),
+        ));
+        items.push(verum_ast::decl::Item::new(
+            verum_ast::ItemKind::Function(caller),
+            Span::default(),
+        ));
+        verum_ast::Module {
+            items,
+            attributes: List::new(),
+            file_id: verum_ast::FileId::new(0),
+            span: Span::default(),
+        }
+    }
+
+    #[test]
+    fn module_walker_detects_secret_to_public_call_site_leak() {
+        // Pin: caller passes a Secret-classified local to a
+        // function whose parameter is unclassified (Public). The
+        // walker emits one TypeError::Other diagnostic per leak.
+        let module = mk_module_with_call(
+            "log_visible",        // callee
+            ("msg", None),        // callee param: unclassified
+            "secret_data",        // caller arg: a name in caller's params
+            vec![("secret_data", "secret")],
+        );
+
+        let mut checker = TypeChecker::new();
+        // Register both functions so their param classifications
+        // are visible to the walker.
+        for item in &module.items {
+            if let verum_ast::ItemKind::Function(func) = &item.kind {
+                let _ = checker.register_function_signature(func);
+            }
+        }
+
+        let errors = checker.check_module_call_classifications(&module);
+        assert_eq!(errors.len(), 1,
+            "secret arg → public param must produce one error");
+        match &errors[0] {
+            TypeError::Other(msg) => {
+                let s = msg.as_str();
+                assert!(s.contains("MLS down-flow"), "got: {}", s);
+                assert!(s.contains("log_visible"), "got: {}", s);
+                assert!(s.contains("secret"), "got: {}", s);
+            }
+            other => panic!("expected TypeError::Other, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn module_walker_accepts_classified_param_chain() {
+        // Pin: when caller's classified local flows into a
+        // matching-classification parameter, no leak.
+        let module = mk_module_with_call(
+            "encrypt",
+            ("data", Some("secret")),  // callee param: secret
+            "secret_data",
+            vec![("secret_data", "secret")],
+        );
+
+        let mut checker = TypeChecker::new();
+        for item in &module.items {
+            if let verum_ast::ItemKind::Function(func) = &item.kind {
+                let _ = checker.register_function_signature(func);
+            }
+        }
+
+        let errors = checker.check_module_call_classifications(&module);
+        assert!(errors.is_empty(),
+            "secret arg → secret param must accept; got {} errors",
+            errors.len());
+    }
+
+    #[test]
+    fn module_walker_accepts_unclassified_program() {
+        // Pin: a program with no classifications anywhere
+        // produces zero diagnostics. Phase 2b is dormant in
+        // public-floor builds — zero overhead.
+        let module = mk_module_with_call(
+            "plain_fn",
+            ("arg", None),
+            "x",
+            vec![("x", "public")],
+        );
+
+        let mut checker = TypeChecker::new();
+        for item in &module.items {
+            if let verum_ast::ItemKind::Function(func) = &item.kind {
+                let _ = checker.register_function_signature(func);
+            }
+        }
+
+        let errors = checker.check_module_call_classifications(&module);
+        assert!(errors.is_empty(),
+            "fully-public program must produce no diagnostics");
+    }
+
+    #[test]
+    fn module_walker_accepts_over_protection() {
+        // Pin: passing a public arg to a secret-classified param
+        // is fine — parameter provides MORE protection than the
+        // unclassified data requires.
+        let module = mk_module_with_call(
+            "encrypt",
+            ("data", Some("secret")),
+            "x",
+            vec![("x", "public")],
+        );
+
+        let mut checker = TypeChecker::new();
+        for item in &module.items {
+            if let verum_ast::ItemKind::Function(func) = &item.kind {
+                let _ = checker.register_function_signature(func);
+            }
+        }
+
+        let errors = checker.check_module_call_classifications(&module);
+        assert!(errors.is_empty(),
+            "public arg → secret param (over-protection) must accept");
+    }
+
+    #[test]
+    fn module_walker_detects_top_secret_to_secret_underflow() {
+        // Pin: TopSecret arg into Secret param is rejected — the
+        // parameter provides only Secret-grade protection.
+        let module = mk_module_with_call(
+            "secret_only_handler",
+            ("data", Some("secret")),
+            "ts_data",
+            vec![("ts_data", "top_secret")],
+        );
+
+        let mut checker = TypeChecker::new();
+        for item in &module.items {
+            if let verum_ast::ItemKind::Function(func) = &item.kind {
+                let _ = checker.register_function_signature(func);
+            }
+        }
+
+        let errors = checker.check_module_call_classifications(&module);
+        assert_eq!(errors.len(), 1,
+            "top_secret → secret must reject (under-protection)");
     }
 
     #[test]
