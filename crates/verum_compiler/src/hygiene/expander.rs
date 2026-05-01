@@ -1437,8 +1437,14 @@ impl QuoteExpander {
 pub struct RepetitionExpander {
     /// Pattern variable names
     pattern_names: List<Text>,
-    /// Current scopes for hygiene
-    #[allow(dead_code)]
+    /// Call-site scopes captured at construction time. Unioned into
+    /// every identifier substituted by [`Self::expand_iteration`] so
+    /// the expanded body carries the call-site's scope tagging
+    /// alongside its definition-site scopes — the Macro-by-Example
+    /// hygiene contract. Closes the inert-defense pattern around the
+    /// field: pre-fix the constructor stored it but no `&self` method
+    /// consulted it, so non-pattern identifiers in the body lost the
+    /// call-site scopes between construction and substitution.
     scopes: ScopeSet,
     /// Span for error reporting
     span: Span,
@@ -1542,20 +1548,30 @@ impl RepetitionExpander {
         // Create a fresh mark for this iteration
         let iteration_mark = Mark::fresh();
 
-        // Substitute all pattern variables in the body
+        // Substitute all pattern variables in the body. Each
+        // substituted identifier is tagged with three scope sources
+        // (Macro-by-Example hygiene contract):
+        //  1. Its original scopes (definition-site for body idents,
+        //  binding-site for the substituted element).
+        //  2. The call-site scopes captured in `self.scopes` —
+        //  ensures references that resolve via the call site
+        //  (e.g. helper fns visible at expansion point) stay
+        //  visible after expansion.
+        //  3. The fresh iteration_mark scope — distinguishes this
+        //  iteration's bindings from the others.
+        let call_site_scopes = &self.scopes;
         let mut result = body.clone();
         for (idx, pattern_name) in self.pattern_names.iter().enumerate() {
             if let Some(element) = elements.get(idx) {
                 result = result.map_idents(|ident| {
-                    if &ident.name == pattern_name {
-                        let mut new_ident = element.clone();
-                        new_ident.scopes.add(ScopeId::new(iteration_mark.as_u64()));
-                        new_ident
+                    let mut new_ident = if &ident.name == pattern_name {
+                        element.clone()
                     } else {
-                        let mut new_ident = ident.clone();
-                        new_ident.scopes.add(ScopeId::new(iteration_mark.as_u64()));
-                        new_ident
-                    }
+                        ident.clone()
+                    };
+                    new_ident.scopes = new_ident.scopes.union(call_site_scopes);
+                    new_ident.scopes.add(ScopeId::new(iteration_mark.as_u64()));
+                    new_ident
                 });
             }
         }
@@ -2021,6 +2037,55 @@ mod tests {
             !idents1[0].scopes.is_subset_of(&idents2[0].scopes)
                 || !idents2[0].scopes.is_subset_of(&idents1[0].scopes)
         );
+    }
+
+    /// Pin: `RepetitionExpander.scopes` is consulted by
+    /// `expand_iteration`. A non-empty call-site `ScopeSet` flows
+    /// through to every substituted identifier (pattern variable
+    /// AND non-pattern body ident). Closes the inert-defense
+    /// pattern around the field — a regression that drops the
+    /// `union(call_site_scopes)` lights up here.
+    #[test]
+    fn repetition_scopes_field_propagates_to_substituted_idents() {
+        let call_site_scope_id = ScopeId::new(0xDEAD_BEEF);
+        let call_site_scopes = ScopeSet::singleton(call_site_scope_id);
+
+        let mut expander =
+            RepetitionExpander::new(Text::from("x"), call_site_scopes.clone(), Span::default());
+
+        // Body: pattern variable `x` PLUS a non-pattern ident `y`
+        // — verifies BOTH branches of the substitution loop union
+        // the call-site scopes.
+        let mut body = TokenStream::new();
+        body.push(Token {
+            kind: TokenKind::Ident(HygienicIdent::unhygienic(Text::from("x"), Span::default())),
+            span: Span::default(),
+            scopes: ScopeSet::new(),
+            marks: MarkSet::new(),
+        });
+        body.push(Token {
+            kind: TokenKind::Ident(HygienicIdent::unhygienic(Text::from("y"), Span::default())),
+            span: Span::default(),
+            scopes: ScopeSet::new(),
+            marks: MarkSet::new(),
+        });
+
+        let element = HygienicIdent::unhygienic(Text::from("field_a"), Span::default());
+        let result = expander
+            .expand_iteration(&body, &[element], 0)
+            .expect("expand_iteration must succeed");
+
+        let idents = result.collect_idents();
+        assert_eq!(idents.len(), 2);
+        // BOTH the substituted pattern var (now `field_a`) and the
+        // body's non-pattern ident `y` carry the call-site scope.
+        for ident in &idents {
+            assert!(
+                ident.scopes.contains(&call_site_scope_id),
+                "ident {:?} missing call-site scope after expansion",
+                ident.name.as_str()
+            );
+        }
     }
 
     #[test]
