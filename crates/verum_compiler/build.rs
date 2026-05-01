@@ -370,12 +370,6 @@ fn split_top_level_commas(s: &str) -> Vec<&str> {
     out
 }
 
-/// Strip leading `.` (as in `public mount .submodule.{…}` from inside a
-/// `mod.vr`) and any leading whitespace.
-fn normalise_path(p: &str) -> String {
-    p.trim().trim_start_matches('.').to_string()
-}
-
 /// Whether a glob path should be treated as the implicit prelude (and
 /// therefore NOT emitted as a graph edge — see `parse_mount_body`).
 ///

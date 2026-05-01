@@ -198,29 +198,6 @@ fn read_classification(attrs: &List<verum_ast::attr::Attribute>) -> MlsLevel {
     found
 }
 
-/// Compute the effective classification floor for a function:
-/// the JOIN (least upper bound on the lattice) of the function's
-/// own `@classification` attribute and every parameter's
-/// `@classification` attribute.  Phase 2b foundation (#288).
-///
-/// Architectural rationale: a function carrying a Secret-classified
-/// parameter must itself be at least Secret — otherwise a Secret
-/// value reaches a Public function body, leaking through the
-/// non-classified boundary.  Reading parameter attributes here
-/// lets the surface gate enforce this consistency without
-/// type-level taint propagation (which is full Phase 2b at
-/// `verum_types`).
-fn function_classification_floor(
-    func: &verum_ast::decl::FunctionDecl,
-) -> MlsLevel {
-    let mut effective = read_classification(&func.attributes);
-    for param in func.params.iter() {
-        let param_level = read_classification(&param.attributes);
-        effective = effective.join(param_level);
-    }
-    effective
-}
-
 /// Find the highest-classified parameter on `func`, returning
 /// `Some((name, level, span))` for the maximally-classified one
 /// when at least one parameter is non-Public, or `None` when every
