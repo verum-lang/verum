@@ -1277,6 +1277,125 @@ impl<'s> CompilationPipeline<'s> {
             self.run_bounds_elimination_analysis(module)?;
         }
 
+        // Auto-route proof certificates when manifest enables them (#285).
+        // For each verified theorem/lemma/corollary, emit a stub
+        // certificate file in the manifest-selected format.  The
+        // stub carries the theorem statement with `Admitted.` /
+        // `sorry` placeholder body — full proof-term reconstruction
+        // is tracked as #285-Followup.
+        if self.session.options().emit_proof_certificate {
+            self.emit_theorem_certificates(module)?;
+        }
+
+        Ok(())
+    }
+
+    /// Emit proof-certificate files for every verified theorem-like
+    /// item in the module (#285).  Format and output directory come
+    /// from `CompilerOptions.proof_certificate_format` /
+    /// `proof_certificate_path`; defaults are Lean format and
+    /// `target/audit-reports/proof-certificates/` directory.
+    fn emit_theorem_certificates(&self, module: &Module) -> Result<()> {
+        use verum_smt::certificates::{CertificateFormat, CertificateGenerator, Theorem};
+
+        let opts = self.session.options();
+        let format_str = opts
+            .proof_certificate_format
+            .as_ref()
+            .map(|t| t.as_str().to_ascii_lowercase())
+            .unwrap_or_else(|| "lean".to_string());
+        let format = match format_str.as_str() {
+            "coq" => CertificateFormat::Coq,
+            "lean" => CertificateFormat::Lean,
+            "dedukti" => CertificateFormat::Dedukti,
+            "metamath" => CertificateFormat::Metamath,
+            "opentheory" => CertificateFormat::OpenTheory,
+            "json" => CertificateFormat::Json,
+            other => {
+                warn!(
+                    "[proof-certificate] unknown format {:?} — falling back to lean",
+                    other
+                );
+                CertificateFormat::Lean
+            }
+        };
+
+        let output_dir = match &opts.proof_certificate_path {
+            Some(p) => p.clone(),
+            None => {
+                let project_root = opts
+                    .input
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|| std::path::PathBuf::from("."));
+                project_root
+                    .join("target")
+                    .join("audit-reports")
+                    .join("proof-certificates")
+            }
+        };
+        if let Err(e) = std::fs::create_dir_all(&output_dir) {
+            warn!(
+                "[proof-certificate] could not create {}: {} — \
+                 skipping certificate emission",
+                output_dir.display(),
+                e
+            );
+            return Ok(());
+        }
+
+        let generator = CertificateGenerator::new(format);
+        let mut emitted = 0u32;
+
+        for item in &module.items {
+            let thm = match &item.kind {
+                verum_ast::ItemKind::Theorem(t) => t,
+                verum_ast::ItemKind::Lemma(t) => t,
+                verum_ast::ItemKind::Corollary(t) => t,
+                _ => continue,
+            };
+            let name: verum_common::Text = thm.name.name.clone();
+            let statement: verum_common::Text =
+                format!("{:?}", thm.proposition).into();
+            let theorem = Theorem::new(name.clone(), statement);
+            match generator.generate_stub(theorem) {
+                Ok(cert) => {
+                    let mut filename = name.as_str().to_string();
+                    filename.push_str(format.extension());
+                    let path = output_dir.join(filename);
+                    if let Err(e) = std::fs::write(&path, cert.content.as_str()) {
+                        warn!(
+                            "[proof-certificate] failed to write {}: {}",
+                            path.display(),
+                            e
+                        );
+                    } else {
+                        emitted += 1;
+                        debug!(
+                            "[proof-certificate] wrote {} ({})",
+                            path.display(),
+                            format.name()
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "[proof-certificate] generator rejected theorem {:?}: {}",
+                        name.as_str(),
+                        e
+                    );
+                }
+            }
+        }
+
+        if emitted > 0 {
+            info!(
+                "[proof-certificate] wrote {} {} certificate(s) to {}",
+                emitted,
+                format.name(),
+                output_dir.display()
+            );
+        }
         Ok(())
     }
 
