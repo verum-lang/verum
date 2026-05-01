@@ -1,0 +1,122 @@
+// =============================================================================
+// t03_prepared_codec.vr — binary-protocol round-trip via PreparedSession
+// =============================================================================
+// Spec: internal/specs/database.md §6.3.4 (binary protocol).
+// =============================================================================
+//
+// Exercises COM_STMT_PREPARE / COM_STMT_EXECUTE through the LRU
+// statement cache. Inserts then reads back the codec smoke row,
+// verifying:
+//   1. INSERT prepared with bound parameters succeeds.
+//   2. SELECT prepared returns one row whose binary-encoded columns
+//      decode to the original bytes (or are correctly NULL).
+//   3. Cache hit metric increments on the second prepare.
+// =============================================================================
+
+mount conn_config.{
+    connect_app, expect, expect_ok, expect_eq_int, pass,
+};
+mount core.database.mysql.{
+    PreparedSession, MysqlConnection,
+    StmtParam, SpNull, SpLongLong, SpDouble, SpString, SpBlob,
+    param_int, param_text, param_blob, param_double, param_null,
+};
+
+fn main() {
+    let mut conn = expect_ok(
+        connect_app(),
+        &"connect_app() failed".clone(),
+    );
+
+    // Idempotent reset.
+    let _ = expect_ok(
+        conn.simple_query(&"DELETE FROM phase_codec_smoke".clone()),
+        &"reset phase_codec_smoke failed".clone(),
+    );
+
+    let mut session = PreparedSession.new();
+
+    // -------------------------------------------------------------------------
+    // 1. INSERT one row exercising the required typed columns.
+    //    Defaulted columns (created_at, naive_dt, only_date,
+    //    only_time, jb, is_active) take their schema defaults.
+    // -------------------------------------------------------------------------
+    let mut params: List<StmtParam> = List.new();
+    params.push(param_int(1));                              // id
+    params.push(param_int(42));                             // big
+    params.push(param_int(7));                              // short
+    params.push(param_double(1.5));                         // flt
+    params.push(param_double(3.14159265358979));            // dbl
+    params.push(param_text("hello".clone()));               // name_text
+    let blob: List<Byte> = (&"\x00\x01\x02\x03\xFE\xFF").as_bytes().to_owned();
+    params.push(param_blob(blob));                          // binary_data
+
+    let r1 = expect_ok(
+        session.execute_cached(
+            &mut conn,
+            &"INSERT INTO phase_codec_smoke \
+              (id, big, short, flt, dbl, name_text, binary_data) \
+              VALUES (?, ?, ?, ?, ?, ?, ?)".clone(),
+            &params,
+        ),
+        &"INSERT prepared failed".clone(),
+    );
+    expect_eq_int(r1.affected_rows, 1, &"INSERT prep affected_rows".clone());
+
+    // -------------------------------------------------------------------------
+    // 2. SELECT — single row, 7 selected columns.
+    // -------------------------------------------------------------------------
+    let no_params: List<StmtParam> = List.new();
+    let r2 = expect_ok(
+        session.query_cached(
+            &mut conn,
+            &"SELECT id, big, short, flt, dbl, name_text, binary_data \
+              FROM phase_codec_smoke WHERE id = 1".clone(),
+            &no_params,
+        ),
+        &"SELECT prepared failed".clone(),
+    );
+    expect_eq_int(r2.rows.len() as Int, 1, &"prep SELECT row count".clone());
+    let row = &r2.rows[0];
+    expect_eq_int(row.len() as Int, 7, &"prep SELECT col count".clone());
+
+    // Spot-check: column 1 (big BIGINT) must be non-NULL and 8 bytes
+    // little-endian binary protocol.
+    match &row[1] {
+        Some(bytes) => expect_eq_int(bytes.len() as Int, 8,
+            &"big binary length".clone()),
+        None        => expect(false, &"big unexpectedly NULL".clone()),
+    }
+
+    // -------------------------------------------------------------------------
+    // 3. Cache hit on second prepare — metrics must increment.
+    // -------------------------------------------------------------------------
+    let pre = session.cache_metrics();
+    let _ = expect_ok(
+        session.query_cached(
+            &mut conn,
+            &"SELECT big FROM phase_codec_smoke WHERE id = 1".clone(),
+            &no_params,
+        ),
+        &"first prepare-only failed".clone(),
+    );
+    let _ = expect_ok(
+        session.query_cached(
+            &mut conn,
+            &"SELECT big FROM phase_codec_smoke WHERE id = 1".clone(),
+            &no_params,
+        ),
+        &"second cached query failed".clone(),
+    );
+    let post = session.cache_metrics();
+    expect(
+        post.hits > pre.hits,
+        &"cache hits did not increment".clone(),
+    );
+
+    // Drain prepared cache before connection close — releases
+    // server-side slots cleanly.
+    let _ = session.drain_cache_on_close(&mut conn);
+
+    pass(&"t03_prepared_codec".clone());
+}

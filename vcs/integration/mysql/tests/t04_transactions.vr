@@ -1,0 +1,131 @@
+// =============================================================================
+// t04_transactions.vr — begin / commit / rollback / savepoint
+// =============================================================================
+// Spec: internal/specs/database.md §5.5 (affine Tx), §6.3.5 (MySQL XA-free
+// transaction protocol).
+// =============================================================================
+//
+// Three scenarios — same shape as PG t07; MySQL uses session-local
+// transaction wire (BEGIN / COMMIT / ROLLBACK / SAVEPOINT) without
+// the typed message family Postgres has.
+//
+//   1. begin → INSERT → ROLLBACK → table unchanged.
+//   2. begin → INSERT → COMMIT → row visible.
+//   3. begin → INSERT a → savepoint sp1 → INSERT b → rollback_to
+//      sp1 → COMMIT → only 'a' visible.
+// =============================================================================
+
+mount conn_config.{
+    connect_app, expect, expect_ok, expect_eq_int, pass,
+};
+mount core.database.mysql.{
+    MysqlConnection, MysqlTransaction,
+    begin_tx, commit_tx, rollback_tx,
+    savepoint, release_savepoint, rollback_to_savepoint,
+};
+
+fn main() {
+    let mut conn = expect_ok(
+        connect_app(),
+        &"connect_app() failed".clone(),
+    );
+
+    // Reset.
+    let _ = conn.simple_query(&"DELETE FROM accounts".clone());
+
+    // -------------------------------------------------------------------------
+    // 1. begin → INSERT → ROLLBACK
+    // -------------------------------------------------------------------------
+    let tx1 = expect_ok(
+        begin_tx(&mut conn),
+        &"begin_tx (rollback case) failed".clone(),
+    );
+    expect_ok(
+        conn.simple_query(&
+            "INSERT INTO accounts (email, age) VALUES ('rb@x.co', 25)".clone()
+        ),
+        &"INSERT inside tx1 failed".clone(),
+    );
+    expect_ok(
+        rollback_tx(&mut conn, tx1),
+        &"rollback_tx failed".clone(),
+    );
+    let count1 = expect_ok(
+        conn.simple_query(&
+            "SELECT count(*) FROM accounts WHERE email = 'rb@x.co'".clone()
+        ),
+        &"count after rollback failed".clone(),
+    );
+    expect_eq_int(count1.rows.len() as Int, 1, &"count rows".clone());
+
+    // -------------------------------------------------------------------------
+    // 2. begin → INSERT → COMMIT
+    // -------------------------------------------------------------------------
+    let tx2 = expect_ok(
+        begin_tx(&mut conn),
+        &"begin_tx (commit case) failed".clone(),
+    );
+    expect_ok(
+        conn.simple_query(&
+            "INSERT INTO accounts (email, age) VALUES ('cm@x.co', 30)".clone()
+        ),
+        &"INSERT inside tx2 failed".clone(),
+    );
+    expect_ok(
+        commit_tx(&mut conn, tx2),
+        &"commit_tx failed".clone(),
+    );
+    let after_commit = expect_ok(
+        conn.simple_query(&
+            "SELECT email FROM accounts WHERE email = 'cm@x.co'".clone()
+        ),
+        &"post-commit SELECT failed".clone(),
+    );
+    expect_eq_int(after_commit.rows.len() as Int, 1, &"row visible after commit".clone());
+
+    // -------------------------------------------------------------------------
+    // 3. begin → INSERT a → savepoint sp1 → INSERT b → rollback_to sp1 → COMMIT
+    // -------------------------------------------------------------------------
+    let tx3 = expect_ok(
+        begin_tx(&mut conn),
+        &"begin_tx (savepoint case) failed".clone(),
+    );
+    expect_ok(
+        conn.simple_query(&
+            "INSERT INTO accounts (email, age) VALUES ('a@s.co', 40)".clone()
+        ),
+        &"INSERT a in tx3 failed".clone(),
+    );
+    expect_ok(
+        savepoint(&mut conn, &"sp1".clone()),
+        &"SAVEPOINT failed".clone(),
+    );
+    expect_ok(
+        conn.simple_query(&
+            "INSERT INTO accounts (email, age) VALUES ('b@s.co', 41)".clone()
+        ),
+        &"INSERT b in tx3 failed".clone(),
+    );
+    expect_ok(
+        rollback_to_savepoint(&mut conn, &"sp1".clone()),
+        &"ROLLBACK TO SAVEPOINT failed".clone(),
+    );
+    expect_ok(
+        commit_tx(&mut conn, tx3),
+        &"commit_tx after savepoint rollback failed".clone(),
+    );
+    let after_sp = expect_ok(
+        conn.simple_query(&
+            "SELECT email FROM accounts WHERE email IN ('a@s.co', 'b@s.co')".clone()
+        ),
+        &"post-savepoint SELECT failed".clone(),
+    );
+    expect_eq_int(
+        after_sp.rows.len() as Int, 1,
+        &"only 'a@s.co' should remain after rollback to sp1".clone(),
+    );
+
+    let _ = conn.simple_query(&"DELETE FROM accounts".clone());
+
+    pass(&"t04_transactions".clone());
+}

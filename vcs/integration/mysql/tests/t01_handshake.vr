@@ -1,0 +1,44 @@
+// =============================================================================
+// t01_handshake.vr — caching_sha2_password handshake against live MySQL
+// =============================================================================
+// Spec: internal/specs/database.md §6.3.2 (caching_sha2_password).
+// =============================================================================
+
+mount conn_config.{
+    connect_app, expect, expect_ok, expect_eq_int, pass,
+};
+mount core.database.mysql.{
+    MysqlConnection, MysqlConnState, McsReady,
+};
+
+fn main() {
+    let mut conn: MysqlConnection = expect_ok(
+        connect_app(),
+        &"connect_app() failed — is docker compose up?".clone(),
+    );
+
+    expect(
+        match conn.state() { McsReady => true, _ => false },
+        &"connection state != McsReady after handshake".clone(),
+    );
+
+    expect(
+        conn.connection_id() != 0,
+        &"connection_id is zero".clone(),
+    );
+
+    let sv = conn.server_version();
+    expect(
+        sv.len() > 0,
+        &"server_version is empty".clone(),
+    );
+
+    // Round-trip — proves the wire is in lockstep.
+    let r = expect_ok(
+        conn.simple_query(&"SELECT 1".clone()),
+        &"SELECT 1 failed".clone(),
+    );
+    expect_eq_int(r.rows.len() as Int, 1, &"SELECT 1 row count".clone());
+
+    pass(&"t01_handshake".clone());
+}

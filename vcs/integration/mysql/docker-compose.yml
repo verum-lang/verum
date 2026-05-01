@@ -1,0 +1,49 @@
+# MySQL integration-test harness for Spindle.
+#
+# Brings up mysql:8.4-oracle on 127.0.0.1:53306 with:
+#   * default_authentication_plugin = caching_sha2_password (matches
+#     the production posture documented in spec §6.3 — the only
+#     auth plugin Spindle's adapter accepts; mysql_native_password
+#     rejected unless `@allow_legacy_auth`).
+#   * Three roles created via init/01-init.sql.
+#   * tmpfs data — every `up` is a clean DB.
+#   * Healthcheck via mysqladmin so the runner waits for ready.
+#
+# Bring up:    docker compose -f docker-compose.yml up -d
+# Wait ready:  scripts/run.sh waits via `mysqladmin ping`.
+# Tear down:   docker compose -f docker-compose.yml down -v
+#
+# Port choice: 53306 (instead of 3306) avoids clashing with a
+# host-level MySQL install. Same value lives in tests/conn_config.vr.
+
+services:
+  mysql:
+    image: mysql:8.4-oracle
+    container_name: spindle-mysql-test
+    restart: "no"
+    environment:
+      MYSQL_ROOT_PASSWORD: spindle_root_pw
+      MYSQL_DATABASE: spindle_test
+      MYSQL_USER: spindle_admin
+      MYSQL_PASSWORD: spindle_admin_pw
+    ports:
+      - "127.0.0.1:53306:3306"
+    volumes:
+      - ./init:/docker-entrypoint-initdb.d:ro
+    command: >
+      mysqld
+        --default-authentication-plugin=caching_sha2_password
+        --character-set-server=utf8mb4
+        --collation-server=utf8mb4_0900_ai_ci
+        --max-connections=64
+        --general-log=1
+        --general-log-file=/tmp/general.log
+    tmpfs:
+      - /var/lib/mysql:rw,size=512m
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root",
+             "-pspindle_root_pw"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 5s
