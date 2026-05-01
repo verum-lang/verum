@@ -3833,9 +3833,10 @@ fn audit_cross_format_roundtrip_inner(
 /// inductive types, etc.).
 pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
     use verum_kernel::proof_checker::Certificate;
+    use verum_kernel::proof_checker_nbe;
 
     if matches!(format, AuditFormat::Plain) {
-        ui::step("Verifying canonical proof-term certificate library");
+        ui::step("Verifying canonical proof-term certificate library (with NbE differential)");
     }
 
     // Discovery: env override → workspace ancestor walk → manifest dir
@@ -3869,6 +3870,12 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
     let mut verified = 0usize;
     let mut rejected = 0usize;
     let mut malformed = 0usize;
+    // **#159 V2** — every certificate runs through BOTH kernels:
+    // Algorithm A (`proof_checker`, trusted base, bidirectional +
+    // explicit substitution) and Algorithm B (`proof_checker_nbe`,
+    // NbE-based).  Disagreements between the two are bugs in EITHER
+    // implementation; they fail the audit.
+    let mut nbe_disagreements = 0usize;
 
     for path in &entries {
         let outcome = match std::fs::read_to_string(path) {
@@ -3879,16 +3886,44 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
                         .get("name")
                         .cloned()
                         .unwrap_or_else(|| "(anonymous)".to_string());
-                    match cert.verify() {
-                        Ok(()) => {
+                    let trusted_outcome = cert.verify();
+                    let nbe_outcome = proof_checker_nbe::verify_certificate(&cert);
+                    // Differential agreement check: both kernels MUST
+                    // agree on accept/reject. Disagreements surface as
+                    // a distinct `disagreement` outcome category that
+                    // flips the audit gate to failure.
+                    let agreement = match (&trusted_outcome, &nbe_outcome) {
+                        (Ok(_), Ok(_)) => "both_accept",
+                        (Err(_), Err(_)) => "both_reject",
+                        _ => {
+                            nbe_disagreements += 1;
+                            "disagreement"
+                        }
+                    };
+                    let (label, detail) = match (&trusted_outcome, agreement) {
+                        (Ok(()), "both_accept") => {
                             verified += 1;
-                            ("verified", name, "".to_string())
+                            ("verified", String::new())
                         }
-                        Err(e) => {
+                        (Err(e), "both_reject") => {
                             rejected += 1;
-                            ("rejected", name, format!("{:?}", e))
+                            ("rejected", format!("{:?}", e))
                         }
-                    }
+                        _ => {
+                            // Disagreement — a load-bearing
+                            // failure mode.  Capture both verdicts
+                            // in detail so the audit consumer can
+                            // diagnose the divergence.
+                            (
+                                "disagreement",
+                                format!(
+                                    "trusted_base={:?}, nbe={:?}",
+                                    trusted_outcome, nbe_outcome,
+                                ),
+                            )
+                        }
+                    };
+                    (label, name, detail)
                 }
                 Err(e) => {
                     malformed += 1;
@@ -3921,13 +3956,17 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
         let _ = std::fs::create_dir_all(parent);
     }
     let payload = serde_json::json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "command": "audit-proof-term-library",
         "library_path": library_dir.display().to_string(),
         "total": entries.len(),
         "verified": verified,
         "rejected": rejected,
         "malformed": malformed,
+        // #159 V2 differential count — number of certificates where
+        // the trusted base and the NbE kernel disagreed.  Any
+        // non-zero value flips the audit gate to failure.
+        "nbe_disagreements": nbe_disagreements,
         "verifications": verifications,
     });
     let _ = std::fs::write(
@@ -3938,17 +3977,18 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
     match format {
         AuditFormat::Plain => {
             println!();
-            println!("Canonical proof-term certificate library");
-            println!("────────────────────────────────────────");
+            println!("Canonical proof-term certificate library (NbE-differential)");
+            println!("────────────────────────────────────────────────────────────");
             println!("  Library: {}", library_dir.display());
             println!(
-                "  ✓ {} verified · ✗ {} rejected · ⚠ {} malformed (total {})",
+                "  ✓ {} verified · ✗ {} rejected · ⚠ {} malformed · ✗ {} NbE-disagreement (total {})",
                 verified,
                 rejected,
                 malformed,
+                nbe_disagreements,
                 entries.len(),
             );
-            if rejected > 0 || malformed > 0 {
+            if rejected > 0 || malformed > 0 || nbe_disagreements > 0 {
                 println!();
                 for v in verifications.iter().filter(|v| {
                     !matches!(v.get("outcome").and_then(|s| s.as_str()), Some("verified"))
@@ -3969,10 +4009,10 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
         }
     }
 
-    if rejected > 0 || malformed > 0 {
+    if rejected > 0 || malformed > 0 || nbe_disagreements > 0 {
         return Err(crate::error::CliError::VerificationFailed(format!(
-            "proof-term-library: {} rejected + {} malformed",
-            rejected, malformed,
+            "proof-term-library: {} rejected + {} malformed + {} NbE-disagreement(s)",
+            rejected, malformed, nbe_disagreements,
         )));
     }
     Ok(())
