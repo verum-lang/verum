@@ -75,6 +75,7 @@ mount core.database.postgres.pipeline.{
 };
 mount core.database.postgres.pg_stream.{PgStream, PsPlain, PsTls, upgrade_to_tls};
 mount core.net.tls.TlsConfig;
+mount core.database.common.arena.{SpindleArena, ArenaScope, ApQuery};
 // CertVerifyMode is referenced fully-qualified to avoid name
 // collision with `Maybe.None`.
 
@@ -136,6 +137,15 @@ public type PgConnection is {
     /// available. Caller registers via `attach_pipeline` /
     /// `detach_pipeline`. Spec database.md §6.1.5.
     pipeline: Maybe<PgPipeline>,
+    /// Per-connection CBGR arena. Lifetime = one pooled checkout.
+    /// Adapter codec hot paths bump-allocate column bytes /
+    /// parameter encoding into per-query sub-scopes via
+    /// `ArenaScope.begin/discard`; the arena is reset
+    /// (generation++) by the pool's `release_healthy` so every
+    /// `ThinRef` / `ArenaSlice` carved during the previous owner's
+    /// session becomes generation-stale on the next dereference.
+    /// Spec database.md §4.2.
+    arena: SpindleArena,
 };
 
 // -----------------------------------------------------------------------------
@@ -264,6 +274,7 @@ public fn connect(config: &PgConfig) -> Result<PgConnection, DbError> {
         notifications: List.new(),
         dispatcher: None,
         pipeline: None,
+        arena: SpindleArena.new_connection(0),
     };
 
     // Send Startup.
@@ -701,6 +712,40 @@ implement PgConnection {
             Some(_) => true,
             None    => false,
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // CBGR per-query arena (spec §4.2)
+    // -------------------------------------------------------------------------
+
+    /// Mutable accessor for the connection's per-checkout arena.
+    /// Adapter codec hot paths (Bind builder, DataRow decoder)
+    /// take this and carry per-query sub-scopes via
+    /// `ArenaScope.begin/discard`. The arena's lifetime is the
+    /// connection's pooled-checkout interval; the pool's
+    /// `release_healthy` invokes `reset_arena()` after the
+    /// connection is returned, bumping the generation in O(1) so
+    /// every reference carved during the previous owner's session
+    /// becomes generation-stale on next dereference.
+    public fn arena_mut(&mut self) -> &mut SpindleArena {
+        &mut self.arena
+    }
+
+    /// Read-only borrow — for diagnostic emitters that just want
+    /// `arena.generation()` / `arena.used()`.
+    public fn arena_ref(&self) -> &SpindleArena {
+        &self.arena
+    }
+
+    /// O(1) generation-bump reset. Invoked by the pool's
+    /// `release_healthy` path between checkouts so every
+    /// `ArenaSlice` / `ThinRef` carved by the previous owner
+    /// surfaces as use-after-reset on its next dereference.
+    /// Cost: a single integer add and bump-pointer rewind,
+    /// regardless of how many bytes were allocated during the
+    /// session.
+    public fn reset_arena(&mut self) {
+        self.arena.reset();
     }
 
     /// Submit a pre-built (Parse?+Bind+Execute) byte triple to the
