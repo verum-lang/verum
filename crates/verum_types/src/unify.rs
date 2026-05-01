@@ -4671,7 +4671,29 @@ impl Unifier {
         }
 
         let resolver = crate::projection::ProjectionResolver::new(protocol_checker, span);
-        resolver.normalize(ty).unwrap_or_else(|_| ty.clone())
+        match resolver.normalize(ty) {
+            Ok(normalized) => normalized,
+            Err(e) => {
+                // #306-followup: surface projection-resolution
+                // failures so a `<X as Iterator>::Item` that can't
+                // resolve via the active impl candidates produces
+                // an audible error trail instead of silently
+                // returning the unresolved Type::Projection.
+                // Downstream type errors will then be traceable to
+                // the actual cause (missing impl, ambiguous bound,
+                // etc.) instead of "type mismatch on unresolved
+                // projection".
+                tracing::warn!(
+                    "normalize_projections: projection resolution \
+                     failed ({}) — returning unresolved Type::\
+                     Projection.  Downstream type-mismatch errors \
+                     may stem from this gap; verify the protocol \
+                     bound has a concrete impl for the receiver.",
+                    e
+                );
+                ty.clone()
+            }
+        }
     }
 
     /// Check if a type lives in the Prop universe (proof-irrelevant).
