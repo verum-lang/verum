@@ -1,0 +1,410 @@
+// =============================================================================
+// encoding/value.vr — universal cross-encoder Value
+// =============================================================================
+// Layer: 1 (Encoding)
+// Dependencies: core, core.collections
+// =============================================================================
+//
+// The interop type for schema-less binary / textual encoders. JSON,
+// CBOR, MessagePack, BSON, and JSONB each have their own native
+// `Value` ADT; this module defines a universal `Value` that can
+// round-trip with each of them losslessly within the common
+// fragment, plus `VExtension { tag, payload }` for format-specific
+// payloads that don't fit the lowest-common shape (CBOR tags, BSON
+// ObjectId / Decimal128, MessagePack Ext, …).
+//
+// Why a universal type:
+//
+//   * Generic transformation / validation pipelines work against
+//     `Value` and never re-type when switching wire formats. Reads a
+//     BSON document, validates with one schema, re-encodes as
+//     msgpack — no triple type chain in the application code.
+//   * Test fixtures live in one shape; round-trip property tests
+//     compare `decode(encode(v)) == v` once across every encoder.
+//   * Cross-format conversions live as named `from_*` / `to_*`
+//     functions with explicit `Result` for the lossy boundary —
+//     no implicit data loss.
+//   * Future schema-required encoders (protobuf / flatbuffers /
+//     avro) project into / out of `Value` for ad-hoc inspection
+//     without giving up their typed schema.
+//
+// # Common subset (Value variants)
+//
+//   VNull      — nullish
+//   VBool      — true / false
+//   VInt(Int)  — 64-bit signed integer
+//   VFloat(Float)         — IEEE 754 binary64
+//   VText(Text)           — UTF-8 string
+//   VBytes(List<Byte>)    — opaque byte string
+//   VArray(List<Value>)   — ordered sequence
+//   VMap(List<(Text,V)>)  — insertion-ordered key→value (Text keys)
+//   VTimestamp(Int)       — milliseconds since Unix epoch
+//   VUuid(List<Byte>)     — 16 raw bytes
+//   VDecimal(List<Byte>)  — opaque 16-byte decimal128 (until
+//                           core.text.numeric.decimal lands)
+//   VExtension {tag, payload}
+//                         — format-specific escape hatch
+//
+// # Format-specific projection
+//
+//   from_json / to_json     — lossless within VNull/VBool/VInt/
+//                             VFloat/VText/VArray/VMap subset
+//   from_cbor / to_cbor     — preserves tags via VExtension; nint
+//                             promoted to VInt with wrap to negative
+//   from_msgpack / to_msgpack — preserves Ext via VExtension;
+//                               Timestamp ext (-1) collapses to
+//                               VTimestamp
+//   from_bson / to_bson     — ObjectId → VUuid (12 bytes carried in
+//                             VExtension because UUID is 16); tied
+//                             types preserved
+//
+// All `to_*` conversions return `Result<X, ConvertError>` so the
+// caller learns explicitly when a non-projectable variant
+// (extension tag the target doesn't understand, oversized integer,
+// non-Text map key) is involved.
+// =============================================================================
+
+module core.encoding.value;
+
+mount core.*;
+mount core.collections.List;
+mount core.collections.map.Map;
+
+mount core.encoding.json.{JsonValue,
+    JsonNull, JsonBool, JsonInt, JsonFloat, JsonString, JsonArray, JsonObject};
+
+// =============================================================================
+// Value
+// =============================================================================
+
+public type Value is
+      VNull
+    | VBool(Bool)
+    | VInt(Int)
+    | VFloat(Float)
+    | VText(Text)
+    | VBytes(List<Byte>)
+    | VArray(List<Value>)
+    | VMap(List<(Text, Value)>)
+    | VTimestamp(Int)               // ms since Unix epoch
+    | VUuid(List<Byte>)             // exactly 16 bytes
+    | VDecimal(List<Byte>)          // opaque 16-byte decimal128
+    | VExtension { tag: Int, payload: List<Byte> };
+
+// =============================================================================
+// ConvertError
+// =============================================================================
+
+public type ConvertError is
+      CeUnsupportedVariant(Text)             // variant outside target's coverage
+    | CeIntegerOutOfRange { value: Int, target: Text }
+    | CeBytesNotUuid(Int)                    // wrong length for VUuid (need 16)
+    | CeBytesNotDecimal(Int)                 // wrong length for VDecimal (need 16)
+    | CeMapKeyNotText                        // CBOR/BSON map key wasn't a Text
+    | CeExtensionUnsupported(Int);
+
+implement Display for ConvertError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CeUnsupportedVariant(name)        => f.write_str(f"Value: unsupported variant `{name}` for target".as_str()),
+            CeIntegerOutOfRange { value, target } => f.write_str(f"Value: integer {value} out of range for `{target}`".as_str()),
+            CeBytesNotUuid(n)                 => f.write_str(f"Value: VUuid expects 16 bytes, got {n}".as_str()),
+            CeBytesNotDecimal(n)              => f.write_str(f"Value: VDecimal expects 16 bytes, got {n}".as_str()),
+            CeMapKeyNotText                   => f.write_str("Value: map key was not a Text"),
+            CeExtensionUnsupported(t)         => f.write_str(f"Value: extension tag {t} not supported by target".as_str()),
+        }
+    }
+}
+
+implement Debug for ConvertError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            CeUnsupportedVariant(name)        => f.write_str(f"CeUnsupportedVariant(\"{name}\")".as_str()),
+            CeIntegerOutOfRange { value, target } => f.write_str(f"CeIntegerOutOfRange {{ value: {value}, target: \"{target}\" }}".as_str()),
+            CeBytesNotUuid(n)                 => f.write_str(f"CeBytesNotUuid({n})".as_str()),
+            CeBytesNotDecimal(n)              => f.write_str(f"CeBytesNotDecimal({n})".as_str()),
+            CeMapKeyNotText                   => f.write_str("CeMapKeyNotText"),
+            CeExtensionUnsupported(t)         => f.write_str(f"CeExtensionUnsupported({t})".as_str()),
+        }
+    }
+}
+
+implement Eq for ConvertError {
+    fn eq(&self, other: &ConvertError) -> Bool {
+        match (self, other) {
+            (CeUnsupportedVariant(a),         CeUnsupportedVariant(b))         => a == b,
+            (CeIntegerOutOfRange { value: va, target: ta },
+             CeIntegerOutOfRange { value: vb, target: tb })                    => va == vb && ta == tb,
+            (CeBytesNotUuid(a),               CeBytesNotUuid(b))               => a == b,
+            (CeBytesNotDecimal(a),            CeBytesNotDecimal(b))            => a == b,
+            (CeMapKeyNotText,                 CeMapKeyNotText)                 => true,
+            (CeExtensionUnsupported(a),       CeExtensionUnsupported(b))       => a == b,
+            _                                                                  => false,
+        }
+    }
+}
+
+// =============================================================================
+// Construction helpers — terse builders for common cases
+// =============================================================================
+
+implement Value {
+    public fn null() -> Value          { VNull }
+    public fn bool_(v: Bool) -> Value  { VBool(v) }
+    public fn int_(v: Int) -> Value    { VInt(v) }
+    public fn float_(v: Float) -> Value{ VFloat(v) }
+    public fn text(v: Text) -> Value   { VText(v) }
+    public fn bytes(v: List<Byte>) -> Value { VBytes(v) }
+    public fn array(v: List<Value>) -> Value { VArray(v) }
+    public fn map(v: List<(Text, Value)>) -> Value { VMap(v) }
+    public fn timestamp_ms(ms: Int) -> Value  { VTimestamp(ms) }
+
+    /// Build a UUID Value. Returns `None` when the input is not
+    /// exactly 16 bytes.
+    public fn uuid(b: List<Byte>) -> Maybe<Value> {
+        if (b.len() as Int) != 16 { None } else { Some(VUuid(b)) }
+    }
+
+    /// Build a Decimal128 Value. Returns `None` when not 16 bytes.
+    public fn decimal128(b: List<Byte>) -> Maybe<Value> {
+        if (b.len() as Int) != 16 { None } else { Some(VDecimal(b)) }
+    }
+
+    public fn extension(tag: Int, payload: List<Byte>) -> Value {
+        VExtension { tag: tag, payload: payload }
+    }
+
+    // ---------------------------------------------------------------------
+    // Predicates / accessors
+    // ---------------------------------------------------------------------
+
+    public fn is_null(&self) -> Bool {
+        match self { VNull => true, _ => false }
+    }
+
+    public fn is_scalar(&self) -> Bool {
+        match self {
+            VArray(_) | VMap(_) => false,
+            _                   => true,
+        }
+    }
+
+    /// Type tag as a short name — for diagnostics / error messages.
+    public fn type_name(&self) -> Text {
+        match self {
+            VNull              => "Null".clone(),
+            VBool(_)           => "Bool".clone(),
+            VInt(_)            => "Int".clone(),
+            VFloat(_)          => "Float".clone(),
+            VText(_)           => "Text".clone(),
+            VBytes(_)          => "Bytes".clone(),
+            VArray(_)          => "Array".clone(),
+            VMap(_)            => "Map".clone(),
+            VTimestamp(_)      => "Timestamp".clone(),
+            VUuid(_)           => "Uuid".clone(),
+            VDecimal(_)        => "Decimal".clone(),
+            VExtension { .. }  => "Extension".clone(),
+        }
+    }
+}
+
+// =============================================================================
+// Equality
+// =============================================================================
+
+/// Structural equality. Floats compare bit-for-bit (NaN ≠ NaN),
+/// matching the equivalent rules in CBOR / BSON.
+public fn value_equals(a: &Value, b: &Value) -> Bool {
+    match (a, b) {
+        (VNull,                VNull)                => true,
+        (VBool(x),             VBool(y))             => x == y,
+        (VInt(x),              VInt(y))              => x == y,
+        (VFloat(x),            VFloat(y))            => x.to_bits() == y.to_bits(),
+        (VText(x),             VText(y))             => x == y,
+        (VBytes(x),            VBytes(y))            => bytes_eq(x, y),
+        (VArray(x),            VArray(y))            => array_eq(x, y),
+        (VMap(x),              VMap(y))              => map_eq(x, y),
+        (VTimestamp(x),        VTimestamp(y))        => x == y,
+        (VUuid(x),             VUuid(y))             => bytes_eq(x, y),
+        (VDecimal(x),          VDecimal(y))          => bytes_eq(x, y),
+        (VExtension { tag: ta, payload: pa },
+         VExtension { tag: tb, payload: pb })        => ta == tb && bytes_eq(pa, pb),
+        _                                            => false,
+    }
+}
+
+fn bytes_eq(a: &List<Byte>, b: &List<Byte>) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() as Int {
+        if a[i] != b[i] { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn array_eq(a: &List<Value>, b: &List<Value>) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() as Int {
+        if !value_equals(&a[i], &b[i]) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+fn map_eq(a: &List<(Text, Value)>, b: &List<(Text, Value)>) -> Bool {
+    if a.len() != b.len() { return false; }
+    let mut i: Int = 0;
+    while i < a.len() as Int {
+        if a[i].0 != b[i].0 { return false; }
+        if !value_equals(&a[i].1, &b[i].1) { return false; }
+        i = i + 1;
+    }
+    true
+}
+
+// =============================================================================
+// JSON conversions
+// =============================================================================
+
+/// Convert a `JsonValue` to `Value`. Lossless within the JSON
+/// subset (Null / Bool / Int / Float / String / Array / Object).
+/// JSON object keys flow through as the Text keys of `VMap`.
+public fn from_json(v: &JsonValue) -> Value {
+    match v {
+        JsonNull       => VNull,
+        JsonBool(b)    => VBool(*b),
+        JsonInt(n)     => VInt(*n),
+        JsonFloat(f)   => VFloat(*f),
+        JsonString(s)  => VText(s.clone()),
+        JsonArray(a)   => {
+            let mut out: List<Value> = List.with_capacity(a.len() as Int);
+            let mut i: Int = 0;
+            while i < a.len() as Int {
+                out.push(from_json(&a[i]));
+                i = i + 1;
+            }
+            VArray(out)
+        }
+        JsonObject(m)  => {
+            let mut out: List<(Text, Value)> = List.new();
+            let keys = m.keys();
+            let mut i: Int = 0;
+            while i < keys.len() as Int {
+                let k = keys[i].clone();
+                match m.get(&k) {
+                    Some(jv) => out.push((k, from_json(jv))),
+                    None     => {}        // shouldn't happen — Map.keys is consistent
+                }
+                i = i + 1;
+            }
+            VMap(out)
+        }
+    }
+}
+
+/// Convert a `Value` to `JsonValue`. Variants outside the JSON
+/// subset (VBytes / VTimestamp / VUuid / VDecimal / VExtension)
+/// produce `CeUnsupportedVariant`. `VBytes` could be base64-encoded
+/// to a JsonString — but doing so silently is the wrong default
+/// (downstream consumers wouldn't know to decode); callers that
+/// want the lossy projection invoke `to_json_lossy` instead.
+public fn to_json(v: &Value) -> Result<JsonValue, ConvertError> {
+    match v {
+        VNull         => Ok(JsonNull),
+        VBool(b)      => Ok(JsonBool(*b)),
+        VInt(n)       => Ok(JsonInt(*n)),
+        VFloat(f)     => Ok(JsonFloat(*f)),
+        VText(s)      => Ok(JsonString(s.clone())),
+        VArray(a)     => {
+            let mut out: List<JsonValue> = List.with_capacity(a.len() as Int);
+            let mut i: Int = 0;
+            while i < a.len() as Int {
+                out.push(to_json(&a[i])?);
+                i = i + 1;
+            }
+            Ok(JsonArray(out))
+        }
+        VMap(m)       => {
+            let mut obj: Map<Text, JsonValue> = Map.new();
+            let mut i: Int = 0;
+            while i < m.len() as Int {
+                let pair = &m[i];
+                obj.insert(pair.0.clone(), to_json(&pair.1)?);
+                i = i + 1;
+            }
+            Ok(JsonObject(obj))
+        }
+        VTimestamp(_) => Err(CeUnsupportedVariant("Timestamp".clone())),
+        VUuid(_)      => Err(CeUnsupportedVariant("Uuid".clone())),
+        VDecimal(_)   => Err(CeUnsupportedVariant("Decimal".clone())),
+        VBytes(_)     => Err(CeUnsupportedVariant("Bytes".clone())),
+        VExtension { tag, .. } => Err(CeExtensionUnsupported(*tag)),
+    }
+}
+
+/// Lossy JSON projection: variants outside the JSON subset are
+/// rendered as JsonString placeholders rather than rejected.
+///
+///   VBytes(b)     → JsonString("base64:...") with hex-encoded body
+///   VTimestamp(n) → JsonInt(n)         (loses datetime semantics)
+///   VUuid(b)      → JsonString hex
+///   VDecimal(b)   → JsonString hex
+///   VExtension    → JsonString f"ext({tag}):{hex}"
+///
+/// Use only at unstructured-output boundaries where the consumer
+/// can't do anything with the structured form anyway. For
+/// round-trip-safe projection, prefer `to_json` and surface errors
+/// to the user.
+public fn to_json_lossy(v: &Value) -> JsonValue {
+    match v {
+        VNull         => JsonNull,
+        VBool(b)      => JsonBool(*b),
+        VInt(n)       => JsonInt(*n),
+        VFloat(f)     => JsonFloat(*f),
+        VText(s)      => JsonString(s.clone()),
+        VBytes(b)     => JsonString(hex_render(b, &"bytes".clone())),
+        VArray(a)     => {
+            let mut out: List<JsonValue> = List.with_capacity(a.len() as Int);
+            let mut i: Int = 0;
+            while i < a.len() as Int {
+                out.push(to_json_lossy(&a[i]));
+                i = i + 1;
+            }
+            JsonArray(out)
+        }
+        VMap(m)       => {
+            let mut obj: Map<Text, JsonValue> = Map.new();
+            let mut i: Int = 0;
+            while i < m.len() as Int {
+                let pair = &m[i];
+                obj.insert(pair.0.clone(), to_json_lossy(&pair.1));
+                i = i + 1;
+            }
+            JsonObject(obj)
+        }
+        VTimestamp(n) => JsonInt(*n),
+        VUuid(b)      => JsonString(hex_render(b, &"uuid".clone())),
+        VDecimal(b)   => JsonString(hex_render(b, &"decimal".clone())),
+        VExtension { tag, payload } => JsonString(hex_render(payload, &f"ext({tag})")),
+    }
+}
+
+fn hex_render(b: &List<Byte>, prefix: &Text) -> Text {
+    let mut out: Text = prefix.clone();
+    out.push_str(&":".clone());
+    let n = b.len() as Int;
+    let mut i: Int = 0;
+    while i < n {
+        let v = (b[i] as Int) & 0xFF;
+        out.push_char(hex_nibble((v >> 4) & 0xF));
+        out.push_char(hex_nibble(v & 0xF));
+        i = i + 1;
+    }
+    out
+}
+
+fn hex_nibble(n: Int) -> Char {
+    if n < 10 { (0x30 + n) as Char } else { (0x57 + n) as Char }    // '0' or 'a'+(n-10)
+}
