@@ -1,0 +1,193 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: weft, http2, rapid_reset, made_you_reset, cve_2023_44487, cve_2023_45288, security, hardening
+// @timeout: 15000
+// @expected-exit: 0
+
+// `core/net/weft/http2.vr` — RapidResetGuard hardening regression
+// suite for §6.16 "Защита от HTTP/2 Rapid Reset / MadeYouReset".
+//
+//   * CVE-2023-44487 (Rapid Reset): client opens streams + immediately
+//     RST_STREAM, charging the server O(streams_per_second × work) CPU
+//     while bypassing MAX_CONCURRENT_STREAMS. Defence: per-connection
+//     RST_STREAM rate limit; on exhaustion the connection is poisoned
+//     and a GOAWAY(ENHANCE_YOUR_CALM=0x0b) is emitted.
+//
+//   * CVE-2023-45288 (MadeYouReset): same effect via malformed frames
+//     that force the server to RST_STREAM on the client's behalf.
+//     Charged against the same budget.
+//
+// These tests pin the *guard surface* the run_h2_session frame loop
+// depends on. End-to-end behaviour (frames over the wire, GOAWAY
+// emission) is exercised at integration-test time; this file pins
+// the invariants that integration suite relies on.
+
+mount core.net.weft.http2.{Http2Limits, RapidResetGuard, RstBudget};
+
+// =============================================================================
+// Test 1 — budget initialised at full capacity
+// =============================================================================
+
+fn guard_starts_healthy_at_full_budget() {
+    let limits = Http2Limits.default();
+    let guard = RapidResetGuard.new(&limits, 0);
+    assert(false == guard.is_poisoned());
+    assert(false == guard.should_refuse_new_stream());
+    assert(0 == guard.total_rst_count());
+}
+
+// =============================================================================
+// Test 2 — single RST does not poison
+// =============================================================================
+
+fn single_rst_does_not_poison() {
+    let limits = Http2Limits.default();
+    let mut guard = RapidResetGuard.new(&limits, 0);
+    let healthy = guard.on_rst_observed(1);
+    assert(true == healthy);
+    assert(false == guard.is_poisoned());
+    assert(1 == guard.total_rst_count());
+}
+
+// =============================================================================
+// Test 3 — 100 RSTs in 1 second do NOT poison (default budget=100)
+// =============================================================================
+
+fn hundred_rst_within_burst_does_not_poison() {
+    let limits = Http2Limits.default();   // 100/sec, burst 100
+    let mut guard = RapidResetGuard.new(&limits, 0);
+    let mut i = 0;
+    while i < 100 {
+        let ok = guard.on_rst_observed(0);
+        assert(true == ok);
+        i = i + 1;
+    }
+    assert(false == guard.is_poisoned());
+    assert(100 == guard.total_rst_count());
+}
+
+// =============================================================================
+// Test 4 — 1000 RSTs in 1 second DOES poison (and the guard signals
+// the frame loop to emit GOAWAY(ENHANCE_YOUR_CALM))
+// =============================================================================
+
+fn thousand_rst_in_one_second_poisons() {
+    let limits = Http2Limits.default();   // 100/sec, burst 100
+    let mut guard = RapidResetGuard.new(&limits, 0);
+    let mut poisoned_at: Int = -1;
+    let mut i = 0;
+    while i < 1000 {
+        let ok = guard.on_rst_observed(0);
+        if !ok && poisoned_at < 0 {
+            poisoned_at = i;
+        }
+        i = i + 1;
+    }
+    assert(true == guard.is_poisoned());
+    assert(true == guard.should_refuse_new_stream());
+    // Bucket starts with 100 whole tokens; 101st RST at the same
+    // instant must exhaust the budget.
+    assert(100 == poisoned_at);
+}
+
+// =============================================================================
+// Test 5 — time-based refill: budget resurrects after the window passes
+// =============================================================================
+
+fn refill_window_replenishes_budget() {
+    let limits = Http2Limits.default();   // 100/sec → 100 tokens/s
+    let mut guard = RapidResetGuard.new(&limits, 0);
+    // Drain 50 tokens at t=0.
+    let mut i = 0;
+    while i < 50 {
+        let ok = guard.on_rst_observed(0);
+        assert(true == ok);
+        i = i + 1;
+    }
+    assert(false == guard.is_poisoned());
+    // 1 second later, 100 tokens have been refilled (capped at 100).
+    // The guard should now happily admit another 50 RSTs.
+    let mut j = 0;
+    while j < 50 {
+        let ok = guard.on_rst_observed(1000);
+        assert(true == ok);
+        j = j + 1;
+    }
+    assert(false == guard.is_poisoned());
+    assert(100 == guard.total_rst_count());
+}
+
+// =============================================================================
+// Test 6 — MadeYouReset path counted against the same budget
+// (CVE-2023-45288)
+// =============================================================================
+
+fn made_you_reset_charged_against_same_budget() {
+    let limits = Http2Limits.default();   // 100/sec, burst 100
+    let mut guard = RapidResetGuard.new(&limits, 0);
+    // Mix RST_STREAM and protocol-violation frames; total > burst.
+    let mut i = 0;
+    while i < 50 {
+        let ok = guard.on_rst_observed(0);
+        assert(true == ok);
+        i = i + 1;
+    }
+    let mut j = 0;
+    while j < 50 {
+        let ok = guard.note_protocol_violation(0);
+        assert(true == ok);
+        j = j + 1;
+    }
+    // 100 events consumed full burst — next event of either kind
+    // must poison the connection.
+    assert(false == guard.is_poisoned());
+    let final_ok = guard.note_protocol_violation(0);
+    assert(false == final_ok);
+    assert(true == guard.is_poisoned());
+    assert(true == guard.should_refuse_new_stream());
+    assert(101 == guard.total_rst_count());
+}
+
+// =============================================================================
+// Test 7 — once poisoned, the guard never un-poisons
+// (one-shot semantics; connection must be torn down)
+// =============================================================================
+
+fn poisoned_guard_is_terminal() {
+    let limits = Http2Limits.default();
+    let mut guard = RapidResetGuard.new(&limits, 0);
+    let mut i = 0;
+    while i < 200 {
+        let _ = guard.on_rst_observed(0);
+        i = i + 1;
+    }
+    assert(true == guard.is_poisoned());
+    // Even a 60-second refill window does not revive the connection.
+    let _ = guard.on_rst_observed(60_000);
+    assert(true == guard.is_poisoned());
+    assert(true == guard.should_refuse_new_stream());
+}
+
+// =============================================================================
+// Test 8 — Http2Limits exposes the rapid_reset_budget +
+// rapid_reset_burst tunables, both at production-grade defaults
+// =============================================================================
+
+fn http2_limits_default_rapid_reset_tunables() {
+    let limits = Http2Limits.default();
+    assert(100 == limits.rapid_reset_budget);
+    assert(100 == limits.rapid_reset_burst);
+    assert(128 == limits.max_concurrent_streams);
+}
+
+fn main() {
+    guard_starts_healthy_at_full_budget();
+    single_rst_does_not_poison();
+    hundred_rst_within_burst_does_not_poison();
+    thousand_rst_in_one_second_poisons();
+    refill_window_replenishes_budget();
+    made_you_reset_charged_against_same_budget();
+    poisoned_guard_is_terminal();
+    http2_limits_default_rapid_reset_tunables();
+}

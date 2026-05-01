@@ -60,7 +60,8 @@ mount core.net.addr.{SocketAddr};
 mount core.net.tcp.{TcpStream};
 mount core.net.http.{Method, StatusCode, Version, Headers, Response};
 mount core.async.cancellation.{CancellationToken};
-mount core.sync.atomic.{AtomicBool, MemoryOrdering};
+mount core.sync.atomic.{AtomicBool, AtomicInt, MemoryOrdering};
+mount core.time.{Instant};
 mount core.net.http2.{
     PREFACE, FrameHeader, FrameType, FrameFlags, Frame,
     Settings, SettingId, ErrorCode, Http2Error,
@@ -89,7 +90,15 @@ public type Http2Limits is {
     max_header_list_size: Int,
     /// Hard cap on RST_STREAM rate (frames / second). Excess triggers
     /// GOAWAY(ENHANCE_YOUR_CALM). §6.16 mitigation.
-    max_rst_per_second: Int,
+    /// CVE-2023-44487 (Rapid Reset) + CVE-2023-45288 (MadeYouReset)
+    /// are both budgeted against this rate — protocol-violation
+    /// frames count the same as client-sent RST_STREAM.
+    rapid_reset_budget: Int,
+    /// Burst tolerance — maximum RST events a legitimate client may
+    /// stack before the steady-state refill rate kicks in. Defaults
+    /// to one second of budget so a brief mass-reset (browser
+    /// closing N tabs) does not poison the connection.
+    rapid_reset_burst: Int,
 };
 
 implement Http2Limits {
@@ -99,7 +108,8 @@ implement Http2Limits {
             initial_window_size:    65_535,
             max_frame_size:         16_384,
             max_header_list_size:   8 * 1024,
-            max_rst_per_second:     100,
+            rapid_reset_budget:     100,
+            rapid_reset_burst:      100,
         }
     }
 }
@@ -111,9 +121,202 @@ implement Clone for Http2Limits {
             initial_window_size:    self.initial_window_size,
             max_frame_size:         self.max_frame_size,
             max_header_list_size:   self.max_header_list_size,
-            max_rst_per_second:     self.max_rst_per_second,
+            rapid_reset_budget:     self.rapid_reset_budget,
+            rapid_reset_burst:      self.rapid_reset_burst,
         }
     }
+}
+
+// =============================================================================
+// RapidResetGuard — CVE-2023-44487 + CVE-2023-45288 defence
+// =============================================================================
+//
+// Two attack patterns close as one:
+//
+//   * Rapid Reset (CVE-2023-44487, Cloudflare/AWS/GCP, October 2023):
+//     attacker opens a stream and immediately sends RST_STREAM,
+//     bypassing MAX_CONCURRENT_STREAMS while charging the server
+//     O(streams_per_second × work_per_stream) CPU. The defence is to
+//     bound RST_STREAM rate per connection — once the client exceeds
+//     the budget, the connection is poisoned and a
+//     GOAWAY(ENHANCE_YOUR_CALM=0x0b) is emitted.
+//
+//   * MadeYouReset (CVE-2023-45288, August 2023): same effect via a
+//     malformed frame that forces the server to RST_STREAM on the
+//     client's behalf. We charge those server-emitted RSTs against
+//     the same budget so the attacker cannot route around the
+//     limiter by sending protocol violations instead of RST_STREAM.
+//
+// The guard is per-connection, stack-allocated alongside the frame
+// loop, and O(1) per RST event — token-bucket refill on observation,
+// no allocation, no locking. The hot request path (HEADERS/DATA frames)
+// is untouched.
+//
+// Design parallels `core/net/weft/backpressure.vr`'s `RateLimitLayer`,
+// but with the per-RST event surface tailored for HTTP/2 — instead of
+// dropping a single request, exhausting the budget poisons the whole
+// connection.
+//
+// @red-team-defense(CVE-2023-44487, CVE-2023-45288)
+
+/// Token-bucket budget for RST_STREAM events on a single HTTP/2
+/// connection. `tokens_milli` is `tokens × 1000` so refills can be
+/// fractional — `refill_per_ms_milli = budget` (per-second) gives
+/// `budget` whole tokens per 1000 ms.
+public type RstBudget is {
+    /// Current tokens × 1000.
+    tokens_milli: Int,
+    /// Burst capacity × 1000.
+    capacity_milli: Int,
+    /// Refill rate, tokens × 1000 per millisecond.
+    /// Equals `rapid_reset_budget` (per-second value, since
+    /// 1 token/sec = 1000 token-milli / 1000 ms = 1 token-milli/ms).
+    refill_per_ms_milli: Int,
+    /// Last refill timestamp, monotonic ms since epoch.
+    last_refill_ms: Int,
+};
+
+implement RstBudget {
+    /// Construct a fresh budget at full capacity. `budget_per_sec`
+    /// is the steady-state RST/sec ceiling; `burst` is the burst
+    /// tolerance.
+    public fn new(budget_per_sec: Int, burst: Int, now_ms: Int) -> RstBudget {
+        RstBudget {
+            tokens_milli:        burst * 1000,
+            capacity_milli:      burst * 1000,
+            refill_per_ms_milli: budget_per_sec,
+            last_refill_ms:      now_ms,
+        }
+    }
+}
+
+implement Clone for RstBudget {
+    fn clone(&self) -> RstBudget {
+        RstBudget {
+            tokens_milli:        self.tokens_milli,
+            capacity_milli:      self.capacity_milli,
+            refill_per_ms_milli: self.refill_per_ms_milli,
+            last_refill_ms:      self.last_refill_ms,
+        }
+    }
+}
+
+/// Per-connection rapid-reset guard. Owns the token bucket plus a
+/// poisoned flag — once poisoned, the frame loop emits GOAWAY and
+/// drops further stream-creation attempts.
+///
+/// Lifetime: stack-allocated inside `run_h2_session`; passed by
+/// `&mut` to every frame-loop arm that observes a RST_STREAM or
+/// detects a protocol violation.
+public type RapidResetGuard is {
+    budget: RstBudget,
+    poisoned: Bool,
+    /// Cumulative RST count for diagnostics / telemetry.
+    rst_observed: Int,
+    /// Cumulative MadeYouReset (protocol-violation) count.
+    made_you_reset_observed: Int,
+};
+
+implement RapidResetGuard {
+    /// Build a guard for one HTTP/2 connection from the configured
+    /// limits. `now_ms` should be the result of `monotonic_now_ms()`
+    /// at session start.
+    public fn new(limits: &Http2Limits, now_ms: Int) -> RapidResetGuard {
+        RapidResetGuard {
+            budget: RstBudget.new(
+                limits.rapid_reset_budget,
+                limits.rapid_reset_burst,
+                now_ms,
+            ),
+            poisoned:                false,
+            rst_observed:            0,
+            made_you_reset_observed: 0,
+        }
+    }
+
+    /// Advance the bucket clock and refill tokens up to capacity.
+    /// O(1). Called at the top of every guard operation so the bucket
+    /// is current before debiting.
+    fn refill(&mut self, now_ms: Int) {
+        let elapsed = now_ms - self.budget.last_refill_ms;
+        if elapsed <= 0 { return; }
+        let added = elapsed * self.budget.refill_per_ms_milli;
+        let new_tokens = self.budget.tokens_milli + added;
+        self.budget.tokens_milli = if new_tokens > self.budget.capacity_milli {
+            self.budget.capacity_milli
+        } else {
+            new_tokens
+        };
+        self.budget.last_refill_ms = now_ms;
+    }
+
+    /// Debit one whole token (1000 token-milli). Returns true if the
+    /// debit succeeded (legitimate event), false if the bucket is
+    /// empty — caller must poison the connection.
+    fn try_debit(&mut self) -> Bool {
+        if self.budget.tokens_milli < 1000 { return false; }
+        self.budget.tokens_milli = self.budget.tokens_milli - 1000;
+        true
+    }
+
+    /// Account for an observed RST_STREAM (CVE-2023-44487). Returns
+    /// true if the connection remains healthy; false if the budget
+    /// was exhausted and the guard transitioned to poisoned.
+    /// O(1). Safe to call from the hot frame-loop path.
+    public fn on_rst_observed(&mut self, now_ms: Int) -> Bool {
+        if self.poisoned { return false; }
+        self.rst_observed = self.rst_observed + 1;
+        self.refill(now_ms);
+        if !self.try_debit() {
+            self.poisoned = true;
+            return false;
+        }
+        true
+    }
+
+    /// Account for a protocol-violation that the server must answer
+    /// with RST_STREAM (CVE-2023-45288 MadeYouReset). Charges the
+    /// same budget — an attacker can't route around the limiter by
+    /// sending malformed frames instead of RST_STREAM. Returns the
+    /// same poisoned/healthy verdict as `on_rst_observed`.
+    public fn note_protocol_violation(&mut self, now_ms: Int) -> Bool {
+        if self.poisoned { return false; }
+        self.made_you_reset_observed = self.made_you_reset_observed + 1;
+        self.refill(now_ms);
+        if !self.try_debit() {
+            self.poisoned = true;
+            return false;
+        }
+        true
+    }
+
+    /// Has the budget been exhausted? Once true, never resets — the
+    /// connection is one-shot poisoned and must be torn down.
+    public fn is_poisoned(&self) -> Bool {
+        self.poisoned
+    }
+
+    /// Should the accept loop refuse a new stream-id? Currently this
+    /// is exactly `is_poisoned`, but the predicate is named for the
+    /// callsite so tightening (e.g. shed when below 5% budget) is a
+    /// drop-in change.
+    public fn should_refuse_new_stream(&self) -> Bool {
+        self.poisoned
+    }
+
+    /// Diagnostic: cumulative count of RST_STREAM frames the guard
+    /// has accounted for. Includes both client-sent and
+    /// server-induced (MadeYouReset).
+    public fn total_rst_count(&self) -> Int {
+        self.rst_observed + self.made_you_reset_observed
+    }
+}
+
+/// Monotonic millisecond clock. Mirrors the helper at the bottom of
+/// `core/net/weft/backpressure.vr`; duplicated here to avoid
+/// cross-file coupling on a one-line shim.
+fn monotonic_now_ms() -> Int {
+    Instant.now().duration_since_epoch().as_millis()
 }
 
 // =============================================================================
@@ -226,14 +429,35 @@ pub async fn run_h2_session<H: Handler>(
     let mut hpack_decoder = HpackDecoder.new();
     let mut hpack_encoder = HpackEncoder.new();
     let mut streams: Map<UInt32, StreamSlot> = Map.new();
-    let mut rst_count_window: Int = 0;
+    // §6.16 / CVE-2023-44487 / CVE-2023-45288: per-connection
+    // rapid-reset budget. Replaces a naive per-second counter with a
+    // proper token-bucket so legitimate burst patterns (browser
+    // closing N tabs) do not poison the connection while sustained
+    // attack traffic is choked off via GOAWAY(ENHANCE_YOUR_CALM).
+    let mut guard = RapidResetGuard.new(limits, monotonic_now_ms());
 
     loop {
         if token.is_cancelled() { break; }
         if draining.load(MemoryOrdering.Acquire) { break; }
 
         let frame = match read_frame(&mut stream, limits, token).await {
-            Err(e) => return Err(e),
+            Err(e) => {
+                // CVE-2023-45288 (MadeYouReset): a malformed frame
+                // forces the server to RST_STREAM on the client's
+                // behalf. Charge the same budget so an attacker can't
+                // route around the limiter by sending protocol
+                // violations instead of explicit RST_STREAM.
+                if is_protocol_violation(&e) {
+                    let _ = guard.note_protocol_violation(monotonic_now_ms());
+                    if guard.is_poisoned() {
+                        let _ = send_goaway(
+                            &mut stream, 0, ErrorCode.EnhanceYourCalm,
+                        ).await;
+                        return Err(Http2Error.ExcessiveRstStream);
+                    }
+                }
+                return Err(e);
+            }
             Ok(f)  => f,
         };
 
@@ -261,18 +485,31 @@ pub async fn run_h2_session<H: Handler>(
                 break;
             }
             Frame.RstStreamFrame { stream_id, .. } => {
-                rst_count_window = rst_count_window + 1;
-                if rst_count_window > limits.max_rst_per_second {
-                    // §6.16 mitigation.
+                // CVE-2023-44487 — debit one token from the
+                // per-connection RST budget. On exhaustion the guard
+                // transitions to poisoned and we emit GOAWAY with
+                // ENHANCE_YOUR_CALM (RFC 7540 §7, error code 0x0b).
+                let healthy = guard.on_rst_observed(monotonic_now_ms());
+                streams.remove(&stream_id);
+                if !healthy {
                     let _ = send_goaway(
                         &mut stream, 0, ErrorCode.EnhanceYourCalm,
                     ).await;
                     return Err(Http2Error.ExcessiveRstStream);
                 }
-                streams.remove(&stream_id);
             }
             Frame.HeadersFrame { .. } | Frame.DataFrame { .. } |
             Frame.ContinuationFrame { .. } => {
+                // CVE-2023-44487 stream-creation surface — refuse to
+                // open a new stream once the guard has poisoned the
+                // connection. The accept loop drops the stream id and
+                // falls through to the GOAWAY emission below.
+                if guard.should_refuse_new_stream() {
+                    let _ = send_goaway(
+                        &mut stream, 0, ErrorCode.EnhanceYourCalm,
+                    ).await;
+                    return Err(Http2Error.ExcessiveRstStream);
+                }
                 // Request-handling path. Scaffolding: reply immediately
                 // with 501 Not Implemented until the full HPACK/body
                 // pipeline lands in a follow-up commit.
@@ -350,6 +587,20 @@ fn encode_frame_to_ints(frame: &Frame, out: &mut List<Int>) {
     core.net.http2.encode_frame(frame, &mut bytes);
     for i in 0..bytes.len() {
         out.push(bytes[i] as Int);
+    }
+}
+
+/// CVE-2023-45288 (MadeYouReset) classifier. Returns true for
+/// frame-level protocol violations the server must answer with a
+/// RST_STREAM the client did not itself send. Excludes IO and
+/// graceful-close errors (those are not attack-relevant).
+fn is_protocol_violation(e: &Http2Error) -> Bool {
+    match e {
+        Http2Error.MalformedFrame(_)              => true,
+        Http2Error.HpackError(_)                  => true,
+        Http2Error.FrameSizeExceeded { .. }       => true,
+        Http2Error.StreamError { .. }             => true,
+        _                                         => false,
     }
 }
 
