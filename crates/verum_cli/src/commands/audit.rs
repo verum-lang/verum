@@ -3832,15 +3832,24 @@ fn audit_cross_format_roundtrip_inner(
 /// admits new inference rules (refinement subtyping, W-types,
 /// inductive types, etc.).
 pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
+    use verum_kernel::kernel_registry::{AgreementVerdict, KernelRegistry};
     use verum_kernel::proof_checker::Certificate;
     use verum_kernel::proof_checker_meta;
-    use verum_kernel::proof_checker_nbe;
 
     if matches!(format, AuditFormat::Plain) {
         ui::step(
-            "Verifying canonical proof-term certificate library (NbE-differential + universe-stability)",
+            "Verifying canonical proof-term certificate library (N-kernel + universe-stability)",
         );
     }
+
+    // **#159 V4 — N-kernel registry**.  Built once at audit entry;
+    // every certificate runs through every registered kernel via
+    // `registry.verify_all(&cert)`.  Adding a third kernel (#154
+    // self-hosted Verum kernel, future HOAS-based checker, ...)
+    // takes one line at the registry construction site below; the
+    // audit gate's per-cert flow stays unchanged.
+    let kernel_registry = KernelRegistry::default();
+    let registered_kernel_names: Vec<&'static str> = kernel_registry.names();
 
     // Discovery: env override → workspace ancestor walk → manifest dir
     // co-located.
@@ -3924,8 +3933,10 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
                         .get("expected_outcome")
                         .map(|s| s.as_str() == "reject")
                         .unwrap_or(false);
-                    let trusted_outcome = cert.verify();
-                    let nbe_outcome = proof_checker_nbe::verify_certificate(&cert);
+                    // **#159 V4 — N-kernel registry verification**.
+                    // Run the certificate through every registered
+                    // kernel; classify agreement; flag disagreements.
+                    let multi_verdict = kernel_registry.verify_all(&cert);
                     // **#158 V1 universe-stability check** — verify
                     // the certificate's verdict is invariant under
                     // universe-lift. Bumping every Universe(n) →
@@ -3937,69 +3948,85 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
                     if !stable {
                         universe_unstable += 1;
                     }
-                    // Differential agreement check: both kernels MUST
-                    // agree on accept/reject. Disagreements surface as
-                    // a distinct `disagreement` outcome category that
-                    // flips the audit gate to failure.
-                    let agreement = match (&trusted_outcome, &nbe_outcome) {
-                        (Ok(_), Ok(_)) => "both_accept",
-                        (Err(_), Err(_)) => "both_reject",
-                        _ => {
-                            nbe_disagreements += 1;
-                            "disagreement"
-                        }
-                    };
+                    // Disagreement bookkeeping: the `nbe_disagreements`
+                    // counter is preserved for backwards compatibility
+                    // with the schema-version-3 JSON consumers; under
+                    // the N-kernel registry it counts "any pair of
+                    // kernels disagreed".
+                    if matches!(
+                        multi_verdict.agreement,
+                        AgreementVerdict::Disagreement { .. }
+                    ) {
+                        nbe_disagreements += 1;
+                    }
+                    let unanimous_accept = matches!(
+                        multi_verdict.agreement,
+                        AgreementVerdict::Unanimous,
+                    );
+                    let unanimous_reject = matches!(
+                        multi_verdict.agreement,
+                        AgreementVerdict::UnanimousReject,
+                    );
                     let (label, detail) = if expected_reject {
-                        // Adversarial path: both kernels MUST reject.
-                        match (&trusted_outcome, agreement) {
-                            (Err(_), "both_reject") => {
-                                adversarial_rejected += 1;
-                                (
-                                    "adversarial_rejected",
-                                    format!(
-                                        "lock-step rejection (trusted_base={:?}, nbe={:?})",
-                                        trusted_outcome, nbe_outcome,
-                                    ),
-                                )
-                            }
-                            (_, "both_accept") => {
-                                // SOUNDNESS BUG: an adversarial
-                                // certificate the kernel claims is valid.
-                                adversarial_unsoundly_accepted += 1;
-                                (
-                                    "adversarial_unsoundly_accepted",
-                                    "Both kernels ACCEPTED a certificate \
+                        // Adversarial path: every kernel MUST reject.
+                        if unanimous_reject {
+                            adversarial_rejected += 1;
+                            (
+                                "adversarial_rejected",
+                                format!(
+                                    "lock-step rejection across {} kernels: {:?}",
+                                    registered_kernel_names.len(),
+                                    registered_kernel_names,
+                                ),
+                            )
+                        } else if unanimous_accept {
+                            // SOUNDNESS BUG: every kernel ACCEPTED a
+                            // certificate marked expected_outcome=reject.
+                            adversarial_unsoundly_accepted += 1;
+                            (
+                                "adversarial_unsoundly_accepted",
+                                format!(
+                                    "EVERY kernel ({}) accepted a certificate \
                                      marked expected_outcome=reject — \
-                                     soundness violation."
-                                        .to_string(),
-                                )
-                            }
-                            _ => (
+                                     soundness violation.",
+                                    registered_kernel_names.len(),
+                                ),
+                            )
+                        } else {
+                            (
                                 "disagreement",
                                 format!(
-                                    "adversarial disagreement: trusted_base={:?}, nbe={:?}",
-                                    trusted_outcome, nbe_outcome,
+                                    "adversarial disagreement across {} kernels: {:?}",
+                                    registered_kernel_names.len(),
+                                    multi_verdict.agreement,
                                 ),
-                            ),
+                            )
                         }
                     } else {
-                        // Canonical-accept path: both kernels MUST accept.
-                        match (&trusted_outcome, agreement) {
-                            (Ok(()), "both_accept") => {
-                                verified += 1;
-                                ("verified", String::new())
-                            }
-                            (Err(e), "both_reject") => {
-                                rejected += 1;
-                                ("rejected", format!("{:?}", e))
-                            }
-                            _ => (
+                        // Canonical-accept path: every kernel MUST accept.
+                        if unanimous_accept {
+                            verified += 1;
+                            ("verified", String::new())
+                        } else if unanimous_reject {
+                            rejected += 1;
+                            // Pull the first error summary from the
+                            // outcomes (all are rejecting; the first
+                            // one's message is representative).
+                            let first_err = multi_verdict
+                                .outcomes
+                                .iter()
+                                .find_map(|o| o.error_summary.clone())
+                                .unwrap_or_default();
+                            ("rejected", first_err)
+                        } else {
+                            (
                                 "disagreement",
                                 format!(
-                                    "trusted_base={:?}, nbe={:?}",
-                                    trusted_outcome, nbe_outcome,
+                                    "kernel-disagreement across {} kernels: {:?}",
+                                    registered_kernel_names.len(),
+                                    multi_verdict.agreement,
                                 ),
-                            ),
+                            )
                         }
                     };
                     (label, name, detail)
@@ -4035,9 +4062,14 @@ pub fn audit_proof_term_library_with_format(format: AuditFormat) -> Result<()> {
         let _ = std::fs::create_dir_all(parent);
     }
     let payload = serde_json::json!({
-        "schema_version": 4,
+        "schema_version": 5,
         "command": "audit-proof-term-library",
         "library_path": library_dir.display().to_string(),
+        // **#159 V4** — list every kernel implementation in the
+        // registered set. Reviewers reading the report can confirm
+        // which independent implementations the corpus was
+        // differential-tested against.
+        "registered_kernels": registered_kernel_names,
         "total": entries.len(),
         "verified": verified,
         "rejected": rejected,
