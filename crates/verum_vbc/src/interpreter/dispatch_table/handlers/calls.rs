@@ -112,6 +112,16 @@ pub(in super::super) fn handle_call(state: &mut InterpreterState) -> Interpreter
                 state.set_reg(dst, result);
                 return Ok(DispatchResult::Continue);
             }
+            if let Some(result) = super::net_runtime::try_intercept_net_runtime(
+                state,
+                &func_name,
+                args.start.0,
+                args.count,
+                caller_base,
+            )? {
+                state.set_reg(dst, result);
+                return Ok(DispatchResult::Continue);
+            }
         }
     }
 
@@ -229,6 +239,12 @@ pub(in super::super) fn handle_call_generic(state: &mut InterpreterState) -> Int
     let bytecode_length = func.bytecode_length;
     let func_name_id = func.name;
     let reg_count = func.register_count;
+
+    if std::env::var("VERUM_TRACE_CALLS").is_ok() {
+        let func_name: String = state.module.strings.get(func_name_id).map(|s| s.to_string()).unwrap_or_default();
+        eprintln!("[trace-callG] func_id={} name='{}' descriptor.id={} args.count={} bytecode_length={}",
+            func_id.0, func_name, func.id.0, args.count, bytecode_length);
+    }
 
     // Intercept external/intrinsic functions with no bytecode body
     if bytecode_length == 0 {
