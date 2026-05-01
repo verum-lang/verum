@@ -579,8 +579,32 @@ impl<V: Visitor> IterativeVisitor<V> {
         self.run_loop();
     }
 
+    // SAFETY contract for every `transmute::<&T, &'static T>` in
+    // the `traverse_*` family below.  The work-stack-based
+    // iterative visitor stores AST node references as
+    // `WorkItem::*(&'static Stmt|Block|Item|Pattern|Type|…)` so
+    // recursion bounded by stack depth never blows the call stack.
+    // The 'static lifetime is a lie — the stored reference's true
+    // lifetime is the caller's `'a` borrow.  The unsafety is sound
+    // because:
+    //   1. `traverse_*` methods take `&'a mut self` + `&'a T` —
+    //      both borrows are alive for the function body.
+    //   2. After `push(WorkItem::T(t_static))`, `run_loop()` is
+    //      called immediately and DRAINS the entire stack before
+    //      returning (see `while let Some(item) = self.stack.pop()`
+    //      loop in run_loop).
+    //   3. Therefore no WorkItem outlives the original `&'a T`
+    //      borrow — the laundered 'static is consumed within the
+    //      same function call where the borrow was active.
+    //
+    // A change that ever causes `run_loop` to NOT drain the stack
+    // (e.g., early-return on visitor error, async pause) would
+    // break this contract — pin tests in run_loop would catch the
+    // regression at construction time.
+
     /// Traverse a statement iteratively.
     pub fn traverse_stmt<'a>(&'a mut self, stmt: &'a Stmt) {
+        // SAFETY: see the contract block above for traverse_*.
         let stmt_static = unsafe { std::mem::transmute::<&Stmt, &'static Stmt>(stmt) };
         self.stack.push(WorkItem::Stmt(stmt_static));
         self.run_loop();
@@ -588,6 +612,7 @@ impl<V: Visitor> IterativeVisitor<V> {
 
     /// Traverse a block iteratively.
     pub fn traverse_block<'a>(&'a mut self, block: &'a Block) {
+        // SAFETY: see the contract block above for traverse_*.
         let block_static = unsafe { std::mem::transmute::<&Block, &'static Block>(block) };
         self.stack.push(WorkItem::Block(block_static));
         self.run_loop();
@@ -595,6 +620,7 @@ impl<V: Visitor> IterativeVisitor<V> {
 
     /// Traverse an item iteratively.
     pub fn traverse_item<'a>(&'a mut self, item: &'a Item) {
+        // SAFETY: see the contract block above for traverse_*.
         let item_static = unsafe { std::mem::transmute::<&Item, &'static Item>(item) };
         self.stack.push(WorkItem::Item(item_static));
         self.run_loop();
@@ -602,6 +628,7 @@ impl<V: Visitor> IterativeVisitor<V> {
 
     /// Traverse a pattern iteratively.
     pub fn traverse_pattern<'a>(&'a mut self, pattern: &'a Pattern) {
+        // SAFETY: see the contract block above for traverse_*.
         let pattern_static = unsafe { std::mem::transmute::<&Pattern, &'static Pattern>(pattern) };
         self.stack.push(WorkItem::Pattern(pattern_static));
         self.run_loop();
@@ -609,6 +636,7 @@ impl<V: Visitor> IterativeVisitor<V> {
 
     /// Traverse a type iteratively.
     pub fn traverse_type<'a>(&'a mut self, ty: &'a Type) {
+        // SAFETY: see the contract block above for traverse_*.
         let ty_static = unsafe { std::mem::transmute::<&Type, &'static Type>(ty) };
         self.stack.push(WorkItem::Type(ty_static));
         self.run_loop();
