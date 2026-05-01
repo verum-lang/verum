@@ -139,6 +139,39 @@ impl PermissionScope {
 /// target hit the one-entry cache.
 pub type PermissionTargetId = u64;
 
+/// Sentinel target_id meaning "wildcard / coarse-mode check".
+/// The intercept-side gate passes this when it doesn't have a
+/// structured target value to hash.  The policy treats it as
+/// "any grant of the scope's matching kind allows".
+pub const WILDCARD_TARGET_ID: PermissionTargetId = 0;
+
+/// Compute a stable u64 [`PermissionTargetId`] from a target string.
+///
+/// Used by the Tier-0 intercept gates to compute the target_id for
+/// a specific resource (host:port, canonical path, program name,
+/// env-var key, etc.) so the [`PermissionRouter`] can look up
+/// granular grants set up by `verum_cli::script::permissions`
+/// frontmatter parsing.
+///
+/// **Algorithm**: BLAKE3 truncated to 8 bytes (low-endian).
+/// Collisions over a script's grant set are vanishingly improbable
+/// (≈2⁻³² for unrelated strings) and would only over-grant — never
+/// under-grant — because the policy registry stores explicit
+/// `Allow` entries and the default outside the granted set is
+/// `Deny`.
+///
+/// MUST agree byte-for-byte with `verum_cli::commands::file::
+/// hash_grant_target` so the build-time grant-key precomputation
+/// and the runtime check both produce the same `(scope, u64)`
+/// tuple for any given target string.
+pub fn target_id_for(target: &str) -> PermissionTargetId {
+    let h = blake3::hash(target.as_bytes());
+    let bytes = h.as_bytes();
+    u64::from_le_bytes([
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+    ])
+}
+
 /// Result of routing a single check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermissionDecision {
