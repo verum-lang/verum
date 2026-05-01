@@ -176,6 +176,47 @@ impl<'ctx> TensorIR<'ctx> {
         Some(func)
     }
 
+    /// Compute a pointer to a tensor-header field at the given
+    /// byte offset.  Single-source SAFETY contract for all the
+    /// header load / store helpers below (#310 consolidation —
+    /// previously each helper duplicated the same unsafe GEP).
+    ///
+    /// SAFETY of the underlying `build_in_bounds_gep`:
+    ///   1. `base_ptr` is a tensor-header allocation produced by
+    ///      `emit_alloca_tensor_header` (or equivalent), which
+    ///      always reserves enough bytes for every documented
+    ///      header field.
+    ///   2. `byte_offset` is one of the canonical header-field
+    ///      offsets defined in the tensor IR layout (see
+    ///      `tensor_layout::FIELD_*` consts).  Every call site
+    ///      passes a layout const — never a user-controlled
+    ///      value.
+    ///   3. The result is a pointer back into the same allocation
+    ///      with provenance preserved; subsequent loads/stores
+    ///      through it stay in-bounds because the tensor header
+    ///      cannot grow or shrink (it's a fixed-size struct
+    ///      lowered to i8 storage).
+    fn header_field_ptr_in_bounds(
+        &self,
+        builder: &verum_llvm::builder::Builder<'ctx>,
+        base_ptr: verum_llvm::values::PointerValue<'ctx>,
+        byte_offset: u64,
+        name: &str,
+    ) -> Result<verum_llvm::values::PointerValue<'ctx>> {
+        let i8_type = self.context.i8_type();
+        let i64_type = self.context.i64_type();
+        let offset = i64_type.const_int(byte_offset, false);
+        // SAFETY: see contract on the function — caller-provided
+        // `byte_offset` is always a layout const, `base_ptr` is
+        // always a tensor header allocation.
+        let field_ptr = unsafe {
+            builder
+                .build_in_bounds_gep(i8_type, base_ptr, &[offset], &format!("{}_ptr", name))
+                .or_llvm_err()?
+        };
+        Ok(field_ptr)
+    }
+
     /// Load a field from the tensor header at the given byte offset.
     /// `base` is a pointer (i8*), result is i64 by default.
     fn load_header_i64(
@@ -185,12 +226,8 @@ impl<'ctx> TensorIR<'ctx> {
         byte_offset: u64,
         name: &str,
     ) -> Result<verum_llvm::values::IntValue<'ctx>> {
-        let i8_type = self.context.i8_type();
         let i64_type = self.context.i64_type();
-        let offset = i64_type.const_int(byte_offset, false);
-        let field_ptr = unsafe {
-            builder.build_in_bounds_gep(i8_type, base_ptr, &[offset], &format!("{}_ptr", name)).or_llvm_err()?
-        };
+        let field_ptr = self.header_field_ptr_in_bounds(builder, base_ptr, byte_offset, name)?;
         Ok(builder.build_load(i64_type, field_ptr, name).or_llvm_err()?.into_int_value())
     }
 
@@ -202,13 +239,8 @@ impl<'ctx> TensorIR<'ctx> {
         byte_offset: u64,
         name: &str,
     ) -> Result<verum_llvm::values::PointerValue<'ctx>> {
-        let i8_type = self.context.i8_type();
-        let i64_type = self.context.i64_type();
         let ptr_type = self.context.ptr_type(AddressSpace::default());
-        let offset = i64_type.const_int(byte_offset, false);
-        let field_ptr = unsafe {
-            builder.build_in_bounds_gep(i8_type, base_ptr, &[offset], &format!("{}_ptr", name)).or_llvm_err()?
-        };
+        let field_ptr = self.header_field_ptr_in_bounds(builder, base_ptr, byte_offset, name)?;
         Ok(builder.build_load(ptr_type, field_ptr, name).or_llvm_err()?.into_pointer_value())
     }
 
@@ -221,12 +253,7 @@ impl<'ctx> TensorIR<'ctx> {
         value: verum_llvm::values::IntValue<'ctx>,
         name: &str,
     ) -> Result<()> {
-        let i8_type = self.context.i8_type();
-        let i64_type = self.context.i64_type();
-        let offset = i64_type.const_int(byte_offset, false);
-        let field_ptr = unsafe {
-            builder.build_in_bounds_gep(i8_type, base_ptr, &[offset], &format!("{}_ptr", name)).or_llvm_err()?
-        };
+        let field_ptr = self.header_field_ptr_in_bounds(builder, base_ptr, byte_offset, name)?;
         builder.build_store(field_ptr, value).or_llvm_err()?;
         Ok(())
     }
@@ -240,12 +267,7 @@ impl<'ctx> TensorIR<'ctx> {
         value: verum_llvm::values::PointerValue<'ctx>,
         name: &str,
     ) -> Result<()> {
-        let i8_type = self.context.i8_type();
-        let i64_type = self.context.i64_type();
-        let offset = i64_type.const_int(byte_offset, false);
-        let field_ptr = unsafe {
-            builder.build_in_bounds_gep(i8_type, base_ptr, &[offset], &format!("{}_ptr", name)).or_llvm_err()?
-        };
+        let field_ptr = self.header_field_ptr_in_bounds(builder, base_ptr, byte_offset, name)?;
         builder.build_store(field_ptr, value).or_llvm_err()?;
         Ok(())
     }
@@ -259,12 +281,7 @@ impl<'ctx> TensorIR<'ctx> {
         value: verum_llvm::values::IntValue<'ctx>,
         name: &str,
     ) -> Result<()> {
-        let i8_type = self.context.i8_type();
-        let i64_type = self.context.i64_type();
-        let offset = i64_type.const_int(byte_offset, false);
-        let field_ptr = unsafe {
-            builder.build_in_bounds_gep(i8_type, base_ptr, &[offset], &format!("{}_ptr", name)).or_llvm_err()?
-        };
+        let field_ptr = self.header_field_ptr_in_bounds(builder, base_ptr, byte_offset, name)?;
         builder.build_store(field_ptr, value).or_llvm_err()?;
         Ok(())
     }
@@ -278,12 +295,7 @@ impl<'ctx> TensorIR<'ctx> {
         value: verum_llvm::values::IntValue<'ctx>,
         name: &str,
     ) -> Result<()> {
-        let i8_type = self.context.i8_type();
-        let i64_type = self.context.i64_type();
-        let offset = i64_type.const_int(byte_offset, false);
-        let field_ptr = unsafe {
-            builder.build_in_bounds_gep(i8_type, base_ptr, &[offset], &format!("{}_ptr", name)).or_llvm_err()?
-        };
+        let field_ptr = self.header_field_ptr_in_bounds(builder, base_ptr, byte_offset, name)?;
         builder.build_store(field_ptr, value).or_llvm_err()?;
         Ok(())
     }
