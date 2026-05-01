@@ -38,6 +38,7 @@ public module async_pool;
 public module async_transaction;
 public module async_typed_database;
 public module binlog;
+public module binlog_rows;
 
 public mount .config.{
     MysqlConfig, MysqlTlsMode,
@@ -114,6 +115,7 @@ public mount .binlog.{
     BinlogStream, BinlogEventHeader,
     BinlogEvent, BeQuery, BeXid, BeRotate, BeFormatDescription,
     BeGtid, BeHeartbeat, BeOther,
+    BeTableMap, BeWriteRows, BeUpdateRows, BeDeleteRows,
     QueryEventBody, RotateEventBody, FormatDescriptionBody,
     GtidEventBody,
     connect_binlog,
@@ -121,4 +123,17 @@ public mount .binlog.{
     ET_QUERY, ET_XID, ET_ROTATE, ET_FORMAT_DESCRIPTION,
     ET_GTID, ET_ANONYMOUS_GTID, ET_HEARTBEAT,
     ET_TABLE_MAP, ET_WRITE_ROWS_V2, ET_UPDATE_ROWS_V2, ET_DELETE_ROWS_V2,
+};
+public mount .binlog_rows.{
+    TableMapEvent, ColumnMeta, TableMapCache,
+    RowEventKind, RkWrite, RkUpdate, RkDelete,
+    RowsEvent, RowValue,
+    RvNull, RvInt, RvUInt, RvFloat, RvText, RvBytes,
+    RvDateTime, RvDate, RvTime, RvRaw,
+    DecodedRow, DecodedRows, DrSimple, DrPairs,
+    decode_with_table_map,
+    COL_TYPE_TINY, COL_TYPE_SHORT, COL_TYPE_LONG, COL_TYPE_LONGLONG,
+    COL_TYPE_FLOAT, COL_TYPE_DOUBLE, COL_TYPE_VARCHAR, COL_TYPE_BLOB,
+    COL_TYPE_TIMESTAMP, COL_TYPE_DATETIME, COL_TYPE_NEWDECIMAL,
+    COL_TYPE_JSON, COL_TYPE_NULL,
 };
