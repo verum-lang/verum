@@ -31,6 +31,7 @@ public module error;
 public module connection;
 public module adapter;
 public module pool;
+public module typed_database;
 public module introspect;
 
 // Re-exports — keep the user-facing surface compact.
@@ -52,4 +53,10 @@ public mount .connection.{
 };
 public mount .error.dberr_from_loom;
 public mount .pool.SqlitePool;
+public mount .typed_database.{
+    SqliteTxScope,
+    sqlite_database_from_pool,
+    sqlite_admin_database_from_pool,
+    sqlite_readonly_database_from_pool,
+};
 public mount .introspect.introspect as introspect_sqlite;

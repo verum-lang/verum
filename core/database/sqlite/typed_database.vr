@@ -1,0 +1,379 @@
+// =============================================================================
+// core/database/sqlite/typed_database.vr — capability-bounded SQLite surface
+// =============================================================================
+// Layer: 3 (Database — sqlite façade)
+// Spec: internal/specs/database.md §5.4 (capability types), §6.2 (SQLite)
+// =============================================================================
+//
+// Mirror of `core.database.postgres.typed_database` and
+// `core.database.mysql.typed_database` for the SQLite façade. Same
+// capability-bounded `implement<C: ...> Database<SqlitePool, C>`
+// pattern; same affine-Tx semantics.
+//
+// # Two-lattice architecture (deliberate)
+//
+// SQLite has TWO capability lattices in the codebase:
+//
+//   1. **Common lattice** (this module) —
+//      `core.database.common.capability` + `Database<SqlitePool, C>`:
+//      `DbRead` / `DbReadWriteTx` / `DbAdmin` / … with
+//      `CanRead` / `CanWrite` / `CanTx` / `CanDdl` / `CanUnsafe`
+//      protocol bounds. THIS IS THE USER-FACING SURFACE.
+//
+//   2. **Native L7 lattice** —
+//      `core.database.sqlite.native.l7_api.capability` +
+//      `TypedConnection<C>`: `ReadCap` / `WriteCap` / `AdminCap`.
+//      Used by the SQLite engine's INTERNAL paths (planner,
+//      VDBE codegen, statement compilation) where the tighter
+//      typed surface helps the in-engine code rule out
+//      mode-mismatch bugs at compile time.
+//
+// The two lattices are intentionally parallel rather than bridged:
+// the common lattice is the cross-adapter contract every handler
+// uses (PG / MySQL / SQLite all see the same Database<P, C> shape);
+// the native lattice is an SQLite-specific implementation detail.
+// User code never reaches for L7 TypedConnection — it goes through
+// `Database<SqlitePool, C>`.
+//
+// # Differences from postgres/mysql typed_database
+//
+//   * **SQLite-specific begin variants**: `begin()` (DEFERRED — no
+//     lock until first write), `begin_immediate()` (RESERVED lock
+//     up front — recommended for OLTP per spec §6.2), `begin_exclusive()`
+//     (EXCLUSIVE lock — only one writer can be active).
+//
+//   * **No CanNotify / CanCopy / CanRepl blocks**:
+//       — SQLite has no LISTEN/NOTIFY (spec §6.1.7 calls this out).
+//       — SQLite has no COPY equivalent (LOAD INDEX / .import is
+//         CLI-only; bulk insert is regular `INSERT INTO ...
+//         VALUES (...), (...), (...)` batches).
+//       — SQLite has no replication slots in the engine — WAL
+//         streaming is a separate workstream.
+//     Handlers calling `subscribe_channel` / `copy_in_text` /
+//     `start_replication` on `Database<SqlitePool, _>` fail at
+//     compile time, exactly the spec §5.4 promise.
+//
+//   * **Tx scope is opaque token, not borrow**: SQLite's loom
+//     engine returns a `Transaction` value from `begin_tx`; `commit_tx`
+//     takes both the connection AND the transaction. The
+//     `SqliteTxScope<SqlitePool>` packages the two so the affine
+//     consume `commit(self)` / `rollback(self)` does both in one
+//     step.
+// =============================================================================
+
+module core.database.sqlite.typed_database;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount collections.List;
+mount base.memory.Shared;
+
+mount core.database.common.error.{DbError, AdapterSpecific};
+mount core.database.common.db_handle.Database;
+mount core.database.common.capability.{
+    Capability, CanRead, CanWrite, CanTx, CanDdl, CanUnsafe,
+    DbRead, DbReadWriteTx, DbAdmin, DbUnsafe,
+    CapabilitySet,
+};
+mount core.database.common.pool_impl.{PooledConnection, ReleaseKind, Healthy, Discard, PoolStatsSnapshot};
+
+mount core.database.sqlite.pool.SqlitePool;
+mount core.database.sqlite.connection.{SqliteConnection, SqliteValue};
+mount core.database.sqlite.native.l7_api.transaction.Transaction;
+
+// -----------------------------------------------------------------------------
+// Read-bound surface — DbRead / DbReadWriteTx / DbAdmin / DbUnsafe.
+// -----------------------------------------------------------------------------
+
+implement<C: CanRead> Database<SqlitePool, C> {
+    /// Run a SELECT — acquire a connection, run `query_all`,
+    /// release. Returns the decoded rows as
+    /// `List<List<SqliteValue>>`. SQLite SELECT against an
+    /// in-memory database is sub-microsecond; per-call pool
+    /// acquire dominates.
+    public fn query_rows(&self, sql: &Text) -> Result<List<List<SqliteValue>>, DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        let result = handle.conn_mut().query_all(sql);
+        match &result {
+            Ok(_)  => handle.release_healthy(),
+            Err(e) => handle.release_discard(e.message()),
+        }
+        result
+    }
+
+    /// First-row-only convenience. Returns `Ok(None)` when the
+    /// query produced no rows.
+    public fn query_first(&self, sql: &Text) -> Result<Maybe<List<SqliteValue>>, DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        let result = handle.conn_mut().query_first(sql);
+        match &result {
+            Ok(row) => {
+                handle.release_healthy();
+                if (row.len() as Int) == 0 {
+                    Ok(None)
+                } else {
+                    Ok(Some(row.clone()))
+                }
+            }
+            Err(e) => {
+                let msg = e.message();
+                handle.release_discard(msg);
+                Err(e.clone())
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Write-bound surface — DbReadWriteTx / DbAdmin / DbUnsafe.
+// -----------------------------------------------------------------------------
+
+implement<C: CanWrite> Database<SqlitePool, C> {
+    /// Run an INSERT / UPDATE / DELETE — acquire, execute, release.
+    /// Returns `()` on success; SQLite's untyped `execute` does
+    /// not surface affected-row counts at this layer (callers that
+    /// need them use the loom `Database.changes()` accessor via
+    /// `SqliteConnection.inner_mut`).
+    public fn execute_simple(&self, sql: &Text) -> Result<(), DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        let result = handle.conn_mut().execute(sql);
+        match &result {
+            Ok(_)  => handle.release_healthy(),
+            Err(e) => handle.release_discard(e.message()),
+        }
+        result
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Tx-bound surface — DbReadWriteTx / DbAdmin / DbUnsafe.
+//
+// SQLite has three BEGIN flavours that affect lock acquisition
+// timing:
+//   * DEFERRED   — default; no lock until the first write.
+//                  Concurrent readers + a single deferred writer
+//                  is the ideal OLTP shape.
+//   * IMMEDIATE  — RESERVED lock acquired at BEGIN. Recommended
+//                  for transactions that will definitely write,
+//                  to fail fast on lock contention rather than
+//                  mid-tx (per spec §6.2).
+//   * EXCLUSIVE  — EXCLUSIVE lock acquired at BEGIN. Single
+//                  writer for the duration; most aggressive.
+// -----------------------------------------------------------------------------
+
+implement<C: CanTx> Database<SqlitePool, C> {
+    /// Open a DEFERRED transaction (no lock until first write).
+    /// The default for query-heavy paths that may or may not
+    /// write.
+    public fn begin(&self) -> Result<SqliteTxScope<SqlitePool>, DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        match handle.conn_mut().begin_tx() {
+            Ok(tx) => Ok(SqliteTxScope { tx: Some(tx), handle: handle }),
+            Err(e) => {
+                handle.release_discard(e.message());
+                Err(e)
+            }
+        }
+    }
+
+    /// Open an IMMEDIATE transaction — fail fast on writer
+    /// contention. Recommended for mutating paths so a busy-
+    /// timeout kicks in at BEGIN, not mid-statement.
+    public fn begin_immediate(&self) -> Result<SqliteTxScope<SqlitePool>, DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        match handle.conn_mut().begin_tx_immediate() {
+            Ok(tx) => Ok(SqliteTxScope { tx: Some(tx), handle: handle }),
+            Err(e) => {
+                handle.release_discard(e.message());
+                Err(e)
+            }
+        }
+    }
+
+    /// Open an EXCLUSIVE transaction — single writer for the
+    /// duration. Use sparingly; intended for batch-write paths
+    /// that absolutely cannot tolerate concurrent writers.
+    public fn begin_exclusive(&self) -> Result<SqliteTxScope<SqlitePool>, DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        match handle.conn_mut().begin_tx_exclusive() {
+            Ok(tx) => Ok(SqliteTxScope { tx: Some(tx), handle: handle }),
+            Err(e) => {
+                handle.release_discard(e.message());
+                Err(e)
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SqliteTxScope — affine wrapper bundling tx + pool checkout
+// -----------------------------------------------------------------------------
+
+/// Active-transaction handle for the SQLite façade. Holds:
+///   * `tx: Maybe<Transaction>` — loom-engine token; consumed by
+///     `commit_tx` / `rollback_tx` on the underlying connection.
+///   * `handle: PooledConnection<SqliteConnection>` — checkout
+///     that keeps the connection alive for the duration.
+///
+/// Affine: must be consumed by `commit` or `rollback`. Forgotten
+/// consume is a compile error per spec §5.5.
+///
+/// Internal note on the `Maybe<Transaction>` shape: SQLite's
+/// `commit_tx` consumes the Transaction value. We hold it in a
+/// `Maybe` so the affine consume can `take()` it before passing
+/// to `commit_tx`. After `take`, the inner is None — but the
+/// affine wrapper itself is consumed in the same expression, so
+/// no observation of `None` is possible from outside.
+public type affine SqliteTxScope<P> is {
+    tx: Maybe<Transaction>,
+    handle: PooledConnection<SqliteConnection>,
+};
+
+implement SqliteTxScope<SqlitePool> {
+    /// Borrow the underlying SqliteConnection mutably during the
+    /// body of the transaction — query / execute calls go through
+    /// `tx_conn_mut().query_all(sql)` etc. The transaction is
+    /// implicit on the connection until `commit` / `rollback`.
+    public fn tx_conn_mut(&mut self) -> &mut SqliteConnection {
+        self.handle.conn_mut()
+    }
+
+    /// COMMIT and release the pool checkout. Healthy release on
+    /// commit success; discard on commit failure (the connection's
+    /// state may be ambiguous).
+    public fn commit(mut self) -> Result<(), DbError> {
+        let tx = match self.tx.take() {
+            Some(t) => t,
+            None    => return Err(tx_already_consumed()),
+        };
+        let result = self.handle.conn_mut().commit_tx(tx);
+        match &result {
+            Ok(_)  => self.handle.release_healthy(),
+            Err(e) => self.handle.release_discard(e.message()),
+        }
+        result
+    }
+
+    /// ROLLBACK and release. Symmetric to `commit`.
+    public fn rollback(mut self) -> Result<(), DbError> {
+        let tx = match self.tx.take() {
+            Some(t) => t,
+            None    => return Err(tx_already_consumed()),
+        };
+        let result = self.handle.conn_mut().rollback_tx(tx);
+        match &result {
+            Ok(_)  => self.handle.release_healthy(),
+            Err(e) => self.handle.release_discard(e.message()),
+        }
+        result
+    }
+}
+
+fn tx_already_consumed() -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: core.database.common.error.AdSqlite,
+        code: "TX_ALREADY_CONSUMED".clone(),
+        message: "SqliteTxScope.commit/rollback called twice".clone(),
+        retryable: false,
+    })
+}
+
+// -----------------------------------------------------------------------------
+// DDL-bound surface — DbAdmin / DbUnsafe only.
+// -----------------------------------------------------------------------------
+
+implement<C: CanDdl> Database<SqlitePool, C> {
+    /// Run a DDL statement (CREATE / ALTER / DROP / TRUNCATE / VACUUM /
+    /// REINDEX / writable_schema PRAGMA). Wraps `execute_simple` but
+    /// tightens the capability bound — `Database<SqlitePool, DbReadWriteTx>`
+    /// cannot accidentally drop a table because `CanDdl` is not in
+    /// scope on it.
+    public fn execute_ddl(&self, sql: &Text) -> Result<(), DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        let result = handle.conn_mut().execute(sql);
+        match &result {
+            Ok(_)  => handle.release_healthy(),
+            Err(e) => handle.release_discard(e.message()),
+        }
+        result
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Unsafe-bound surface — DbUnsafe only.
+// -----------------------------------------------------------------------------
+
+implement<C: CanUnsafe> Database<SqlitePool, C> {
+    /// Run an arbitrary SQL string. Capability bound restricts to
+    /// `Database<SqlitePool, DbUnsafe>`; combined with the
+    /// `@unsafe` + `@audit(reason)` annotations the spec §8.9
+    /// requires at the call site, every invocation is auditable.
+    public fn execute_raw_unsafe(&self, sql: &Text) -> Result<(), DbError> {
+        let mut handle = match self.pool.acquire() {
+            Ok(h)  => h,
+            Err(e) => return Err(e),
+        };
+        let result = handle.conn_mut().execute(sql);
+        match &result {
+            Ok(_)  => handle.release_healthy(),
+            Err(e) => handle.release_discard(e.message()),
+        }
+        result
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Universal helpers — accessible regardless of capability.
+// -----------------------------------------------------------------------------
+
+implement<C: Capability> Database<SqlitePool, C> {
+    /// Snapshot the underlying pool's metrics — for emission to
+    /// the observability layer.
+    public fn pool_stats(&self) -> PoolStatsSnapshot {
+        self.pool.stats()
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Construction shortcuts
+// -----------------------------------------------------------------------------
+
+/// Construct a read-write-transactional database from a freshly
+/// launched SqlitePool. Application-account default. Matches PG /
+/// MySQL `*_database_from_pool` shape so handlers call across
+/// adapters with a uniform style.
+public fn sqlite_database_from_pool(pool: SqlitePool) -> Database<SqlitePool, DbReadWriteTx> {
+    Database.from_pool(Shared.new(pool))
+}
+
+/// Admin handle — surfaces `execute_ddl` for migration runners.
+public fn sqlite_admin_database_from_pool(pool: SqlitePool) -> Database<SqlitePool, DbAdmin> {
+    Database.from_admin_pool(Shared.new(pool))
+}
+
+/// Read-only handle — for views that must reject writes by
+/// type-construction.
+public fn sqlite_readonly_database_from_pool(pool: SqlitePool) -> Database<SqlitePool, DbRead> {
+    Database.from_readonly_pool(Shared.new(pool))
+}
