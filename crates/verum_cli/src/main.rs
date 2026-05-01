@@ -1948,6 +1948,52 @@ enum Commands {
         #[clap(long)]
         reset: bool,
     },
+
+    /// ATS-V Architectural Type System operations.
+    /// Per `internal/specs/ats-v.md` §32.4 (dual-audience design),
+    /// these commands provide structured machine-readable surfaces
+    /// for coding-agents alongside human-friendly CLI output.
+    Arch {
+        #[clap(subcommand)]
+        cmd: ArchCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ArchCommands {
+    /// Show structured architectural type information for a cog.
+    /// Per spec §32.4: outputs `Shape` + anti-pattern violations
+    /// + suggestions in human-friendly plain text or
+    /// machine-readable JSON.
+    ///
+    /// In Сезон 2 (current), without ATS-V phase wiring, the
+    /// command returns the default Shape with the canonical
+    /// anti-pattern catalog roster. After Сезон 3, it consumes
+    /// the cog's actual `@arch_module(...)` declaration and runs
+    /// per-cog dispatch.
+    Explain {
+        /// Cog or module path to explain.  Currently a stub
+        /// argument — Сезон 3 wiring resolves it against the
+        /// project's cog graph.
+        cog: Option<String>,
+        /// Output format: `plain` (human) or `json` (agent).
+        #[clap(long, default_value = "plain")]
+        format: String,
+    },
+    /// List the canonical anti-pattern catalog with stable RFC
+    /// codes ATS-V-AP-NNN.  Equivalent to `verum audit
+    /// --arch-discharges` filtered to the catalog table.
+    Catalog {
+        /// Output format: `plain` (human) or `json` (agent).
+        #[clap(long, default_value = "plain")]
+        format: String,
+        /// Filter to MTAC patterns only (AP-027..032).
+        #[clap(long)]
+        mtac_only: bool,
+        /// Filter by season (1 or 2).
+        #[clap(long, value_name = "N")]
+        season: Option<u8>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -4125,5 +4171,35 @@ fn run_command(cli: Cli) -> Result<()> {
             clap_complete::generate(shell, &mut Cli::command(), "verum", &mut std::io::stdout());
             Ok(())
         } // NOTE: stdlib command removed - stdlib is now compiled automatically via cache system
+        Commands::Arch { cmd } => match cmd {
+            ArchCommands::Explain { cog, format } => {
+                let output_format = match format.as_str() {
+                    "plain" => commands::audit::AuditFormat::Plain,
+                    "json" => commands::audit::AuditFormat::Json,
+                    other => {
+                        return Err(CliError::InvalidArgument(
+                            format!("--format must be 'plain' or 'json', got '{}'", other).into(),
+                        ));
+                    }
+                };
+                commands::audit::arch_explain(cog.as_deref(), output_format)
+            }
+            ArchCommands::Catalog {
+                format,
+                mtac_only,
+                season,
+            } => {
+                let output_format = match format.as_str() {
+                    "plain" => commands::audit::AuditFormat::Plain,
+                    "json" => commands::audit::AuditFormat::Json,
+                    other => {
+                        return Err(CliError::InvalidArgument(
+                            format!("--format must be 'plain' or 'json', got '{}'", other).into(),
+                        ));
+                    }
+                };
+                commands::audit::arch_catalog(output_format, mtac_only, season)
+            }
+        },
     }
 }

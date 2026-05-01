@@ -9949,6 +9949,209 @@ pub fn audit_ar_roadmap(format: AuditFormat) -> Result<()> {
 // audit; consumers should call `--reflection-tower` instead.
 
 // =============================================================================
+// ATS-V — agent-readable surfaces (verum arch:explain, arch:catalog)
+// =============================================================================
+
+/// `verum arch explain [cog] [--format plain|json]` — structured
+/// architectural type information per spec §32.4.
+///
+/// Сезон 2 scope: outputs the canonical Shape (default for
+/// unannotated cogs since ATS-V phase isn't yet wired into the
+/// compiler) + the full anti-pattern catalog roster.  Сезон 3+
+/// resolves `cog` argument against project's cog graph and
+/// reads its `@arch_module(...)` declaration.
+pub fn arch_explain(cog: Option<&str>, format: AuditFormat) -> Result<()> {
+    use verum_kernel::arch::Shape;
+    use verum_kernel::arch_anti_pattern::{
+        check_all_anti_patterns, AntiPatternCode, DiagnosticContext,
+    };
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("ATS-V arch:explain — structured architectural type information");
+    }
+
+    let cog_name = cog.unwrap_or("<unannotated>").to_string();
+    // Сезон 2: default shape for the requested cog. Сезон 3 reads
+    // actual `@arch_module(...)` declaration.
+    let shape = Shape::default_for_unannotated();
+    let mut ctx = DiagnosticContext::default();
+    ctx.cog_name = cog_name.clone();
+    let violations = check_all_anti_patterns(&shape, &ctx);
+
+    let shape_json =
+        serde_json::to_value(&shape).unwrap_or_else(|_| serde_json::json!(null));
+    let violations_json: Vec<serde_json::Value> = violations
+        .iter()
+        .map(|v| {
+            serde_json::json!({
+                "code": v.code.code(),
+                "name": v.code.name(),
+                "severity": format!("{:?}", v.severity).to_lowercase(),
+                "summary": v.summary,
+                "human_message": v.human_message,
+                "auto_fix_suggestion": v.auto_fix_suggestion,
+                "docs_url": v.code.docs_url(),
+            })
+        })
+        .collect();
+
+    let total_patterns_checked = AntiPatternCode::full_list().len();
+
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "kernel_version": env!("CARGO_PKG_VERSION"),
+        "discipline": "ats_v_arch_explain",
+        "spec": "internal/specs/ats-v.md",
+        "cog": cog_name,
+        "season_resolution": "season_2_default_shape_stub",
+        "shape": shape_json,
+        "violations": violations_json,
+        "patterns_checked": total_patterns_checked,
+    });
+
+    match format {
+        AuditFormat::Plain => {
+            println!();
+            println!("Cog: {}", cog_name);
+            println!("─────────────────────────────────────────────────────");
+            println!("Shape (default for unannotated; Сезон 2 stub):");
+            println!("  exposes:           {} capabilities", shape.exposes.len());
+            println!("  requires:          {} capabilities", shape.requires.len());
+            println!("  preserves:         {} invariants", shape.preserves.len());
+            println!("  at_tier:           {}", shape.at_tier.tag());
+            println!("  foundation:        {}", shape.foundation.tag());
+            println!("  stratum:           {}", shape.stratum.tag());
+            println!("  lifecycle:         {}", shape.lifecycle.tag());
+            println!(
+                "  cve_closure:       {}/3 axes",
+                shape.cve_closure.closure_degree()
+            );
+            println!("  composes_with:     {} cogs", shape.composes_with.len());
+            println!("  strict:            {}", shape.strict);
+            println!();
+            println!(
+                "Anti-pattern check: {} violations across {} canonical patterns",
+                violations.len(),
+                total_patterns_checked,
+            );
+            for v in &violations {
+                println!(
+                    "  {} {}: {}",
+                    v.code.code(),
+                    v.code.name(),
+                    v.summary
+                );
+            }
+            if violations.is_empty() {
+                println!(
+                    "{} No violations — default Shape is canonically clean.",
+                    "✓".green(),
+                );
+            }
+            println!();
+            println!("Сезон 2 stub: no per-cog @arch_module(...) parsing yet.");
+            println!("Сезон 3 wires the compiler's ATS-V phase to read actual cog declarations.");
+        }
+        AuditFormat::Json => {
+            println!("{}", serde_json::to_string(&payload).unwrap_or_default());
+        }
+    }
+    Ok(())
+}
+
+/// `verum arch catalog [--format plain|json] [--mtac-only] [--season N]` —
+/// list the canonical anti-pattern catalog with stable RFC codes.
+/// Per spec §29.1 — codes are stable across v1.x; agents may
+/// pattern-match безопасно.
+pub fn arch_catalog(
+    format: AuditFormat,
+    mtac_only: bool,
+    season: Option<u8>,
+) -> Result<()> {
+    use verum_kernel::arch_anti_pattern::AntiPatternCode;
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("ATS-V anti-pattern catalog");
+    }
+
+    let filtered: Vec<_> = AntiPatternCode::full_list()
+        .iter()
+        .filter(|c| !mtac_only || c.is_mtac())
+        .filter(|c| season.is_none() || season == Some(c.season()))
+        .copied()
+        .collect();
+
+    let patterns_json: Vec<serde_json::Value> = filtered
+        .iter()
+        .map(|code| {
+            serde_json::json!({
+                "code": code.code(),
+                "name": code.name(),
+                "docs_url": code.docs_url(),
+                "season": code.season(),
+                "is_mtac": code.is_mtac(),
+                "stability": "v1.0",
+            })
+        })
+        .collect();
+
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "discipline": "ats_v_anti_pattern_catalog",
+        "spec": "internal/specs/ats-v.md",
+        "filter": {
+            "mtac_only": mtac_only,
+            "season": season,
+        },
+        "total_canonical": AntiPatternCode::full_list().len(),
+        "filtered_count": filtered.len(),
+        "patterns": patterns_json,
+    });
+
+    match format {
+        AuditFormat::Plain => {
+            println!();
+            println!(
+                "{} canonical anti-patterns ({} after filter):",
+                AntiPatternCode::full_list().len(),
+                filtered.len(),
+            );
+            println!();
+            println!(
+                "  {:<14}  {:<32}  {:<7}  Docs URL",
+                "Code", "Name", "Season"
+            );
+            println!(
+                "  {}  {}  {}  {}",
+                "─".repeat(14),
+                "─".repeat(32),
+                "─".repeat(7),
+                "─".repeat(40),
+            );
+            for code in filtered {
+                let season_label = if code.is_mtac() {
+                    format!("{}-MTAC", code.season())
+                } else {
+                    format!("{}", code.season())
+                };
+                println!(
+                    "  {:<14}  {:<32}  {:<7}  {}",
+                    code.code(),
+                    code.name(),
+                    season_label,
+                    code.docs_url(),
+                );
+            }
+            println!();
+        }
+        AuditFormat::Json => {
+            println!("{}", serde_json::to_string(&payload).unwrap_or_default());
+        }
+    }
+    Ok(())
+}
+
+// =============================================================================
 // ATS-V Architectural Type System audit (Сезон 1)
 // =============================================================================
 
@@ -10009,7 +10212,8 @@ pub fn audit_arch_discharges_with_format(format: AuditFormat) -> Result<()> {
         })
         .collect();
 
-    // Anti-pattern catalog with stable RFC error codes (Сезон 1: 10).
+    // Anti-pattern catalog with stable RFC error codes
+    // (Сезоны 1+2: 32 canonical patterns — 26 base + 6 MTAC).
     let anti_patterns_json: Vec<serde_json::Value> = AntiPatternCode::full_list()
         .iter()
         .map(|code| {
@@ -10017,7 +10221,8 @@ pub fn audit_arch_discharges_with_format(format: AuditFormat) -> Result<()> {
                 "code": code.code(),
                 "name": code.name(),
                 "docs_url": code.docs_url(),
-                "season": 1,
+                "season": code.season(),
+                "is_mtac": code.is_mtac(),
                 "stability": "v1.0",
             })
         })
@@ -10036,8 +10241,10 @@ pub fn audit_arch_discharges_with_format(format: AuditFormat) -> Result<()> {
         "load_bearing": all_intrinsics_dispatch,
         "intrinsics": intrinsics_json,
         "anti_pattern_catalog": {
-            "total_in_season_1": 10,
-            "remaining_for_season_2": 22,
+            "total_canonical": 32,
+            "season_1_count": 10,
+            "season_2_count": 22,
+            "mtac_count": 6,
             "patterns": anti_patterns_json,
         },
     });
@@ -10079,17 +10286,28 @@ pub fn audit_arch_discharges_with_format(format: AuditFormat) -> Result<()> {
             }
             println!();
             println!(
-                "  Anti-pattern catalog: {} canonical patterns ({} remaining for Сезон 2)",
-                10, 22,
+                "  Anti-pattern catalog: 32 canonical patterns (10 Сезон 1 + 16 Сезон 2 base + 6 Сезон 2 MTAC)",
             );
             println!();
-            println!("  {:<14}  {:<28}  Docs URL", "Code", "Name");
-            println!("  {}  {}  {}", "─".repeat(14), "─".repeat(28), "─".repeat(40));
+            println!("  {:<14}  {:<32}  {:<7}  Docs URL", "Code", "Name", "Season");
+            println!(
+                "  {}  {}  {}  {}",
+                "─".repeat(14),
+                "─".repeat(32),
+                "─".repeat(7),
+                "─".repeat(40),
+            );
             for code in AntiPatternCode::full_list().iter() {
+                let season_label = if code.is_mtac() {
+                    format!("{}-MTAC", code.season())
+                } else {
+                    format!("{}", code.season())
+                };
                 println!(
-                    "  {:<14}  {:<28}  {}",
+                    "  {:<14}  {:<32}  {:<7}  {}",
                     code.code(),
                     code.name(),
+                    season_label,
                     code.docs_url(),
                 );
             }
