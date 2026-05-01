@@ -132,6 +132,13 @@ impl<'s> CompilationPipeline<'s> {
         // Look up main function
         // SAFETY: get_function requires unsafe because it can return arbitrary function pointers.
         // We're looking for known entry points that we've compiled with expected signatures.
+        // SAFETY: get_function transmutes the JIT-resolved symbol
+        // address to the requested fn pointer type without runtime
+        // checking — a wrong signature here would invoke UB at the
+        // subsequent call.  We pin `unsafe extern "C" fn() -> i64`
+        // because main() is emitted with that exact signature in
+        // `pipeline/native_codegen.rs::emit_program_main` (commit
+        // 0d04ee0b documented main's i64 return contract).
         if let Ok(main_fn) = unsafe {
             execution_engine.get_function::<unsafe extern "C" fn() -> i64>("main")
         } {
@@ -140,7 +147,10 @@ impl<'s> CompilationPipeline<'s> {
             let result = unsafe { main_fn.call() };
             Ok(result)
         } else {
-            // Try _start as fallback
+            // SAFETY: same reasoning as the main lookup above —
+            // _start is emitted with `unsafe extern "C" fn()`
+            // signature when present (no return value); transmute
+            // is sound because the codegen-side signature matches.
             if let Ok(start_fn) = unsafe {
                 execution_engine.get_function::<unsafe extern "C" fn()>("_start")
             } {
