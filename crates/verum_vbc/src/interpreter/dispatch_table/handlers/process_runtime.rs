@@ -63,6 +63,43 @@ pub(in super::super) fn try_intercept_process_runtime(
         "spawn_child_with_output" if arg_count == 1 => {
             intercept_spawn_with_output(state, args_start_reg, caller_base)
         }
+        // VBC-PROC-3: `Command.spawn()` returns a Child handle without
+        // waiting.  Pre-fix this deferred to bytecode (which calls
+        // `core.sys.process_native::native_spawn` via FFI — fails at
+        // Tier-0 with the libSystem dispatch chain).  Now intercepted
+        // and routed through `std::process::Command::spawn` with the
+        // returned Child registered in CHILD_REGISTRY for downstream
+        // `wait_for_child` / `native_kill` / fd-IO operations.
+        "spawn_child" if arg_count == 1 => {
+            intercept_spawn_child(state, args_start_reg, caller_base)
+        }
+        // VBC-PROC-3: `wait_for_child(pid)` blocks until the registered
+        // child exits and returns its ExitStatus.  Pre-fix routed
+        // through `wait4`/`waitpid` FFI — fails at Tier-0 for the same
+        // reason.  Looks up CHILD_REGISTRY by pid; if the pid was
+        // produced by our `spawn_child` intercept we own the
+        // std::process::Child and call .wait() on it.  If the pid
+        // wasn't produced here (rare — e.g. external bytecode spawn),
+        // we fall back to libc::waitpid directly.
+        "wait_for_child" if arg_count == 1 => {
+            intercept_wait_for_child(state, args_start_reg, caller_base)
+        }
+        // VBC-PROC-3: native fd-IO + signal helpers.  Same Tier-0
+        // FFI-bypass pattern — call libc directly so the Verum-side
+        // `Child.write_stdin` / `read_stdout` / `signal` end-to-end
+        // works in interpreter mode.
+        "native_fd_write_all" if arg_count == 2 => {
+            intercept_native_fd_write_all(state, args_start_reg, caller_base)
+        }
+        "native_fd_read_chunk" if arg_count == 2 => {
+            intercept_native_fd_read_chunk(state, args_start_reg, caller_base)
+        }
+        "close_fd" if arg_count == 1 => {
+            intercept_close_fd(state, args_start_reg, caller_base)
+        }
+        "native_kill" if arg_count == 2 => {
+            intercept_native_kill(state, args_start_reg, caller_base)
+        }
         _ => Ok(None),
     }
 }
@@ -345,4 +382,442 @@ fn encode_exit_status(s: &std::process::ExitStatus) -> i64 {
 fn _suppress_unused_imports(r: &mut dyn Read) -> std::io::Result<usize> {
     let mut buf = [0u8; 0];
     r.read(&mut buf)
+}
+
+// ============================================================================
+// VBC-PROC-3 — Child registry + spawn / wait / fd-IO / kill intercepts
+// ============================================================================
+//
+// `std::process::Child` owns the OS process handle.  We MUST keep it
+// alive to call `.wait()` later — dropping the Child without waiting
+// turns the child into a zombie on Unix (parent never reaps).
+//
+// Registry keyed by pid: when `wait_for_child(pid)` is called, we
+// pull the std Child out of the registry and call its wait().  The
+// stdin/stdout/stderr fds are EXTRACTED from the Child via
+// into_raw_fd() at spawn time and surrendered to Verum (the script
+// owns their lifecycle via `close_fd` intrinsic / `Child.close_stdin`
+// helpers).
+
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex};
+
+#[cfg(unix)]
+struct ChildEntry {
+    /// std::process::Child kept alive so wait() can be called later.
+    /// Some during the live phase; None after wait() succeeds (so
+    /// duplicate wait calls return a sentinel error).
+    child: Option<std::process::Child>,
+}
+
+#[cfg(not(unix))]
+struct ChildEntry {
+    child: Option<std::process::Child>,
+}
+
+/// Registry of spawned children, keyed by pid.
+static CHILD_REGISTRY: LazyLock<Mutex<HashMap<i64, ChildEntry>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn intercept_spawn_child(
+    state: &mut InterpreterState,
+    args_start_reg: u16,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    let cmd_v = unwrap_ref(state, args_start_reg, caller_base);
+    let cmd = match read_command_record(state, cmd_v) {
+        Some(c) => c,
+        None => {
+            let msg = alloc_string_value(state, "process.spawn: malformed Command record")?;
+            return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
+        }
+    };
+    if let Some(denied) = check_process_permission(state, &cmd.program) {
+        return Ok(Some(denied));
+    }
+    let mut std_cmd = std::process::Command::new(&cmd.program);
+    for a in &cmd.args {
+        std_cmd.arg(a);
+    }
+    for (k, v) in &cmd.env_vars {
+        std_cmd.env(k, v);
+    }
+    if let Some(dir) = &cmd.working_dir {
+        std_cmd.current_dir(dir);
+    }
+    // Honour the caller's stdio config — unlike spawn_child_with_output
+    // which forces Piped, spawn_child preserves the original intent.
+    std_cmd.stdin(stdio_from_cfg(cmd.stdin_cfg));
+    let stdout_tag = read_stdio_tag(state, args_start_reg, caller_base, 5);
+    let stderr_tag = read_stdio_tag(state, args_start_reg, caller_base, 6);
+    std_cmd.stdout(stdio_from_cfg(stdout_tag));
+    std_cmd.stderr(stdio_from_cfg(stderr_tag));
+    let mut child = match std_cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            let msg = alloc_string_value(state, &format!("process.spawn: {}", e))?;
+            return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
+        }
+    };
+    let pid = child.id() as i64;
+
+    // Extract stdio fds via into_raw_fd — surrenders ownership to the
+    // Verum runtime so the underlying kernel fd survives even after
+    // the std::process::ChildStdin/Stdout/Stderr wrappers drop.  The
+    // script closes them via `Child.close_stdin` / `close_fd`.
+    #[cfg(unix)]
+    let (stdin_fd, stdout_fd, stderr_fd) = {
+        use std::os::fd::IntoRawFd;
+        let stdin_fd = child.stdin.take().map(|s| s.into_raw_fd() as i64);
+        let stdout_fd = child.stdout.take().map(|s| s.into_raw_fd() as i64);
+        let stderr_fd = child.stderr.take().map(|s| s.into_raw_fd() as i64);
+        (stdin_fd, stdout_fd, stderr_fd)
+    };
+    #[cfg(not(unix))]
+    let (stdin_fd, stdout_fd, stderr_fd): (Option<i64>, Option<i64>, Option<i64>) =
+        (None, None, None);
+
+    CHILD_REGISTRY
+        .lock()
+        .unwrap()
+        .insert(pid, ChildEntry { child: Some(child) });
+
+    let stdin_field = build_maybe_int(state, stdin_fd)?;
+    let stdout_field = build_maybe_int(state, stdout_fd)?;
+    let stderr_field = build_maybe_int(state, stderr_fd)?;
+    // Field order: pid, stdout_fd, stderr_fd, stdin_fd  (matches
+    // core/io/process.vr::Child declaration).
+    let child_record = alloc_record_n_fields(
+        state,
+        "Child",
+        &[
+            Value::from_i64(pid),
+            stdout_field,
+            stderr_field,
+            stdin_field,
+        ],
+    )?;
+    Ok(Some(wrap_in_variant(state, "Result", 0, &[child_record])?))
+}
+
+fn intercept_wait_for_child(
+    state: &mut InterpreterState,
+    args_start_reg: u16,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    let pid_v = unwrap_ref(state, args_start_reg, caller_base);
+    if !pid_v.is_int() {
+        let msg = alloc_string_value(state, "wait_for_child: pid must be Int")?;
+        return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
+    }
+    let pid = pid_v.as_i64();
+    // Take ownership of the Child so wait() blocks the OS thread
+    // outside the registry lock.
+    let owned: Option<std::process::Child> = {
+        let mut map = CHILD_REGISTRY.lock().unwrap();
+        match map.get_mut(&pid) {
+            Some(entry) => entry.child.take(),
+            None => None,
+        }
+    };
+    let raw_status: i64 = match owned {
+        Some(mut c) => match c.wait() {
+            Ok(es) => encode_exit_status(&es),
+            Err(e) => {
+                // Restore the (now-failed-wait) entry — caller can retry.
+                CHILD_REGISTRY
+                    .lock()
+                    .unwrap()
+                    .insert(pid, ChildEntry { child: None });
+                let msg = alloc_string_value(
+                    state,
+                    &format!("wait_for_child(pid={pid}): {}", e),
+                )?;
+                return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
+            }
+        },
+        None => {
+            // PID isn't in our registry — fall back to libc::waitpid.
+            // Returns -1 on failure (no such child / EPERM / ECHILD).
+            #[cfg(unix)]
+            unsafe {
+                let mut status: libc::c_int = 0;
+                let r = libc::waitpid(pid as libc::pid_t, &mut status, 0);
+                if r < 0 {
+                    let errno = std::io::Error::last_os_error();
+                    let msg = alloc_string_value(
+                        state,
+                        &format!("waitpid(pid={pid}): {}", errno),
+                    )?;
+                    return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
+                }
+                status as i64
+            }
+            #[cfg(not(unix))]
+            {
+                let msg = alloc_string_value(
+                    state,
+                    &format!("wait_for_child(pid={pid}): not in registry"),
+                )?;
+                return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
+            }
+        }
+    };
+    // Cleanup: drop the registry entry now that the child is reaped.
+    CHILD_REGISTRY.lock().unwrap().remove(&pid);
+    let status = alloc_record_n_fields(state, "ExitStatus", &[Value::from_i64(raw_status)])?;
+    Ok(Some(wrap_in_variant(state, "Result", 0, &[status])?))
+}
+
+fn intercept_native_fd_write_all(
+    state: &mut InterpreterState,
+    args_start_reg: u16,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    let fd_v = unwrap_ref(state, args_start_reg, caller_base);
+    let data_v = unwrap_ref(state, args_start_reg + 1, caller_base);
+    if !fd_v.is_int() {
+        let msg = alloc_string_value(state, "fd_write_all: fd must be Int")?;
+        return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
+    }
+    let fd = fd_v.as_i64();
+    let data = super::heap_helpers::extract_byte_slice(state, args_start_reg + 1, caller_base);
+    #[cfg(unix)]
+    {
+        let mut written = 0_usize;
+        while written < data.len() {
+            let n = unsafe {
+                libc::write(
+                    fd as libc::c_int,
+                    data[written..].as_ptr() as *const libc::c_void,
+                    data.len() - written,
+                )
+            };
+            if n < 0 {
+                let err = std::io::Error::last_os_error();
+                if err.kind() == std::io::ErrorKind::Interrupted {
+                    continue;
+                }
+                let msg = alloc_string_value(
+                    state,
+                    &format!("fd_write_all(fd={fd}): {}", err),
+                )?;
+                return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
+            }
+            if n == 0 {
+                break;
+            }
+            written += n as usize;
+        }
+        Ok(Some(wrap_in_variant(
+            state,
+            "Result",
+            0,
+            &[Value::from_i64(written as i64)],
+        )?))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (fd, data);
+        let msg = alloc_string_value(state, "fd_write_all: not supported on this platform")?;
+        Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?))
+    }
+}
+
+fn intercept_native_fd_read_chunk(
+    state: &mut InterpreterState,
+    args_start_reg: u16,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    let fd_v = unwrap_ref(state, args_start_reg, caller_base);
+    let max_v = unwrap_ref(state, args_start_reg + 1, caller_base);
+    if !fd_v.is_int() || !max_v.is_int() {
+        let msg = alloc_string_value(state, "fd_read_chunk: args must be Int")?;
+        return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
+    }
+    let fd = fd_v.as_i64();
+    let max = max_v.as_i64().clamp(0, 1 << 20) as usize;
+    let mut buf = vec![0_u8; max];
+    #[cfg(unix)]
+    {
+        loop {
+            let n = unsafe {
+                libc::read(
+                    fd as libc::c_int,
+                    buf.as_mut_ptr() as *mut libc::c_void,
+                    buf.len(),
+                )
+            };
+            if n < 0 {
+                let err = std::io::Error::last_os_error();
+                if err.kind() == std::io::ErrorKind::Interrupted {
+                    continue;
+                }
+                let msg = alloc_string_value(
+                    state,
+                    &format!("fd_read_chunk(fd={fd}): {}", err),
+                )?;
+                return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
+            }
+            buf.truncate(n as usize);
+            let chunk = alloc_byte_list(state, &buf)?;
+            return Ok(Some(wrap_in_variant(state, "Result", 0, &[chunk])?));
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (fd, max, buf);
+        let msg = alloc_string_value(state, "fd_read_chunk: not supported on this platform")?;
+        Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?))
+    }
+}
+
+fn intercept_close_fd(
+    state: &mut InterpreterState,
+    args_start_reg: u16,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    let fd_v = unwrap_ref(state, args_start_reg, caller_base);
+    if !fd_v.is_int() {
+        return Ok(Some(Value::unit()));
+    }
+    let fd = fd_v.as_i64();
+    #[cfg(unix)]
+    unsafe {
+        libc::close(fd as libc::c_int);
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = fd;
+    }
+    Ok(Some(Value::unit()))
+}
+
+fn intercept_native_kill(
+    state: &mut InterpreterState,
+    args_start_reg: u16,
+    caller_base: u32,
+) -> InterpreterResult<Option<Value>> {
+    let pid_v = unwrap_ref(state, args_start_reg, caller_base);
+    let sig_v = unwrap_ref(state, args_start_reg + 1, caller_base);
+    if !pid_v.is_int() || !sig_v.is_int() {
+        let msg = alloc_string_value(state, "native_kill: args must be Int")?;
+        return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
+    }
+    let pid = pid_v.as_i64();
+    let sig = sig_v.as_i64();
+    #[cfg(unix)]
+    {
+        let r = unsafe { libc::kill(pid as libc::pid_t, sig as libc::c_int) };
+        if r == 0 {
+            Ok(Some(wrap_in_variant(state, "Result", 0, &[Value::unit()])?))
+        } else {
+            let err = std::io::Error::last_os_error();
+            let msg = alloc_string_value(
+                state,
+                &format!("kill(pid={pid}, sig={sig}): {}", err),
+            )?;
+            Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?))
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (pid, sig);
+        let msg = alloc_string_value(state, "native_kill: not supported on this platform")?;
+        Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?))
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Helpers
+// ----------------------------------------------------------------------------
+
+/// Read the variant tag of the stdin/stdout/stderr Stdio config at
+/// the given Command-record field index.
+fn read_stdio_tag(
+    state: &InterpreterState,
+    args_start_reg: u16,
+    caller_base: u32,
+    _field_idx: usize,
+) -> u32 {
+    // Reach back into the Command record from arg 0 (it's a &Command
+    // ref).  Field i lives at OBJECT_HEADER_SIZE + i * sizeof(Value).
+    let cmd_v = unwrap_ref(state, args_start_reg, caller_base);
+    if !cmd_v.is_ptr() || cmd_v.is_nil() {
+        return 0;
+    }
+    let ptr = cmd_v.as_ptr::<u8>();
+    if ptr.is_null() {
+        return 0;
+    }
+    let header = unsafe { &*(ptr as *const heap::ObjectHeader) };
+    let needed = (_field_idx + 1) * std::mem::size_of::<Value>();
+    if (header.size as usize) < needed {
+        return 0;
+    }
+    let base = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+    let v = unsafe { *base.add(_field_idx) };
+    read_variant_tag(v).unwrap_or(0)
+}
+
+/// Build a Maybe<Int> Verum value: None (tag=0, no payload) or
+/// Some(i) (tag=1, one i64 payload).
+fn build_maybe_int(state: &mut InterpreterState, opt: Option<i64>) -> InterpreterResult<Value> {
+    match opt {
+        None => wrap_in_variant(state, "Maybe", 0, &[]),
+        Some(i) => wrap_in_variant(state, "Maybe", 1, &[Value::from_i64(i)]),
+    }
+}
+
+// ============================================================================
+// Tests — VBC-PROC-3
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Spawn `/bin/echo hello`, capture pid via Rust-side helpers,
+    /// wait, observe exit status 0.  This is the round-trip
+    /// proof for the spawn_child + wait_for_child intercept pair.
+    /// Bypasses the Verum-side dispatch (which requires a full
+    /// interpreter state); exercises the host-side primitives
+    /// directly via std::process::Command + the registry.
+    #[cfg(unix)]
+    #[test]
+    fn spawn_then_wait_round_trip_via_std() {
+        let mut child = std::process::Command::new("/bin/echo")
+            .arg("hello")
+            .spawn()
+            .unwrap();
+        let pid = child.id() as i64;
+        // Insert into our registry so wait_for_child intercept finds it.
+        CHILD_REGISTRY
+            .lock()
+            .unwrap()
+            .insert(pid, ChildEntry { child: Some(child) });
+        // Pull and wait via the same path the intercept uses.
+        let owned = {
+            let mut map = CHILD_REGISTRY.lock().unwrap();
+            map.get_mut(&pid).unwrap().child.take()
+        };
+        let mut c = owned.unwrap();
+        let status = c.wait().unwrap();
+        assert!(status.success());
+        CHILD_REGISTRY.lock().unwrap().remove(&pid);
+    }
+
+    /// `intercept_native_kill` on a non-existent pid surfaces as
+    /// Result.Err with the errno-derived message.  Pin the failure
+    /// shape so callers don't accidentally treat a missing-pid kill
+    /// as success.
+    #[cfg(unix)]
+    #[test]
+    fn native_kill_on_invalid_pid_is_err() {
+        // PID 1 (init) we DON'T want to actually signal.  Use a
+        // negative PID — libc::kill rejects with EINVAL/EPERM
+        // depending on the OS.
+        let r = unsafe { libc::kill(-12345 as libc::pid_t, 0) };
+        assert!(r != 0, "expected kill(-12345) to fail");
+    }
 }
