@@ -1,0 +1,728 @@
+// =============================================================================
+// core/database/mysql/binlog.vr — binlog replication wire (V0)
+// =============================================================================
+// Layer: 3 (Database — mysql adapter)
+// Spec: internal/specs/database.md §6.3.7 (binlog replication).
+// Refs:
+//   * MySQL src/sql/log_event.h  — event header + canonical events.
+//   * MariaDB knowledge base "Binlog Event Header" — same wire.
+// =============================================================================
+//
+// MySQL ships no logical-replication-plugin equivalent of pgoutput;
+// **binlog events are the CDC source**. Spindle exposes the
+// dump-protocol wire so downstream tooling can consume change
+// events without bringing in libmysqlclient / mysqlbinlog.
+//
+// Wire flow:
+//
+//   Client → SET @master_binlog_checksum = 'NONE' (or matches server)
+//          → SET @master_heartbeat_period = … (nanoseconds, optional)
+//          → COM_BINLOG_DUMP_GTID
+//              binlog_flags:u16 server_id:u32
+//              binlog_filename_length:u32 filename:bytes
+//              binlog_pos:u64 data_size:u32 gtid_data:bytes
+//          (or)
+//            COM_BINLOG_DUMP
+//              binlog_pos:u32 binlog_flags:u16 server_id:u32
+//              binlog_filename:bytes
+//
+//   Server → stream of packets, each prefixed with a 1-byte status
+//            (0x00 OK / 0xFF ERR / 0xFE EOF). For OK the rest of
+//            the packet is ONE binlog event.
+//
+//            Binlog event = 19-byte header + body:
+//              timestamp:u32   event_type:u8   server_id:u32
+//              event_size:u32  log_pos:u32     flags:u16
+//
+//            Each event_type has its own body layout. V0 decodes:
+//              0x04 ROTATE_EVENT
+//              0x02 QUERY_EVENT
+//              0x10 XID_EVENT
+//              0x21 GTID_EVENT
+//              0x0F FORMAT_DESCRIPTION_EVENT
+//              0x1B HEARTBEAT_EVENT
+//            Everything else → BinlogEventOther { tag, header, body }
+//            so callers can dispatch new variants without
+//            rev-locking this module.
+//
+// V0 OUT of scope (each follow-up):
+//   * TABLE_MAP_EVENT (0x13) + WRITE_ROWS_V2 (0x1E) + UPDATE_ROWS_V2
+//     (0x1F) + DELETE_ROWS_V2 (0x20) — the actual row-based DML
+//     payload (hundreds of LOC for the type-aware tuple decoder).
+//   * Binlog checksum CRC32 verification (we tell the server
+//     `@master_binlog_checksum='NONE'` to side-step it).
+//   * COM_REGISTER_SLAVE — not strictly required (works without on
+//     MySQL 5.7+ unless `rpl_semi_sync_master_enabled=ON`).
+//   * GTID set algebra (we surface gtid bytes opaque).
+// =============================================================================
+
+module core.database.mysql.binlog;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{
+    DbError, AdapterId, AdMysql, AdapterSpecific,
+};
+mount core.database.mysql.connection.{
+    MysqlConnection, MysqlConnState, McsReady,
+};
+mount core.database.mysql.config.MysqlConfig;
+mount core.database.mysql.error.dberr_from_mysql;
+mount core.database.mysql.wire.frame.{
+    put_u8, put_u16_le, put_u32_le, put_u64_le, put_bytes,
+    read_u8, read_u16_le, read_u32_le, read_u64_le,
+    read_bytes,
+};
+mount core.database.mysql.wire.backend.{
+    classify, parse_err, parse_ok,
+    SkOk, SkError, SkEof, SkResultSet,
+};
+mount core.database.mysql.connection.connect as mysql_connect;
+
+// =============================================================================
+// COM_* opcodes
+// =============================================================================
+
+const COM_BINLOG_DUMP:      Int = 0x12;
+const COM_BINLOG_DUMP_GTID: Int = 0x1E;
+const COM_REGISTER_SLAVE:   Int = 0x15;
+
+// Binlog dump flags (binlog_flags field):
+public const BINLOG_DUMP_NON_BLOCK: Int = 0x01;
+public const BINLOG_THROUGH_GTID:   Int = 0x04;
+
+// =============================================================================
+// Binlog event types (canonical PG 5.6+ codes)
+// =============================================================================
+
+public const ET_UNKNOWN:                 Int = 0x00;
+public const ET_START_V3:                Int = 0x01;
+public const ET_QUERY:                   Int = 0x02;
+public const ET_STOP:                    Int = 0x03;
+public const ET_ROTATE:                  Int = 0x04;
+public const ET_INTVAR:                  Int = 0x05;
+public const ET_FORMAT_DESCRIPTION:      Int = 0x0F;
+public const ET_XID:                     Int = 0x10;
+public const ET_TABLE_MAP:               Int = 0x13;
+public const ET_WRITE_ROWS_V2:           Int = 0x1E;
+public const ET_UPDATE_ROWS_V2:          Int = 0x1F;
+public const ET_DELETE_ROWS_V2:          Int = 0x20;
+public const ET_GTID:                    Int = 0x21;
+public const ET_ANONYMOUS_GTID:          Int = 0x22;
+public const ET_PREVIOUS_GTIDS:          Int = 0x23;
+public const ET_HEARTBEAT:               Int = 0x1B;
+
+// =============================================================================
+// Configuration
+// =============================================================================
+
+public type BinlogChecksum is BcNone | BcCrc32;
+
+public type BinlogStartFrom is
+      BfFilePosition { filename: Text, position: Int }
+    | BfGtidSet { gtid_set: Text };
+
+public type BinlogConfig is {
+    /// MUST be unique cluster-wide. Server uses it to route which
+    /// slave is asking; collisions cause the older slave to be
+    /// disconnected silently. Pick something deterministic per
+    /// consumer (e.g. hash of consumer-name).
+    server_id: Int,
+    /// Heartbeat interval in NANOSECONDS. 0 disables. PG default
+    /// is 30s; keepalive within `master_heartbeat_period * 2` is
+    /// safe.
+    heartbeat_period_ns: Int,
+    /// Server checksum mode — must match the server's
+    /// `@@global.binlog_checksum` setting OR we ask the server to
+    /// disable checksums per-connection via SET. V0 always asks
+    /// for `NONE` so we don't need to verify CRC32; V1 verifies.
+    checksum: BinlogChecksum,
+    /// Where to start streaming.
+    start_from: BinlogStartFrom,
+    /// Stop streaming at end-of-binlog (otherwise blocks for
+    /// new events). Useful for one-shot snapshots; production CDC
+    /// leaves it false.
+    non_blocking: Bool,
+};
+
+implement BinlogConfig {
+    public fn from_position(server_id: Int, filename: Text, position: Int)
+        -> BinlogConfig
+    {
+        BinlogConfig {
+            server_id: server_id,
+            heartbeat_period_ns: 30_000_000_000,    // 30 s
+            checksum: BcNone,
+            start_from: BfFilePosition { filename: filename, position: position },
+            non_blocking: false,
+        }
+    }
+
+    public fn from_gtid(server_id: Int, gtid_set: Text) -> BinlogConfig {
+        BinlogConfig {
+            server_id: server_id,
+            heartbeat_period_ns: 30_000_000_000,
+            checksum: BcNone,
+            start_from: BfGtidSet { gtid_set: gtid_set },
+            non_blocking: false,
+        }
+    }
+}
+
+// =============================================================================
+// Affine BinlogStream wrapper
+// =============================================================================
+
+/// Affine — a binlog connection has terminal stream state once
+/// COM_BINLOG_DUMP[_GTID] runs. Returning it to a regular pool
+/// would poison subsequent checkouts (the wire is single-direction
+/// push from the server). The affine attribute makes the
+/// type-level guarantee explicit.
+public type affine BinlogStream is {
+    conn: MysqlConnection,
+    config: BinlogConfig,
+    streaming: Bool,
+};
+
+implement BinlogStream {
+    public fn config(&self) -> &BinlogConfig { &self.config }
+    public fn is_streaming(&self) -> Bool { self.streaming }
+}
+
+// =============================================================================
+// Binlog event header + ADT
+// =============================================================================
+
+/// Per-event 19-byte header — same shape for every event type.
+public type BinlogEventHeader is {
+    /// Server timestamp (seconds since UNIX epoch UTC).
+    timestamp_s: Int,
+    event_type: Int,
+    /// Server ID of the originating server (NOT our consumer
+    /// server_id). Useful for filtering loops in multi-source
+    /// topologies.
+    server_id: Int,
+    /// Total event size INCLUDING the 19-byte header.
+    event_size: Int,
+    /// Position in the binlog FILE where the NEXT event starts.
+    /// Tracks position for resume.
+    log_pos: Int,
+    flags: Int,
+};
+
+public type BinlogEvent is
+      BeQuery { header: BinlogEventHeader, body: QueryEventBody }
+    | BeXid { header: BinlogEventHeader, xid: Int }
+    | BeRotate { header: BinlogEventHeader, body: RotateEventBody }
+    | BeFormatDescription { header: BinlogEventHeader, body: FormatDescriptionBody }
+    | BeGtid { header: BinlogEventHeader, body: GtidEventBody }
+    | BeHeartbeat { header: BinlogEventHeader }
+    | BeOther { header: BinlogEventHeader, payload: List<Byte> };
+
+public type QueryEventBody is {
+    /// Slave proxy thread id — usually informational.
+    thread_id: Int,
+    /// Statement execution time in seconds.
+    exec_time_s: Int,
+    /// Schema the statement ran against (USE <db>).
+    db: Text,
+    /// MySQL error code if the statement failed mid-replication
+    /// (master logs the error so slave can decide).
+    error_code: Int,
+    /// Raw status variables blob. Decoded in V1.
+    status_vars: List<Byte>,
+    /// The SQL text. UTF-8 in 99% of cases; non-UTF8 surfaces
+    /// as raw bytes via `Text.from_utf8_lossy`.
+    statement: Text,
+};
+
+public type RotateEventBody is {
+    /// First event position in the new file.
+    next_position: Int,
+    /// New binlog filename.
+    next_filename: Text,
+};
+
+public type FormatDescriptionBody is {
+    /// 4 for MySQL 5.0+, MariaDB; 3 was 4.x.
+    binlog_version: Int,
+    /// Server version string ("8.4.0-oracle" etc.) — first 50
+    /// bytes of the body padded with NULs.
+    server_version: Text,
+    /// Server creation timestamp.
+    create_timestamp: Int,
+    /// Per-event-type post-header lengths — index by event_type.
+    /// Lets a forward-compatible decoder skip unknown variable
+    /// trailers.
+    post_header_lengths: List<Int>,
+};
+
+public type GtidEventBody is {
+    /// 0x00 = no commit dependencies / 0x01 = commit dependencies.
+    commit_flag: Int,
+    /// SID — 16-byte UUID identifying the originating server.
+    sid: List<Byte>,
+    /// GNO — sequence number within the SID's transactions.
+    gno: Int,
+    /// Logical timestamps + last_committed (since MySQL 5.7) —
+    /// V0 surfaces opaque-trailer bytes; V1 decodes.
+    trailer: List<Byte>,
+};
+
+// =============================================================================
+// Public — connect_binlog + start
+// =============================================================================
+
+/// Open a connection in binlog-dump mode. Issues SET @session
+/// variables for checksum + heartbeat, then sends the
+/// COM_BINLOG_DUMP[_GTID] command. After this, the wire is
+/// single-direction streaming and no further commands are legal.
+public fn connect_binlog(
+    mysql_cfg: &MysqlConfig,
+    binlog_cfg: BinlogConfig,
+) -> Result<BinlogStream, DbError> {
+    let mut conn = mysql_connect(mysql_cfg)?;
+
+    // Tell the server which checksum we expect (per-session
+    // override of @@global.binlog_checksum).
+    let checksum_sql = match binlog_cfg.checksum {
+        BcNone  => "SET @master_binlog_checksum = 'NONE'".clone(),
+        BcCrc32 => "SET @master_binlog_checksum = 'CRC32'".clone(),
+    };
+    let _ = conn.execute(&checksum_sql)?;
+
+    if binlog_cfg.heartbeat_period_ns > 0 {
+        let ns = binlog_cfg.heartbeat_period_ns;
+        let hb_sql = f"SET @master_heartbeat_period = {ns}";
+        let _ = conn.execute(&hb_sql)?;
+    }
+
+    // Build the dump payload.
+    let payload = build_dump_payload(&binlog_cfg);
+    conn.binlog_send_command(payload.as_slice())?;
+
+    Ok(BinlogStream {
+        conn: conn,
+        config: binlog_cfg,
+        streaming: true,
+    })
+}
+
+// -----------------------------------------------------------------------------
+// COM_BINLOG_DUMP[_GTID] payload builder
+// -----------------------------------------------------------------------------
+
+fn build_dump_payload(cfg: &BinlogConfig) -> List<Byte> {
+    let flags = if cfg.non_blocking { BINLOG_DUMP_NON_BLOCK } else { 0 };
+
+    match &cfg.start_from {
+        BfFilePosition { filename, position } => {
+            // COM_BINLOG_DUMP layout:
+            //   1 byte:  COM_BINLOG_DUMP (0x12)
+            //   4 bytes: binlog_pos (u32 LE)
+            //   2 bytes: binlog_flags (u16 LE)
+            //   4 bytes: server_id (u32 LE)
+            //   N bytes: binlog_filename (eof-terminated)
+            let mut out: List<Byte> = List.with_capacity(11 + filename.len());
+            put_u8(&mut out, COM_BINLOG_DUMP);
+            put_u32_le(&mut out, *position);
+            put_u16_le(&mut out, flags);
+            put_u32_le(&mut out, cfg.server_id);
+            put_bytes(&mut out, filename.as_bytes());
+            out
+        }
+        BfGtidSet { gtid_set } => {
+            // COM_BINLOG_DUMP_GTID layout:
+            //   1 byte:  COM_BINLOG_DUMP_GTID (0x1E)
+            //   2 bytes: binlog_flags
+            //   4 bytes: server_id
+            //   4 bytes: binlog_filename_length
+            //   N bytes: binlog_filename (we send empty — server
+            //            picks based on gtid_set)
+            //   8 bytes: binlog_pos (start at 4 — first event
+            //            after FORMAT_DESCRIPTION)
+            //   4 bytes: data_size (size of gtid_data trailer)
+            //   N bytes: gtid_data (encoded GTID set)
+            let f = flags | BINLOG_THROUGH_GTID;
+            let gtid_bytes = gtid_set.as_bytes();
+            let mut out: List<Byte> = List.with_capacity(23 + gtid_bytes.len());
+            put_u8(&mut out, COM_BINLOG_DUMP_GTID);
+            put_u16_le(&mut out, f);
+            put_u32_le(&mut out, cfg.server_id);
+            put_u32_le(&mut out, 0);             // empty filename
+            put_u64_le(&mut out, 4);             // pos = 4 (first real byte)
+            put_u32_le(&mut out, gtid_bytes.len() as Int);
+            put_bytes(&mut out, gtid_bytes);
+            out
+        }
+    }
+}
+
+// =============================================================================
+// next_event — one wire packet per event
+// =============================================================================
+
+implement BinlogStream {
+    /// Read one binlog event. Each server-pushed packet is one
+    /// event prefixed with a 1-byte status (0x00 OK / 0xFF ERR /
+    /// 0xFE EOF). EOF closes the stream cleanly.
+    public fn next_event(&mut self) -> Result<Maybe<BinlogEvent>, DbError> {
+        if !self.streaming {
+            return Err(stream_state_error("next_event after end-of-stream"));
+        }
+        let payload = self.conn.binlog_recv_packet()?;
+        if payload.len() == 0 {
+            return Err(bad_binlog("empty binlog packet"));
+        }
+        let status = (payload[0] as Int) & 0xFF;
+        if status == 0xFE {
+            // EOF — server closed the stream (NON_BLOCK or end of
+            // available binlog).
+            self.streaming = false;
+            return Ok(None);
+        }
+        if status == 0xFF {
+            // ERR packet — translate via the standard MySQL error
+            // decoder. Capabilities pass-through 0 for binlog
+            // (no auth-plugin negotiation in this state).
+            let body_after_status = match read_bytes(payload.as_slice(), 1, payload.len() as Int - 1) {
+                Ok(b)  => b,
+                Err(_) => { return Err(bad_binlog("ERR packet body truncated")); }
+            };
+            // Re-prepend the 0xFF marker for parse_err.
+            let mut full: List<Byte> = List.with_capacity(payload.len());
+            put_u8(&mut full, 0xFF);
+            put_bytes(&mut full, body_after_status.as_slice());
+            let err = match parse_err(full.as_slice(), 0) {
+                Ok(e)  => e,
+                Err(_) => { return Err(bad_binlog("ERR decode failed")); }
+            };
+            self.streaming = false;
+            return Err(dberr_from_mysql(err));
+        }
+        if status != 0x00 {
+            return Err(bad_binlog("unexpected binlog packet status byte"));
+        }
+
+        // Decode header (19 bytes, starting at offset 1).
+        let header = decode_event_header(payload.as_slice(), 1)?;
+
+        // Body starts at offset 1 + 19 = 20; runs to end of packet.
+        let body_start: Int = 20;
+        let body_end: Int = payload.len() as Int;
+        let body = match read_bytes(payload.as_slice(), body_start, body_end - body_start) {
+            Ok(b)  => b,
+            Err(_) => { return Err(bad_binlog("event body truncated")); }
+        };
+
+        let event = decode_event_body(&header, body)?;
+        Ok(Some(event))
+    }
+
+    /// Tear down the binlog connection. Closes the underlying
+    /// wire — binlog conns are not reusable.
+    public fn close(self) -> Result<(), DbError> {
+        let mut s = self;
+        s.streaming = false;
+        s.conn.close()
+    }
+}
+
+// =============================================================================
+// Header decode
+// =============================================================================
+
+fn decode_event_header(buf: &[Byte], off: Int) -> Result<BinlogEventHeader, DbError> {
+    let timestamp = match read_u32_le(buf, off) {
+        Ok(v)  => v,
+        Err(_) => { return Err(bad_binlog("header.timestamp")); }
+    };
+    let event_type = match read_u8(buf, off + 4) {
+        Ok(v)  => v,
+        Err(_) => { return Err(bad_binlog("header.event_type")); }
+    };
+    let server_id = match read_u32_le(buf, off + 5) {
+        Ok(v)  => v,
+        Err(_) => { return Err(bad_binlog("header.server_id")); }
+    };
+    let event_size = match read_u32_le(buf, off + 9) {
+        Ok(v)  => v,
+        Err(_) => { return Err(bad_binlog("header.event_size")); }
+    };
+    let log_pos = match read_u32_le(buf, off + 13) {
+        Ok(v)  => v,
+        Err(_) => { return Err(bad_binlog("header.log_pos")); }
+    };
+    let flags = match read_u16_le(buf, off + 17) {
+        Ok(v)  => v,
+        Err(_) => { return Err(bad_binlog("header.flags")); }
+    };
+    Ok(BinlogEventHeader {
+        timestamp_s: timestamp,
+        event_type: event_type,
+        server_id: server_id,
+        event_size: event_size,
+        log_pos: log_pos,
+        flags: flags,
+    })
+}
+
+// =============================================================================
+// Body decoders
+// =============================================================================
+
+fn decode_event_body(header: &BinlogEventHeader, body: List<Byte>) -> Result<BinlogEvent, DbError> {
+    let t = header.event_type;
+    if t == ET_HEARTBEAT {
+        return Ok(BeHeartbeat { header: header.clone() });
+    }
+    if t == ET_QUERY {
+        let q = decode_query_body(body.as_slice())?;
+        return Ok(BeQuery { header: header.clone(), body: q });
+    }
+    if t == ET_XID {
+        let xid = match read_u64_le(body.as_slice(), 0) {
+            Ok(v)  => v,
+            Err(_) => { return Err(bad_binlog("XID.xid")); }
+        };
+        return Ok(BeXid { header: header.clone(), xid: xid });
+    }
+    if t == ET_ROTATE {
+        let r = decode_rotate_body(body.as_slice())?;
+        return Ok(BeRotate { header: header.clone(), body: r });
+    }
+    if t == ET_FORMAT_DESCRIPTION {
+        let f = decode_format_description_body(body.as_slice())?;
+        return Ok(BeFormatDescription { header: header.clone(), body: f });
+    }
+    if t == ET_GTID || t == ET_ANONYMOUS_GTID {
+        let g = decode_gtid_body(body.as_slice())?;
+        return Ok(BeGtid { header: header.clone(), body: g });
+    }
+    Ok(BeOther { header: header.clone(), payload: body })
+}
+
+fn decode_query_body(buf: &[Byte]) -> Result<QueryEventBody, DbError> {
+    // QUERY_EVENT post-header layout (post-5.0):
+    //   4 bytes: thread_id (slave_proxy_id)
+    //   4 bytes: exec_time
+    //   1 byte:  schema_length
+    //   2 bytes: error_code
+    //   2 bytes: status_vars_length
+    //   N bytes: status_vars
+    //   M bytes: schema (NUL-terminated)
+    //   K bytes: query (rest of body)
+    let thread_id = match read_u32_le(buf, 0) {
+        Ok(v)  => v,
+        Err(_) => { return Err(bad_binlog("QUERY.thread_id")); }
+    };
+    let exec_time = match read_u32_le(buf, 4) {
+        Ok(v)  => v,
+        Err(_) => { return Err(bad_binlog("QUERY.exec_time")); }
+    };
+    let schema_len = match read_u8(buf, 8) {
+        Ok(v)  => v,
+        Err(_) => { return Err(bad_binlog("QUERY.schema_length")); }
+    };
+    let error_code = match read_u16_le(buf, 9) {
+        Ok(v)  => v,
+        Err(_) => { return Err(bad_binlog("QUERY.error_code")); }
+    };
+    let sv_len = match read_u16_le(buf, 11) {
+        Ok(v)  => v,
+        Err(_) => { return Err(bad_binlog("QUERY.status_vars_length")); }
+    };
+
+    let sv_off: Int = 13;
+    let status_vars = match read_bytes(buf, sv_off, sv_len) {
+        Ok(b)  => b,
+        Err(_) => { return Err(bad_binlog("QUERY.status_vars")); }
+    };
+
+    let schema_off: Int = sv_off + sv_len;
+    let schema_bytes = match read_bytes(buf, schema_off, schema_len) {
+        Ok(b)  => b,
+        Err(_) => { return Err(bad_binlog("QUERY.schema")); }
+    };
+    let db = bytes_to_text(&schema_bytes);
+
+    // Skip the NUL terminator after schema.
+    let stmt_off: Int = schema_off + schema_len + 1;
+    let stmt_len: Int = (buf.len() as Int) - stmt_off;
+    let stmt_bytes = if stmt_len > 0 {
+        match read_bytes(buf, stmt_off, stmt_len) {
+            Ok(b)  => b,
+            Err(_) => { return Err(bad_binlog("QUERY.statement")); }
+        }
+    } else {
+        List.new()
+    };
+    let statement = bytes_to_text(&stmt_bytes);
+
+    Ok(QueryEventBody {
+        thread_id: thread_id,
+        exec_time_s: exec_time,
+        db: db,
+        error_code: error_code,
+        status_vars: status_vars,
+        statement: statement,
+    })
+}
+
+fn decode_rotate_body(buf: &[Byte]) -> Result<RotateEventBody, DbError> {
+    // ROTATE_EVENT body:
+    //   8 bytes: position
+    //   N bytes: filename (rest of body)
+    let pos = match read_u64_le(buf, 0) {
+        Ok(v)  => v,
+        Err(_) => { return Err(bad_binlog("ROTATE.position")); }
+    };
+    let name_off: Int = 8;
+    let name_len: Int = (buf.len() as Int) - name_off;
+    let name_bytes = if name_len > 0 {
+        match read_bytes(buf, name_off, name_len) {
+            Ok(b)  => b,
+            Err(_) => { return Err(bad_binlog("ROTATE.filename")); }
+        }
+    } else {
+        List.new()
+    };
+    Ok(RotateEventBody {
+        next_position: pos,
+        next_filename: bytes_to_text(&name_bytes),
+    })
+}
+
+fn decode_format_description_body(buf: &[Byte]) -> Result<FormatDescriptionBody, DbError> {
+    // FORMAT_DESCRIPTION_EVENT body:
+    //   2 bytes:  binlog_version (4)
+    //   50 bytes: server_version (NUL-padded)
+    //   4 bytes:  create_timestamp
+    //   1 byte:   event_header_length (always 19)
+    //   N bytes:  post_header_lengths (one per event type, no
+    //             header for ET_UNKNOWN — so vector len is the
+    //             count of non-zero event-types)
+    let version = match read_u16_le(buf, 0) {
+        Ok(v)  => v,
+        Err(_) => { return Err(bad_binlog("FDE.binlog_version")); }
+    };
+    let sv_bytes = match read_bytes(buf, 2, 50) {
+        Ok(b)  => b,
+        Err(_) => { return Err(bad_binlog("FDE.server_version")); }
+    };
+    // Strip trailing NULs.
+    let mut sv_end = sv_bytes.len() as Int;
+    while sv_end > 0 && (sv_bytes[sv_end - 1] as Int) == 0 {
+        sv_end = sv_end - 1;
+    }
+    let mut sv_trim: List<Byte> = List.with_capacity(sv_end);
+    let mut k: Int = 0;
+    while k < sv_end {
+        sv_trim.push(sv_bytes[k]);
+        k = k + 1;
+    }
+    let server_version = bytes_to_text(&sv_trim);
+
+    let ct = match read_u32_le(buf, 52) {
+        Ok(v)  => v,
+        Err(_) => { return Err(bad_binlog("FDE.create_timestamp")); }
+    };
+    let _hdr_len = match read_u8(buf, 56) {
+        Ok(v)  => v,
+        Err(_) => { return Err(bad_binlog("FDE.header_length")); }
+    };
+    let phl_off: Int = 57;
+    let mut phl: List<Int> = List.new();
+    let mut i: Int = phl_off;
+    while i < (buf.len() as Int) {
+        phl.push((buf[i] as Int) & 0xFF);
+        i = i + 1;
+    }
+
+    Ok(FormatDescriptionBody {
+        binlog_version: version,
+        server_version: server_version,
+        create_timestamp: ct,
+        post_header_lengths: phl,
+    })
+}
+
+fn decode_gtid_body(buf: &[Byte]) -> Result<GtidEventBody, DbError> {
+    // GTID_EVENT body:
+    //   1 byte:  commit_flag
+    //   16 bytes: SID (UUID)
+    //   8 bytes:  GNO (sequence number)
+    //   trailer: logical timestamps (V1 decode)
+    let commit_flag = match read_u8(buf, 0) {
+        Ok(v)  => v,
+        Err(_) => { return Err(bad_binlog("GTID.commit_flag")); }
+    };
+    let sid = match read_bytes(buf, 1, 16) {
+        Ok(b)  => b,
+        Err(_) => { return Err(bad_binlog("GTID.sid")); }
+    };
+    let gno = match read_u64_le(buf, 17) {
+        Ok(v)  => v,
+        Err(_) => { return Err(bad_binlog("GTID.gno")); }
+    };
+    let trailer_off: Int = 25;
+    let trailer_len: Int = (buf.len() as Int) - trailer_off;
+    let trailer = if trailer_len > 0 {
+        match read_bytes(buf, trailer_off, trailer_len) {
+            Ok(b)  => b,
+            Err(_) => List.new(),
+        }
+    } else {
+        List.new()
+    };
+    Ok(GtidEventBody {
+        commit_flag: commit_flag,
+        sid: sid,
+        gno: gno,
+        trailer: trailer,
+    })
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn bytes_to_text(b: &List<Byte>) -> Text {
+    match Text.from_utf8(b.as_slice()) {
+        Ok(s)  => s,
+        Err(_) => {
+            // Lossy fallback — replace invalid sequences with U+FFFD.
+            let mut out = "".clone();
+            let mut i: Int = 0;
+            while i < (b.len() as Int) {
+                let by = b[i] as Int;
+                if by < 0x80 {
+                    out.push_byte(b[i]);
+                } else {
+                    out.push_str("?");
+                }
+                i = i + 1;
+            }
+            out
+        }
+    }
+}
+
+fn stream_state_error(what: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdMysql,
+        code: "BINLOG_BAD_STATE".clone(),
+        message: f"binlog state violation: {what}",
+        retryable: false,
+    })
+}
+
+fn bad_binlog(what: &str) -> DbError {
+    DbError.Adapter(AdapterSpecific {
+        adapter: AdMysql,
+        code: "BINLOG_PROTOCOL".clone(),
+        message: f"binlog protocol error: {what}",
+        retryable: false,
+    })
+}

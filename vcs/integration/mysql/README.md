@@ -55,6 +55,7 @@ plugin Spindle accepts in the safe path).
 | `t05_capability.vr` | `Database<MysqlPool, DbReadWriteTx>.into_readonly()` |
 | `t06_pool.vr` | acquire/release accounting; total_arena_resets |
 | `t07_async_transaction.vr` | async typed Database<AsyncMysqlPool, _> + AsyncMysqlTxScope rollback / commit (spec §6.3.6 async surface) |
+| `t08_binlog.vr` | COM_BINLOG_DUMP_GTID + binlog event header + canonical event decoders (FORMAT_DESCRIPTION / QUERY / XID / GTID / ROTATE / HEARTBEAT) (spec §6.3.7) |
 
 ## Adding tests
 

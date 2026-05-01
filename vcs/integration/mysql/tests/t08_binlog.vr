@@ -1,0 +1,137 @@
+// =============================================================================
+// t08_binlog.vr — MySQL binlog dump V0
+// =============================================================================
+// Spec: internal/specs/database.md §6.3.7 (binlog replication).
+// =============================================================================
+//
+// V0 surface check:
+//
+//   1. connect_binlog(admin, gtid_set='') — empty GTID asks the
+//      server to start from the earliest available binlog.
+//   2. Side-channel INSERT on a separate connection so the dump
+//      stream sees a non-empty WAL change.
+//   3. Drain up to N events; assert at least:
+//        * one FORMAT_DESCRIPTION (the mandatory first real event)
+//        * one ROTATE or one QUERY/XID/GTID
+//      under the wall-clock cap.
+//   4. close() the binlog stream.
+//
+// Wall-clock cap is tolerant — server may take a moment to flush
+// the binlog before our consumer attaches.
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, ADMIN_USER, ADMIN_PW,
+    connect_app,
+};
+mount core.database.mysql.{
+    MysqlConfig, MtmDisable,
+    BinlogConfig, BinlogStream,
+    BinlogEvent, BeFormatDescription, BeQuery, BeXid, BeRotate,
+    BeGtid, BeHeartbeat, BeOther,
+    connect_binlog,
+};
+
+const SERVER_ID: Int = 16777216;     // unique-enough consumer ID
+
+fn admin_mysql_cfg() -> MysqlConfig {
+    MysqlConfig {
+        host: TEST_HOST.clone(),
+        port: TEST_PORT,
+        user: ADMIN_USER.clone(),
+        password: ADMIN_PW.clone(),
+        database: TEST_DB.clone(),
+        character_set: 255,
+        tls_mode: MtmDisable,
+        connect_timeout_ms: 10_000,
+    }
+}
+
+fn write_row_on_side_channel() {
+    let mut side = expect_ok(
+        connect_app(),
+        &"side-channel connect_app() failed".clone(),
+    );
+    let _ = side.simple_query(
+        &"CREATE TABLE IF NOT EXISTS binlog_smoke (id INT PRIMARY KEY, payload TEXT NOT NULL)"
+            .clone()
+    );
+    let _ = side.simple_query(&"DELETE FROM binlog_smoke".clone());
+    let _ = expect_ok(
+        side.simple_query(&
+            "INSERT INTO binlog_smoke (id, payload) VALUES (1, 'first')".clone()
+        ),
+        &"side-channel INSERT failed".clone(),
+    );
+}
+
+fn main() {
+    write_row_on_side_channel();
+
+    // Empty GTID set → server picks the earliest available binlog.
+    let bcfg = BinlogConfig.from_gtid(SERVER_ID, "".clone());
+    let mut stream = expect_ok(
+        connect_binlog(&admin_mysql_cfg(), bcfg),
+        &"connect_binlog failed".clone(),
+    );
+    expect(
+        stream.is_streaming(),
+        &"is_streaming() must be true after connect_binlog".clone(),
+    );
+
+    let mut saw_format_desc: Bool = false;
+    let mut saw_dml_marker: Bool = false;
+    let mut total_events: Int = 0;
+    let mut i: Int = 0;
+    while i < 50 {
+        let r = expect_ok(
+            stream.next_event(),
+            &f"next_event #{i} failed",
+        );
+        match r {
+            Some(ev) => {
+                total_events = total_events + 1;
+                match ev {
+                    BeFormatDescription { .. } => {
+                        saw_format_desc = true;
+                    }
+                    BeQuery { .. } | BeXid { .. } | BeGtid { .. }
+                    | BeRotate { .. } => {
+                        saw_dml_marker = true;
+                    }
+                    BeHeartbeat { .. } => {
+                        // Server keepalive — count but don't gate on.
+                    }
+                    BeOther { .. } => {}
+                }
+                if saw_format_desc && saw_dml_marker {
+                    break;
+                }
+            }
+            None => {
+                // EOF — server closed the stream cleanly. Acceptable
+                // outcome for the smoke test.
+                break;
+            }
+        }
+        i = i + 1;
+    }
+
+    expect(
+        total_events > 0,
+        &"binlog stream produced no events".clone(),
+    );
+    expect(
+        saw_format_desc,
+        &"never saw FORMAT_DESCRIPTION_EVENT — wrong wire framing?".clone(),
+    );
+    expect(
+        saw_dml_marker,
+        &"never saw a Query/Xid/Gtid/Rotate — side-channel did not propagate".clone(),
+    );
+
+    let _ = stream.close();
+
+    pass(&"t08_binlog".clone());
+}

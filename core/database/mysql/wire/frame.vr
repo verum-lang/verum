@@ -239,6 +239,14 @@ public fn put_u32_le(buf: &mut List<Byte>, v: Int) {
     }
 }
 
+public fn put_u64_le(buf: &mut List<Byte>, v: Int) {
+    let mut k = 0;
+    while k < 8 {
+        buf.push(((v >> (k * 8)) & 0xFF) as Byte);
+        k = k + 1;
+    }
+}
+
 public fn put_bytes(buf: &mut List<Byte>, src: &[Byte]) {
     buf.extend_from_slice(src);
 }
@@ -275,6 +283,19 @@ public fn read_u32_le(buf: &[Byte], off: Int) -> Result<Int, MyFrameError> {
     let mut v: Int = 0;
     let mut k = 0;
     while k < 4 {
+        v = v | (((buf[off + k] as Int) & 0xFF) << (k * 8));
+        k = k + 1;
+    }
+    Ok(v)
+}
+
+public fn read_u64_le(buf: &[Byte], off: Int) -> Result<Int, MyFrameError> {
+    if (buf.len() as Int) < off + 8 {
+        return Err(FeShort { wanted: 8, available: (buf.len() as Int) - off });
+    }
+    let mut v: Int = 0;
+    let mut k = 0;
+    while k < 8 {
         v = v | (((buf[off + k] as Int) & 0xFF) << (k * 8));
         k = k + 1;
     }
