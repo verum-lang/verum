@@ -1295,6 +1295,19 @@ enum Commands {
         #[clap(long = "kernel-v0-roster")]
         kernel_v0_roster: bool,
 
+        /// Codegen-pass kernel-discharge attestation audit
+        /// (task #162 / CompCert-style verified compilation).
+        /// Walks the canonical 6-pass codegen manifest from
+        /// `verum_kernel::codegen_attestation` and reports per-pass
+        /// status (Discharged / AdmittedWithIOU / NotYetAttested).
+        /// Each pass entry carries its semantic invariant + the
+        /// concrete proof obligation that would discharge it.
+        /// Foundation surface: V0 has every entry NotYetAttested;
+        /// future per-pass discharge work flips entries individually.
+        /// Output: `target/audit-reports/codegen-attestation.json`.
+        #[clap(long = "codegen-attestation")]
+        codegen_attestation: bool,
+
         /// Run the bridge-discharge audit (task #134 / MSFS-L4.1).
         /// Walks every `apply kernel_*_strict(args)` invocation in the
         /// corpus's proof bodies and replays each literal-arg call
@@ -3760,6 +3773,7 @@ fn run_command(cli: Cli) -> Result<()> {
             kernel_recheck,
             kernel_soundness,
             kernel_v0_roster,
+            codegen_attestation,
             bridge_discharge,
             ladder_monotonicity,
             cross_format_roundtrip,
@@ -3816,6 +3830,8 @@ fn run_command(cli: Cli) -> Result<()> {
                 commands::audit::audit_kernel_soundness_with_format(output_format)
             } else if kernel_v0_roster {
                 commands::audit::audit_kernel_v0_roster_with_format(output_format)
+            } else if codegen_attestation {
+                commands::audit::audit_codegen_attestation_with_format(output_format)
             } else if bridge_discharge {
                 commands::audit::audit_bridge_discharge_with_format(output_format)
             } else if ladder_monotonicity {

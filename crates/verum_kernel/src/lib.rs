@@ -137,12 +137,19 @@ pub mod separation_logic;
 // concurrency, IO).  Provides `HeapPredicate`, `HoareTriple`,
 // `SeparationGoal`, `Capability` data types + an adapter that
 // lifts pure separation goals to the unified verification surface
-// so the two coexist cleanly.
+// so the two coexist cleanly.  The dispatcher surface
+// (`dispatch_separation_goal` + `SeparationVerdict` +
+// `SeparationDispatcherStats`) routes a goal to the
+// frame-rule / Hoare-sequencing / consequence-rule strategies; the
+// strategies themselves land in the next #161 slice.
 // Canonical `ForeignSystem` enum (#166) — the single source of truth
 // for the external proof systems Verum interacts with.  Lives in
 // verum_kernel because that's the lowest-level domain crate every
 // other layer depends on; placing it elsewhere creates dependency
 // cycles or pollutes the foundation crate with domain concepts.
+pub use separation_logic::{
+    SeparationDispatcherStats, SeparationVerdict, dispatch_separation_goal,
+};
 
 pub mod verification_goal;
 // Unified VerificationGoal type — the verification surface.  Tracks
@@ -746,6 +753,20 @@ pub use infer::{
 /// other kernel module builds on top of these three types.
 pub mod term;
 pub use term::{CoreTerm, CoreType, UniverseLevel};
+
+/// Verified-compilation kernel-discharge manifest (#162).  Per-pass
+/// simulation-theorem attestation roster for Verum's codegen
+/// pipeline, mirroring CompCert's verified-compilation discipline.
+/// Foundation layer only — every entry in V0 is `NotYetAttested`
+/// with a concrete IOU; the manifest is the slot future passes flip
+/// to `Discharged` or `Admitted_with_IOU`.
+pub mod codegen_attestation;
+pub use codegen_attestation::{
+    AttestationStatus, CODEGEN_PASS_COUNT, CodegenPassId, PassAttestation,
+    admitted_count as codegen_admitted_count,
+    attested_count as codegen_attested_count, manifest as codegen_manifest,
+    pass_count as codegen_pass_count, pending_count as codegen_pending_count,
+};
 
 /// SMT certificate envelope — `SmtCertificate` +
 /// `CERTIFICATE_SCHEMA_VERSION`. Split V7.

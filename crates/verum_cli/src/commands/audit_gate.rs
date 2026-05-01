@@ -154,7 +154,7 @@ impl AuditRegistry {
 impl Default for AuditRegistry {
     fn default() -> Self {
         let mut r = Self::new();
-        // Full migration of all 24 audit gates.  Each gate is one
+        // Full migration of all 27 audit gates.  Each gate is one
         // unit struct + one `impl AuditGate` block; the trait impl
         // routes through the existing `audit::audit_*_with_format`
         // function, so all current behaviour is preserved.
@@ -163,6 +163,7 @@ impl Default for AuditRegistry {
         r.register(Box::new(BridgeAdmitsGate));
         r.register(Box::new(BridgeDischargeGate));
         r.register(Box::new(BundleGate));
+        r.register(Box::new(CodegenAttestationGate));
         r.register(Box::new(CoherentGate));
         r.register(Box::new(CoordGate));
         r.register(Box::new(CoordConsistencyGate));
@@ -251,6 +252,18 @@ impl AuditGate for BundleGate {
     }
     fn run(&self, format: AuditFormat) -> Result<()> {
         super::audit::audit_bundle_with_format(format)
+    }
+}
+
+/// `verum audit --codegen-attestation` — verified-compilation manifest (#162).
+pub struct CodegenAttestationGate;
+impl AuditGate for CodegenAttestationGate {
+    fn name(&self) -> &'static str { "codegen-attestation" }
+    fn description(&self) -> &'static str {
+        "Walk the codegen-pass kernel-discharge manifest (#162); report per-pass attestation status (Discharged / AdmittedWithIOU / NotYetAttested)."
+    }
+    fn run(&self, format: AuditFormat) -> Result<()> {
+        super::audit::audit_codegen_attestation_with_format(format)
     }
 }
 
@@ -519,6 +532,7 @@ mod tests {
             "bridge-admits",
             "bridge-discharge",
             "bundle",
+            "codegen-attestation",
             "coherent",
             "coord",
             "coord-consistency",
@@ -547,7 +561,7 @@ mod tests {
                 name,
             );
         }
-        assert_eq!(r.len(), 26, "expected 26 gates in the default registry");
+        assert_eq!(r.len(), 27, "expected 27 gates in the default registry");
     }
 
     #[test]
@@ -565,7 +579,7 @@ mod tests {
     fn registry_list_returns_name_description_pairs() {
         let r = AuditRegistry::default();
         let entries = r.list();
-        assert_eq!(entries.len(), 26);
+        assert_eq!(entries.len(), 27);
         for (name, desc) in &entries {
             assert!(!name.is_empty());
             assert!(!desc.is_empty());
