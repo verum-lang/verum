@@ -116,13 +116,25 @@ pub(in super::super) fn try_intercept_shell_runtime(
     // Permission gate — process termination AND spawn live under
     // the same `Process` scope (matches `ffi_symbol_permission_scope`
     // mapping for `fork`/`execve`/`posix_spawn` etc.).
-    if state.check_permission(PermissionScope::Process, 0) == PermissionDecision::Deny {
-        // Build Err(ShellError.SpawnFailed { command, reason }) directly.
-        return Ok(Some(build_err_spawn_failed(
-            state,
-            &cmd_text,
-            "permission denied: shell-spawn requires Process grant",
-        )?));
+    //
+    // VBC-PERM-1 — granular target_id: hash the full command line so
+    // a script frontmatter `permissions = ["run=git status"]` grants
+    // only that exact invocation.  Falls through to WILDCARD for
+    // scripts that grant `"run"` without a target.
+    {
+        use crate::interpreter::permission::{target_id_for, WILDCARD_TARGET_ID};
+        let tid = target_id_for(&cmd_text);
+        if state.check_permission(PermissionScope::Process, tid) != PermissionDecision::Allow
+            && state.check_permission(PermissionScope::Process, WILDCARD_TARGET_ID)
+                == PermissionDecision::Deny
+        {
+            // Build Err(ShellError.SpawnFailed { command, reason }) directly.
+            return Ok(Some(build_err_spawn_failed(
+                state,
+                &cmd_text,
+                "permission denied: shell-spawn requires Process grant",
+            )?));
+        }
     }
 
     // Dispatch via std::process::Command — the canonical Tier-0

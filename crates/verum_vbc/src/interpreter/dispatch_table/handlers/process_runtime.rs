@@ -76,9 +76,6 @@ fn intercept_spawn_with_output(
     args_start_reg: u16,
     caller_base: u32,
 ) -> InterpreterResult<Option<Value>> {
-    if let Some(denied) = check_process_permission(state) {
-        return Ok(Some(denied));
-    }
     let cmd_v = unwrap_ref(state, args_start_reg, caller_base);
     let cmd = match read_command_record(state, cmd_v) {
         Some(c) => c,
@@ -87,6 +84,12 @@ fn intercept_spawn_with_output(
             return Ok(Some(wrap_in_variant(state, "Result", 1, &[msg])?));
         }
     };
+    // Permission check NEEDS the program path so we extracted the
+    // command record first.  Granular `permissions = ["run=/bin/echo"]`
+    // grants only that program.
+    if let Some(denied) = check_process_permission(state, &cmd.program) {
+        return Ok(Some(denied));
+    }
     let mut std_cmd = std::process::Command::new(&cmd.program);
     for a in &cmd.args {
         std_cmd.arg(a);
@@ -282,15 +285,30 @@ fn stdio_from_cfg(tag: u32) -> std::process::Stdio {
 // Permission gate
 // ============================================================================
 
-fn check_process_permission(state: &mut InterpreterState) -> Option<Value> {
-    if state.check_permission(PermissionScope::Process, 0) == PermissionDecision::Deny {
-        // Surface as an Err(Text) — the stdlib's spawn return type is
-        // `Result<Output, Text>`, so we match its discriminant.
-        let msg =
-            alloc_string_value(state, "permission denied: process spawn requires `run`").ok()?;
-        return wrap_in_variant(state, "Result", 1, &[msg]).ok();
+/// VBC-PERM-1 — granular target_id: hash the program path so a
+/// script frontmatter `permissions = ["run=/bin/echo"]` grants
+/// only that program.  Falls through to WILDCARD for scripts
+/// that grant `"run"` without a target.
+fn check_process_permission(
+    state: &mut InterpreterState,
+    program: &str,
+) -> Option<Value> {
+    use crate::interpreter::permission::{target_id_for, WILDCARD_TARGET_ID};
+    let tid = target_id_for(program);
+    if state.check_permission(PermissionScope::Process, tid) == PermissionDecision::Allow {
+        return None;
     }
-    None
+    if state.check_permission(PermissionScope::Process, WILDCARD_TARGET_ID) != PermissionDecision::Deny {
+        return None;
+    }
+    // Surface as an Err(Text) — the stdlib's spawn return type is
+    // `Result<Output, Text>`, so we match its discriminant.
+    let msg = alloc_string_value(
+        state,
+        &format!("permission denied: process spawn `{}` requires `run` grant", program),
+    )
+    .ok()?;
+    wrap_in_variant(state, "Result", 1, &[msg]).ok()
 }
 
 // ============================================================================
