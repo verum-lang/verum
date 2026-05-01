@@ -232,21 +232,36 @@ Mitigation:
 - Phase 1A foundation (LANDED, commit 0ab9cdcb): WorkerPool data
   structure + AsyncRuntime.worker_pool field + worker_pool_size()
   accessor. Zero-overhead default contract preserved.
-- **Phase 1B-1 (LANDED, this commit)**: thread spawning via
-  `Thread.spawn` + worker-main poll loop + park/notify protocol +
-  shutdown extract-and-join + 50 ms park timeout safety net.
-  Graceful single-threaded fallback covers Tier 0 / spawn failures
-  (Hazard 4). All 6 documented hazards (1-6) mitigated. Test
-  surface: `test_compile_stdlib_async_executor` (codegen feature)
-  green; `worker_pool_phase1b_typecheck.vr` (L2 spec) typechecks
-  the Phase 1B method surface. Executable Tier 0 + Tier 1 pin
-  tests gated on (a) the pre-existing AsyncRuntime-construction
-  stack-overflow in interpreter mode and (b) AOT trunk being
-  unblocked from `dealloc missing param 1` lowering bug.
-- Phase 1B-2 follow-up: replace 50 ms park timeout with explicit
-  `worker_pool.notify_one()` calls in `spawn()` + waker-dispatch
-  paths for production-grade wakeup latency.
-- Phase 2 work-stealing: follow-up task #278.
+- **Phase 1B-1 (LANDED)**: thread spawning via `Thread.spawn` +
+  worker-main poll loop + park/notify protocol + shutdown
+  extract-and-join + 50 ms park timeout safety net.  Graceful
+  single-threaded fallback covers Tier 0 / spawn failures
+  (Hazard 4). All 6 documented hazards (1-6) mitigated.
+- **Phase 1B-2 (LANDED, with Phase 2)**: `notify_one()` after
+  every `spawn` push so parked workers don't have to wait for
+  the 50 ms timeout to pick up newly-spawned work. The timeout
+  remains as a defense-in-depth safety net; latency is now
+  bounded by `Condvar` wake (~µs).
+- **Phase 2 (LANDED, this commit)**: per-worker local deques +
+  work-stealing.  `WorkerSlot` type holds
+  `local_deque: Heap<Mutex<Deque<Heap<TaskEntry>>>>` +
+  `steal_hint: AtomicInt`. `WorkerPool.slots: List<WorkerSlot>`
+  allocated by `WorkerPool.empty(num)`.
+  `CURRENT_WORKER_ID` thread-local is set by `worker_main` so
+  `current_worker_id()` returns `Maybe.Some(id)` inside a worker
+  / `Maybe.None` on the main thread / FFI callback.
+  `spawn` dispatches: inside-worker → `slot.push_local(entry)`
+  (LIFO, cache-hot for recursive spawn); outside → existing
+  `task_queue` (the global injector). Each spawn also calls
+  `pool.notify_one()` (Phase 1B-2). `worker_main` drains in
+  three tiers: own local deque (LIFO via `pop_back`) → global
+  ready/pending queues → `try_steal_for(self_id)` over peers
+  (FIFO via `pop_front`, round-robin keyed by `steal_hint`).
+  Test surface: `test_compile_stdlib_async_executor` green;
+  `worker_pool_phase2_typecheck.vr` (L2 spec) typechecks the
+  Phase 2 surface (`WorkerSlot.local_len`, `WorkerPool.slot` /
+  `try_steal_for`, `current_worker_id`).  Executable observable-
+  parallelism pin still gated on #330 + #331.
 - Phase 3 Send/Sync pins: follow-up task #279.
 - Phase 4 lock-free + cache padding: follow-up task #280.
 - VCS spec tests: integrated with #273 (Differential Tier 0/1 tests).

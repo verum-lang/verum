@@ -1,0 +1,50 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: async, runtime, worker-pool, phase-2, work-stealing
+// @timeout: 10000
+// @expect: pass
+//
+// Phase 2 (#278) — work-stealing surface contract pin. Type-checks
+// the public WorkerSlot / WorkerPool / current_worker_id surface
+// Phase 2 introduces.  A regression that removes a method or
+// changes a return type lights up here even when the executable
+// dual-mode tests are blocked by pre-existing #330 (interpreter
+// AsyncRuntime overflow) and #331 (AOT trunk lowering).
+
+mount core.async.executor.{
+    AsyncRuntime, WorkerPool, WorkerSlot, current_worker_id,
+};
+
+fn worker_slot_surface_check(slot: &WorkerSlot) {
+    // Diagnostic accessor — local deque length.
+    let _: Int = slot.local_len();
+}
+
+fn worker_pool_phase2_surface_check(pool: &WorkerPool) {
+    // Phase 2 additions: per-worker slot accessor + work-stealing.
+    let _slot_opt = pool.slot(0);
+    let _stolen = pool.try_steal_for(0);
+}
+
+fn current_worker_id_surface_check() {
+    // Outside a worker, this returns Maybe.None. Inside a worker
+    // (set by `worker_main`), Maybe.Some(0..num_workers-1).
+    let id_opt: Maybe<Int> = current_worker_id();
+    match id_opt {
+        Maybe.Some(_id) => {},
+        Maybe.None => {},
+    };
+}
+
+fn main() {
+    let pool = WorkerPool.empty(2);
+    worker_pool_phase2_surface_check(&pool);
+
+    match pool.slot(0) {
+        Maybe.Some(slot) => worker_slot_surface_check(slot),
+        Maybe.None => {},
+    };
+
+    current_worker_id_surface_check();
+}
