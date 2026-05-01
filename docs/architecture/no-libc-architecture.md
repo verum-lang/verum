@@ -131,9 +131,16 @@ shipping):
 | ✅ `runtime.rs::get_or_declare_access`        | `access`              | Linux x86_64 `SYS_access` (21) / aarch64 `SYS_faccessat` (48) ; libSystem on macOS. **Closed.** |
 | `runtime.rs::get_or_declare_clock_gettime`    | `clock_gettime`       | Already replaced for Linux / macOS via direct syscall + libSystem; the helper itself remains for the macOS + other-Unix fallback paths.  Audit each remaining call. |
 | `runtime.rs::get_or_declare_nanosleep`        | `nanosleep`           | Same as clock_gettime.                       |
-| `runtime.rs::get_or_declare_freeaddrinfo`     | `freeaddrinfo`        | Audit usage; the resolver path likely shouldn't require this in a no-libc world. |
-| `platform_ir.rs::emit_socket_*` (~10 helpers) | `setsockopt` etc.     | Direct syscall / WinSock — partial in progress. |
-| `verum_vbc::ffi::*` (libffi paths)            | All libc syscalls     | Replace with `__sys_*_raw` intrinsics that bypass libffi. |
+| `runtime.rs::get_or_declare_freeaddrinfo`     | `freeaddrinfo`        | DNS resolver path.  Strategy: replace `getaddrinfo`/`freeaddrinfo` pair with a Verum-native DNS resolver that talks UDP to nameservers from `/etc/resolv.conf` directly.  Substantial work — ~500 LOC.  **Deferred — large standalone task.** |
+| `runtime.rs::get_or_declare_inet_pton`        | `inet_pton`           | IP-string parsing.  Strategy: emit inline parser for AF_INET (4-byte) and AF_INET6 (16-byte) cases.  ~80 LOC of LLVM IR.  **Open — straightforward but pending.** |
+| `platform_ir.rs::emit_socket_*` (~10 helpers) | `setsockopt`/`socket`/`bind`/`listen`/`accept`/`connect`/`send`/`sendto`/`recv`/`recvfrom`/`getsockname` | Most have v2 intrinsic replacements via `__tcp_*_raw` family in `verum_vbc::intrinsics`.  Migration: re-point platform_ir.rs declarations at the v2 intrinsics where they exist; for the remaining socket-options helpers, add direct-syscall paths (Linux SYS_setsockopt = 54).  **Open — partially closed via v2 intrinsic family in earlier sweep.** |
+| `verum_vbc::ffi::*` (libffi paths)            | All libc syscalls     | Replace with `__sys_*_raw` intrinsics that bypass libffi.  Substantial work — ~1000 LOC across `verum_vbc/src/ffi/platform/{linux,darwin}.rs`.  **Deferred — large standalone task.** |
+| **Internal-only paths (debug/test, not user-facing):** | | |
+| `instruction.rs` printf (×3 in debug helper)  | `printf`              | Debug helper for `Debug` opcode.  Strategy: route through `verum_internal_puts` after formatting i64/f64 → text via Verum's own number-to-text helpers.  Lower priority since debug-mode-only. **Open — internal only.** |
+| `instruction.rs` strtol (×2)                  | `strtol`              | Verum text → int parser.  ~30 LOC of LLVM IR (skip whitespace, optional sign, accumulate digits).  **Open — straightforward.** |
+| `instruction.rs` strtod (×2)                  | `strtod`              | Float parsing — genuinely complex (Ryu, exponents, NaN/Inf).  Could route through libSystem on macOS (acceptable) and require migration on Linux only.  **Open — large effort for Linux path.** |
+| `platform_ir.rs::emit_exception_handling`     | `setjmp`/`longjmp`    | Exception unwinding primitive.  No direct syscall — purely CPU register save/restore.  Strategy: emit `llvm.eh.sjlj.setjmp` LLVM intrinsic (lowers to inline asm, not libc).  **Open — special-case.** |
+| `verum_kernel` / Rust internals               | Rust stdlib's libc usage | Not in scope — Verum compiler/host concerns; the *produced binary* is the audit target. |
 
 ## Why this matters
 
