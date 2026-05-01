@@ -1,0 +1,61 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: net, weft, bufpool, connection
+// @timeout: 10000
+// @expect: pass
+//
+// Pin (#315) — `ConnectionConfig.with_pool(Shared<BufferPool>)`
+// surface contract.  The bufpool→connection wiring closes the
+// red-team gap where `BufferPool` was defined but no other weft
+// file referenced it, leaving the per-connection read loop with:
+//
+//   * Per-iteration `let mut chunk: List<Byte> = List.with_capacity(4096)`
+//     allocations — K heap allocations + K CBGR-refs per request
+//     frame on a slowloris-paced peer.
+//   * No path for the kernel-pinned io_uring registered-buffer
+//     contract that `bufpool::register_with_iouring` set up.
+//
+// Post-fix `serve_one_message` hoists the chunk allocation out of
+// the loop (clear-and-reuse semantics — O(1) allocations per
+// connection regardless of read iteration count) and consults
+// `config.pool` to size the chunk and acquire a pool lease for
+// the connection's lifetime.  Same observable behaviour without
+// a pool (None default); io_uring-aligned with one.
+
+mount core.net.weft.connection.{ConnectionConfig};
+mount core.net.weft.bufpool.{BufferPool, BufferPoolConfig};
+
+fn surface_check() {
+    // Default config — `pool: None` (zero-overhead default).
+    let cfg_default = ConnectionConfig.default();
+    match cfg_default.pool {
+        Some(_) => panic("default ConnectionConfig must have pool: None"),
+        None => {},
+    };
+
+    // Builder API — `with_pool` accepts `Shared<BufferPool>` and
+    // returns ConnectionConfig with the field populated.
+    let pool = Shared.new(BufferPool.new(
+        BufferPoolConfig.default()
+            .with_count(64)
+            .with_buf_size(16 * 1024),
+    ));
+    let cfg_pooled = ConnectionConfig.default().with_pool(pool.clone());
+    match cfg_pooled.pool {
+        Some(_) => {},
+        None => panic("with_pool must populate pool: Some(_)"),
+    };
+
+    // Clone propagates the pool — Shared semantics give every
+    // connection a refcounted view of the same pool state.
+    let cfg_cloned = cfg_pooled.clone();
+    match cfg_cloned.pool {
+        Some(_) => {},
+        None => panic("Clone for ConnectionConfig must propagate pool"),
+    };
+}
+
+fn main() {
+    surface_check();
+}
