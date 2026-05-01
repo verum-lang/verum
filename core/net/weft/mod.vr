@@ -15,6 +15,7 @@ public mount super.net.weft.handler.*;
 public mount super.net.weft.router.*;
 public mount super.net.weft.connection.*;
 public mount super.net.weft.listener.*;
+public mount super.net.weft.io_uring_accept.*;
 public mount super.net.weft.tls.*;
 public mount super.net.weft.http2.*;
 public mount super.net.weft.websocket.*;

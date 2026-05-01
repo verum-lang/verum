@@ -1,0 +1,238 @@
+// @test: typecheck-pass
+// @tier: 0
+// @level: L2
+// @tags: net, weft, io-uring, multi-shot, accept, phase5, scaffold
+// @timeout: 10000
+// @expect: pass
+
+// §6.17 — io_uring multi-shot accept V0 scaffold (#316.3).
+//
+// V0 lands the architectural surface only:
+//
+//   * IoUringAcceptConfig + builder methods + defaults
+//   * IoUringAcceptStrategy protocol
+//   * BlockingAcceptStrategy — today's behaviour (calls TcpListener::accept)
+//   * MultiShotAcceptStrategy — V1 placeholder, panics on dispatch
+//   * select_accept_strategy() — picks Blocking on every triple today
+//   * IoUringTelemetry counters
+//   * ListenerConfig.with_io_uring_strategy() opt-in builder
+//
+// V1 (#316.4) wires the actual liburing FFI behind the same surface.
+
+mount core.net.weft.io_uring_accept.{
+    IoUringAcceptConfig,
+    IoUringAcceptStrategy,
+    BlockingAcceptStrategy,
+    MultiShotAcceptStrategy,
+    IoUringTelemetry,
+    IoUringTelemetryAtomics,
+    select_accept_strategy,
+    would_select_multi_shot,
+};
+mount core.net.weft.listener.{ListenerConfig};
+
+// -----------------------------------------------------------------------------
+// 1. Config builder defaults
+// -----------------------------------------------------------------------------
+
+fn test_config_defaults() -> (Bool, Int, (Bool, Int)) {
+    let cfg = IoUringAcceptConfig.default();
+    // Defaults per §6.17: multi-shot ON, batch 128, no fixed-fd index.
+    cfg.fingerprint()
+}
+
+fn test_config_builders_round_trip() -> (Bool, Int, (Bool, Int)) {
+    // Set every field explicitly; the fingerprint must reflect the
+    // builder-argument values exactly — round-trip on the config.
+    let cfg = IoUringAcceptConfig.default()
+        .with_multi_shot(false)
+        .with_sqe_batch_size(64)
+        .with_fixed_listener_index(Some(7));
+    cfg.fingerprint()
+}
+
+fn test_config_clone_round_trip() -> Bool {
+    let original = IoUringAcceptConfig.default()
+        .with_multi_shot(true)
+        .with_sqe_batch_size(256)
+        .with_fixed_listener_index(Some(3));
+    let cloned = original.clone();
+    let (a_ms, a_b, (a_p, a_v)) = original.fingerprint();
+    let (b_ms, b_b, (b_p, b_v)) = cloned.fingerprint();
+    a_ms == b_ms && a_b == b_b && a_p == b_p && a_v == b_v
+}
+
+// -----------------------------------------------------------------------------
+// 2. Strategy selection on a Linux target picks the MultiShot scaffold
+//    (intent surface — V0 selector returns Blocking today; the
+//    `would_select_multi_shot` predicate pins the V1 contract.)
+// -----------------------------------------------------------------------------
+
+fn test_select_intent_linux() -> Bool {
+    let cfg = IoUringAcceptConfig.default();
+    let triple = "x86_64-unknown-linux-gnu".to_text();
+    would_select_multi_shot(&triple, &cfg)
+}
+
+fn test_select_intent_linux_musl() -> Bool {
+    // Forward-compat: substring match on `linux` covers musl, gnu, etc.
+    let cfg = IoUringAcceptConfig.default();
+    let triple = "aarch64-unknown-linux-musl".to_text();
+    would_select_multi_shot(&triple, &cfg)
+}
+
+fn test_select_returns_strategy_linux() -> Text {
+    let cfg = IoUringAcceptConfig.default();
+    let triple = "x86_64-unknown-linux-gnu".to_text();
+    let strat = select_accept_strategy(&triple, &cfg);
+    // V0 always picks blocking — the test pins behaviour so V1's
+    // upgrade is a single-test diff.
+    (&*strat).name()
+}
+
+// -----------------------------------------------------------------------------
+// 3. Strategy selection on darwin / windows falls back to Blocking
+// -----------------------------------------------------------------------------
+
+fn test_select_intent_darwin() -> Bool {
+    let cfg = IoUringAcceptConfig.default();
+    let triple = "aarch64-apple-darwin".to_text();
+    would_select_multi_shot(&triple, &cfg)
+}
+
+fn test_select_intent_windows() -> Bool {
+    let cfg = IoUringAcceptConfig.default();
+    let triple = "x86_64-pc-windows-msvc".to_text();
+    would_select_multi_shot(&triple, &cfg)
+}
+
+fn test_select_returns_strategy_darwin() -> Text {
+    let cfg = IoUringAcceptConfig.default();
+    let triple = "aarch64-apple-darwin".to_text();
+    let strat = select_accept_strategy(&triple, &cfg);
+    (&*strat).name()
+}
+
+fn test_select_disabled_multi_shot_falls_back() -> Bool {
+    // Even on Linux, `multi_shot: false` must demote intent to false.
+    let cfg = IoUringAcceptConfig.default().with_multi_shot(false);
+    let triple = "x86_64-unknown-linux-gnu".to_text();
+    would_select_multi_shot(&triple, &cfg)
+}
+
+// -----------------------------------------------------------------------------
+// 4. MultiShotAcceptStrategy construction surface
+//    (Cannot test the panic at typecheck time — the panic is the
+//    runtime behaviour for accidental V0 dispatch.  We verify here
+//    that the type CAN be constructed and exposes the protocol;
+//    a runtime test would invoke `next_accept` and observe the panic.)
+// -----------------------------------------------------------------------------
+
+fn test_multi_shot_construction() -> Text {
+    let cfg = IoUringAcceptConfig.default();
+    let strat = MultiShotAcceptStrategy.new(cfg);
+    strat.name()
+}
+
+fn test_multi_shot_telemetry_starts_zero() -> (Int, Int, Int) {
+    let cfg = IoUringAcceptConfig.default();
+    let strat = MultiShotAcceptStrategy.new(cfg);
+    let snap = strat.telemetry();
+    (snap.shots_observed, snap.fallbacks_used, snap.accept_errors)
+}
+
+// -----------------------------------------------------------------------------
+// 5. Blocking strategy — construction + telemetry surface
+//    (Real `next_accept` requires a live TcpListener; that's covered
+//    in the integration tests, not the typecheck pass.)
+// -----------------------------------------------------------------------------
+
+fn test_blocking_construction() -> Text {
+    let strat = BlockingAcceptStrategy.new();
+    strat.name()
+}
+
+fn test_blocking_telemetry_starts_zero() -> (Int, Int, Int) {
+    let strat = BlockingAcceptStrategy.new();
+    let snap = strat.telemetry();
+    (snap.shots_observed, snap.fallbacks_used, snap.accept_errors)
+}
+
+// -----------------------------------------------------------------------------
+// 6. Telemetry counters increment correctly
+// -----------------------------------------------------------------------------
+
+fn test_telemetry_record() -> (Int, Int, Int) {
+    let counters = IoUringTelemetryAtomics.new();
+    counters.record_shot();
+    counters.record_shot();
+    counters.record_shot();
+    counters.record_fallback();
+    counters.record_error();
+    counters.record_error();
+    let snap = counters.snapshot();
+    (snap.shots_observed, snap.fallbacks_used, snap.accept_errors)
+}
+
+fn test_telemetry_zero_constructor() -> (Int, Int, Int) {
+    let snap = IoUringTelemetry.zero();
+    (snap.shots_observed, snap.fallbacks_used, snap.accept_errors)
+}
+
+fn test_telemetry_clone_round_trip() -> Bool {
+    let counters = IoUringTelemetryAtomics.new();
+    counters.record_shot();
+    counters.record_error();
+    let snap = counters.snapshot();
+    let snap_cloned = snap.clone();
+    snap.shots_observed == snap_cloned.shots_observed
+        && snap.fallbacks_used == snap_cloned.fallbacks_used
+        && snap.accept_errors == snap_cloned.accept_errors
+}
+
+// -----------------------------------------------------------------------------
+// 7. ListenerConfig opt-in via with_io_uring_strategy
+// -----------------------------------------------------------------------------
+
+fn test_listener_config_default_has_no_io_uring() -> Bool {
+    let cfg = ListenerConfig.default();
+    match cfg.io_uring_accept {
+        Some(_) => false,
+        None    => true,
+    }
+}
+
+fn test_listener_config_opt_in() -> Bool {
+    let io_cfg = IoUringAcceptConfig.default();
+    let cfg = ListenerConfig.default().with_io_uring_strategy(io_cfg);
+    match cfg.io_uring_accept {
+        Some(_) => true,
+        None    => false,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Test driver — typecheck the surface end-to-end.
+// -----------------------------------------------------------------------------
+
+fn main() {
+    let _ = test_config_defaults();
+    let _ = test_config_builders_round_trip();
+    let _ = test_config_clone_round_trip();
+    let _ = test_select_intent_linux();
+    let _ = test_select_intent_linux_musl();
+    let _ = test_select_returns_strategy_linux();
+    let _ = test_select_intent_darwin();
+    let _ = test_select_intent_windows();
+    let _ = test_select_returns_strategy_darwin();
+    let _ = test_select_disabled_multi_shot_falls_back();
+    let _ = test_multi_shot_construction();
+    let _ = test_multi_shot_telemetry_starts_zero();
+    let _ = test_blocking_construction();
+    let _ = test_blocking_telemetry_starts_zero();
+    let _ = test_telemetry_record();
+    let _ = test_telemetry_zero_constructor();
+    let _ = test_telemetry_clone_round_trip();
+    let _ = test_listener_config_default_has_no_io_uring();
+    let _ = test_listener_config_opt_in();
+}
