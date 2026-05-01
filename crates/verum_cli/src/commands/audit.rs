@@ -1632,35 +1632,59 @@ pub(crate) fn discover_vr_files(root: &Path) -> Vec<PathBuf> {
 /// as `unresolved` per the apply-graph fallback contract.
 pub(crate) fn discover_stdlib_vr_files() -> Vec<PathBuf> {
     let candidates: Vec<PathBuf> = stdlib_root_candidates();
+    // Aggregate from every viable candidate, deduplicate by absolute
+    // path. Returning the first non-empty match (the previous behaviour)
+    // missed sibling subtrees like `core/verify/codegen_soundness/`
+    // when `core/math/` was already populated. Walking each viable
+    // candidate keeps stdlib-side @kernel_discharge axiom discovery
+    // complete across all topic subtrees.
+    let mut seen: std::collections::BTreeSet<PathBuf> = std::collections::BTreeSet::new();
+    let mut out: Vec<PathBuf> = Vec::new();
     for root in candidates {
-        if root.is_dir() {
-            let files = discover_vr_files(&root);
-            if !files.is_empty() {
-                return files;
+        if !root.is_dir() {
+            continue;
+        }
+        let canonical = root.canonicalize().unwrap_or(root.clone());
+        if !seen.insert(canonical) {
+            continue;
+        }
+        let files = discover_vr_files(&root);
+        for f in files {
+            let key = f.canonicalize().unwrap_or(f.clone());
+            if seen.insert(key) {
+                out.push(f);
             }
         }
     }
-    Vec::new()
+    out
 }
 
-fn stdlib_root_candidates() -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = Vec::new();
-    // The audit only needs `core/math/` (where MSFS-related axioms
-    // and `_full` form theorems live). Walking the whole stdlib
-    // (2000+ files) would slow the audit significantly without
-    // adding apply-graph resolution value.
+/// Locate the Verum-language stdlib root (the directory containing
+/// `core/`). Used by the codegen-attestation cross-check to find
+/// `core/verify/codegen_soundness/<pass>.vr` citation files.
+///
+/// Discovery order mirrors [`stdlib_root_candidates`] but searches
+/// for `core/verify/` rather than `core/math/`:
+///   1. `VERUM_STDLIB_ROOT` env var.
+///   2. Walk up from the verum binary directory.
+///   3. Walk up from the current working directory.
+///   4. Walk up from the manifest directory.
+/// Returns the first match whose `core/verify/` is a directory, or
+/// `None` when no candidate succeeds.
+pub(crate) fn locate_stdlib_root(manifest_dir: &Path) -> Option<PathBuf> {
+    let probe = |root: &Path| -> bool { root.join("core").join("verify").is_dir() };
     if let Ok(env_root) = std::env::var("VERUM_STDLIB_ROOT") {
         let env_path = PathBuf::from(env_root);
-        out.push(env_path.join("math"));
-        out.push(env_path);
+        if probe(&env_path) {
+            return Some(env_path);
+        }
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             let mut cur = dir.to_path_buf();
-            for _ in 0..6 {
-                let candidate = cur.join("core").join("math");
-                if candidate.is_dir() {
-                    out.push(candidate);
+            for _ in 0..8 {
+                if probe(&cur) {
+                    return Some(cur);
                 }
                 if !cur.pop() {
                     break;
@@ -1671,9 +1695,68 @@ fn stdlib_root_candidates() -> Vec<PathBuf> {
     if let Ok(cwd) = std::env::current_dir() {
         let mut cur = cwd;
         for _ in 0..8 {
-            let candidate = cur.join("core").join("math");
-            if candidate.is_dir() {
-                out.push(candidate);
+            if probe(&cur) {
+                return Some(cur);
+            }
+            if !cur.pop() {
+                break;
+            }
+        }
+    }
+    let mut cur = manifest_dir.to_path_buf();
+    for _ in 0..8 {
+        if probe(&cur) {
+            return Some(cur);
+        }
+        if !cur.pop() {
+            break;
+        }
+    }
+    None
+}
+
+fn stdlib_root_candidates() -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+    // The audit consumes per-topic subtrees of `core/`:
+    //   - `core/math/` — MSFS-related axioms, framework-cited theorems.
+    //   - `core/verify/` — kernel-soundness corpora + codegen-attestation
+    //     citations (#162 / `core/verify/codegen_soundness/`).
+    //   - `core/proof/` — kernel-bridge axioms.
+    // Walking every subtree (2000+ files total) would slow the audit;
+    // pinpointing the topic-relevant ones keeps it fast while ensuring
+    // every kernel-discharge citation surfaces.
+    let topic_subdirs: &[&str] = &["math", "verify", "proof"];
+    if let Ok(env_root) = std::env::var("VERUM_STDLIB_ROOT") {
+        let env_path = PathBuf::from(env_root);
+        for topic in topic_subdirs {
+            out.push(env_path.join(topic));
+        }
+        out.push(env_path);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let mut cur = dir.to_path_buf();
+            for _ in 0..6 {
+                for topic in topic_subdirs {
+                    let candidate = cur.join("core").join(topic);
+                    if candidate.is_dir() {
+                        out.push(candidate);
+                    }
+                }
+                if !cur.pop() {
+                    break;
+                }
+            }
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut cur = cwd;
+        for _ in 0..8 {
+            for topic in topic_subdirs {
+                let candidate = cur.join("core").join(topic);
+                if candidate.is_dir() {
+                    out.push(candidate);
+                }
             }
             if !cur.pop() {
                 break;
@@ -2525,6 +2608,7 @@ pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> 
         AttestationStatus, CODEGEN_PASS_COUNT, admitted_count, attested_count, manifest,
         pass_count, pending_count,
     };
+    use verum_kernel::intrinsic_dispatch::{IntrinsicValue, dispatch_intrinsic};
 
     if matches!(format, AuditFormat::Plain) {
         ui::step("Auditing codegen-pass kernel-discharge attestations (#162)");
@@ -2537,13 +2621,80 @@ pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> 
     let admitted = admitted_count();
     let pending = pending_count();
 
+    // Cross-reference layer (#162 V2) — each manifest entry must have:
+    //   (a) a matching .vr citation file at
+    //       core/verify/codegen_soundness/<tag>.vr; and
+    //   (b) a kernel intrinsic dispatcher that returns
+    //       Decision { holds: true } for kernel_<tag>_preserves_semantics.
+    //
+    // **Embedded-stdlib lookup**. `core/` is zstd-compressed and embedded
+    // directly into the verum binary at build time (see
+    // `verum_compiler::embedded_stdlib`). The cross-check primarily
+    // queries the embedded archive — installed binaries don't ship a
+    // separate `core/` directory. Source-tree builds get a working
+    // archive too because build.rs walks the project's core/ folder
+    // and generates the archive on every build.
+    //
+    // Disk fallback exists only for the rare developer scenario of
+    // running the audit against a source tree whose embedded archive
+    // is empty (e.g. running `cargo run -- audit ...` immediately
+    // after a `cargo clean` — uncommon in practice).
+    //
+    // Both gaps are reported as `vr_missing` / `dispatcher_missing` rows
+    // in the JSON. A discharged-or-admitted manifest entry whose .vr
+    // citation OR dispatcher is missing flips the audit verdict to
+    // failure — the architecture's bidirectional contract.
+    let embedded = verum_compiler::embedded_stdlib::get_embedded_stdlib();
+    let stdlib_root_disk = locate_stdlib_root(&manifest_dir);
+    let mut vr_missing: Vec<String> = Vec::new();
+    let mut dispatcher_missing: Vec<String> = Vec::new();
+    let vr_present = |tag: &str| -> bool {
+        // Embedded paths are relative to core/, so the lookup key is
+        // `verify/codegen_soundness/<tag>.vr`.
+        let embedded_key = format!("verify/codegen_soundness/{}.vr", tag);
+        if let Some(archive) = embedded {
+            if archive.get_file(&embedded_key).is_some() {
+                return true;
+            }
+        }
+        // Disk fallback for source-tree builds with empty archive.
+        if let Some(root) = stdlib_root_disk.as_ref() {
+            let path = root
+                .join("core")
+                .join("verify")
+                .join("codegen_soundness")
+                .join(format!("{}.vr", tag));
+            if path.exists() {
+                return true;
+            }
+        }
+        false
+    };
+    for p in &passes {
+        let intrinsic_name = p.pass.kernel_intrinsic_name();
+        // (a) .vr file presence — only required when the entry is not
+        // `NotYetAttested`. Pending entries by definition haven't yet
+        // landed their citation file.
+        if !matches!(p.status, AttestationStatus::NotYetAttested) && !vr_present(p.pass.tag()) {
+            vr_missing.push(p.pass.tag().to_string());
+        }
+        // (b) Dispatcher presence — required for every entry, regardless
+        // of status, because the audit gate's intrinsic walker looks
+        // these up unconditionally.
+        match dispatch_intrinsic(&intrinsic_name, &[]) {
+            Some(IntrinsicValue::Decision { holds: true, .. }) => {}
+            _ => dispatcher_missing.push(intrinsic_name),
+        }
+    }
+    let cross_check_ok = vr_missing.is_empty() && dispatcher_missing.is_empty();
+
     // Always write the JSON report — same convention as the rest of
     // the audit gate suite (#172).
     let report_dir = manifest_dir.join("target").join("audit-reports");
     let _ = std::fs::create_dir_all(&report_dir);
     let report_path = report_dir.join("codegen-attestation.json");
     let payload = serde_json::json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "kernel_version": env!("CARGO_PKG_VERSION"),
         "task": "#162",
         "discipline": "compcert_per_pass_simulation",
@@ -2552,6 +2703,12 @@ pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> 
         "admitted_count": admitted,
         "pending_count": pending,
         "all_attested_claim_supported": attested == total,
+        // #162 V2 — cross-reference layer: every non-pending entry
+        // must have a matching .vr citation file AND a kernel intrinsic
+        // dispatcher entry. Both gaps surface here for audit consumers.
+        "vr_citations_missing": vr_missing,
+        "dispatchers_missing": dispatcher_missing,
+        "cross_check_passed": cross_check_ok,
         "passes": passes
             .iter()
             .map(|p| {
@@ -2626,6 +2783,35 @@ pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> 
                 }
             }
             println!();
+            // Cross-reference summary (#162 V2): the bidirectional
+            // contract between the Rust manifest and the .vr citation
+            // files + kernel dispatchers. Both must agree for the
+            // attestation surface to be load-bearing.
+            if cross_check_ok {
+                println!(
+                    "{} cross-check: every non-pending pass has a matching .vr \
+                     citation + kernel dispatcher",
+                    "✓".green(),
+                );
+            } else {
+                println!(
+                    "{} cross-check FAILED:",
+                    "✗".red(),
+                );
+                if !vr_missing.is_empty() {
+                    println!(
+                        "       .vr citations missing: {}",
+                        vr_missing.join(", "),
+                    );
+                }
+                if !dispatcher_missing.is_empty() {
+                    println!(
+                        "       dispatchers missing: {}",
+                        dispatcher_missing.join(", "),
+                    );
+                }
+            }
+            println!();
             println!(
                 "{} of {} passes attested — the verified-compilation chain is the L4 IOU surface",
                 attested, CODEGEN_PASS_COUNT,
@@ -2638,11 +2824,16 @@ pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> 
         }
     }
 
-    // Failure semantics: the manifest's literal "all attested" claim
-    // is the only failure surface. Pending entries are observability;
-    // a partial-attestation manifest is an honest report, not a gate
-    // failure. If the manifest data layer ever diverges from the
-    // helper-count partition, that is a build-time bug surfaced here.
+    // Failure semantics: two distinct surfaces fail the gate.
+    //  (1) Manifest internal-consistency: if attested+admitted+pending
+    //      ever drifts from the total, the data layer has a bug.
+    //  (2) Cross-reference contract: every non-pending entry MUST have
+    //      a matching .vr citation + kernel dispatcher. A discharged
+    //      or admitted entry without its citation file or dispatcher
+    //      is an unsound claim — the audit gate enforces both.
+    //
+    // Pending entries are still observability — a partial-attestation
+    // manifest is an honest report, not a gate failure.
     if attested + admitted + pending != total {
         return Err(crate::error::CliError::Custom(
             format!(
@@ -2653,6 +2844,21 @@ pub fn audit_codegen_attestation_with_format(format: AuditFormat) -> Result<()> 
                 admitted,
                 pending,
                 total,
+                report_path.display(),
+            )
+            .into(),
+        ));
+    }
+    if !cross_check_ok {
+        return Err(crate::error::CliError::Custom(
+            format!(
+                "codegen-attestation cross-reference failed: vr_missing={:?}, \
+                 dispatchers_missing={:?} — every non-pending manifest entry \
+                 requires a matching .vr citation under \
+                 core/verify/codegen_soundness/ AND a kernel dispatcher in \
+                 verum_kernel::intrinsic_dispatch. See {}",
+                vr_missing,
+                dispatcher_missing,
                 report_path.display(),
             )
             .into(),

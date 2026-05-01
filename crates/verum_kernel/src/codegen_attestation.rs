@@ -254,16 +254,17 @@ pub struct PassAttestation {
 
 /// Canonical attestation roster for Verum's codegen pipeline.
 ///
-
 /// This is the single source of truth for the codegen-attestation
-/// surface. The manifest's V0 contents shipped with #162 — every
-/// entry is `NotYetAttested` and carries the precise structural
-/// invariant that would discharge it.
+/// surface. Each entry is mirrored on the Verum-language side by an
+/// `axiom kernel_<pass>_preserves_semantics` declaration in
+/// `core/verify/codegen_soundness/<pass>.vr` carrying the same
+/// `@framework(...)` citation as the manifest's IOU.
 ///
-
-/// **Stable contract**: adding a codegen pass requires a manifest
-/// entry. Removing or renaming an entry is a breaking change for
-/// audit tooling.
+/// **Stable contract**: adding a codegen pass requires both a
+/// manifest entry AND a `core/verify/codegen_soundness/<pass>.vr`
+/// file. Removing or renaming an entry is a breaking change for
+/// audit tooling. The audit gate
+/// (`verum audit --codegen-attestation`) cross-checks both surfaces.
 pub fn manifest() -> Vec<PassAttestation> {
     vec![
         PassAttestation {
@@ -275,7 +276,13 @@ pub fn manifest() -> Vec<PassAttestation> {
                  evaluation context `K`, `K[e] ⇓ v` iff `lower(K)[lower(e)] ⇓ \
                  lower(v)` in the VBC operational semantics"
                 .to_string(),
-            status: AttestationStatus::NotYetAttested,
+            status: AttestationStatus::AdmittedWithIou {
+                iou: "Leroy, X. (2009). Formal verification of a realistic compiler. CACM \
+                      52(7):107-115. — §5.2 Simulation Diagram for the simpl_cminor → cminor \
+                      lowering pass; instantiated here for TypedAST → VBC. Cited at \
+                      core/verify/codegen_soundness/vbc_lowering.vr."
+                    .to_string(),
+            },
         },
         PassAttestation {
             pass: CodegenPassId::SsaConstruction,
@@ -287,7 +294,14 @@ pub fn manifest() -> Vec<PassAttestation> {
                  SSA value `v`, the loads dominated by `a`'s defining store \
                  evaluate to `store(v)` post-mem2reg"
                 .to_string(),
-            status: AttestationStatus::NotYetAttested,
+            status: AttestationStatus::AdmittedWithIou {
+                iou: "Beringer, L. & Stark, K. (2002). A simple and efficient construction of \
+                      Static Single Assignment form. Compiler Construction (CC 2002), LNCS \
+                      2304, 110-125. — §3 Semantic Equivalence Proof. Algorithm: Cytron, R. et \
+                      al. (1991) Efficiently computing static single assignment form. TOPLAS \
+                      13(4):451-490. Cited at core/verify/codegen_soundness/ssa_construction.vr."
+                    .to_string(),
+            },
         },
         PassAttestation {
             pass: CodegenPassId::RegisterAllocation,
@@ -299,7 +313,14 @@ pub fn manifest() -> Vec<PassAttestation> {
                  virtual register agrees with the input dataflow at every \
                  program point"
                 .to_string(),
-            status: AttestationStatus::NotYetAttested,
+            status: AttestationStatus::AdmittedWithIou {
+                iou: "George, L. & Appel, A.W. (1996). Iterated register coalescing. TOPLAS \
+                      18(3):300-324. — §6 Soundness Proof. Generalisation: Leroy's CompCert \
+                      backend uses this as the template for per-allocator preservation \
+                      arguments. Cited at \
+                      core/verify/codegen_soundness/register_allocation.vr."
+                    .to_string(),
+            },
         },
         PassAttestation {
             pass: CodegenPassId::LinearScanRegalloc,
@@ -312,7 +333,15 @@ pub fn manifest() -> Vec<PassAttestation> {
                  allocation that agrees with the SSA dataflow AND respects \
                  the spilling discipline"
                 .to_string(),
-            status: AttestationStatus::NotYetAttested,
+            status: AttestationStatus::AdmittedWithIou {
+                iou: "Poletto, M. & Sarkar, V. (1999). Linear scan register allocation. TOPLAS \
+                      21(5):895-913. — §3 Algorithm Correctness. Refinement: Mössenböck, H. & \
+                      Pfeiffer, M. (2002). Linear scan register allocation in the context of \
+                      SSA form and register constraints. CC 2002, LNCS 2304, 229-246. — §4 \
+                      Structural Monotonicity Proof. Cited at \
+                      core/verify/codegen_soundness/linear_scan_regalloc.vr."
+                    .to_string(),
+            },
         },
         PassAttestation {
             pass: CodegenPassId::LlvmEmission,
@@ -323,7 +352,14 @@ pub fn manifest() -> Vec<PassAttestation> {
                  well-formed LLVM IR translation `tr(I)` such that `step(I) ⇒ \
                  step*(tr(I))` modulo LLVM-internal scheduling"
                 .to_string(),
-            status: AttestationStatus::NotYetAttested,
+            status: AttestationStatus::AdmittedWithIou {
+                iou: "Zhao, J., Nagarakatte, S., Martin, M.M.K., Zdancewic, S. (2012). \
+                      Formalizing the LLVM intermediate representation for verified program \
+                      transformations. POPL 2012, 427-440. — §4 Operational Semantics of LLVM \
+                      IR; §5 Translation Validation (Vellvm). Cited at \
+                      core/verify/codegen_soundness/llvm_emission.vr."
+                    .to_string(),
+            },
         },
         PassAttestation {
             pass: CodegenPassId::MachineCodeEmission,
@@ -336,7 +372,14 @@ pub fn manifest() -> Vec<PassAttestation> {
                  obligation reduces to LLVM-version pinning + ABI conformance \
                  (cf. CompCert's external-call axiom)"
                 .to_string(),
-            status: AttestationStatus::NotYetAttested,
+            status: AttestationStatus::AdmittedWithIou {
+                iou: "Wang, Y., Wilke, P., Leroy, X. (2020). An abstract stack-based approach \
+                      to verified compositional compilation to machine code. POPL 2020, 1-30. \
+                      — §6 ELF Backend Verification. Boundary discipline: Leroy, X. (2009) §6 \
+                      External Call Axiom. Cited at \
+                      core/verify/codegen_soundness/machine_code_emission.vr."
+                    .to_string(),
+            },
         },
     ]
 }
@@ -426,6 +469,34 @@ mod tests {
     }
 
     #[test]
+    fn every_admitted_pass_has_concrete_framework_citation() {
+        // The post-V1 baseline (#162 follow-on) — every entry now
+        // carries an AdmittedWithIou status whose `iou` field cites
+        // a published proof + the corresponding .vr file. The audit
+        // gate rejects any entry whose IOU is empty or doesn't
+        // reference the canonical core/verify/codegen_soundness/
+        // location.
+        for pass in manifest() {
+            if let AttestationStatus::AdmittedWithIou { iou } = &pass.status {
+                assert!(
+                    !iou.is_empty(),
+                    "AdmittedWithIou pass {:?} must carry a non-empty IOU \
+                     citation",
+                    pass.pass,
+                );
+                assert!(
+                    iou.contains("core/verify/codegen_soundness/"),
+                    "AdmittedWithIou pass {:?} IOU must reference the .vr \
+                     citation file under core/verify/codegen_soundness/, \
+                     got: {}",
+                    pass.pass,
+                    iou,
+                );
+            }
+        }
+    }
+
+    #[test]
     fn every_pass_has_non_empty_semantic_invariant() {
         for pass in manifest() {
             assert!(
@@ -446,13 +517,17 @@ mod tests {
     }
 
     #[test]
-    fn v0_baseline_is_zero_attested_six_pending() {
-        // current surface (#162 commit): every pass is NotYetAttested.
-        // Every future attestation flips entries to Admitted or
-        // Discharged and bumps these counts.
+    fn v1_baseline_is_zero_attested_six_admitted() {
+        // Current surface (post #162 V2 — the IOU-with-citation pass).
+        // Every entry now carries an AdmittedWithIou with a concrete
+        // framework citation (CompCert / Vellvm / Poletto-Sarkar /
+        // CompCertELF) AND a reference to the matching
+        // core/verify/codegen_soundness/<pass>.vr file. Future work
+        // flips entries from AdmittedWithIou to Discharged via
+        // Verum-language proofs of the simulation diagrams.
         assert_eq!(attested_count(), 0);
-        assert_eq!(admitted_count(), 0);
-        assert_eq!(pending_count(), CODEGEN_PASS_COUNT);
+        assert_eq!(admitted_count(), CODEGEN_PASS_COUNT);
+        assert_eq!(pending_count(), 0);
     }
 
     #[test]

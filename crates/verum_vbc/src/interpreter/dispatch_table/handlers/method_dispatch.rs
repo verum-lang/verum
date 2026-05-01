@@ -101,6 +101,30 @@ pub(in super::super) fn handle_call_method(
         }
     }
 
+    // Async-runtime method intercept (#334): `runtime.block_on(future)`.
+    // Under interpreter's "async-as-sync" semantics
+    // (codegen/expressions.rs:12778 — async fns are NOT compiled to
+    // suspend/resume state machines), the future arg is the
+    // already-computed value of the async fn body. The pure-Verum
+    // `block_on` body calls `.poll()` on this value; in interpreter
+    // mode that dispatches to the wrong type's `poll` (first
+    // `*.poll` suffix-match win at method_dispatch.rs:1199) and
+    // crashes on a bogus self-pointer field access.  Short-circuit
+    // to return the value directly.
+    //
+    // CallM args.count excludes the receiver (line 1146 — it adds
+    // +1 to compute expected_param_count). For `rt.block_on(future)`
+    // we have args.count == 1 and the future lives at args.start.0.
+    if bare_method_name == "block_on" && args.count == 1 {
+        let caller_base = state.reg_base();
+        let future_val = state.registers.get(
+            caller_base,
+            crate::instruction::Reg(args.start.0),
+        );
+        state.set_reg(dst, future_val);
+        return Ok(DispatchResult::Continue);
+    }
+
     // Try generator methods (next, has_next, collect) first
     // These are dispatched to the corresponding GenNext/GenHasNext handlers
     if receiver.is_generator() {
@@ -2542,7 +2566,13 @@ pub(super) fn dispatch_primitive_method(
             && header.type_id != TypeId::DEQUE
             && header.type_id != TypeId::CHANNEL
             && !is_heap_string;
-        let is_list = header.type_id == TypeId::LIST;
+        // `is_list` covers both canonical `LIST` (Value-per-element)
+        // and packed `BYTE_LIST` (1-byte-per-element).  Both share the
+        // 3-Value header `[len, cap, backing_ptr]`; downstream
+        // helpers (`get_array_length`, `get_array_element`,
+        // `list_push`) dispatch on `header.type_id` to use the right
+        // element stride.
+        let is_list = header.type_id.is_list_like();
 
         // IMPORTANT: For user-defined types (type_id >= FIRST_USER but < 256),
         // skip the builtin array handlers. User-defined structs like core.collections.map.Map
@@ -5692,7 +5722,10 @@ pub(super) fn get_array_length(
     ptr: *const u8,
     header: &heap::ObjectHeader,
 ) -> InterpreterResult<usize> {
-    if header.type_id == TypeId::LIST {
+    if header.type_id.is_list_like() {
+        // LIST and BYTE_LIST share the 3-Value-header shape; len is
+        // at slot 0 of the header data regardless of the backing
+        // element stride.
         let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
         Ok(unsafe { (*data_ptr).as_i64() } as usize)
     } else {
@@ -5700,7 +5733,7 @@ pub(super) fn get_array_length(
     }
 }
 
-/// Get element at index from an array (Value array or List).
+/// Get element at index from an array (Value array, List, or BYTE_LIST).
 pub(super) fn get_array_element(
     ptr: *const u8,
     header: &heap::ObjectHeader,
@@ -5713,6 +5746,13 @@ pub(super) fn get_array_element(
         let elem_ptr =
             unsafe { backing.add(heap::OBJECT_HEADER_SIZE + elem_offset) as *const Value };
         Ok(unsafe { *elem_ptr })
+    } else if header.type_id == TypeId::BYTE_LIST {
+        // Packed-byte backing: read 1 byte at index, zero-extend
+        // into a NaN-boxed Value.
+        let data_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
+        let backing = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
+        let elem_ptr = unsafe { backing.add(heap::OBJECT_HEADER_SIZE + index) };
+        Ok(Value::from_i64(unsafe { *elem_ptr } as i64))
     } else {
         let elem_offset = index * std::mem::size_of::<Value>();
         let elem_ptr = unsafe { ptr.add(heap::OBJECT_HEADER_SIZE + elem_offset) as *const Value };
@@ -5945,47 +5985,79 @@ pub(super) fn unwrap_maybe_some(value: Value) -> Option<Value> {
     Some(payload)
 }
 
-/// Push a value onto a List.
-/// List layout: [len: Value(i64), cap: Value(i64), backing: Value(ptr)]
+/// Push a value onto a List or BYTE_LIST.
+/// Both share `[len: Value(i64), cap: Value(i64), backing: Value(ptr)]`
+/// header; element stride dispatches on `list.type_id`:
+///   * `LIST` — 8-byte NaN-boxed Value per element.
+///   * `BYTE_LIST` — 1 byte per element (red-team §4 packed layout).
 pub(super) fn list_push(
     state: &mut InterpreterState,
     list_val: Value,
     new_val: Value,
 ) -> InterpreterResult<()> {
     let list_ptr = list_val.as_ptr::<u8>();
+    let header = unsafe { &*(list_ptr as *const heap::ObjectHeader) };
+    let is_byte_list = header.type_id == TypeId::BYTE_LIST;
+    let elem_size = if is_byte_list {
+        std::mem::size_of::<u8>()
+    } else {
+        std::mem::size_of::<Value>()
+    };
     let data_ptr = unsafe { list_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
     let len = unsafe { (*data_ptr).as_i64() } as usize;
     let cap = unsafe { (*data_ptr.add(1)).as_i64() } as usize;
     let backing_ptr = unsafe { (*data_ptr.add(2)).as_ptr::<u8>() };
 
     if len >= cap {
-        // Grow: allocate new backing with 2x capacity
+        // Grow: allocate new backing with 2x capacity, tagged with
+        // the matching TypeId so the GC / CBGR scan knows the
+        // element stride.
         let new_cap = (cap * 2).max(8);
-        let new_backing = state.heap.alloc_array(TypeId::LIST, new_cap)?;
-        state.record_allocation();
-
-        // Copy old elements
-        let old_data = unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *const Value };
-        let new_data = unsafe {
-            (new_backing.as_ptr() as *mut u8).add(heap::OBJECT_HEADER_SIZE) as *mut Value
+        let new_backing = if is_byte_list {
+            state.heap.alloc(TypeId::BYTE_LIST, new_cap)?
+        } else {
+            state.heap.alloc_array(TypeId::LIST, new_cap)?
         };
-        for i in 0..len {
-            unsafe { *new_data.add(i) = *old_data.add(i) };
+        state.record_allocation();
+        let new_backing_ptr = new_backing.as_ptr() as *mut u8;
+
+        // Copy old elements with the right stride
+        if len > 0 {
+            let old_data = unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) };
+            let new_data = unsafe { new_backing_ptr.add(heap::OBJECT_HEADER_SIZE) };
+            unsafe { std::ptr::copy_nonoverlapping(old_data, new_data, len * elem_size) };
         }
 
         // Write new element
-        unsafe { *new_data.add(len) = new_val };
+        if is_byte_list {
+            let elem_ptr = unsafe {
+                new_backing_ptr.add(heap::OBJECT_HEADER_SIZE + len * elem_size)
+            };
+            unsafe { *elem_ptr = (new_val.as_i64() & 0xFF) as u8 };
+        } else {
+            let elem_ptr = unsafe {
+                new_backing_ptr.add(heap::OBJECT_HEADER_SIZE + len * elem_size) as *mut Value
+            };
+            unsafe { *elem_ptr = new_val };
+        }
 
         // Update list header
         unsafe {
             *data_ptr = Value::from_i64((len + 1) as i64);
             *data_ptr.add(1) = Value::from_i64(new_cap as i64);
-            *data_ptr.add(2) = Value::from_ptr(new_backing.as_ptr() as *mut u8);
+            *data_ptr.add(2) = Value::from_ptr(new_backing_ptr);
         }
     } else {
-        // Write directly
-        let backing_data = unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
-        unsafe { *backing_data.add(len) = new_val };
+        // Write directly with the right stride.
+        if is_byte_list {
+            let elem_ptr = unsafe {
+                backing_ptr.add(heap::OBJECT_HEADER_SIZE + len * elem_size)
+            };
+            unsafe { *elem_ptr = (new_val.as_i64() & 0xFF) as u8 };
+        } else {
+            let backing_data = unsafe { backing_ptr.add(heap::OBJECT_HEADER_SIZE) as *mut Value };
+            unsafe { *backing_data.add(len) = new_val };
+        }
         // Update len
         unsafe { *data_ptr = Value::from_i64((len + 1) as i64) };
     }

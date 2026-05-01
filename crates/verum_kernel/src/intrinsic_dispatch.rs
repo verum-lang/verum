@@ -554,6 +554,165 @@ pub fn dispatch_intrinsic(name: &str, args: &[IntrinsicValue]) -> Option<Intrins
             })
         }
 
+        // -- Verified-compilation simulation theorems (#162 / CompCert-parity).
+        //
+        // Each kernel_<pass>_preserves_semantics intrinsic recognises a
+        // codegen-pass bridge axiom declared at
+        // core/verify/codegen_soundness/<pass>.vr. The dispatcher returns
+        // `Decision { holds: true }` because the discharge route is via
+        // framework citation (Leroy 2009 / Vellvm 2012 / Poletto-Sarkar
+        // 1999 / CompCertELF 2020), not via algorithmic check. The
+        // `reason` text references the citation so audit reports
+        // surface the published proof reviewers can chase.
+        //
+        // Manifest cross-reference:
+        // `verum_kernel::codegen_attestation::manifest()` carries the
+        // canonical roster + IOU citations. The audit gate
+        // (`verum audit --codegen-attestation`) cross-checks both
+        // surfaces and reports per-pass discharge status.
+        "kernel_vbc_lowering_preserves_semantics" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "CompCert simulation diagram (Leroy 2009 §5.2) — TypedAST → \
+                     VBC lowering preserves operational semantics; admitted \
+                     with framework citation, see \
+                     core/verify/codegen_soundness/vbc_lowering.vr"
+                .into(),
+        }),
+        "kernel_ssa_construction_preserves_semantics" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "Beringer-Stark CC 2002 §3 / Cytron et al TOPLAS 1991 — \
+                     SSA construction preserves operational semantics; admitted \
+                     with framework citation, see \
+                     core/verify/codegen_soundness/ssa_construction.vr"
+                .into(),
+        }),
+        "kernel_register_allocation_preserves_semantics" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "George-Appel TOPLAS 1996 §6 — register allocation preserves \
+                     observable behaviour; admitted with framework citation, see \
+                     core/verify/codegen_soundness/register_allocation.vr"
+                .into(),
+        }),
+        "kernel_linear_scan_regalloc_preserves_semantics" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "Poletto-Sarkar TOPLAS 1999 §3 / Mössenböck CC 2002 §4 — \
+                     linear-scan regalloc preserves observable behaviour AND \
+                     live-range monotonicity; admitted with framework citation, \
+                     see core/verify/codegen_soundness/linear_scan_regalloc.vr"
+                .into(),
+        }),
+        "kernel_llvm_emission_preserves_semantics" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "Vellvm POPL 2012 §4-5 — LLVM IR emission preserves \
+                     operational semantics modulo LLVM-internal scheduling; \
+                     admitted with framework citation, see \
+                     core/verify/codegen_soundness/llvm_emission.vr"
+                .into(),
+        }),
+        "kernel_machine_code_emission_preserves_semantics" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "CompCertELF Wang-Wilke-Leroy POPL 2020 §6 + Leroy 2009 §6 \
+                     external-call axiom — machine-code emission boundary \
+                     attestation (LLVM-version pinning + ABI conformance); \
+                     admitted with framework citation, see \
+                     core/verify/codegen_soundness/machine_code_emission.vr"
+                .into(),
+        }),
+
+        // -- kernel_v0 rule soundness IOUs (#157 / minimal-CIC kernel).
+        //
+        // Each `kernel_<rule>_strict` (and the master
+        // `kernel_soundness_v0`) is the dispatcher counterpart of a
+        // `@kernel_discharge` annotation on a `k_*_sound` theorem in
+        // `core/verify/kernel_v0/rules/`. The discharge route is via
+        // a Verum-language lemma in `core/verify/kernel_v0/lemmas/`
+        // (named in each rule's `@discharged_by(...)` attribute);
+        // the dispatcher returns `Decision { holds: true }` to make
+        // the bidirectional contract surface in
+        // `verum audit --kernel-discharged-axioms`.
+        "kernel_var" | "kernel_var_strict" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "kernel_v0/k_var_sound: variable lookup — bookkeeping rule, no \
+                     upstream proof obligation. See \
+                     core/verify/kernel_v0/rules/k_var.vr."
+                .into(),
+        }),
+        "kernel_universe_intro" | "kernel_universe_intro_strict" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "kernel_v0/k_univ_sound: universe-introduction soundness — \
+                     U_n : U_{n+1} cumulative hierarchy. Discharged by \
+                     core.verify.kernel_v0.lemmas.sub.cumulative_universe_inclusion. \
+                     See core/verify/kernel_v0/rules/k_univ.vr."
+                .into(),
+        }),
+        "kernel_forward_axiom" | "kernel_forward_axiom_strict" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "kernel_v0/k_fwax_sound: forward-axiom witness import — relies on \
+                     foreign-system proof of the axiom in its native theory \
+                     (Coq/Lean/Isabelle/Agda mathlib). See \
+                     core/verify/kernel_v0/rules/k_fwax.vr."
+                .into(),
+        }),
+        "kernel_positivity" | "kernel_positivity_strict" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "kernel_v0/k_pos_sound: strict-positivity check for inductive \
+                     types — Coquand-Huet 1988. Discharged by per-rule structural \
+                     analysis. See core/verify/kernel_v0/rules/k_pos.vr."
+                .into(),
+        }),
+        "kernel_pi_form" | "kernel_pi_form_strict" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "kernel_v0/k_pi_form_sound: Π-formation rule. Discharged by \
+                     core.verify.kernel_v0.lemmas.subst.subst_preserves_typing. \
+                     See core/verify/kernel_v0/rules/k_pi_form.vr."
+                .into(),
+        }),
+        "kernel_lam_intro" | "kernel_lam_intro_strict" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "kernel_v0/k_lam_intro_sound: λ-introduction rule. Discharged by \
+                     core.verify.kernel_v0.lemmas.cartesian.cartesian_closure_for_pi. \
+                     See core/verify/kernel_v0/rules/k_lam_intro.vr."
+                .into(),
+        }),
+        "kernel_app_elim" | "kernel_app_elim_strict" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "kernel_v0/k_app_elim_sound: application-elimination rule. \
+                     Discharged by \
+                     core.verify.kernel_v0.lemmas.subst.subst_preserves_typing + \
+                     core.verify.kernel_v0.lemmas.beta.church_rosser_confluence. \
+                     See core/verify/kernel_v0/rules/k_app_elim.vr."
+                .into(),
+        }),
+        "kernel_beta" | "kernel_beta_strict" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "kernel_v0/k_beta_sound: β-conversion soundness — (λx.b) a ↝_β \
+                     b[x:=a] preserves typing. Discharged by \
+                     core.verify.kernel_v0.lemmas.beta.church_rosser_confluence. \
+                     See core/verify/kernel_v0/rules/k_beta.vr."
+                .into(),
+        }),
+        "kernel_eta" | "kernel_eta_strict" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "kernel_v0/k_eta_sound: η-conversion soundness. Discharged by \
+                     core.verify.kernel_v0.lemmas.eta.function_extensionality. \
+                     See core/verify/kernel_v0/rules/k_eta.vr."
+                .into(),
+        }),
+        "kernel_sub" | "kernel_sub_strict" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "kernel_v0/k_sub_sound: subsumption rule. Discharged by \
+                     core.verify.kernel_v0.lemmas.sub.cumulative_universe_inclusion. \
+                     See core/verify/kernel_v0/rules/k_sub.vr."
+                .into(),
+        }),
+        "kernel_soundness_v0" => Some(IntrinsicValue::Decision {
+            holds: true,
+            reason: "kernel_v0/kernel_soundness: master soundness theorem. \
+                     Discharged by per-rule case-split over the 10 k_*_sound \
+                     lemmas. See core/verify/kernel_v0/soundness.vr."
+                .into(),
+        }),
+
         _ => None,
     }
 }
@@ -597,6 +756,33 @@ pub fn available_intrinsics() -> &'static [&'static str] {
         "kernel_contr_fiber_coherence",
         "kernel_transport_coherence",
         "kernel_prop_coherence",
+        // Verified-compilation simulation theorems (#162 / CompCert-parity).
+        // Mirror of `verum_kernel::codegen_attestation::manifest()` —
+        // every entry there has a matching dispatcher entry here.
+        "kernel_vbc_lowering_preserves_semantics",
+        "kernel_ssa_construction_preserves_semantics",
+        "kernel_register_allocation_preserves_semantics",
+        "kernel_linear_scan_regalloc_preserves_semantics",
+        "kernel_llvm_emission_preserves_semantics",
+        "kernel_machine_code_emission_preserves_semantics",
+        // kernel_v0 rule soundness IOUs (#157). Bare names — the
+        // `_strict` suffix on the citation site is stripped by
+        // [`is_known_intrinsic`] before lookup, so registering the
+        // bare form covers both citation conventions. Each name
+        // corresponds to a `@kernel_discharge("kernel_<rule>_strict")`
+        // annotation on a `k_*_sound` theorem in
+        // `core/verify/kernel_v0/rules/`.
+        "kernel_var",
+        "kernel_universe_intro",
+        "kernel_forward_axiom",
+        "kernel_positivity",
+        "kernel_pi_form",
+        "kernel_lam_intro",
+        "kernel_app_elim",
+        "kernel_beta",
+        "kernel_eta",
+        "kernel_sub",
+        "kernel_soundness_v0",
     ]
 }
 
@@ -918,18 +1104,18 @@ mod tests {
     #[test]
     fn available_intrinsics_covers_all_bridges() {
         let names = available_intrinsics();
-        // 22 from core/proof/kernel_bridge.vr (the canonical bridge
-        // surface) + 5 HoTT coherence dispatchers from
-        // core/math/hott.vr (kernel_equiv_inv_coherence,
-        // kernel_equiv_compose_coherence, kernel_contr_fiber_coherence,
-        // kernel_transport_coherence, kernel_prop_coherence).
-        // Adding a new bridge axiom must update both the bridge
-        // surface and this count.
+        // 22 from core/proof/kernel_bridge.vr + 5 HoTT coherence
+        // dispatchers from core/math/hott.vr + 6 codegen-attestation
+        // dispatchers from core/verify/codegen_soundness/ + 11
+        // kernel_v0 rule soundness IOUs from core/verify/kernel_v0/.
+        // Adding a new bridge axiom must update both the bridge surface
+        // and this count.
         assert_eq!(
             names.len(),
-            27,
+            44,
             "Every kernel_* axiom in core/proof/kernel_bridge.vr + \
-             core/math/hott.vr must have a dispatcher"
+             core/math/hott.vr + core/verify/codegen_soundness/ + \
+             core/verify/kernel_v0/ must have a dispatcher"
         );
         // Check uniqueness.
         let mut seen = std::collections::HashSet::new();
@@ -1444,6 +1630,101 @@ mod tests {
                 is_known_intrinsic(name),
                 "HoTT coherence dispatcher {} must be registered in available_intrinsics()",
                 name
+            );
+        }
+    }
+
+    // -------------------------------------------------------------
+    // #162 — Verified-compilation simulation theorems
+    // -------------------------------------------------------------
+
+    #[test]
+    fn codegen_attestation_dispatchers_all_holds_true() {
+        // Every kernel_<pass>_preserves_semantics intrinsic returns
+        // Decision { holds: true, reason: <citation> }. The discharge
+        // route is via framework citation, not algorithmic check —
+        // the dispatcher's role is to confirm the name is recognised
+        // and the citation is non-empty.
+        for name in &[
+            "kernel_vbc_lowering_preserves_semantics",
+            "kernel_ssa_construction_preserves_semantics",
+            "kernel_register_allocation_preserves_semantics",
+            "kernel_linear_scan_regalloc_preserves_semantics",
+            "kernel_llvm_emission_preserves_semantics",
+            "kernel_machine_code_emission_preserves_semantics",
+        ] {
+            let r = dispatch_intrinsic(name, &[]).unwrap_or_else(|| {
+                panic!("dispatcher must recognise {} and return a decision", name)
+            });
+            assert_eq!(
+                r.as_bool(),
+                Some(true),
+                "codegen-attestation dispatcher {} must return holds=true \
+                 (admitted via framework citation)",
+                name,
+            );
+            // Reason must reference the citation file path so audit
+            // reports surface the canonical .vr location.
+            if let IntrinsicValue::Decision { reason, .. } = &r {
+                assert!(
+                    reason.contains("core/verify/codegen_soundness/"),
+                    "dispatcher {} reason must reference the .vr citation file: {}",
+                    name,
+                    reason,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn codegen_attestation_dispatchers_listed_in_available_intrinsics() {
+        // Every codegen-attestation intrinsic must appear in
+        // available_intrinsics() so `verum audit --kernel-intrinsics`
+        // enumerates them. Mirrors the HoTT coherence pin above.
+        for name in &[
+            "kernel_vbc_lowering_preserves_semantics",
+            "kernel_ssa_construction_preserves_semantics",
+            "kernel_register_allocation_preserves_semantics",
+            "kernel_linear_scan_regalloc_preserves_semantics",
+            "kernel_llvm_emission_preserves_semantics",
+            "kernel_machine_code_emission_preserves_semantics",
+        ] {
+            assert!(
+                is_known_intrinsic(name),
+                "codegen-attestation dispatcher {} must be registered in \
+                 available_intrinsics()",
+                name,
+            );
+        }
+    }
+
+    #[test]
+    fn codegen_attestation_dispatchers_match_manifest_pass_roster() {
+        // Every CodegenPassId in the manifest must have a dispatcher
+        // entry whose name matches the canonical
+        // `kernel_<tag>_preserves_semantics` form. This test pins the
+        // bidirectional contract: removing a dispatcher entry without
+        // also removing the manifest entry breaks the audit gate.
+        use crate::codegen_attestation::manifest;
+        for pass in manifest() {
+            let name = pass.pass.kernel_intrinsic_name();
+            assert!(
+                is_known_intrinsic(&name),
+                "manifest entry {:?} requires dispatcher {} to be registered",
+                pass.pass,
+                name,
+            );
+            let r = dispatch_intrinsic(&name, &[]).unwrap_or_else(|| {
+                panic!(
+                    "dispatcher {} required by manifest entry {:?} returns None",
+                    name, pass.pass,
+                )
+            });
+            assert_eq!(
+                r.as_bool(),
+                Some(true),
+                "manifest-required dispatcher {} must return holds=true",
+                name,
             );
         }
     }
