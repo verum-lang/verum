@@ -94,6 +94,39 @@ pub fn target_is_x86_64(module: &Module<'_>) -> bool {
     t.contains("x86_64") || t.contains("amd64")
 }
 
+// ---------------------------------------------------------------------------
+// String-form variants (for callers that have the raw triple string —
+// e.g. linker config that runs without an LLVM Module in scope).
+// ---------------------------------------------------------------------------
+
+/// `target_is_linux` for callers holding a raw triple string.
+///
+/// Used by the linker-flag selection in
+/// `verum_compiler::pipeline::native_codegen` which decides flags
+/// before constructing the LLVM Module.  Same predicate as
+/// [`target_is_linux`], just substring-tested directly on the string.
+pub fn triple_str_is_linux(triple: &str) -> bool {
+    triple.contains("linux")
+}
+
+/// `target_is_darwin` for callers holding a raw triple string.
+pub fn triple_str_is_darwin(triple: &str) -> bool {
+    triple.contains("darwin")
+        || triple.contains("apple")
+        || triple.contains("macos")
+        || triple.contains("ios")
+        || triple.contains("tvos")
+        || triple.contains("watchos")
+}
+
+/// `target_is_windows` for callers holding a raw triple string.
+pub fn triple_str_is_windows(triple: &str) -> bool {
+    triple.contains("windows")
+        || triple.contains("win32")
+        || triple.contains("msvc")
+        || triple.contains("mingw")
+}
+
 #[cfg(test)]
 mod tests {
     // Smoke tests live alongside the module that owns the LLVM

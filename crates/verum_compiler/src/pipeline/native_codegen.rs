@@ -707,9 +707,23 @@ impl<'s> CompilationPipeline<'s> {
             }
         }
 
-        // Add Metal/Foundation frameworks for macOS GPU support (LLD path)
-        #[cfg(target_os = "macos")]
-        {
+        // Add Metal/Foundation frameworks for macOS GPU support (LLD path).
+        // **Target-aware** (#80): driven by configured target triple via
+        // the canonical `triple_str_is_darwin` helper, not host
+        // `#[cfg(target_os)]`.  Pre-fix this gate used host-cfg,
+        // which silently dropped the Metal frameworks when cross-compiling
+        // to macOS from Linux.
+        let triple_for_frameworks: String = match self.session.options().target_triple.clone() {
+            Some(t) => t.as_str().to_string(),
+            None => {
+                use verum_codegen::llvm::verum_llvm::targets::TargetMachine;
+                TargetMachine::get_default_triple()
+                    .as_str()
+                    .to_string_lossy()
+                    .into_owned()
+            }
+        };
+        if verum_codegen::llvm::target_triple::triple_str_is_darwin(&triple_for_frameworks) {
             linker_config.extra_flags.push("-framework Metal".into());
             linker_config
                 .extra_flags
@@ -908,9 +922,36 @@ impl<'s> CompilationPipeline<'s> {
         // Exception: GPU targets may link Metal/CUDA/ROCm frameworks via MLIR path.
         // ==========================================================================
 
-        // Platform-specific flags (no libc)
-        #[cfg(target_os = "macos")]
-        {
+        // **Target-aware linker flags** — driven by the session's
+        // configured target triple, NOT host `#[cfg(target_os)]`.
+        // Cross-compile correctness: a binary built on Linux for a
+        // macOS target must get Darwin linker flags (-framework
+        // Metal, etc.), not Linux flags (-Wl,--gc-sections).
+        //
+        // Session::options().target_triple is the configured target;
+        // when None, falls back to the build host's triple via
+        // `TargetMachine::get_default_triple()`.  We read it as a
+        // string and dispatch via substring match — same pattern as
+        // `target_triple::target_is_*(module)` in verum_codegen.
+        // **Target-triple dispatch** via canonical helpers from
+        // `verum_codegen::llvm::target_triple` — the single source of
+        // truth for "is this triple X?" checks across the codebase.
+        // (Avoids ad-hoc substring duplication; see #80 CI guard.)
+        let target_triple_string: String = match self.session.options().target_triple.clone() {
+            Some(t) => t.as_str().to_string(),
+            None => {
+                use verum_codegen::llvm::verum_llvm::targets::TargetMachine;
+                TargetMachine::get_default_triple()
+                    .as_str()
+                    .to_string_lossy()
+                    .into_owned()
+            }
+        };
+        use verum_codegen::llvm::target_triple::{triple_str_is_darwin, triple_str_is_linux};
+        let target_is_darwin = triple_str_is_darwin(&target_triple_string);
+        let target_is_linux = triple_str_is_linux(&target_triple_string);
+
+        if target_is_darwin {
             cmd.arg("-Wl,-dead_strip");
             cmd.arg("-Wl,-undefined,dynamic_lookup");
             // 16MB stack for recursive algorithms (default 8MB causes SIGSEGV in deep recursion)
@@ -923,8 +964,7 @@ impl<'s> CompilationPipeline<'s> {
             cmd.arg("-lobjc");
         }
 
-        #[cfg(target_os = "linux")]
-        {
+        if target_is_linux {
             cmd.arg("-Wl,--gc-sections");
             cmd.arg("-rdynamic");
             // 16MB stack for recursive algorithms
