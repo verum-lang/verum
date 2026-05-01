@@ -594,22 +594,26 @@ impl Session {
         //     commands/test.rs:292 — when false the harness runs
         //     tests serially.
         //
-        // Four remain inert (#268-Infra):
-        //   - `differential` — VBC vs AOT cross-tier consistency
-        //     test expansion. Requires the differential runner
-        //     infrastructure tracked as #273.
-        //   - `property_testing` — proptest-style randomized test
-        //     expansion. Requires `@property` attribute + harness
-        //     integration with proptest crate.
-        //   - `proptest_cases` — case count for property tests.
-        //     Coupled to `property_testing`.
-        //   - `fuzzing` — cargo-fuzz seed integration on `@fuzz`-
-        //     attributed functions. Requires fuzz infrastructure.
-        //
-        // No runtime warn! emitted — the four wired fields produce
-        // observable behaviour, and the four unwired fields are
-        // inert by virtue of missing infrastructure (not by gate).
-        // #268-Infra tracks the per-feature build-out.
+        // All eight [test] fields are now load-bearing as of
+        // #298 + #273 + #299 (closes #286/#268-Infra):
+        //   - `property_testing` (#298): TestRunCfg.property_testing
+        //     gates the @property dispatcher in run_single_test;
+        //     when false, @property tests record a "disabled"
+        //     Pass without invoking the proptest runner.
+        //   - `proptest_cases` (#298): TestRunCfg.proptest_cases
+        //     is the default `runs` count when @property(runs=N)
+        //     does not override.
+        //   - `differential` (#273): TestRunCfg.differential
+        //     routes every non-property test through both Tier 0
+        //     (interpreter) and Tier 1 (AOT) and requires both
+        //     to PASS — disagreement is itself the test failure
+        //     (the load-bearing soundness gate for the language's
+        //     two execution backends).
+        //   - `fuzzing` (#299): TestRunCfg.fuzzing drives the
+        //     cargo-fuzz orchestrator (commands/fuzz.rs) — after
+        //     the regular suite, fuzz/Cargo.toml targets are
+        //     discovered and exercised; fresh crash artifacts
+        //     count as test failures.
 
         // The `[protocols]` manifest section parses 5 fields. ALL
         // FIVE are wired:
