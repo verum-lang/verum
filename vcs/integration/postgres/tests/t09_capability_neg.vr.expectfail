@@ -1,0 +1,66 @@
+// =============================================================================
+// t09_capability_neg.vr.expectfail — capability lattice rejection (negative)
+// =============================================================================
+// Spec: internal/specs/database.md §5.4 (capability types).
+// =============================================================================
+//
+// THIS FILE MUST FAIL `verum check`. It calls `execute_simple` on
+// a `Database<PgPool, DbRead>` — `execute_simple` is bounded on
+// `<C: CanWrite>`, and `DbRead` does NOT implement `CanWrite`. The
+// type-checker should reject the call with "method not in scope"
+// or equivalent.
+//
+// **KNOWN LIMITATION (v1).** `verum check` is per-file syntax +
+// module-resolution; full generic-implement-bound resolution
+// (resolving `<C: CanWrite> Database<PgPool, C>::execute_simple`
+// against `Database<PgPool, DbRead>` to surface a "method not in
+// scope" error) requires whole-project type inference exercised by
+// `verum build`. As of writing, `verum check` of this file
+// erroneously returns exit 0 even though the offending call
+// SHOULD be a compile error in the full type-checker.
+//
+// Correct verification requires either:
+//   (a) Wrapping this file in a verum project and running
+//       `verum build`, observing the type error.
+//   (b) The standalone `verum lint` capability-bound checker
+//       (planned) explicitly walking generic-implement bounds.
+//
+// The capability lattice IS load-bearing in the type system —
+// the bound itself compiles correctly, and the right side
+// (positive case t09_capability.vr) verifies the SCOPE of methods
+// available on each capability marker. Until full whole-project
+// negative-test discovery is wired, this `.expectfail` file
+// stays as DOCUMENTATION of the spec §5.4 promise rather than
+// an automated assertion.
+// =============================================================================
+
+mount core.database.postgres.{
+    PgConfig, PgPool, PtmDisable,
+    database_from_pool,
+};
+mount core.database.common.pool_impl.{PoolConfig};
+mount core.database.common.error.{AdPostgres};
+
+fn main() {
+    // Construct any pool — we never reach the runtime path.
+    let cfg = PgConfig {
+        host: "127.0.0.1".clone(),
+        port: 55432,
+        user: "spindle_app".clone(),
+        password: "spindle_app_pw".clone(),
+        database: "spindle_test".clone(),
+        application_name: "neg".clone(),
+        tls_mode: PtmDisable,
+        connect_timeout_ms: 10_000,
+    };
+    let pool = match PgPool.launch(cfg, PoolConfig.default(AdPostgres)) {
+        Ok(p)  => p,
+        Err(_) => return,
+    };
+    let db_rwtx = database_from_pool(pool);
+    let db_ro = db_rwtx.into_readonly();
+
+    // ↓↓↓ THE OFFENDING CALL — execute_simple is bounded on CanWrite,
+    //     not implemented for DbRead. Type-checker MUST reject.
+    let _ = db_ro.execute_simple(&"DELETE FROM accounts".clone());
+}

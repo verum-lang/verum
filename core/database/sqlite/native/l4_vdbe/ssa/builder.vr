@@ -1,0 +1,301 @@
+module core.database.sqlite.native.l4_vdbe.ssa.builder;
+
+// =============================================================================
+// l4_vdbe/ssa/builder.vr — SsaBuilder for direct codegen emission
+// =============================================================================
+// Layer: 4
+// Spec: sqlite-native.md §4.4 (SSA as canonical IR)
+//
+// Pre-fix: codegen.vr emits opcodes directly to a `VdbeProgram`
+// via `program.emit(op)`.  The SSA layer is reachable only by
+// LIFTING the finished VdbeProgram via `lift_vdbe_to_ssa` — an
+// O(N) round-trip on every compile.  Spec §4.4 promises SSA as
+// the CANONICAL IR, with VdbeProgram emerging only at the
+// lower-to-execute boundary.
+//
+// Post-fix: this module ships an `SsaBuilder` with the same
+// emit-style interface as VdbeProgram.emit(), but stamping
+// instructions into an SsaProgram + tracking a per-block
+// reaching-def map for register→value resolution.  Codegen
+// callers wishing to use the SSA canonical pipeline construct
+// an SsaBuilder, emit per-opcode, then call `finalize` to get
+// the SsaProgram ready for the optimizer.
+//
+// Architecture: builder pattern matches VdbeProgram's existing
+// `emit/replace/declare_*` shape so a future codegen-side migration
+// is mechanical (s/program/builder/g).  The builder maintains an
+// internal block cursor + per-register reaching-def map; emitting
+// a control-flow instruction terminates the current block and
+// begins a new one.
+//
+// Performance: builder is O(1) per emit (push to current block's
+// inst list).  Block split on terminator is O(1) (allocate new
+// BlockId, re-point cursor).  Lift cost — eliminated entirely on
+// the direct-emission path.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l4_vdbe.ssa.value.{
+    SValueKind, SkInt, SkReal, SkText, SkBlob, SkBool, SkNull, SkRowId, SkAny,
+    ValueId, value_id, value_id_raw,
+    SsaValue, ssa_value, kind_eq,
+};
+mount core.database.sqlite.native.l4_vdbe.ssa.inst.{
+    SsaInst, CmpKind, CursorOpKind,
+    CkEq, CkNe, CkLt, CkLe, CkGt, CkGe,
+    CoOpenRead, CoOpenWrite, CoOpenEphemeral, CoOpenAutoindex,
+    CoSorterOpen, CoClose,
+    IConst, INull, IIntImm,
+    IAdd, ISub, IMul, IDiv, IRem,
+    IBitAnd, IBitOr, IShiftLeft, IShiftRight, IBitNot,
+    ICmp, ICast,
+    ICursorOpen, ICursorClose, ICursorRewind, ICursorNext,
+    ICursorPrev, ICursorLast, IColumn, IRowId, IMakeRecord,
+    ICursorInsert, ICursorDelete, INewRowId,
+    ICallFn, IAggStep, IAggFinal,
+    IPhi, IResultRow,
+    ITransactionBegin, ITransactionCommit, ITransactionRollback,
+    IBranch, IJump, IHalt, IReturn, IYield,
+    inst_is_terminator,
+};
+mount core.database.sqlite.native.l4_vdbe.ssa.block.{
+    BasicBlock, BlockId, block_id, block_id_raw,
+};
+mount core.database.sqlite.native.l4_vdbe.ssa.cfg.{Cfg, cfg_new};
+mount core.database.sqlite.native.l4_vdbe.ssa.program.{
+    SsaProgram, ssa_program_new,
+};
+
+// -----------------------------------------------------------------------------
+// SsaBuilder — emit-style API building an SsaProgram
+// -----------------------------------------------------------------------------
+
+pub type SsaBuilder is {
+    /// Program under construction.
+    program: SsaProgram,
+    /// Block currently receiving emitted instructions.  Updated by
+    /// `terminate_block` (called from emit_terminator) to point at
+    /// the freshly-allocated successor block.
+    current_block: BlockId,
+    /// Per-VDBE-register reaching definitions in the current block.
+    /// Reset on every block boundary (cross-block resolution is
+    /// the phi insertion pass's job).
+    reaching_defs: Map<Int, ValueId>,
+}
+
+pub fn ssa_builder_new(sql: Text) -> SsaBuilder {
+    let prog = ssa_program_new(sql);
+    let entry = block_id(0);
+    SsaBuilder {
+        program: prog,
+        current_block: entry,
+        reaching_defs: Map.new(),
+    }
+}
+
+implement SsaBuilder {
+    pub fn current_block_id(&self) -> BlockId { self.current_block.clone() }
+
+    pub fn block_count(&self) -> Int { self.program.block_count() }
+
+    pub fn value_count(&self) -> Int { self.program.value_count }
+
+    /// Allocate a fresh SSA value of the given static kind.  Each
+    /// emit_* helper that produces a result value calls this.
+    pub fn fresh_value(&mut self, kind: SValueKind) -> SsaValue {
+        let id = self.program.fresh_value_id();
+        ssa_value(id, kind)
+    }
+
+    /// Push a non-terminator instruction into the current block.
+    /// Caller is responsible for ensuring the instruction shape
+    /// matches the SsaInst variant (use the typed emit_* helpers
+    /// below rather than calling this directly).
+    pub fn push(&mut self, inst: SsaInst) {
+        self.program.cfg.get_mut(&self.current_block).push_inst(inst);
+    }
+
+    /// Emit a terminator + open a fresh successor block.  The
+    /// builder's `current_block` advances to the new block; the
+    /// reaching-def map resets.  Returns the new block's id so
+    /// callers can patch jump targets if needed.
+    pub fn terminate(&mut self, term: SsaInst) -> BlockId {
+        if !inst_is_terminator(&term) {
+            // Defensive: if a non-terminator is passed, we still
+            // record it but DON'T open a new block.  Caller bug.
+            self.push(term);
+            return self.current_block.clone();
+        }
+        self.program.cfg.get_mut(&self.current_block).set_terminator(term);
+        let next = self.program.cfg.new_block();
+        self.current_block = next.clone();
+        self.reaching_defs = Map.new();
+        next
+    }
+
+    /// Record that VDBE register `reg_idx` was just written by
+    /// SSA value `v`.  Subsequent `read_reg` in the same block
+    /// returns `v`; cross-block reads fall through to phi
+    /// insertion later.
+    pub fn def_reg(&mut self, reg_idx: Int, v: &SsaValue) {
+        self.reaching_defs.insert(reg_idx, v.id.clone());
+    }
+
+    /// Resolve a VDBE register read.  Returns the in-block reaching
+    /// definition's SsaValue (kind reconstructed as SkAny — the
+    /// type-inference pass refines kinds later).  None when the
+    /// register has not been defined in the current block; the
+    /// builder caller should record a pending-phi placeholder via
+    /// `mint_pending`.
+    pub fn read_reg(&self, reg_idx: Int) -> Maybe<SsaValue> {
+        match self.reaching_defs.get(&reg_idx) {
+            Some(id) => Some(ssa_value(id, SkAny)),
+            None     => None,
+        }
+    }
+
+    /// Mint a pending-phi placeholder — used when the codegen
+    /// reads a register that has no in-block reaching def.  The
+    /// final phi insertion pass will substitute the real
+    /// reaching-def from a predecessor block.
+    pub fn mint_pending(&mut self, reg_idx: Int) -> SsaValue {
+        let v = self.fresh_value(SkAny);
+        self.def_reg(reg_idx, &v);
+        v
+    }
+
+    /// Finish the build.  Computes predecessor lists, returns the
+    /// SsaProgram ready for the optimizer + lower passes.
+    pub fn finalize(self) -> SsaProgram {
+        let mut prog = self.program;
+        prog.cfg.compute_preds();
+        prog
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Typed emit_* helpers — one per common SsaInst variant
+// -----------------------------------------------------------------------------
+
+/// Materialise a typed integer immediate; defines `dst_reg` to the
+/// freshly-minted SsaValue.
+pub fn emit_int_imm(b: &mut SsaBuilder, dst_reg: Int, value: Int64) -> SsaValue {
+    let dst = b.fresh_value(SkInt);
+    b.push(IIntImm(dst.clone(), value));
+    b.def_reg(dst_reg, &dst);
+    dst
+}
+
+/// Materialise a typed null; defines `dst_reg`.
+pub fn emit_null(b: &mut SsaBuilder, dst_reg: Int) -> SsaValue {
+    let dst = b.fresh_value(SkNull);
+    b.push(INull(dst.clone()));
+    b.def_reg(dst_reg, &dst);
+    dst
+}
+
+/// Pull a typed constant from the constant pool.
+pub fn emit_const(b: &mut SsaBuilder, dst_reg: Int, kind: SValueKind, const_idx: Int) -> SsaValue {
+    let dst = b.fresh_value(kind);
+    b.push(IConst(dst.clone(), const_idx));
+    b.def_reg(dst_reg, &dst);
+    dst
+}
+
+/// Binary arithmetic: dst = lhs OP rhs.  Result kind defaults to
+/// the LHS kind (caller-side type checker validates compatibility).
+pub fn emit_arith(
+    b: &mut SsaBuilder,
+    op: ArithOp,
+    dst_reg: Int,
+    lhs_reg: Int,
+    rhs_reg: Int,
+) -> SsaValue {
+    let lhs = read_or_pending(b, lhs_reg);
+    let rhs = read_or_pending(b, rhs_reg);
+    let kind = lhs.kind.clone();
+    let dst = b.fresh_value(kind);
+    let inst = match op {
+        AoAdd => IAdd(dst.clone(), lhs, rhs),
+        AoSub => ISub(dst.clone(), lhs, rhs),
+        AoMul => IMul(dst.clone(), lhs, rhs),
+        AoDiv => IDiv(dst.clone(), lhs, rhs),
+        AoRem => IRem(dst.clone(), lhs, rhs),
+    };
+    b.push(inst);
+    b.def_reg(dst_reg, &dst);
+    dst
+}
+
+pub type ArithOp is AoAdd | AoSub | AoMul | AoDiv | AoRem;
+
+/// Cursor open: no SSA value produced.  Inserted into current block.
+pub fn emit_cursor_open(
+    b: &mut SsaBuilder,
+    cursor_id: Int,
+    op: CursorOpKind,
+    root_page: Int,
+    n_cols: Int,
+) {
+    b.push(ICursorOpen(cursor_id, op, root_page, n_cols));
+}
+
+/// Read column from cursor.  dst_kind = SkAny (the schema-aware
+/// codegen layer can refine via ICast follow-up).
+pub fn emit_column(
+    b: &mut SsaBuilder,
+    dst_reg: Int,
+    cursor_id: Int,
+    col_idx: Int,
+) -> SsaValue {
+    let dst = b.fresh_value(SkAny);
+    b.push(IColumn(dst.clone(), cursor_id, col_idx));
+    b.def_reg(dst_reg, &dst);
+    dst
+}
+
+/// Yield a result row from N consecutive registers.
+pub fn emit_result_row(b: &mut SsaBuilder, reg_start: Int, n_cols: Int) {
+    let mut vs: List<SsaValue> = List.new();
+    let mut i: Int = 0;
+    while i < n_cols {
+        vs.push(read_or_pending(b, reg_start + i));
+        i = i + 1;
+    }
+    b.push(IResultRow(vs));
+}
+
+/// Halt the program.  Terminates the current block.
+pub fn emit_halt(b: &mut SsaBuilder, code: Int, msg: Text) -> BlockId {
+    b.terminate(IHalt(code, msg))
+}
+
+/// Unconditional jump.  Terminates the current block; opens a
+/// successor.  Returns the new block id.
+pub fn emit_jump(b: &mut SsaBuilder, target: BlockId) -> BlockId {
+    b.terminate(IJump(target))
+}
+
+/// Conditional branch.  Terminates the current block.
+pub fn emit_branch(
+    b: &mut SsaBuilder,
+    cond_reg: Int,
+    then_blk: BlockId,
+    else_blk: BlockId,
+) -> BlockId {
+    let cond = read_or_pending(b, cond_reg);
+    b.terminate(IBranch(cond, then_blk, else_blk))
+}
+
+// -----------------------------------------------------------------------------
+// Helper: read or pending-phi
+// -----------------------------------------------------------------------------
+
+fn read_or_pending(b: &mut SsaBuilder, reg_idx: Int) -> SsaValue {
+    match b.read_reg(reg_idx) {
+        Some(v) => v,
+        None    => b.mint_pending(reg_idx),
+    }
+}

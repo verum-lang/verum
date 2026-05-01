@@ -1,0 +1,88 @@
+// =============================================================================
+// t01_handshake_scram.vr — SCRAM-SHA-256 startup against live Postgres
+// =============================================================================
+// Spec: internal/specs/database.md §6.1.2 (SCRAM-SHA-256 startup),
+//       §8.13.1 (TLS posture — loopback-only here pending TLS layer).
+// =============================================================================
+//
+// Verifies the connect → startup → SCRAM-SHA-256 handshake flow
+// completes end-to-end against a live `postgres:16-alpine` server
+// configured with `password_encryption = scram-sha-256` and
+// `pg_hba.conf` forcing scram for every host.
+//
+// Asserts:
+//   1. `connect()` returns Ok.
+//   2. Final connection state is `PcsReady`.
+//   3. BackendKeyData was captured (process_id ≠ 0, secret_key ≠ 0).
+//   4. `server_version` ParameterStatus was observed.
+//   5. A trivial `SELECT 1` round-trip succeeds.
+//
+// Failure mode: any expected assertion fails → `expect_*` prints
+// `FAIL: <message>` to stderr, exits 1; the runner classifies the
+// test as failed.
+// =============================================================================
+
+mount conn_config.{
+    connect_app, expect, expect_ok, expect_eq_int, pass,
+};
+mount core.database.postgres.{
+    PgConnection, PgConnState, PcsReady,
+};
+
+fn main() {
+    // (1) connect — drives Startup + SCRAM-SHA-256 + ReadyForQuery.
+    let mut conn: PgConnection = expect_ok(
+        connect_app(),
+        &"connect_app() failed — is docker compose up?".clone(),
+    );
+
+    // (2) state must be PcsReady after a clean startup.
+    expect(
+        match conn.state() { PcsReady => true, _ => false },
+        &"connection state != PcsReady after handshake".clone(),
+    );
+
+    // (3) BackendKeyData must have arrived (CancelRequest depends on it).
+    let key = conn.backend_key();
+    expect(
+        match key { Some(_) => true, None => false },
+        &"BackendKeyData not received".clone(),
+    );
+    match key {
+        Some((pid, sk)) => {
+            expect(pid != 0, &"backend pid is zero".clone());
+            expect(sk != 0,  &"secret_key is zero".clone());
+        }
+        None => {}
+    }
+
+    // (4) server_version ParameterStatus seen.
+    let params = conn.parameters();
+    let mut found_server_version: Bool = false;
+    let mut i: Int = 0;
+    while i < params.len() as Int {
+        if params[i].0 == "server_version".clone() {
+            found_server_version = true;
+        }
+        i = i + 1;
+    }
+    expect(
+        found_server_version,
+        &"server_version ParameterStatus not in conn.parameters()".clone(),
+    );
+
+    // (5) SELECT 1 round-trip — proves the connection is usable
+    //     post-handshake (reads + writes) and the wire framing is
+    //     in lockstep with the server.
+    let result = expect_ok(
+        conn.simple_query(&"SELECT 1::int4 AS one".clone()),
+        &"SELECT 1 failed".clone(),
+    );
+    expect_eq_int(
+        result.rows.len() as Int,
+        1,
+        &"SELECT 1 returned wrong row count".clone(),
+    );
+
+    pass(&"t01_handshake_scram".clone());
+}

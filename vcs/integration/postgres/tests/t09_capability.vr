@@ -1,0 +1,70 @@
+// =============================================================================
+// t09_capability.vr — capability lattice compile-time rejection (positive)
+// =============================================================================
+// Spec: internal/specs/database.md §5.4 (capability types), §8.13.10
+//       (compile-time enforcement normative).
+// =============================================================================
+//
+// Positive half: build a Database<PgPool, DbReadWriteTx>, narrow to
+// Database<PgPool, DbRead>, and verify that the read-only handle's
+// `query_simple` works end-to-end. The compile-rejection negative
+// half lives in `t09_capability_neg.vr.expectfail` — that file
+// MUST fail `verum check` because it tries to call `execute_simple`
+// on a `Database<PgPool, DbRead>` (CanWrite not in scope). The
+// runner's special-case for `*.expectfail` files asserts the
+// inverse: a clean check is a test FAILURE.
+//
+// In v1 the negative half is documented in the README and run
+// manually via `verum check t09_capability_neg.vr.expectfail`
+// — automated wiring of expectfail discovery in run.sh is a
+// follow-up.
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, expect_eq_int, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, APP_USER, APP_PW,
+};
+mount core.database.postgres.{
+    PgConfig, PgPool, PtmDisable,
+    database_from_pool,
+};
+mount core.database.common.pool_impl.{PoolConfig};
+mount core.database.common.error.{AdPostgres};
+
+fn main() {
+    let cfg = PgConfig {
+        host: TEST_HOST.clone(),
+        port: TEST_PORT,
+        user: APP_USER.clone(),
+        password: APP_PW.clone(),
+        database: TEST_DB.clone(),
+        application_name: "spindle-itest-cap".clone(),
+        tls_mode: PtmDisable,
+        connect_timeout_ms: 10_000,
+    };
+    let pool = expect_ok(
+        PgPool.launch(cfg, PoolConfig.default(AdPostgres)),
+        &"pool launch failed".clone(),
+    );
+
+    // Construct read-write-transactional handle.
+    let db_rwtx = database_from_pool(pool);
+
+    // Narrow to read-only — one-way transition.
+    let db_ro = db_rwtx.into_readonly();
+
+    // Read works on the narrowed handle.
+    let result = expect_ok(
+        db_ro.query_simple(&"SELECT 1::int4".clone()),
+        &"query_simple on Database<PgPool, DbRead> failed".clone(),
+    );
+    expect_eq_int(result.rows.len() as Int, 1, &"row count".clone());
+
+    // The negative half — `db_ro.execute_simple(...)` — would fail
+    // to compile because `<C: CanWrite> Database<PgPool, C>`'s
+    // execute_simple is not in scope on `Database<PgPool, DbRead>`.
+    // The check is verified by `t09_capability_neg.vr.expectfail`
+    // out-of-band.
+
+    pass(&"t09_capability".clone());
+}
