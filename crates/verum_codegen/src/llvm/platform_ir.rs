@@ -128,6 +128,50 @@ impl<'ctx> PlatformIR<'ctx> {
     /// shape — pads with i64 zeros for unused args.
     ///
 
+    /// Coerce a syscall i64 result to the wrapper's declared return
+    /// type.  POSIX FFI commonly declares `Int32` returns; the syscall
+    /// instruction yields i64.  Truncate (i64 → smaller int), accept
+    /// as-is (i64 → i64), or convert i64 → ptr for pointer returns.
+    fn coerce_int_to_return(
+        &self,
+        builder: &verum_llvm::builder::Builder<'ctx>,
+        ret_i64: verum_llvm::values::IntValue<'ctx>,
+        ret_ty: Option<verum_llvm::types::BasicTypeEnum<'ctx>>,
+        name_hint: &str,
+    ) -> super::error::Result<verum_llvm::values::BasicValueEnum<'ctx>> {
+        match ret_ty {
+            Some(verum_llvm::types::BasicTypeEnum::IntType(it)) => {
+                let bits = it.get_bit_width();
+                if bits == 64 {
+                    Ok(ret_i64.into())
+                } else if bits < 64 {
+                    let truncated = builder
+                        .build_int_truncate(ret_i64, it, name_hint)
+                        .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?;
+                    Ok(truncated.into())
+                } else {
+                    let extended = builder
+                        .build_int_z_extend(ret_i64, it, name_hint)
+                        .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?;
+                    Ok(extended.into())
+                }
+            }
+            Some(verum_llvm::types::BasicTypeEnum::PointerType(pt)) => {
+                let p = builder
+                    .build_int_to_ptr(ret_i64, pt, name_hint)
+                    .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?;
+                Ok(p.into())
+            }
+            // Float / aggregate return types aren't part of the POSIX
+            // syscall surface — reject explicitly so a future expansion
+            // doesn't silently miscompile.
+            other => Err(super::error::LlvmLoweringError::internal(format!(
+                "coerce_int_to_return: unsupported return type {:?} for {}",
+                other, name_hint
+            ))),
+        }
+    }
+
     /// Cross-compilation correct: reads `module.get_triple()`, never
     /// host `#[cfg]`.
     fn emit_linux_syscall(
@@ -5049,22 +5093,48 @@ impl<'ctx> PlatformIR<'ctx> {
             }
         };
 
-        // Either reuse the existing pre-declaration (declared earlier
-        // by a caller) or add a new one. Either way, set linkage to
-        // External so VBC-compiled FFI calls (which look up the name
-        // by symbol) can resolve.
+        // **Signature reconciliation** (#96 fundamental fix).
+        //
+        // Either reuse an existing declaration or add a new one with
+        // the canonical i64-everywhere ABI.  The pre-existing
+        // declaration may come from VBC-compiled FFI in
+        // `core/sys/darwin/libsystem.vr` which uses NATIVE POSIX
+        // types (e.g. `socket(domain: Int32, ...) -> Int32`).
+        //
+        // Pre-fix the wrapper imposed i64-everywhere unconditionally
+        // — but only on the libsys helper signature, while reusing
+        // the existing wrapper signature.  The wrapper body then
+        // routed i32 params through an i64-typed libsys call,
+        // producing IR like:
+        //
+        //     define internal i32 @socket(i32, i32, i32) {
+        //       %ret = call i64 @__verum_libsys_socket(i32, i32, i32)
+        //       ret i64 %ret
+        //     }
+        //
+        // ...which LLVM verifier rejects ("value doesn't match
+        // function result type" + "call parameter type does not
+        // match function signature").
+        //
+        // Post-fix: the libsys helper conforms to the WRAPPER's
+        // signature.  All param/return shapes round-trip cleanly.
         let wrapper = module
             .get_function(name)
             .unwrap_or_else(|| module.add_function(name, fn_type, None));
+        let wrapper_fn_ty = wrapper.get_type();
+        let wrapper_ret_ty = wrapper_fn_ty.get_return_type();
 
         let entry = ctx.append_basic_block(wrapper, "entry");
         let builder = ctx.create_builder();
         builder.position_at_end(entry);
 
         if target_is_linux(module) {
-            // Direct syscall path. Build i64 args by reading params
-            // and converting pointer params via `ptr_to_int`. All
-            // syscalls in this set fit in 6 args.
+            // Direct syscall path.  Linux syscall ABI takes i64 args;
+            // the syscall instruction returns i64 in the result reg.
+            // We zext smaller integer params (i8/i16/i32) to i64 and
+            // ptrtoint pointer params before issuing the syscall, then
+            // truncate the i64 result back to whatever the wrapper's
+            // return type is (commonly i32 for POSIX FFI shape).
             let n_params = wrapper.count_params();
             let mut args_i64: Vec<verum_llvm::values::IntValue<'ctx>> =
                 Vec::with_capacity(n_params as usize);
@@ -5076,7 +5146,21 @@ impl<'ctx> PlatformIR<'ctx> {
                     ))
                 })?;
                 let v: verum_llvm::values::IntValue<'ctx> = match p {
-                    verum_llvm::values::BasicValueEnum::IntValue(iv) => iv,
+                    verum_llvm::values::BasicValueEnum::IntValue(iv) => {
+                        // Zero-extend smaller integer types to i64
+                        // before passing to the syscall ABI.  POSIX
+                        // FFI declares fd/domain/etc. as Int32; the
+                        // syscall expects i64.
+                        if iv.get_type().get_bit_width() < 64 {
+                            builder
+                                .build_int_z_extend(iv, i64_type, &format!("p{}_zext", i))
+                                .map_err(|e| {
+                                    super::error::LlvmLoweringError::llvm_error(e.to_string())
+                                })?
+                        } else {
+                            iv
+                        }
+                    }
                     verum_llvm::values::BasicValueEnum::PointerValue(pv) => builder
                         .build_ptr_to_int(pv, i64_type, &format!("p{}_addr", i))
                         .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?,
@@ -5095,19 +5179,27 @@ impl<'ctx> PlatformIR<'ctx> {
             } else {
                 sys_x86_64
             };
-            let ret = self.emit_linux_syscall(&builder, module, sys_num, &args_i64)?;
+            let ret_i64 = self.emit_linux_syscall(&builder, module, sys_num, &args_i64)?;
+
+            // Truncate / reshape syscall result to the wrapper's
+            // declared return type.  POSIX FFI commonly declares i32
+            // returns for socket/bind/listen/accept/etc.
+            let ret_typed = self.coerce_int_to_return(
+                &builder,
+                ret_i64,
+                wrapper_ret_ty,
+                &format!("{}_ret", name),
+            )?;
             builder
-                .build_return(Some(&ret))
+                .build_return(Some(&ret_typed))
                 .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?;
         } else {
-            // libSystem indirection. Declare a Verum-named alias of
-            // the libSystem symbol with the same signature, route the
-            // call through it. The linker resolves
-            // `__verum_libsys_<name>` against libSystem's `<name>`
-            // via the manifest-driven `verum.libsys` attribute.
+            // libSystem indirection.  The libsys helper conforms to
+            // the WRAPPER's signature so param/return shapes round-trip
+            // cleanly without LLVM type-mismatch errors.
             let libsys_name = format!("__verum_libsys_{}", name);
             let libsys = module.get_function(&libsys_name).unwrap_or_else(|| {
-                let f = module.add_function(&libsys_name, fn_type, None);
+                let f = module.add_function(&libsys_name, wrapper_fn_ty, None);
                 f.add_attribute(
                     AttributeLoc::Function,
                     ctx.create_string_attribute("verum.libsys", name),
@@ -5115,7 +5207,9 @@ impl<'ctx> PlatformIR<'ctx> {
                 f
             });
 
-            // Forward all params 1:1.
+            // Forward all params 1:1.  Names use `ret` only when the
+            // call has a non-void result — naming a void-returning
+            // call is rejected by LLVM verifier.
             let n_params = wrapper.count_params();
             let mut args: Vec<verum_llvm::values::BasicMetadataValueEnum<'ctx>> =
                 Vec::with_capacity(n_params as usize);
@@ -5129,21 +5223,29 @@ impl<'ctx> PlatformIR<'ctx> {
                 args.push(p.into());
             }
 
-            let ret = builder
-                .build_call(libsys, &args, "ret")
-                .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?
-                .try_as_basic_value()
-                .basic()
-                .ok_or_else(|| {
-                    super::error::LlvmLoweringError::internal(format!(
-                        "{}: libsys call returned void",
-                        name
-                    ))
-                })?
-                .into_int_value();
-            builder
-                .build_return(Some(&ret))
+            let call_name = if wrapper_ret_ty.is_some() { "ret" } else { "" };
+            let call_site = builder
+                .build_call(libsys, &args, call_name)
                 .map_err(|e| super::error::LlvmLoweringError::llvm_error(e.to_string()))?;
+
+            match wrapper_ret_ty {
+                Some(_) => {
+                    let ret = call_site.try_as_basic_value().basic().ok_or_else(|| {
+                        super::error::LlvmLoweringError::internal(format!(
+                            "{}: libsys call returned void but wrapper expects value",
+                            name
+                        ))
+                    })?;
+                    builder.build_return(Some(&ret)).map_err(|e| {
+                        super::error::LlvmLoweringError::llvm_error(e.to_string())
+                    })?;
+                }
+                None => {
+                    builder.build_return(None).map_err(|e| {
+                        super::error::LlvmLoweringError::llvm_error(e.to_string())
+                    })?;
+                }
+            }
         }
 
         Ok(())

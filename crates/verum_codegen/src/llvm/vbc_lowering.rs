@@ -53,6 +53,7 @@ use verum_llvm::debug_info::{
     AsDIScope, DICompileUnit, DIFile, DIFlags, DIFlagsConstants, DILocalVariable, DIScope,
     DISubprogram, DIType, DWARFEmissionKind, DWARFSourceLanguage, DebugInfoBuilder,
 };
+use verum_llvm::builder::Builder;
 use verum_llvm::module::{Linkage, Module};
 use verum_llvm::values::{BasicValueEnum, FunctionValue};
 use verum_vbc::instruction::Instruction;
@@ -3745,56 +3746,13 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
         let num_blocks = block_starts.len();
 
-        // Ensure all basic blocks have terminators (exception handler blocks, etc.)
-        // **AND** delete orphan `dead_after_N` blocks that have no
-        // predecessors AND no instructions other than `unreachable`.
-        //
-        // Pre-fix: the codegen at line 3711 inserted `dead_after_N`
-        // placeholder blocks after every terminator-emitting instruction
-        // as a safety net.  When subsequent instructions started a new
-        // block (the normal path), the placeholder stayed empty with
-        // `unreachable` added by this sweep — producing
-        //
-        //     dead_after_2:                ; No predecessors!
-        //       unreachable
-        //
-        // These orphan blocks are valid IR but trip
-        // `SimplifyCFG::TryToSimplifyUncondBranchFromEmptyBlock` on
-        // arity-collided / type-conflict modules (#96), causing SIGBUS.
-        // Deleting them pre-optimization eliminates the crash surface
-        // without affecting program semantics — they're unreachable
-        // by definition.
-        let mut bb = llvm_fn.get_first_basic_block();
-        let mut orphan_blocks: Vec<_> = Vec::new();
-        while let Some(block) = bb {
-            let next = block.get_next_basic_block();
-            if block.get_terminator().is_none() {
-                ctx.position_at_end(block);
-                let _ = ctx.builder().build_unreachable();
-            }
-            // Detect orphan: no predecessor uses + first instruction is
-            // `unreachable` (i.e. the block has nothing else in it).
-            // Skip the entry block — never delete that even if empty.
-            if Some(block) != llvm_fn.get_first_basic_block()
-                && block.get_first_use().is_none()
-            {
-                if let Some(first_instr) = block.get_first_instruction() {
-                    let opcode_name = first_instr.get_opcode();
-                    use verum_llvm::values::InstructionOpcode;
-                    if matches!(opcode_name, InstructionOpcode::Unreachable) {
-                        orphan_blocks.push(block);
-                    }
-                }
-            }
-            bb = next;
-        }
-        for orphan in orphan_blocks {
-            // SAFETY: block has no predecessor uses; deleting it doesn't
-            // dangle any reference.  Only the unreachable instruction is
-            // present, which is removed alongside the block.
-            unsafe {
-                let _ = orphan.delete();
-            }
+        let total_deleted = cleanup_orphan_blocks_in_function(llvm_fn, ctx.builder());
+        if total_deleted > 0 && std::env::var_os("VERUM_TRACE_PASSES").is_some() {
+            let fn_name = llvm_fn.get_name().to_string_lossy().to_string();
+            eprintln!(
+                "[orphan-cleanup] {} : deleted {} unreachable blocks",
+                fn_name, total_deleted,
+            );
         }
 
         self.stats.functions_lowered += 1;
@@ -4331,6 +4289,105 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
     pub fn get_function_by_id(&self, id: u32) -> Option<FunctionValue<'ctx>> {
         self.functions.get(&id).copied()
     }
+
+    /// Module-wide unreachable-block sweep.
+    ///
+    /// Walks every function with a body and deletes no-predecessor
+    /// blocks to fixed point.  Catches orphans emitted by codegen
+    /// paths *outside* VBC lowering — `platform_ir.rs` (`no_main`),
+    /// `tensor_ir.rs` (`zero_data`), and any future non-VBC codegen
+    /// site.  Returns total blocks deleted across the module.
+    ///
+    /// Must run before LLVM optimization passes — SimplifyCFG SIGBUSes
+    /// when it tries to merge a no-predecessor block with its
+    /// (non-existent) predecessor.
+    pub fn sweep_module_orphan_blocks(&self) -> usize {
+        let builder = self.context.create_builder();
+        let mut total = 0usize;
+        let mut func = self.module.get_first_function();
+        while let Some(f) = func {
+            let next = f.get_next_function();
+            if f.count_basic_blocks() > 0 {
+                let deleted = cleanup_orphan_blocks_in_function(f, &builder);
+                if deleted > 0 && std::env::var_os("VERUM_TRACE_PASSES").is_some() {
+                    let fn_name = f.get_name().to_string_lossy().to_string();
+                    eprintln!(
+                        "[orphan-cleanup-module] {} : deleted {} unreachable blocks",
+                        fn_name, deleted,
+                    );
+                }
+                total += deleted;
+            }
+            func = next;
+        }
+        total
+    }
+}
+
+/// Cleanup unreachable basic blocks in a single LLVM function.
+///
+/// **Algorithm** — iterate to fixed point: deleting one block may
+/// remove the only branch reference into another, making it newly
+/// unreachable.  Bounded by O(blocks * iterations); in practice
+/// 2-3 passes suffice.  The entry block is never deleted.
+///
+/// **Why a sweep instead of fixing each emission site**:
+/// VBC codegen + non-VBC IR emitters (platform / tensor / runtime)
+/// emit speculative blocks for branches they later don't connect.
+/// A centralized sweep handles all current AND future emission
+/// sites uniformly — eliminating a class of latent SimplifyCFG
+/// SIGBUS bugs at one architectural seam.
+///
+/// **SSA dominance guarantee**: per LLVM, values defined in a
+/// no-predecessor block can only be referenced from within that
+/// same block, so deleting the entire block (instructions +
+/// terminator) is always safe — there are no cross-block uses
+/// to fix up.
+///
+/// Returns the number of blocks deleted.
+pub fn cleanup_orphan_blocks_in_function<'ctx>(
+    llvm_fn: FunctionValue<'ctx>,
+    builder: &Builder<'ctx>,
+) -> usize {
+    // First pass: ensure every block has a terminator (verifier requirement).
+    let mut bb = llvm_fn.get_first_basic_block();
+    while let Some(block) = bb {
+        let next = block.get_next_basic_block();
+        if block.get_terminator().is_none() {
+            builder.position_at_end(block);
+            let _ = builder.build_unreachable();
+        }
+        bb = next;
+    }
+
+    // Subsequent passes: delete no-predecessor blocks until fixed point.
+    let entry_block = llvm_fn.get_first_basic_block();
+    let mut total_deleted = 0usize;
+    loop {
+        let mut orphans: Vec<_> = Vec::new();
+        let mut bb = llvm_fn.get_first_basic_block();
+        while let Some(block) = bb {
+            let next = block.get_next_basic_block();
+            if Some(block) != entry_block && block.get_first_use().is_none() {
+                orphans.push(block);
+            }
+            bb = next;
+        }
+        if orphans.is_empty() {
+            break;
+        }
+        for orphan in &orphans {
+            // SAFETY: no_use → no predecessor → SSA dominance ensures
+            // no instruction outside this block references its
+            // definitions.  `delete()` removes the block + all its
+            // instructions atomically.
+            unsafe {
+                let _ = orphan.delete();
+            }
+        }
+        total_deleted += orphans.len();
+    }
+    total_deleted
 }
 
 #[cfg(test)]

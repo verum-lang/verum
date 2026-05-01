@@ -597,6 +597,25 @@ impl<'s> CompilationPipeline<'s> {
                     lowering.skip_body_count(),
                 );
             }
+            // **Module-wide unreachable-block sweep** (#96).
+            //
+            // Runs after ALL codegen completes — VBC lowering, platform
+            // IR (main wrapper), tensor IR, runtime helpers — so it
+            // catches orphans from every emission site.  Per-function
+            // cleanup inside `lower_function` already handles the
+            // common case; this sweep mops up the residual orphans
+            // from non-VBC paths (`no_main` from platform_ir, `zero_data`
+            // from tensor_ir, etc.) that would otherwise crash
+            // `SimplifyCFG::TryToSimplifyUncondBranchFromEmptyBlock`
+            // with SIGBUS under `default<O2>`.
+            let module_orphans = lowering.sweep_module_orphan_blocks();
+            if module_orphans > 0 && std::env::var("VERUM_TRACE_PASSES").is_ok() {
+                eprintln!(
+                    "[verum-passes] module-wide orphan sweep deleted {} blocks",
+                    module_orphans,
+                );
+            }
+
             // **Pre-pass IR dump** — capture IR before LLVM passes run.
             // Used for diagnosing crashes inside SimplifyCFG/SROA/GVN.
             if std::env::var("VERUM_DUMP_PRE_PASS").is_ok() {
