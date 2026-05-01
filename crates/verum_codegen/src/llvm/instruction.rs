@@ -1910,19 +1910,37 @@ pub fn lower_instruction<'ctx>(
                 // Text objects use flat layout {ptr, len, cap} — no object header.
                 // This matches verum_text_alloc in C runtime.
                 let i64_type = ctx.types().i64_type();
-                let i32_type = ctx.types().i32_type();
+                let i8_type = ctx.types().i8_type();
+                let bool_type = ctx.types().bool_type();
+                let void_type = ctx.types().void_type();
                 let ptr_type = ctx.types().ptr_type();
-                let memset_fn = ctx.get_module().get_function("memset").unwrap_or_else(|| {
-                    let ft = ptr_type
-                        .fn_type(&[ptr_type.into(), i32_type.into(), i64_type.into()], false);
-                    ctx.get_module().add_function("memset", ft, None)
-                });
+                // Libc-free: route zero-init through llvm.memset.p0.i64 intrinsic.
+                let memset_fn = ctx
+                    .get_module()
+                    .get_function("llvm.memset.p0.i64")
+                    .unwrap_or_else(|| {
+                        let ft = void_type.fn_type(
+                            &[
+                                ptr_type.into(),
+                                i8_type.into(),
+                                i64_type.into(),
+                                bool_type.into(),
+                            ],
+                            false,
+                        );
+                        ctx.get_module().add_function("llvm.memset.p0.i64", ft, None)
+                    });
                 let size = i64_type.const_int(24, false); // 3 fields * 8 bytes, no header
                 let module = ctx.get_module();
                 let obj = checked_malloc_instr(ctx, module, size, "text_flat")?;
                 let _ = ctx.builder().build_call(
                     memset_fn,
-                    &[obj.into(), i32_type.const_zero().into(), size.into()],
+                    &[
+                        obj.into(),
+                        i8_type.const_zero().into(),
+                        size.into(),
+                        bool_type.const_zero().into(),
+                    ],
                     "clear_text",
                 );
                 ctx.set_register(dst.0, obj.into());
@@ -1992,19 +2010,37 @@ pub fn lower_instruction<'ctx>(
                 // Text objects use flat layout {ptr, len, cap} — no object header.
                 // This matches verum_text_alloc in C runtime.
                 let i64_type = ctx.types().i64_type();
-                let i32_type = ctx.types().i32_type();
+                let i8_type = ctx.types().i8_type();
+                let bool_type = ctx.types().bool_type();
+                let void_type = ctx.types().void_type();
                 let ptr_type = ctx.types().ptr_type();
-                let memset_fn = ctx.get_module().get_function("memset").unwrap_or_else(|| {
-                    let ft = ptr_type
-                        .fn_type(&[ptr_type.into(), i32_type.into(), i64_type.into()], false);
-                    ctx.get_module().add_function("memset", ft, None)
-                });
+                // Libc-free: route zero-init through llvm.memset.p0.i64 intrinsic.
+                let memset_fn = ctx
+                    .get_module()
+                    .get_function("llvm.memset.p0.i64")
+                    .unwrap_or_else(|| {
+                        let ft = void_type.fn_type(
+                            &[
+                                ptr_type.into(),
+                                i8_type.into(),
+                                i64_type.into(),
+                                bool_type.into(),
+                            ],
+                            false,
+                        );
+                        ctx.get_module().add_function("llvm.memset.p0.i64", ft, None)
+                    });
                 let size = i64_type.const_int(24, false); // 3 fields * 8 bytes, no header
                 let module = ctx.get_module();
                 let obj = checked_malloc_instr(ctx, module, size, "text_flat")?;
                 let _ = ctx.builder().build_call(
                     memset_fn,
-                    &[obj.into(), i32_type.const_zero().into(), size.into()],
+                    &[
+                        obj.into(),
+                        i8_type.const_zero().into(),
+                        size.into(),
+                        bool_type.const_zero().into(),
+                    ],
                     "clear_text",
                 );
                 ctx.set_register(dst.0, obj.into());
@@ -15453,11 +15489,22 @@ fn lower_call_method<'ctx>(
                             );
                             module.add_function("verum_gen_next_maybe", fn_type, None)
                         });
-                let memset_fn = module.get_function("memset").unwrap_or_else(|| {
-                    let fn_type = ptr_type
-                        .fn_type(&[ptr_type.into(), i32_type.into(), i64_type.into()], false);
-                    module.add_function("memset", fn_type, None)
-                });
+                // Libc-free: route through llvm.memset.p0.i64 intrinsic.
+                let bool_type = ctx.types().bool_type();
+                let memset_fn = module
+                    .get_function("llvm.memset.p0.i64")
+                    .unwrap_or_else(|| {
+                        let fn_type = void_type.fn_type(
+                            &[
+                                ptr_type.into(),
+                                i8_type.into(),
+                                i64_type.into(),
+                                bool_type.into(),
+                            ],
+                            false,
+                        );
+                        module.add_function("llvm.memset.p0.i64", fn_type, None)
+                    });
 
                 let gen_val = ctx.get_register(receiver.0)?;
 
@@ -15494,14 +15541,15 @@ fn lower_call_method<'ctx>(
                 // Allocate variant: header(24) + tag(4) + pad(4) + payload(8) = 40 bytes
                 let variant_size = i64_type.const_int(40, false);
                 let variant_ptr = checked_malloc_instr(ctx, module, variant_size, "maybe_variant")?;
-                // Zero-init
+                // Zero-init via llvm.memset.p0.i64 (libc-free)
                 ctx.builder()
                     .build_call(
                         memset_fn,
                         &[
                             variant_ptr.into(),
-                            i32_type.const_zero().into(),
+                            i8_type.const_zero().into(),
                             variant_size.into(),
+                            bool_type.const_zero().into(),
                         ],
                         "clear",
                     )
@@ -16048,6 +16096,45 @@ fn lower_call_method<'ctx>(
         }
     }
     Ok(())
+}
+
+/// Decode a register index from a varint-encoded operand stream,
+/// advancing `pos`.  Mirrors `verum_vbc::codegen::expressions::write_reg`
+/// (the encoder) and `verum_vbc::interpreter::dispatch_table::handlers::
+/// bytecode_io::read_reg` (the interpreter-side decoder):
+///
+/// * Registers `0..=127` use 1 byte.
+/// * Registers `128..=32767` use 2 bytes: `[0x80 | (reg >> 8)][reg & 0xFF]`.
+///
+/// **Critical for production correctness** — without this, all
+/// extended-opcode LLVM lowering handlers that index `operands[i]`
+/// by position silently miscompile any function with ≥128 live
+/// registers (the high-numbered register's encoding's first byte
+/// gets sign-extended into a register number that doesn't exist
+/// or, worse, aliases a different register).
+#[inline]
+fn read_reg_varlen(operands: &[u8], pos: &mut usize) -> Result<u16> {
+    let p = *pos;
+    if p >= operands.len() {
+        return Err(LlvmLoweringError::internal(
+            "read_reg_varlen: operand stream exhausted",
+        ));
+    }
+    let b0 = operands[p];
+    if b0 < 128 {
+        *pos = p + 1;
+        Ok(b0 as u16)
+    } else {
+        if p + 1 >= operands.len() {
+            return Err(LlvmLoweringError::internal(
+                "read_reg_varlen: truncated 2-byte register encoding",
+            ));
+        }
+        let high = (b0 & 0x7F) as u16;
+        let low = operands[p + 1] as u16;
+        *pos = p + 2;
+        Ok((high << 8) | low)
+    }
 }
 
 fn lower_arith_extended<'ctx>(
@@ -19093,15 +19180,20 @@ fn lower_mem_extended<'ctx>(
 ) -> Result<()> {
     // Sub-op numbering MUST match VBC codegen (expressions.rs) and interpreter:
     // 0x00=Alloc, 0x01=AllocZeroed, 0x02=Dealloc, 0x03=Realloc, 0x04=Swap,
-    // 0x05=Replace, 0x06=NewByteList (red-team §4 packed-byte list allocator)
+    // 0x05=Replace, 0x06=NewByteList (red-team §4 packed-byte list allocator).
+    //
+    // Operand reads use `read_reg_varlen` because codegen's `write_reg`
+    // emits variable-length register indexes (1 byte for regs 0-127,
+    // 2 bytes for regs ≥128).  Pre-fix, every site here read a single
+    // byte and silently miscompiled any function with ≥128 live regs.
+    let mut pos = 0usize;
     match sub_op {
         0x00 => {
             // Alloc: operands = [dst, size, align]
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let dst = operands[0] as u16;
-            let size = ctx.get_register(operands[1] as u16)?;
+            let dst = read_reg_varlen(operands, &mut pos)?;
+            let size_reg = read_reg_varlen(operands, &mut pos)?;
+            let _align_reg = read_reg_varlen(operands, &mut pos).ok();
+            let size = ctx.get_register(size_reg)?;
             let module = ctx.get_module();
             let fn_type = ctx
                 .types()
@@ -19122,11 +19214,10 @@ fn lower_mem_extended<'ctx>(
         }
         0x01 => {
             // AllocZeroed: operands = [dst, size, align]
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let dst = operands[0] as u16;
-            let size = ctx.get_register(operands[1] as u16)?;
+            let dst = read_reg_varlen(operands, &mut pos)?;
+            let size_reg = read_reg_varlen(operands, &mut pos)?;
+            let _align_reg = read_reg_varlen(operands, &mut pos).ok();
+            let size = ctx.get_register(size_reg)?;
             let module = ctx.get_module();
             let ptr_ty = ctx.types().ptr_type();
             let i64_ty = ctx.types().i64_type();
@@ -19185,10 +19276,10 @@ fn lower_mem_extended<'ctx>(
         }
         0x02 => {
             // Dealloc: operands = [ptr, size, align]
-            if operands.len() < 1 {
-                return Ok(());
-            }
-            let ptr_raw = ctx.get_register(operands[0] as u16)?;
+            let ptr_reg = read_reg_varlen(operands, &mut pos)?;
+            let _size_reg = read_reg_varlen(operands, &mut pos).ok();
+            let _align_reg = read_reg_varlen(operands, &mut pos).ok();
+            let ptr_raw = ctx.get_register(ptr_reg)?;
             let ptr_val = as_ptr(ctx, ptr_raw, "dealloc_ptr")?;
             let module = ctx.get_module();
             let fn_type = ctx
@@ -19205,15 +19296,14 @@ fn lower_mem_extended<'ctx>(
         }
         0x03 => {
             // Realloc: operands = [dst, ptr, old_size, new_size, align]
-            if operands.len() < 4 {
-                return Ok(());
-            }
-            let dst = operands[0] as u16;
-            let ptr_raw = ctx.get_register(operands[1] as u16)?;
+            let dst = read_reg_varlen(operands, &mut pos)?;
+            let ptr_reg = read_reg_varlen(operands, &mut pos)?;
+            let _old_size = read_reg_varlen(operands, &mut pos)?; // unused — C runtime reads from AllocationHeader
+            let new_size_reg = read_reg_varlen(operands, &mut pos)?;
+            let _align_reg = read_reg_varlen(operands, &mut pos).ok();
+            let ptr_raw = ctx.get_register(ptr_reg)?;
             let ptr_val = as_ptr(ctx, ptr_raw, "realloc_ptr")?;
-            // operands[2] = old_size (unused by C runtime, it reads from AllocationHeader)
-            // operands[3] = new_size
-            let new_size = ctx.get_register(operands[3] as u16)?;
+            let new_size = ctx.get_register(new_size_reg)?;
             let module = ctx.get_module();
             let ptr_ty = ctx.types().ptr_type();
             let i64_ty = ctx.types().i64_type();
@@ -19239,11 +19329,10 @@ fn lower_mem_extended<'ctx>(
             // Swap: operands = [a_ptr, b_ptr] — exchange the i64 values at *a and *b
             // Mirrors interpreter handler at log_extended.rs:256 (core::ptr::swap on u64).
             // Was a no-op stub; that left core::base::memory::swap silently dropped at AOT.
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let a_raw = ctx.get_register(operands[0] as u16)?;
-            let b_raw = ctx.get_register(operands[1] as u16)?;
+            let a_reg = read_reg_varlen(operands, &mut pos)?;
+            let b_reg = read_reg_varlen(operands, &mut pos)?;
+            let a_raw = ctx.get_register(a_reg)?;
+            let b_raw = ctx.get_register(b_reg)?;
             let a_ptr = as_ptr(ctx, a_raw, "swap_a_ptr")?;
             let b_ptr = as_ptr(ctx, b_raw, "swap_b_ptr")?;
             let i64_ty = ctx.types().i64_type();
@@ -19265,12 +19354,11 @@ fn lower_mem_extended<'ctx>(
         }
         0x05 => {
             // Replace — replace value and return old
-            if operands.len() < 3 {
-                return Ok(());
-            }
-            let dst = operands[0] as u16;
-            let ptr = ctx.get_register(operands[1] as u16)?;
-            let new_val = ctx.get_register(operands[2] as u16)?;
+            let dst = read_reg_varlen(operands, &mut pos)?;
+            let ptr_reg = read_reg_varlen(operands, &mut pos)?;
+            let new_val_reg = read_reg_varlen(operands, &mut pos)?;
+            let ptr = ctx.get_register(ptr_reg)?;
+            let new_val = ctx.get_register(new_val_reg)?;
             // Load old value, store new value
             let ptr_val = as_ptr(ctx, ptr, "repl_ptr")?;
             let i64_ty = ctx.types().i64_type();
@@ -19294,11 +19382,9 @@ fn lower_mem_extended<'ctx>(
             // -> *mut u8` which mirrors interpreter's
             // `alloc_byte_list_packed`: builds a 3-Value header tagged
             // `TypeId::BYTE_LIST` + a `[u8; cap]` packed backing.
-            if operands.len() < 2 {
-                return Ok(());
-            }
-            let dst = operands[0] as u16;
-            let cap_raw = ctx.get_register(operands[1] as u16)?;
+            let dst = read_reg_varlen(operands, &mut pos)?;
+            let cap_reg = read_reg_varlen(operands, &mut pos)?;
+            let cap_raw = ctx.get_register(cap_reg)?;
             let cap_i64 = as_i64(ctx, cap_raw, "byte_list_cap")?;
             let module = ctx.get_module();
             let ptr_ty = ctx.types().ptr_type();
