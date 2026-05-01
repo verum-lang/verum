@@ -8678,7 +8678,7 @@ fn manifest_field_table() -> Vec<ManifestFieldEntry> {
         ManifestFieldEntry { section: "safety", field: "forbid_stdlib_extern", status: S::LoadBearing, closure_task: "", consumer_site: "SafetyPolicy.forbid_stdlib_extern → safety_gate" },
         ManifestFieldEntry { section: "safety", field: "mls_level", status: S::LoadBearingPartial, closure_task: "#266 + #282 + #283", consumer_site: "Phase 1+2a+2b+3a — Pi-type propagation = #289" },
 
-        // [test] — 7/8 wired, 1 forward-looking (need #286-fuzz).
+        // [test] — all 8 wired (Phase 1+2+3+4 closures #298+#273+#299).
         ManifestFieldEntry { section: "test", field: "timeout_secs", status: S::LoadBearing, closure_task: "", consumer_site: "TestRunCfg.timeout_secs → commands/test.rs" },
         ManifestFieldEntry { section: "test", field: "deny_warnings", status: S::LoadBearing, closure_task: "", consumer_site: "TestRunCfg.deny_warnings → commands/test.rs" },
         ManifestFieldEntry { section: "test", field: "coverage", status: S::LoadBearing, closure_task: "", consumer_site: "TestRunCfg.coverage CLI||manifest" },
@@ -8686,7 +8686,7 @@ fn manifest_field_table() -> Vec<ManifestFieldEntry> {
         ManifestFieldEntry { section: "test", field: "differential", status: S::LoadBearing, closure_task: "#273", consumer_site: "TestRunCfg.differential → run_test_differential (T0 + T1 cross-tier agreement)" },
         ManifestFieldEntry { section: "test", field: "property_testing", status: S::LoadBearing, closure_task: "#298", consumer_site: "TestRunCfg.property_testing → run_single_test (skips @property when false)" },
         ManifestFieldEntry { section: "test", field: "proptest_cases", status: S::LoadBearing, closure_task: "#298", consumer_site: "TestRunCfg.proptest_cases → run_test_property default_runs" },
-        ManifestFieldEntry { section: "test", field: "fuzzing", status: S::ForwardLooking, closure_task: "#286-fuzz", consumer_site: "cargo-fuzz harness pending" },
+        ManifestFieldEntry { section: "test", field: "fuzzing", status: S::LoadBearing, closure_task: "#299", consumer_site: "TestRunCfg.fuzzing → commands/fuzz::run (cargo-fuzz orchestration)" },
 
         // CompilerOptions surface fields.
         ManifestFieldEntry { section: "options", field: "continue_on_error", status: S::LoadBearing, closure_task: "#270", consumer_site: "Session::collect_phase_error → validate_module" },
