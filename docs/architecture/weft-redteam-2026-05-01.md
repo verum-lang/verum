@@ -189,7 +189,14 @@ Tighten the check to fire on `accum.len() + n > max_request_size`
 
 ---
 
-## §6. Medium: refuse_overloaded write is unbounded
+## §6. Medium: refuse_overloaded write is unbounded — **FIXED**
+
+**Status:** Closed.  `core/net/weft/listener.vr::refuse_overloaded`
+now uses fire-and-forget `task.spawn` + `future_timeout_ms(1_000, ...)`
+to bound the write at one second.  The accept loop returns immediately
+after the spawn — slow refused clients can no longer gate accept.
+See lines 181-198 of listener.vr (pre-fix vs post-fix annotated in
+source).
 
 ### Attack
 Send TCP SYN, complete handshake, never read.  Server hits
