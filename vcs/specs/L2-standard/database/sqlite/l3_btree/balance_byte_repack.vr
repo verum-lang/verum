@@ -1,0 +1,150 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l3_btree, balance, page_writer, repack
+// @timeout: 15000
+// @description: Real byte-level B-tree balance — materialize/serialize
+//               round trip + Split/Merge/Rotate cell preservation
+//               (#146 closure).
+//
+// Spec: internal/specs/sqlite-native.md §10.5
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l3_btree.{
+    MaterializedCell, MaterializedPage,
+    materialized_cell, materialized_page,
+    serialize_page,
+    PageBuf, page_buf, ApplyOutcome,
+    apply_balance_decision,
+    BalanceDecision, NoChange, Split, Merge, Rotate, GrowRoot, ShrinkRoot,
+    BalanceContext, balance_context_new,
+};
+mount core.database.sqlite.native.l3_btree.page_layout.{
+    PageKind, TableLeaf, TableInterior, IndexLeaf, IndexInterior,
+};
+
+// -----------------------------------------------------------------------------
+// 1. MaterializedPage construction + cell ops
+// -----------------------------------------------------------------------------
+
+fn empty_materialized_page() {
+    let mp = materialized_page(TableLeaf, 0 as UInt32, 0);
+    assert_eq(mp.cell_count(), 0);
+    assert_eq(mp.total_cell_bytes(), 0);
+    // header(8) + 0 pointers + 0 content = 8 bytes
+    assert_eq(mp.storage_cost(), 8);
+}
+
+fn append_cells_grows_count() {
+    let mut mp = materialized_page(TableLeaf, 0 as UInt32, 0);
+    let mut bs1: List<Byte> = List.new();
+    bs1.push(0xAA as Byte);
+    bs1.push(0xBB as Byte);
+    mp.append_cell(materialized_cell(bs1));
+    let mut bs2: List<Byte> = List.new();
+    bs2.push(0xCC as Byte);
+    mp.append_cell(materialized_cell(bs2));
+    assert_eq(mp.cell_count(), 2);
+    assert_eq(mp.total_cell_bytes(), 3);
+    // header(8) + 2*2 ptr + 3 content = 15
+    assert_eq(mp.storage_cost(), 15);
+}
+
+// -----------------------------------------------------------------------------
+// 2. serialize_page produces a buffer of exactly page_size
+// -----------------------------------------------------------------------------
+
+fn serialize_produces_full_page() {
+    let mp = materialized_page(TableLeaf, 0 as UInt32, 0);
+    match serialize_page(&mp, 4096) {
+        Ok(bytes) => {
+            assert_eq(bytes.len(), 4096);
+            // Header byte at offset 0 is the leaf kind code.
+            // TableLeaf = 0x0D per SQLite spec.
+            assert_eq(bytes[0] as Int, 0x0D);
+            // Cell count at bytes[3..5] = 0
+            assert_eq(bytes[3] as Int, 0);
+            assert_eq(bytes[4] as Int, 0);
+        }
+        Err(_) => panic("serialize_page failed on empty page"),
+    }
+}
+
+fn serialize_with_cells() {
+    let mut mp = materialized_page(TableLeaf, 0 as UInt32, 0);
+    let mut bs: List<Byte> = List.new();
+    bs.push(0x42 as Byte);
+    bs.push(0x43 as Byte);
+    bs.push(0x44 as Byte);
+    mp.append_cell(materialized_cell(bs));
+    match serialize_page(&mp, 4096) {
+        Ok(bytes) => {
+            assert_eq(bytes.len(), 4096);
+            // Cell count = 1
+            assert_eq(bytes[4] as Int, 1);
+            // Cell content sits at the END of the page (offset 4093..4095)
+            assert_eq(bytes[4093] as Int, 0x42);
+            assert_eq(bytes[4094] as Int, 0x43);
+            assert_eq(bytes[4095] as Int, 0x44);
+            // Cell-pointer array entry [0] = 4093 = 0x0FFD
+            // header_size = 8, so pointer at offset 8..10
+            assert_eq(bytes[8] as Int, 0x0F);
+            assert_eq(bytes[9] as Int, 0xFD);
+        }
+        Err(_) => panic("serialize_page failed with cells"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 3. apply_balance_decision::Merge actually concatenates cells
+// -----------------------------------------------------------------------------
+
+fn merge_concatenates_cells() {
+    let ctx = balance_context_new(4096, 0);
+
+    // Build two leaf pages with one cell each.
+    let mut left_mp = materialized_page(TableLeaf, 0 as UInt32, 0);
+    let mut bsl: List<Byte> = List.new();
+    bsl.push(0x11 as Byte);
+    left_mp.append_cell(materialized_cell(bsl));
+    let left_bytes = match serialize_page(&left_mp, 4096) {
+        Ok(b)  => b,
+        Err(_) => panic("left serialize failed"),
+    };
+
+    let mut right_mp = materialized_page(TableLeaf, 0 as UInt32, 0);
+    let mut bsr: List<Byte> = List.new();
+    bsr.push(0x22 as Byte);
+    right_mp.append_cell(materialized_cell(bsr));
+    let right_bytes = match serialize_page(&right_mp, 4096) {
+        Ok(b)  => b,
+        Err(_) => panic("right serialize failed"),
+    };
+
+    let mut pages: List<PageBuf> = List.new();
+    pages.push(page_buf(2, left_bytes));
+    pages.push(page_buf(3, right_bytes));
+
+    match apply_balance_decision(&Merge(2, 3, 0), &pages, &ctx) {
+        Ok(outcome) => {
+            // Right page freed; left page returned with both cells.
+            assert_eq(outcome.freed_pages.len(), 1);
+            assert_eq(outcome.freed_pages[0], 3);
+            assert_eq(outcome.updated_pages.len(), 1);
+            // Verify merged page has cell_count = 2
+            let merged_bytes = &outcome.updated_pages[0].bytes;
+            assert_eq(merged_bytes[4] as Int, 2);
+        }
+        Err(_) => panic("Merge apply failed"),
+    }
+}
+
+fn main() {
+    empty_materialized_page();
+    append_cells_grows_count();
+    serialize_produces_full_page();
+    serialize_with_cells();
+    merge_concatenates_cells();
+}

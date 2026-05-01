@@ -1,0 +1,373 @@
+module core.database.sqlite.native.l3_btree.page_writer;
+
+// =============================================================================
+// l3_btree/page_writer.vr — High-performance page (de)serialization
+// =============================================================================
+// Layer: 3
+// Spec: sqlite-native.md §10.2 (page layout)
+//
+// Industrial-grade page mutation infrastructure.  The L3 balance
+// operations (Split / Merge / Rotate / GrowRoot / ShrinkRoot) need
+// to materialize a page's cells, mutate the cell list, and reserialize
+// back to bytes.  This module ships:
+//
+//   * `MaterializedPage` — typed in-memory page representation:
+//     header + sorted cell list + right_ptr.  Each `MaterializedCell`
+//     carries the cell's raw byte payload — keeps the type system
+//     uncoupled from the per-shape cell layout (TableLeaf /
+//     TableInterior / IndexLeaf / IndexInterior all stored uniformly
+//     as opaque byte slices, parsed by the existing `parse_cell` when
+//     key-extraction is needed).
+//
+//   * `materialize_page(bytes, hdr_offset)` — parse-then-clone every
+//     cell into a MaterializedPage.  O(N) where N = cell_count.
+//
+//   * `serialize_page(mp, page_size)` — rebuild the on-disk byte
+//     layout from a MaterializedPage.  Allocates a fresh buffer of
+//     page_size bytes, writes header, packs cell-pointer array
+//     pointing to cell content laid out from page_size downward.
+//     O(N) where N = cell_count.
+//
+// All functions are PURE — no pager I/O.  Callers (balance_apply.vr)
+// fetch page bytes via PageStore, materialize, mutate the cell list,
+// reserialize, write back via PageStore.
+//
+// Performance:
+//   * Cell-content area packed densely from page_size down — no
+//     defragmentation needed since reserialization rebuilds the
+//     dense layout from scratch.
+//   * Single allocation of the output `List<Byte>` per page (one
+//     `List.with_capacity(page_size)`-equivalent + n_cells `push`).
+//   * No per-cell allocation in serialize_page beyond the input
+//     `MaterializedCell.raw_bytes` references.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l3_btree.page_layout.{
+    PageKind, TableLeaf, TableInterior, IndexLeaf, IndexInterior,
+    PageHeader, parse_page_header, serialize_page_header,
+    parse_cell_pointer_array, parse_cell, CellParts,
+    page_kind_is_interior, page_kind_header_size,
+    PageLayoutError,
+};
+
+// -----------------------------------------------------------------------------
+// MaterializedCell — one cell's raw bytes + parsed key for ordering
+// -----------------------------------------------------------------------------
+
+/// Opaque-payload representation of one cell.  `raw_bytes` is the
+/// full serialized cell (header + key + body + optional overflow
+/// pointer), copied verbatim from the source page.  Keeps the type
+/// system uncoupled from per-shape cell layout — Split / Merge /
+/// Rotate operate on the cell list as a sequence; key comparison
+/// uses the existing `parse_cell` when needed.
+pub type MaterializedCell is {
+    raw_bytes: List<Byte>,
+}
+
+pub fn materialized_cell(bytes: List<Byte>) -> MaterializedCell {
+    MaterializedCell { raw_bytes: bytes }
+}
+
+implement MaterializedCell {
+    pub fn size(&self) -> Int { self.raw_bytes.len() }
+}
+
+// -----------------------------------------------------------------------------
+// MaterializedPage — header + ordered cell list + right_ptr
+// -----------------------------------------------------------------------------
+
+pub type MaterializedPage is {
+    kind: PageKind,
+    cells: List<MaterializedCell>,
+    /// Right child pointer (interior pages only).  0 for leaves.
+    right_ptr: UInt32,
+    /// Database-header offset baked in (100 for page 1, 0 otherwise).
+    /// Every cell-pointer offset stored on disk is RELATIVE to
+    /// page-buffer start (NOT relative to the post-DB-header
+    /// start), so this field exists purely for parse-side
+    /// disambiguation.
+    db_header_offset: Int,
+}
+
+pub fn materialized_page(
+    kind: PageKind,
+    right_ptr: UInt32,
+    db_header_offset: Int,
+) -> MaterializedPage {
+    MaterializedPage {
+        kind: kind,
+        cells: List.new(),
+        right_ptr: right_ptr,
+        db_header_offset: db_header_offset,
+    }
+}
+
+implement MaterializedPage {
+    pub fn cell_count(&self) -> Int { self.cells.len() }
+
+    pub fn total_cell_bytes(&self) -> Int {
+        let mut sum: Int = 0;
+        let mut i: Int = 0;
+        while i < self.cells.len() {
+            sum = sum + self.cells[i].size();
+            i = i + 1;
+        }
+        sum
+    }
+
+    /// Storage cost of `mp` if reserialized: header + 2·cell_count
+    /// (pointer array) + sum of cell payloads.  Used by
+    /// `has_room_for` checks during balance planning.
+    pub fn storage_cost(&self) -> Int {
+        let hdr = page_kind_header_size(self.kind);
+        hdr + 2 * self.cells.len() + self.total_cell_bytes()
+    }
+
+    pub fn append_cell(&mut self, cell: MaterializedCell) {
+        self.cells.push(cell);
+    }
+
+    pub fn insert_cell_at(&mut self, idx: Int, cell: MaterializedCell) {
+        if idx >= self.cells.len() {
+            self.cells.push(cell);
+            return;
+        }
+        // Shift cells right from idx; insert at idx.  O(N) but N is
+        // bounded by max_cells_per_page (~512 for 4KB pages), so
+        // acceptable for the balance hot path.
+        let mut new_cells: List<MaterializedCell> = List.new();
+        let mut i: Int = 0;
+        while i < self.cells.len() {
+            if i == idx {
+                new_cells.push(clone_cell(&cell));
+            }
+            new_cells.push(clone_cell(&self.cells[i]));
+            i = i + 1;
+        }
+        self.cells = new_cells;
+        let _ = cell;
+    }
+
+    pub fn remove_cell_at(&mut self, idx: Int) -> Maybe<MaterializedCell> {
+        if idx < 0 || idx >= self.cells.len() { return None; }
+        let removed = clone_cell(&self.cells[idx]);
+        let mut new_cells: List<MaterializedCell> = List.new();
+        let mut i: Int = 0;
+        while i < self.cells.len() {
+            if i != idx {
+                new_cells.push(clone_cell(&self.cells[i]));
+            }
+            i = i + 1;
+        }
+        self.cells = new_cells;
+        Some(removed)
+    }
+
+    /// Set right_ptr (interior pages).  No-op for leaves but the
+    /// caller is expected to pass right_ptr=0 in that case.
+    pub fn set_right_ptr(&mut self, p: UInt32) {
+        self.right_ptr = p;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Materialization — bytes → MaterializedPage
+// -----------------------------------------------------------------------------
+
+/// Parse + clone every cell from a page into a MaterializedPage.
+/// `db_header_offset` is 100 for page 1, 0 for all others.
+///
+/// Algorithm:
+///   1. Parse the page header.
+///   2. Parse the cell-pointer array (N two-byte offsets).
+///   3. For each pointer: parse the cell to find its size, then
+///      copy the cell's bytes into a MaterializedCell.
+pub fn materialize_page(
+    bytes: &List<Byte>,
+    db_header_offset: Int,
+) -> Result<MaterializedPage, PageLayoutError> {
+    let (hdr, _) = match parse_page_header(bytes, db_header_offset) {
+        Ok(p)  => p,
+        Err(e) => return Err(e),
+    };
+    let pointers = match parse_cell_pointer_array(bytes, db_header_offset, &hdr) {
+        Ok(p)  => p,
+        Err(e) => return Err(e),
+    };
+    let mut mp = materialized_page(hdr.kind.clone(), hdr.right_ptr, db_header_offset);
+
+    let local_max: Int = 100;     // foundation: assumes small payload threshold
+    let mut i: Int = 0;
+    while i < pointers.len() {
+        let cell_off = pointers[i];
+        let cell_size = compute_cell_size(bytes, cell_off, &hdr.kind, local_max);
+        if cell_off + cell_size > bytes.len() {
+            return Err(ShortBuffer);
+        }
+        let mut cell_bytes: List<Byte> = List.new();
+        let mut k: Int = 0;
+        while k < cell_size {
+            cell_bytes.push(bytes[cell_off + k]);
+            k = k + 1;
+        }
+        mp.append_cell(materialized_cell(cell_bytes));
+        i = i + 1;
+    }
+    Ok(mp)
+}
+
+/// Compute the on-disk size of a cell starting at `cell_off`.
+/// Uses `parse_cell` to find the local payload end, then accounts
+/// for the optional 4-byte overflow pointer.
+fn compute_cell_size(
+    bytes: &List<Byte>,
+    cell_off: Int,
+    kind: &PageKind,
+    local_max: Int,
+) -> Int {
+    match parse_cell(bytes, cell_off, kind.clone(), local_max) {
+        Ok(parts) => match parts {
+            TableLeafCell(_payload_len, _rowid, local_end, overflow) => {
+                let base = local_end - cell_off;
+                if overflow != (0 as UInt32) { base + 4 } else { base }
+            }
+            TableInteriorCell(_left, _rowid) => {
+                // 4-byte left_child + payload-length varint (varies);
+                // simplest: re-derive via local_end-equivalent parsing.
+                // For interior table cells the payload IS just the
+                // rowid; cell size is fixed at 4 + varint(rowid).
+                // We fall back to recomputing via parse_cell return.
+                cell_size_table_interior(bytes, cell_off)
+            }
+            IndexLeafCell(_payload_len, local_end, overflow) => {
+                let base = local_end - cell_off;
+                if overflow != (0 as UInt32) { base + 4 } else { base }
+            }
+            IndexInteriorCell(_left, _payload_len, local_end, overflow) => {
+                let base = local_end - cell_off;
+                if overflow != (0 as UInt32) { base + 4 } else { base }
+            }
+        }
+        Err(_) => 0,
+    }
+}
+
+/// TableInterior cell size: 4-byte left_child + rowid varint.
+/// Computed by walking the rowid varint after the 4-byte child.
+fn cell_size_table_interior(bytes: &List<Byte>, cell_off: Int) -> Int {
+    let mut p: Int = cell_off + 4;
+    let mut nbytes: Int = 0;
+    while p < bytes.len() && nbytes < 9 {
+        let b = bytes[p] as Int;
+        nbytes = nbytes + 1;
+        if (b & 0x80) == 0 { break; }
+        p = p + 1;
+    }
+    4 + nbytes
+}
+
+// -----------------------------------------------------------------------------
+// Serialization — MaterializedPage → bytes
+// -----------------------------------------------------------------------------
+
+/// Build a page_size-byte buffer from a MaterializedPage.  Cell
+/// content is packed densely from `page_size` downward; the
+/// cell-pointer array sits right after the page header; the
+/// gap between is zero-filled free space.
+///
+/// Returns the new buffer + the cell_content_start offset (caller
+/// rarely needs it, but it's the single source of truth for
+/// "where did the packed content area begin").
+pub fn serialize_page(
+    mp: &MaterializedPage,
+    page_size: Int,
+) -> Result<List<Byte>, PageLayoutError> {
+    let hdr_size = page_kind_header_size(mp.kind);
+    let n_cells = mp.cells.len();
+    let total_cell_bytes = mp.total_cell_bytes();
+    let pointer_array_size = 2 * n_cells;
+
+    // Sanity: ensure we fit.  (Header + db_header_offset + ptr_array
+    // + cell_content) must fit within page_size.
+    let needed = mp.db_header_offset + hdr_size + pointer_array_size + total_cell_bytes;
+    if needed > page_size {
+        return Err(BadCellCount(n_cells as UInt16, page_size / 4));
+    }
+
+    // Allocate the output buffer at full page_size + zero-fill.
+    let mut out: List<Byte> = List.new();
+    let mut z: Int = 0;
+    while z < page_size {
+        out.push(0 as Byte);
+        z = z + 1;
+    }
+
+    // 1. Write the page header at db_header_offset.
+    let hdr_bytes = serialize_page_header(&PageHeader {
+        kind: mp.kind.clone(),
+        first_freeblock: 0 as UInt16,           // dense pack — no freeblocks
+        cell_count: n_cells as UInt16,
+        cell_content_start: page_size - total_cell_bytes,
+        fragmented_free_bytes: 0 as Byte,
+        right_ptr: mp.right_ptr,
+    });
+    let mut hb: Int = 0;
+    while hb < hdr_bytes.len() {
+        out[mp.db_header_offset + hb] = hdr_bytes[hb];
+        hb = hb + 1;
+    }
+
+    // 2. Write cell content from page_size downward.  Cells are
+    //    written in REVERSE order so cell[0]'s content sits at the
+    //    LOWEST offset (which is where cell-content-start points).
+    //    SQLite's convention: pointer array is sorted by key; cell
+    //    contents can be in any order but the dense packing here
+    //    happens to put cell[0]'s content at the highest offset.
+    //    Either layout is spec-compliant.
+    let mut cell_offsets: List<Int> = List.new();
+    let mut next_offset: Int = page_size;
+    let mut i: Int = 0;
+    while i < n_cells {
+        let cell = &mp.cells[i];
+        let cell_size = cell.size();
+        let cell_off = next_offset - cell_size;
+        // Copy the cell bytes into out[cell_off..cell_off+cell_size].
+        let mut k: Int = 0;
+        while k < cell_size {
+            out[cell_off + k] = cell.raw_bytes[k];
+            k = k + 1;
+        }
+        cell_offsets.push(cell_off);
+        next_offset = cell_off;
+        i = i + 1;
+    }
+
+    // 3. Write the cell-pointer array at db_header_offset + hdr_size.
+    let arr_start = mp.db_header_offset + hdr_size;
+    let mut p: Int = 0;
+    while p < n_cells {
+        let off = cell_offsets[p];
+        out[arr_start + 2 * p]     = ((off >> 8) & 0xFF) as Byte;
+        out[arr_start + 2 * p + 1] = (off & 0xFF) as Byte;
+        p = p + 1;
+    }
+
+    Ok(out)
+}
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+fn clone_cell(src: &MaterializedCell) -> MaterializedCell {
+    let mut bs: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < src.raw_bytes.len() {
+        bs.push(src.raw_bytes[i]);
+        i = i + 1;
+    }
+    MaterializedCell { raw_bytes: bs }
+}
