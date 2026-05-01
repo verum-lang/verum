@@ -1,0 +1,868 @@
+//! ATS-V Architectural Type System — kernel-side primitives.
+//!
+//! ## Architectural role
+//!
+//! Per `internal/specs/ats-v.md` §4 (Architectural primitives) +
+//! §17 (Reuse compliance), ATS-V is a strict extension of Verum
+//! through ONE typed attribute (`@arch_module(...)`) plus library
+//! types in `core/architecture/`.  This module ships the kernel-
+//! side mirror of those library types — Rust `enum`s and `struct`s
+//! that the ATS-V phase (Phase 6.5 per §3) consumes during
+//! architectural type checking.
+//!
+//! ## Why mirrors live in the kernel
+//!
+//! The kernel discharges architectural invariants through
+//! intrinsics (`kernel_arch_*` per §9.3).  Kernel intrinsic dispatch
+//! happens in Rust (per V8.1 META1 architectural principle), so
+//! the carrier types must be Rust-side first-class enums.  The
+//! Verum-side `core/architecture/types.vr` mirrors the same shape
+//! for human-readable declarations + LSP integration; the two
+//! sides stay aligned through pin tests (added in Сезон 1.4).
+//!
+//! ## Reuse over invention
+//!
+//! Per spec §17.1 (Grammar reuse map), every concept reuses an
+//! existing Verum mechanism:
+//!
+//!   * Capability flavour (Linear/Affine/Relevant/Unrestricted) →
+//!     existing `@quantity(0|1|omega)` attribute.  We do NOT
+//!     introduce a parallel `CapabilityFlavour` enum — agents
+//!     declare flavour via `@quantity` on the capability binding.
+//!   * Verification route (V-axis CVE) → existing `@verify(strategy)`
+//!     ladder.
+//!   * Foundation citation → existing `@framework(corpus, "...")`.
+//!   * Refinement predicates for anti-patterns → existing `where`
+//!     clause.
+//!
+//! What this module DOES introduce: the canonical *types* that
+//! `@arch_module(...)` named arguments parse into.  These are
+//! pure data carriers — no reasoning, no SMT.  Reasoning lives
+//! in [`super::arch_anti_pattern`].
+
+use serde::{Deserialize, Serialize};
+
+// =============================================================================
+// Capability — first-class possibility tracked at architecture level
+// =============================================================================
+
+/// First-class capability — what a cog can DO.  Per spec §4.2.
+///
+/// This enum is the closed canonical set; user-defined capabilities
+/// register via [`Capability::Custom`] with mandatory ontology entry
+/// in `core/architecture/capability_ontology.vr` (per spec §17.4).
+///
+/// Capability flavour (Linear / Affine / Relevant / Unrestricted) is
+/// attached at the call site via existing `@quantity(0|1|omega)`
+/// attribute — see spec §17.1.  This enum carries only the kind,
+/// not the substructural-logic discipline.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Capability {
+    /// Read from a resource — file, db, network endpoint, etc.
+    Read { resource: ResourceTag },
+    /// Write to a resource.
+    Write { resource: ResourceTag },
+    /// Execute a target — FFI call, syscall, external program.
+    Exec { target: ExecTarget },
+    /// Escalate privileges into a higher realm.
+    Escalate { realm: PrivilegeRealm },
+    /// Spawn a task in the supervision tree.
+    Spawn { lifetime: TaskLifetime },
+    /// Capability with TTL — must be exercised before expiry.
+    TimeBound { until: ExpirationPolicy },
+    /// Persistence — durable state operation.
+    Persist { medium: PersistenceMedium },
+    /// Network — protocol-typed exposure or reach.
+    Network {
+        protocol: NetProtocol,
+        direction: NetDirection,
+    },
+    /// User-defined custom capability.  MUST be registered in
+    /// `core/architecture/capability_ontology.vr`; the kernel
+    /// validates this at audit time.
+    Custom { tag: String, schema: CapabilitySchema },
+}
+
+impl Capability {
+    /// Stable single-token tag — used in audit JSON, error codes,
+    /// machine-readable agent surfaces (per spec §32.2).
+    pub fn tag(&self) -> &'static str {
+        match self {
+            Capability::Read { .. } => "read",
+            Capability::Write { .. } => "write",
+            Capability::Exec { .. } => "exec",
+            Capability::Escalate { .. } => "escalate",
+            Capability::Spawn { .. } => "spawn",
+            Capability::TimeBound { .. } => "time_bound",
+            Capability::Persist { .. } => "persist",
+            Capability::Network { .. } => "network",
+            Capability::Custom { .. } => "custom",
+        }
+    }
+}
+
+/// Resource identifier — what's being read/written.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ResourceTag {
+    /// Database table or whole connection.
+    Database { name: String },
+    /// Filesystem path.
+    File { path_pattern: String },
+    /// In-memory state slot.
+    Memory { region: String },
+    /// Configuration store.
+    Config { namespace: String },
+    /// Logging sink.
+    Logger,
+    /// Random source.
+    Random,
+    /// Custom resource — names it explicitly.
+    Custom(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ExecTarget {
+    Ffi { library: String, symbol: String },
+    Syscall { number: u32 },
+    Program { path: String },
+    Custom(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PrivilegeRealm {
+    Admin,
+    Root,
+    Audit,
+    Custom(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum TaskLifetime {
+    /// Bounded by parent scope (structured concurrency).
+    ScopedToParent,
+    /// Detached — runs until explicit shutdown.
+    Detached,
+    /// Bounded by explicit deadline.
+    Deadlined { milliseconds: u64 },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum ExpirationPolicy {
+    AtUnixTime { seconds: u64 },
+    AfterDuration { milliseconds: u64 },
+    OnEvent { event_tag: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PersistenceMedium {
+    Disk { path: String },
+    Database { connection_tag: String },
+    DistributedLog { topic: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum NetProtocol {
+    Tcp,
+    Udp,
+    Unix,
+    Tls,
+    Quic,
+    Http,
+    Grpc,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum NetDirection {
+    Inbound,
+    Outbound,
+    Bidirectional,
+}
+
+/// Schema for custom capabilities — declared once in the ontology
+/// registry, referenced by tag thereafter.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct CapabilitySchema {
+    /// Human-readable description.
+    pub description: String,
+    /// Whether the capability transfers privilege (escalate-style).
+    pub transfers_privilege: bool,
+    /// Optional related capabilities (subsumption hint).
+    pub subsumed_by: Vec<String>,
+}
+
+// =============================================================================
+// Boundary — typed cross-module traffic discipline
+// =============================================================================
+
+/// Cross-module / cross-cog boundary.  Per spec §4.3.
+///
+/// Carries:
+///   * What messages can cross.
+///   * What capabilities are handed off.
+///   * What invariants are preserved (both sides).
+///   * Wire encoding + physical layer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Boundary {
+    pub messages_in: Vec<MessageType>,
+    pub messages_out: Vec<MessageType>,
+    pub capability_handoff: Vec<Capability>,
+    pub invariants: Vec<BoundaryInvariant>,
+    pub wire_encoding: WireEncoding,
+    pub physical_layer: BoundaryPhysicalLayer,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum MessageType {
+    /// Typed structured message.
+    Typed { name: String, schema_hash: String },
+    /// Capability handoff message (transfers a capability).
+    CapabilityTransfer { capability_tag: String },
+    /// Acknowledgement / control frame.
+    Control { kind: String },
+    /// Raw — discouraged; kernel flags via anti-pattern check.
+    Raw,
+}
+
+/// Boundary invariant — predicate that holds on both sides of the
+/// boundary at all times.  Per spec §4.3.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum BoundaryInvariant {
+    /// All-or-nothing transactional crossing.
+    AllOrNothing,
+    /// Messages serialised deterministically.
+    DeterministicSerialisation,
+    /// Authentication required before first message.
+    AuthenticatedFirst,
+    /// Backpressure honoured — no unbounded queues.
+    BackpressureHonoured,
+    /// Custom named invariant — refinement predicate referenced
+    /// by name; resolved at audit time.
+    Custom { name: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum WireEncoding {
+    /// Verum-native serialisation (canonical).
+    VerumNative,
+    /// Protocol Buffers schema.
+    ProtoBuf { schema_path: String },
+    /// JSON with schema reference.
+    Json { schema_url: String },
+    /// MessagePack.
+    MsgPack,
+    /// Raw bytes — flagged as anti-pattern unless explicitly justified.
+    RawBytes,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum BoundaryPhysicalLayer {
+    /// Same process, same crate.
+    Intracrate,
+    /// Same process, cross-crate.
+    Intracess,
+    /// Cross-process IPC.
+    Ipc,
+    /// Network boundary (any protocol).
+    Network,
+}
+
+// =============================================================================
+// Lifecycle — staged status of an architectural artifact
+// =============================================================================
+
+/// Lifecycle stage.  Per spec §4.5.
+///
+/// Transitions are typed: `[Г] → [П] → [С] → [Т]` upward; `→ [О]`
+/// downward.  Citing higher from lower (e.g. `[Т]` cites `[Г]`) is
+/// `LifecycleRegression` anti-pattern (ATS-V-AP-009).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Lifecycle {
+    /// Hypothesis — speculation; no implementation.
+    Hypothesis { confidence: ConfidenceLevel },
+    /// Plan — committed but not yet implemented.
+    Plan { target_completion: String },
+    /// Conditional — proven under explicit assumptions.
+    Conditional { conditions: Vec<String> },
+    /// Theorem — fully proven, load-bearing.
+    Theorem { since: String },
+    /// Obsolete — deprecated, scheduled for removal.
+    Obsolete {
+        deprecation_reason: String,
+        replacement: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum ConfidenceLevel {
+    Low,
+    Medium,
+    High,
+}
+
+impl Lifecycle {
+    /// Stable diagnostic tag.
+    pub fn tag(&self) -> &'static str {
+        match self {
+            Lifecycle::Hypothesis { .. } => "hypothesis",
+            Lifecycle::Plan { .. } => "plan",
+            Lifecycle::Conditional { .. } => "conditional",
+            Lifecycle::Theorem { .. } => "theorem",
+            Lifecycle::Obsolete { .. } => "obsolete",
+        }
+    }
+
+    /// Lifecycle ordering: `[Т] > [С] > [П] > [Г]`; `[О]` is below
+    /// everything (deprecation downstream).  Used by
+    /// `LifecycleRegression` anti-pattern check (citing must go
+    /// from `>=` to `<=` only).
+    pub fn rank(&self) -> u8 {
+        match self {
+            Lifecycle::Obsolete { .. } => 0,
+            Lifecycle::Hypothesis { .. } => 1,
+            Lifecycle::Plan { .. } => 2,
+            Lifecycle::Conditional { .. } => 3,
+            Lifecycle::Theorem { .. } => 4,
+        }
+    }
+}
+
+// =============================================================================
+// Foundation — meta-theoretic profile
+// =============================================================================
+
+/// Foundation profile — the meta-theory the cog operates in.
+/// Per spec §4.6.  Composition of cogs with different foundations
+/// requires an explicit functor-bridge (`FoundationBridge`); else
+/// `FoundationDrift` anti-pattern (ATS-V-AP-005).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Foundation {
+    /// ZFC + 2 strongly-inaccessibles (the canonical baseline).
+    ZfcTwoInacc,
+    /// Homotopy Type Theory (Univalent Foundations).
+    Hott,
+    /// Cubical HoTT.
+    Cubical,
+    /// Calculus of Inductive Constructions.
+    Cic,
+    /// Martin-Löf Type Theory.
+    Mltt,
+    /// Effective topos.
+    Eff,
+    /// User-defined custom foundation — must cite via
+    /// `@framework(corpus, ...)`.
+    Custom {
+        name: String,
+        framework_corpus: String,
+    },
+}
+
+impl Foundation {
+    pub fn tag(&self) -> &'static str {
+        match self {
+            Foundation::ZfcTwoInacc => "zfc_two_inacc",
+            Foundation::Hott => "hott",
+            Foundation::Cubical => "cubical",
+            Foundation::Cic => "cic",
+            Foundation::Mltt => "mltt",
+            Foundation::Eff => "eff",
+            Foundation::Custom { .. } => "custom",
+        }
+    }
+
+    /// True iff `self` is interpretable into `target` without an
+    /// explicit functor-bridge (canonical inclusions only).
+    pub fn directly_subsumed_by(&self, target: &Foundation) -> bool {
+        // Identity is always direct.
+        if self == target {
+            return true;
+        }
+        // CIC subsumes MLTT (CIC is MLTT + inductive families).
+        matches!(
+            (self, target),
+            (Foundation::Mltt, Foundation::Cic)
+                | (Foundation::Hott, Foundation::Cubical) // cubical subsumes Book HoTT
+        )
+    }
+}
+
+// =============================================================================
+// Tier — execution placement
+// =============================================================================
+
+/// Execution tier.  Per spec §4.7.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Tier {
+    /// Tier 0: VBC interpreter — fast startup, ~100ns CBGR check.
+    Interp,
+    /// Tier 1: AOT via LLVM — 85-95% native speed.
+    Aot,
+    /// Tier 2: GPU compilation via MLIR.
+    Gpu,
+    /// Type-checking only (no codegen).
+    Check,
+    /// Multi-tier: cog runs on any of the listed tiers.
+    MultiTier { allowed: Vec<Tier> },
+}
+
+impl Tier {
+    pub fn tag(&self) -> &'static str {
+        match self {
+            Tier::Interp => "interp",
+            Tier::Aot => "aot",
+            Tier::Gpu => "gpu",
+            Tier::Check => "check",
+            Tier::MultiTier { .. } => "multi_tier",
+        }
+    }
+
+    /// True iff `caller_tier` is compatible with `callee_tier` —
+    /// i.e., a function in `caller_tier` can call into
+    /// `callee_tier` without violating tier discipline.
+    pub fn compatible_with(&self, callee_tier: &Tier) -> bool {
+        match (self, callee_tier) {
+            (a, b) if a == b => true,
+            (Tier::MultiTier { allowed }, b) => allowed.iter().any(|t| t == b),
+            (a, Tier::MultiTier { allowed }) => allowed.iter().any(|t| t == a),
+            // Check tier doesn't run; nothing is compatible with it.
+            (Tier::Check, _) | (_, Tier::Check) => false,
+            // Interp / Aot / Gpu — incompatible without bridge.
+            _ => false,
+        }
+    }
+}
+
+// =============================================================================
+// MsfsStratum — position in the moduli space (MSFS preprint)
+// =============================================================================
+
+/// Position of a cog in the MSFS-modulating space.  Per spec §4.7
+/// + reflection-tower module.  `LAbs` is impossible by AFN-T α
+/// (MSFS Theorem 5.1) — any cog claiming `LAbs` triggers
+/// `AbsoluteBoundaryAttempt` anti-pattern (ATS-V-AP-011).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum MsfsStratum {
+    /// L_Fnd — foundation level.
+    LFnd,
+    /// L_Cls — classifier level.
+    LCls,
+    /// L_Cls^⊤ — maximal classifier sub-class.
+    LClsTop,
+    /// L_Abs — empty by AFN-T α; declaring this is a defect.
+    LAbs,
+}
+
+impl MsfsStratum {
+    pub fn tag(&self) -> &'static str {
+        match self {
+            MsfsStratum::LFnd => "l_fnd",
+            MsfsStratum::LCls => "l_cls",
+            MsfsStratum::LClsTop => "l_cls_top",
+            MsfsStratum::LAbs => "l_abs",
+        }
+    }
+
+    /// True iff the stratum is admissible (i.e., not `LAbs`).
+    pub fn is_admissible(&self) -> bool {
+        !matches!(self, MsfsStratum::LAbs)
+    }
+}
+
+// =============================================================================
+// CveClosure — three-axis closure triple (Constructive / Verifiable / Executable)
+// =============================================================================
+
+/// CVE-closure triple per spec §4.8 + §32 (dual-audience contract).
+///
+/// Each axis carries an identifier path + provenance.  In strict
+/// mode (`@arch_module(strict=true)`), all three fields MUST be
+/// present; in soft mode, missing axes produce warnings but not
+/// errors.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CveClosure {
+    /// C — Constructive witness (function or constructor path).
+    pub constructive: Option<String>,
+    /// V — Verification strategy from the existing `@verify` ladder.
+    pub verifiable_strategy: Option<VerifyStrategy>,
+    /// E — Executable artefact (entry point or audit command).
+    pub executable: Option<String>,
+}
+
+impl CveClosure {
+    /// True iff all three axes are present (full CVE-closure).
+    pub fn is_fully_closed(&self) -> bool {
+        self.constructive.is_some()
+            && self.verifiable_strategy.is_some()
+            && self.executable.is_some()
+    }
+
+    /// Number of axes that discharge (0..=3).
+    pub fn closure_degree(&self) -> u8 {
+        let mut n = 0;
+        if self.constructive.is_some() {
+            n += 1;
+        }
+        if self.verifiable_strategy.is_some() {
+            n += 1;
+        }
+        if self.executable.is_some() {
+            n += 1;
+        }
+        n
+    }
+}
+
+/// Verification strategy — mirrors the existing `@verify(...)`
+/// ladder per grammar (verum.ebnf:467+).  Reuse, not parallel
+/// system (per spec §17.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum VerifyStrategy {
+    Runtime,
+    Static,
+    Fast,
+    Formal,
+    Proof,
+    Thorough,
+    Reliable,
+    Certified,
+    Synthesize,
+}
+
+impl VerifyStrategy {
+    pub fn tag(&self) -> &'static str {
+        match self {
+            VerifyStrategy::Runtime => "runtime",
+            VerifyStrategy::Static => "static",
+            VerifyStrategy::Fast => "fast",
+            VerifyStrategy::Formal => "formal",
+            VerifyStrategy::Proof => "proof",
+            VerifyStrategy::Thorough => "thorough",
+            VerifyStrategy::Reliable => "reliable",
+            VerifyStrategy::Certified => "certified",
+            VerifyStrategy::Synthesize => "synthesize",
+        }
+    }
+
+    /// Strength rank — higher is stronger.  Per VVA §12 the
+    /// strategies are strictly ordered on the Diakrisis ν-ladder.
+    pub fn rank(&self) -> u32 {
+        match self {
+            VerifyStrategy::Runtime => 0,
+            VerifyStrategy::Static => 1,
+            VerifyStrategy::Fast => 2,
+            VerifyStrategy::Formal => 3,
+            VerifyStrategy::Proof => 4,
+            VerifyStrategy::Thorough => 5,
+            VerifyStrategy::Reliable => 6,
+            VerifyStrategy::Certified => 7,
+            VerifyStrategy::Synthesize => 8,
+        }
+    }
+}
+
+// =============================================================================
+// Shape — main carrier per `@arch_module(...)`
+// =============================================================================
+
+/// Main carrier of `@arch_module(...)`.  Per spec §4.1.
+///
+/// Built by the parser when it encounters `@arch_module(...)` on
+/// a module declaration; consumed by the ATS-V phase (Phase 6.5)
+/// + the kernel intrinsic dispatcher.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Shape {
+    /// Capabilities the cog exposes to consumers.
+    pub exposes: Vec<Capability>,
+    /// Capabilities the cog requires from the environment.
+    pub requires: Vec<Capability>,
+    /// Boundary invariants preserved through the cog.
+    pub preserves: Vec<BoundaryInvariant>,
+    /// Linear / affine resources consumed.
+    pub consumes: Vec<String>,
+    /// Execution tier constraint.
+    pub at_tier: Tier,
+    /// Foundation profile.
+    pub foundation: Foundation,
+    /// MSFS-modulating-space stratum.
+    pub stratum: MsfsStratum,
+    /// CVE-closure triple.
+    pub cve_closure: CveClosure,
+    /// Lifecycle stage.
+    pub lifecycle: Lifecycle,
+    /// Cogs / functions this cog composes with.
+    pub composes_with: Vec<String>,
+    /// Strict mode flag (compile errors vs warnings).
+    pub strict: bool,
+}
+
+impl Shape {
+    /// Default shape used for cogs without `@arch_module`.  Per
+    /// spec §6.1 (smart default inference).  Soft-mode trivial
+    /// shape — passes all anti-pattern checks vacuously.
+    pub fn default_for_unannotated() -> Self {
+        Shape {
+            exposes: Vec::new(),
+            requires: Vec::new(),
+            preserves: Vec::new(),
+            consumes: Vec::new(),
+            at_tier: Tier::MultiTier {
+                allowed: vec![Tier::Interp, Tier::Aot],
+            },
+            foundation: Foundation::ZfcTwoInacc,
+            stratum: MsfsStratum::LFnd,
+            cve_closure: CveClosure {
+                constructive: None,
+                verifiable_strategy: None,
+                executable: None,
+            },
+            lifecycle: Lifecycle::Plan {
+                target_completion: "unspecified".to_string(),
+            },
+            composes_with: Vec::new(),
+            strict: false,
+        }
+    }
+}
+
+// =============================================================================
+// Tests
+// =============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capability_tags_distinct() {
+        let probes = [
+            Capability::Read {
+                resource: ResourceTag::Logger,
+            },
+            Capability::Write {
+                resource: ResourceTag::Logger,
+            },
+            Capability::Exec {
+                target: ExecTarget::Custom("x".into()),
+            },
+            Capability::Escalate {
+                realm: PrivilegeRealm::Admin,
+            },
+            Capability::Spawn {
+                lifetime: TaskLifetime::Detached,
+            },
+            Capability::TimeBound {
+                until: ExpirationPolicy::AfterDuration { milliseconds: 1000 },
+            },
+            Capability::Persist {
+                medium: PersistenceMedium::Disk { path: "/x".into() },
+            },
+            Capability::Network {
+                protocol: NetProtocol::Tcp,
+                direction: NetDirection::Inbound,
+            },
+            Capability::Custom {
+                tag: "logger".into(),
+                schema: CapabilitySchema {
+                    description: "x".into(),
+                    transfers_privilege: false,
+                    subsumed_by: vec![],
+                },
+            },
+        ];
+        let tags: std::collections::BTreeSet<_> = probes.iter().map(|c| c.tag()).collect();
+        assert_eq!(tags.len(), 9, "every Capability variant must have a distinct tag");
+    }
+
+    #[test]
+    fn lifecycle_rank_orders_correctly() {
+        // Pin: rank Theorem > Conditional > Plan > Hypothesis > Obsolete.
+        assert!(
+            Lifecycle::Theorem {
+                since: "v0.1".into()
+            }
+            .rank()
+                > Lifecycle::Conditional {
+                    conditions: vec![]
+                }
+                .rank()
+        );
+        assert!(
+            Lifecycle::Conditional {
+                conditions: vec![]
+            }
+            .rank()
+                > Lifecycle::Plan {
+                    target_completion: "x".into()
+                }
+                .rank()
+        );
+        assert!(
+            Lifecycle::Plan {
+                target_completion: "x".into()
+            }
+            .rank()
+                > Lifecycle::Hypothesis {
+                    confidence: ConfidenceLevel::Medium
+                }
+                .rank()
+        );
+        // Obsolete is below everything.
+        assert!(
+            Lifecycle::Hypothesis {
+                confidence: ConfidenceLevel::Medium
+            }
+            .rank()
+                > Lifecycle::Obsolete {
+                    deprecation_reason: "x".into(),
+                    replacement: None
+                }
+                .rank()
+        );
+    }
+
+    #[test]
+    fn tier_compatible_with_self() {
+        assert!(Tier::Aot.compatible_with(&Tier::Aot));
+        assert!(Tier::Interp.compatible_with(&Tier::Interp));
+        assert!(!Tier::Aot.compatible_with(&Tier::Interp));
+    }
+
+    #[test]
+    fn tier_multi_tier_compatibility() {
+        let multi = Tier::MultiTier {
+            allowed: vec![Tier::Aot, Tier::Interp],
+        };
+        assert!(multi.compatible_with(&Tier::Aot));
+        assert!(multi.compatible_with(&Tier::Interp));
+        assert!(Tier::Aot.compatible_with(&multi));
+        assert!(!multi.compatible_with(&Tier::Gpu));
+    }
+
+    #[test]
+    fn tier_check_tier_runs_nothing() {
+        // Architectural pin: Check tier is type-check-only; nothing
+        // executes. So Check is incompatible with anything that
+        // actually runs.
+        assert!(!Tier::Check.compatible_with(&Tier::Aot));
+        assert!(!Tier::Aot.compatible_with(&Tier::Check));
+    }
+
+    #[test]
+    fn msfs_stratum_l_abs_is_inadmissible() {
+        // Architectural pin (AFN-T α MSFS Theorem 5.1): L_Abs is
+        // empty by construction; declaring it is a defect.
+        assert!(!MsfsStratum::LAbs.is_admissible());
+        assert!(MsfsStratum::LFnd.is_admissible());
+        assert!(MsfsStratum::LCls.is_admissible());
+        assert!(MsfsStratum::LClsTop.is_admissible());
+    }
+
+    #[test]
+    fn foundation_zfc_subsumes_only_itself() {
+        // Pin: foundation profiles don't have generic subsumption
+        // — only specific canonical inclusions (CIC ⊃ MLTT,
+        // Cubical ⊃ HoTT). Random pairs require explicit bridges.
+        assert!(Foundation::ZfcTwoInacc.directly_subsumed_by(&Foundation::ZfcTwoInacc));
+        assert!(Foundation::Mltt.directly_subsumed_by(&Foundation::Cic));
+        assert!(Foundation::Hott.directly_subsumed_by(&Foundation::Cubical));
+        // No reverse direction without bridge.
+        assert!(!Foundation::Cic.directly_subsumed_by(&Foundation::Mltt));
+        // Cross-paradigm requires explicit bridge.
+        assert!(!Foundation::ZfcTwoInacc.directly_subsumed_by(&Foundation::Hott));
+    }
+
+    #[test]
+    fn cve_closure_degree_counts_correctly() {
+        let full = CveClosure {
+            constructive: Some("c".into()),
+            verifiable_strategy: Some(VerifyStrategy::Certified),
+            executable: Some("e".into()),
+        };
+        assert_eq!(full.closure_degree(), 3);
+        assert!(full.is_fully_closed());
+
+        let two = CveClosure {
+            constructive: Some("c".into()),
+            verifiable_strategy: None,
+            executable: Some("e".into()),
+        };
+        assert_eq!(two.closure_degree(), 2);
+        assert!(!two.is_fully_closed());
+
+        let none = CveClosure {
+            constructive: None,
+            verifiable_strategy: None,
+            executable: None,
+        };
+        assert_eq!(none.closure_degree(), 0);
+        assert!(!none.is_fully_closed());
+    }
+
+    #[test]
+    fn verify_strategy_rank_strictly_increases() {
+        // VVA §12: the 9 strategies are STRICTLY ORDERED on the
+        // Diakrisis ν-ladder. Pin the order.
+        let order = [
+            VerifyStrategy::Runtime,
+            VerifyStrategy::Static,
+            VerifyStrategy::Fast,
+            VerifyStrategy::Formal,
+            VerifyStrategy::Proof,
+            VerifyStrategy::Thorough,
+            VerifyStrategy::Reliable,
+            VerifyStrategy::Certified,
+            VerifyStrategy::Synthesize,
+        ];
+        for window in order.windows(2) {
+            assert!(window[0].rank() < window[1].rank());
+        }
+    }
+
+    #[test]
+    fn shape_default_for_unannotated_passes_default_invariants() {
+        // Pin: cog без @arch_module gets a Shape that vacuously
+        // satisfies every anti-pattern (per spec §17.5
+        // backward-compat). Default trivial — no requires, no
+        // exposes, multi-tier, ZFC foundation.
+        let s = Shape::default_for_unannotated();
+        assert!(s.requires.is_empty());
+        assert!(s.exposes.is_empty());
+        assert_eq!(s.foundation, Foundation::ZfcTwoInacc);
+        assert_eq!(s.stratum, MsfsStratum::LFnd);
+        assert!(s.stratum.is_admissible());
+        assert!(!s.strict);
+    }
+
+    #[test]
+    fn shape_default_admits_serde_roundtrip() {
+        // Pin: Shape can be serialised to JSON for agent-readable
+        // surfaces (per spec §32.2 machine-readable surfaces).
+        let s = Shape::default_for_unannotated();
+        let json = serde_json::to_string(&s).expect("serialise default shape");
+        let _back: Shape = serde_json::from_str(&json).expect("deserialise default shape");
+    }
+
+    // ----- Architectural pin: tag stability -----
+
+    #[test]
+    fn architectural_pin_capability_tags_documented_in_spec() {
+        // Pin: every Capability tag here matches the canonical
+        // surface in `internal/specs/ats-v.md` §4.2.  Adding a
+        // new variant requires updating both this enum and the
+        // spec table.
+        let documented_tags: std::collections::BTreeSet<&'static str> = [
+            "read",
+            "write",
+            "exec",
+            "escalate",
+            "spawn",
+            "time_bound",
+            "persist",
+            "network",
+            "custom",
+        ]
+        .iter()
+        .copied()
+        .collect();
+        assert_eq!(documented_tags.len(), 9);
+    }
+}

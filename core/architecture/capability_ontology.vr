@@ -1,0 +1,95 @@
+// =============================================================================
+// core.architecture.capability_ontology — Custom capability registry
+// =============================================================================
+//
+// **Canonical registry of user-defined Custom capabilities.**
+//
+// Per `internal/specs/ats-v.md` §17.4 + RT2.4 (red-team pass on
+// capability ontology drift), every `Capability::CustomCapability(name)`
+// usage MUST appear in this registry. The kernel-side ATS-V phase
+// validates declared Custom capabilities against this ontology;
+// unknown names produce a compile error in strict mode (warning
+// in soft mode).
+//
+// **Architectural rationale**: prevents capability namespace drift —
+// distinct cogs declaring slightly-different names ("logger" vs
+// "log" vs "logging") for the same conceptual capability. Single
+// source of truth.
+//
+// **Сезон 1 scope**: registry surface only. Сезон 2 wires the
+// ATS-V phase to validate against this list during architectural
+// type checking.
+// =============================================================================
+
+module core.architecture.capability_ontology;
+
+mount core.prelude.{Bool, Text};
+
+/// Schema for a registered custom capability.  Carries metadata
+/// the kernel uses to validate declared usages.
+public type CapabilityRegistration is {
+    /// Stable canonical name — what cogs reference via
+    /// `Capability::CustomCapability(name)`.
+    name: Text,
+    /// Human-readable description (review aid + LSP hover).
+    description: Text,
+    /// Whether the capability transfers privilege (escalation-style).
+    transfers_privilege: Bool,
+    /// Deprecation status: None = active; Some(replacement) = deprecated.
+    deprecation: Maybe<Text>,
+};
+
+mount core.prelude.{Maybe};
+
+/// **Сезон 1 baseline registry** — minimal set of canonical custom
+/// capabilities used by core/. Cogs register additional names by
+/// extending this list (under RFC review per spec §29.2).
+///
+/// **Stability**: every entry here is RFC-stable v1.0+. Removing
+/// requires deprecation cycle ≥ 2 minor versions per spec §29.5.
+public const ATS_V_CANONICAL_CAPABILITIES: List<CapabilityRegistration> = [
+    CapabilityRegistration {
+        name: "logger",
+        description: "Structured logging sink — Spindle / Weft / arbitrary cogs emit log records.",
+        transfers_privilege: false,
+        deprecation: None,
+    },
+    CapabilityRegistration {
+        name: "metrics",
+        description: "Metrics emitter — counters, gauges, histograms.",
+        transfers_privilege: false,
+        deprecation: None,
+    },
+    CapabilityRegistration {
+        name: "tracing",
+        description: "Distributed-tracing span emitter.",
+        transfers_privilege: false,
+        deprecation: None,
+    },
+    CapabilityRegistration {
+        name: "config_read",
+        description: "Read-only access to configuration store.",
+        transfers_privilege: false,
+        deprecation: None,
+    },
+    CapabilityRegistration {
+        name: "config_admin",
+        description: "Admin-level configuration mutation.",
+        transfers_privilege: true,
+        deprecation: None,
+    },
+    CapabilityRegistration {
+        name: "supervisor_spawn",
+        description: "Spawn child task in supervision tree (structured concurrency).",
+        transfers_privilege: false,
+        deprecation: None,
+    },
+    CapabilityRegistration {
+        name: "kernel_intrinsic",
+        description: "Invoke a kernel intrinsic via @kernel_discharge.",
+        transfers_privilege: true,
+        deprecation: None,
+    },
+];
+
+mount core.prelude.{List};
