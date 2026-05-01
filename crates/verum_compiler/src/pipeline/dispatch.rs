@@ -320,9 +320,21 @@ impl<'s> CompilationPipeline<'s> {
                 }
                 // The parser stores the full dotted name (`core.verify.kernel_v0.soundness`)
                 // as a single Text in `decl.name.name`.
+                //
+                // Strip a trailing `.mod` segment so `module
+                // core.verify.kernel_v0.mod;` (the convention for
+                // mod.vr files) registers under the canonical
+                // namespace path `core.verify.kernel_v0`.  Without
+                // this strip, `super.X` from the mod.vr file would
+                // pop to `core.verify.kernel_v0` (correct) instead
+                // of `core.verify` (the author's intent: sibling
+                // access within the directory).
                 let name = decl.name.name.as_str();
                 if !name.is_empty() {
-                    return Some(Text::from(name));
+                    let canonical = name
+                        .strip_suffix(".mod")
+                        .unwrap_or(name);
+                    return Some(Text::from(canonical));
                 }
             }
         }
