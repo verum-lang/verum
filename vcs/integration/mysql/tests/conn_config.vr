@@ -1,0 +1,104 @@
+// =============================================================================
+// vcs/integration/mysql/tests/conn_config.vr — shared MySQL fixtures
+// =============================================================================
+// Mirror of vcs/integration/postgres/tests/conn_config.vr — same
+// helper surface, MySQL-specific connect parameters.
+// =============================================================================
+
+module conn_config;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text};
+mount core.database.mysql.{
+    MysqlConfig, MysqlConnection, MysqlTlsMode,
+    MtmDisable, MtmRequired, MtmVerifyIdentity,
+    connect,
+};
+
+/// Container endpoint per docker-compose.yml.
+public const TEST_HOST: Text = "127.0.0.1";
+public const TEST_PORT: Int = 53306;
+public const TEST_DB:   Text = "spindle_test";
+
+public const APP_USER: Text = "spindle_app";
+public const APP_PW:   Text = "spindle_app_pw";
+
+public const RO_USER:  Text = "spindle_ro";
+public const RO_PW:    Text = "spindle_ro_pw";
+
+public const ADMIN_USER: Text = "spindle_admin";
+public const ADMIN_PW:   Text = "spindle_admin_pw";
+
+public fn connect_app() -> Result<MysqlConnection, core.database.common.error.DbError> {
+    let cfg = MysqlConfig {
+        host: TEST_HOST.clone(),
+        port: TEST_PORT,
+        user: APP_USER.clone(),
+        password: APP_PW.clone(),
+        database: TEST_DB.clone(),
+        character_set: 255,             // utf8mb4_0900_ai_ci
+        tls_mode: MtmDisable,           // loopback — TLS scaffold tested separately
+        connect_timeout_ms: 10_000,
+    };
+    connect(&cfg)
+}
+
+public fn connect_ro() -> Result<MysqlConnection, core.database.common.error.DbError> {
+    let cfg = MysqlConfig {
+        host: TEST_HOST.clone(),
+        port: TEST_PORT,
+        user: RO_USER.clone(),
+        password: RO_PW.clone(),
+        database: TEST_DB.clone(),
+        character_set: 255,
+        tls_mode: MtmDisable,
+        connect_timeout_ms: 10_000,
+    };
+    connect(&cfg)
+}
+
+public fn connect_admin() -> Result<MysqlConnection, core.database.common.error.DbError> {
+    let cfg = MysqlConfig {
+        host: TEST_HOST.clone(),
+        port: TEST_PORT,
+        user: ADMIN_USER.clone(),
+        password: ADMIN_PW.clone(),
+        database: TEST_DB.clone(),
+        character_set: 255,
+        tls_mode: MtmDisable,
+        connect_timeout_ms: 10_000,
+    };
+    connect(&cfg)
+}
+
+// -----------------------------------------------------------------------------
+// Assertion helpers — mirror vcs/integration/postgres/tests/conn_config.vr.
+// -----------------------------------------------------------------------------
+
+public fn expect(condition: Bool, message: &Text) {
+    if !condition {
+        eprint(f"FAIL: {message}");
+        sys.exit(1);
+    }
+}
+
+public fn expect_eq_int(actual: Int, expected: Int, message: &Text) {
+    if actual != expected {
+        eprint(f"FAIL: {message} — expected {expected}, got {actual}");
+        sys.exit(1);
+    }
+}
+
+public fn expect_ok<T, E: Display>(r: Result<T, E>, message: &Text) -> T {
+    match r {
+        Ok(v) => v,
+        Err(e) => {
+            eprint(f"FAIL: {message} — {e}");
+            sys.exit(1);
+        }
+    }
+}
+
+public fn pass(name: &Text) {
+    print(f"PASS: {name}");
+}

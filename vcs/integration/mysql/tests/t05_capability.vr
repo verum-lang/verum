@@ -1,0 +1,53 @@
+// =============================================================================
+// t05_capability.vr — capability lattice positive end-to-end
+// =============================================================================
+// Spec: internal/specs/database.md §5.4 (capability types), §8.13.10
+//       (compile-time enforcement normative).
+// =============================================================================
+//
+// Construct Database<MysqlPool, DbReadWriteTx>, narrow to
+// Database<MysqlPool, DbRead>, exercise the read path. Compile-time
+// rejection of writes on the narrowed handle is verified
+// out-of-band by `t05_capability_neg.vr.expectfail` (follow-up).
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, expect_eq_int, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, APP_USER, APP_PW,
+};
+mount core.database.mysql.{
+    MysqlConfig, MysqlPool, MtmDisable,
+    mysql_database_from_pool,
+};
+mount core.database.common.pool_impl.{PoolConfig};
+mount core.database.common.error.{AdMysql};
+
+fn main() {
+    let cfg = MysqlConfig {
+        host: TEST_HOST.clone(),
+        port: TEST_PORT,
+        user: APP_USER.clone(),
+        password: APP_PW.clone(),
+        database: TEST_DB.clone(),
+        character_set: 255,
+        tls_mode: MtmDisable,
+        connect_timeout_ms: 10_000,
+    };
+    let pool = expect_ok(
+        MysqlPool.launch(cfg, PoolConfig.default(AdMysql)),
+        &"pool launch failed".clone(),
+    );
+
+    let db_rwtx = mysql_database_from_pool(pool);
+
+    // Narrow to read-only — one-way transition.
+    let db_ro = db_rwtx.into_readonly();
+
+    let result = expect_ok(
+        db_ro.query_simple(&"SELECT 1".clone()),
+        &"query_simple on Database<MysqlPool, DbRead> failed".clone(),
+    );
+    expect_eq_int(result.rows.len() as Int, 1, &"row count".clone());
+
+    pass(&"t05_capability".clone());
+}
