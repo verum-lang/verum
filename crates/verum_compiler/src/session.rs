@@ -576,8 +576,8 @@ impl Session {
         // No runtime warn! needed — every value the user can set
         // produces observable typecheck behaviour.
 
-        // The `[test]` manifest section parses 8 fields. Four are
-        // wired in `verum_cli::commands::test`:
+        // The `[test]` manifest section parses 8 fields, ALL EIGHT
+        // load-bearing in `verum_cli::commands::test`:
         //   - `timeout_secs` flows through `TestRunCfg.timeout_secs`
         //     and bounds each test's wall-clock at run time
         //     (commands/test.rs:215).
@@ -594,7 +594,7 @@ impl Session {
         //     commands/test.rs:292 — when false the harness runs
         //     tests serially.
         //
-        // All eight [test] fields are now load-bearing as of
+        // The remaining four are load-bearing as of
         // #298 + #273 + #299 (closes #286/#268-Infra):
         //   - `property_testing` (#298): TestRunCfg.property_testing
         //     gates the @property dispatcher in run_single_test;
