@@ -78,7 +78,7 @@
 //! the alternative (no recogniser) is the pre-V2 status quo where
 //! the entire separation-logic surface is opaque-functions-only.
 
-use verum_ast::expr::{Expr, ExprKind};
+use verum_ast::expr::{BinOp, Expr, ExprKind};
 
 use super::separation_logic::SepAssertion;
 
@@ -501,6 +501,216 @@ pub fn partition_clauses<'a>(clauses: &[&'a Expr]) -> ClausePartition<'a> {
     ClausePartition { separation, pure }
 }
 
+// =============================================================================
+// Conjunction descent through `&&` operators
+// =============================================================================
+//
+// Whole-clause partitioning classifies based on the OUTER expression
+// shape: a clause like `points_to(a, av) && x > 0` has the outer
+// `Binary { op: BinOp::And, .. }` shape — not a Call to a separation
+// constructor — so the whole clause falls into the Pure cohort even
+// though its left subtree is a syntactic separation predicate. The
+// descent helpers below walk through `&&` chains and classify each
+// conjunct independently, recombining via the rules below.
+//
+// ## Soundness
+//
+// The descent rests on three classical separation-logic
+// equivalences (Reynolds 2002 §2.4, O'Hearn 2007 §3.1):
+//
+//   1. `Pure_p && Pure_q ≡ Pure_(p && q)`
+//      — pure conjunctions stay pure; trivially heap-irrelevant.
+//
+//   2. `Sep_p && Pure_q ≡ Sep_p ∧ Pure_q`
+//      — separation predicate conjoined with pure prop is the
+//      classical conjunction.  Because `Pure_q` doesn't constrain
+//      the heap, this is also EQUIVALENT to `Sep_p * Pure_q` (the
+//      pure-conjunction lemma): pure assertions commute through
+//      separating conjunction at the semantic level.
+//
+//   3. `Sep_p && Sep_q ≡ heap_and(Sep_p, Sep_q)`
+//      — two heap-bearing predicates joined by `&&` describe the
+//      SAME heap satisfying both.  This is heap-stable
+//      conjunction (`SepAssertion::And`), NOT separating conjunction
+//      (`SepAssertion::Sep`).  Conflating them would be unsound:
+//      `Sep` requires DISJOINT subheaps.
+//
+// The classifier respects these distinctions:
+//   * Within an `&&` chain, multiple separation atoms fold via
+//     `heap_and` (rule 3).
+//   * Pure atoms in the same `&&` chain are extracted into the
+//     pure cohort (rule 2 + the pure-conjunction lemma let us
+//     factor them out without losing soundness).
+//   * A clause that flattens to all-pure atoms is appended to the
+//     pure cohort as the original `Expr` (rule 1; the atomic shape
+//     is preserved so generic SMT sees the user-written expression).
+//
+// ## Performance
+//
+// Each clause is walked once via `flatten_and_chain` (O(d) where d
+// is the `&&` chain depth, typically 1–4 in practice) and each
+// atom is run through `try_recognize_sep_assertion` (O(n) AST walk
+// in the atom).  Total cost is O(N × n) for N clauses.
+
+/// Flatten a left-associative `&&` chain into its leaf atoms.
+///
+/// `(A && B) && C` → `[A, B, C]`. Non-`&&` expressions return
+/// `[expr]` unchanged. The parser produces left-associative `&&`
+/// trees so the spine is canonical; nevertheless this helper
+/// recurses into BOTH branches to cover defensive cases (parser
+/// changes, hand-built expressions in tests, etc.).
+///
+/// Returns references into the input expression — no allocation
+/// of new `Expr` nodes; cheap.
+pub fn flatten_and_chain<'a>(expr: &'a Expr) -> Vec<&'a Expr> {
+    let mut out = Vec::new();
+    flatten_and_chain_into(expr, &mut out);
+    out
+}
+
+fn flatten_and_chain_into<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) {
+    match &expr.kind {
+        ExprKind::Binary { op: BinOp::And, left, right } => {
+            flatten_and_chain_into(left.as_ref(), out);
+            flatten_and_chain_into(right.as_ref(), out);
+        }
+        _ => out.push(expr),
+    }
+}
+
+/// Descended-clause recognition outcome.
+///
+/// Distinguishes the three observable shapes after `&&` descent:
+///   * `AllPure` — every atom in the `&&` chain failed separation
+///     recognition; the whole clause stays pure.  The original
+///     `Expr` reference is preserved so generic SMT translates the
+///     untouched user expression.
+///   * `AllSeparation` — every atom recognised as a separation
+///     predicate; the chain folds via `heap_and` into a single
+///     `SepAssertion` (which retains `&&` semantics, NOT `*`).
+///   * `Mixed` — the chain has at least one separation atom AND
+///     at least one pure atom; the separation atoms fold into a
+///     single `SepAssertion` via `heap_and`, the pure atoms are
+///     extracted as individual `Expr` references.
+#[derive(Debug, Clone)]
+pub enum ClauseDescentOutcome<'a> {
+    /// No separation atoms in the `&&` chain.  Whole clause is
+    /// pure — passed through to generic SMT verbatim.
+    AllPure(&'a Expr),
+    /// Every atom in the `&&` chain is a separation predicate.
+    /// Multiple separation atoms fold via `heap_and`.
+    AllSeparation(SepAssertion),
+    /// Mixed: some separation atoms, some pure atoms.  The
+    /// separation cohort folds via `heap_and` into one
+    /// `SepAssertion`; pure atoms are returned as individual
+    /// `Expr`s for the caller to dispatch through generic SMT.
+    Mixed {
+        /// Combined separation predicate (folded via `heap_and`).
+        separation: SepAssertion,
+        /// Pure atoms extracted from the same `&&` chain.
+        pure_atoms: Vec<&'a Expr>,
+    },
+}
+
+/// Recognise a clause with conjunction descent.
+///
+/// Flattens the clause's `&&` chain (no-op for single-atom
+/// clauses) and classifies each atom via
+/// [`try_recognize_sep_assertion`].  The outcome reflects the
+/// composition rule (heap_and within `&&`).
+///
+/// Contrast with [`try_recognize_sep_assertion`]: the outer
+/// recogniser refuses to dive INTO a `Binary{And}` because that
+/// shape is not itself a separation-logic constructor. This helper
+/// sits one level above: it acknowledges the `&&` operator's
+/// classical-conjunction semantics and decomposes accordingly.
+pub fn recognize_clause_with_descent<'a>(clause: &'a Expr) -> ClauseDescentOutcome<'a> {
+    let atoms = flatten_and_chain(clause);
+
+    // Single-atom clauses (no `&&`) bypass the descent machinery
+    // and route through the whole-clause classifier directly.
+    if atoms.len() == 1 {
+        return match try_recognize_sep_assertion(clause) {
+            Some(a) => ClauseDescentOutcome::AllSeparation(a),
+            None => ClauseDescentOutcome::AllPure(clause),
+        };
+    }
+
+    // Multi-atom: classify each atom independently.
+    let mut sep_atoms: Vec<SepAssertion> = Vec::new();
+    let mut pure_atoms: Vec<&'a Expr> = Vec::new();
+    for atom in atoms {
+        match try_recognize_sep_assertion(atom) {
+            Some(a) => sep_atoms.push(a),
+            None => pure_atoms.push(atom),
+        }
+    }
+
+    match (sep_atoms.is_empty(), pure_atoms.is_empty()) {
+        // Every atom failed recognition — clause is pure.  The
+        // ORIGINAL clause expression is returned so generic SMT
+        // sees the user-written `&&` chain (not a re-synthesised
+        // form) and any debug/error messaging cites the source
+        // shape.
+        (true, false) => ClauseDescentOutcome::AllPure(clause),
+        // Every atom recognised as separation; fold via `heap_and`.
+        // Soundness: `Sep_1 && Sep_2 && … && Sep_n` describes the
+        // SAME heap satisfying every predicate — heap_and chain.
+        (false, true) => ClauseDescentOutcome::AllSeparation(fold_heap_and(sep_atoms)),
+        // Mixed cohort: separation fold + pure list.
+        (false, false) => ClauseDescentOutcome::Mixed {
+            separation: fold_heap_and(sep_atoms),
+            pure_atoms,
+        },
+        // Both empty is impossible because `atoms.len() >= 2` here.
+        (true, true) => unreachable!("flatten_and_chain returns at least one atom"),
+    }
+}
+
+/// Left-associative `heap_and` fold over a non-empty list of
+/// separation predicates.  Panics on empty input — callers must
+/// guarantee non-emptiness.
+fn fold_heap_and(atoms: Vec<SepAssertion>) -> SepAssertion {
+    let mut iter = atoms.into_iter();
+    let first = iter.next().expect("fold_heap_and requires non-empty input");
+    iter.fold(first, |acc, next| SepAssertion::and(acc, next))
+}
+
+/// Partition clauses with conjunction descent.
+///
+/// Mirrors [`partition_clauses`] but threads each clause through
+/// [`recognize_clause_with_descent`] so `&&` chains decompose into
+/// per-atom separation/pure entries.  Resulting cohorts:
+///   * `separation` — one `SepAssertion` per clause that contained
+///     ANY separation atom (possibly mixed with pure atoms; the
+///     pure atoms in that clause are extracted into the pure cohort
+///     simultaneously).
+///   * `pure` — every pure atom from every clause's `&&` chain,
+///     plus the original `Expr` of any all-pure clause.
+///
+/// **Cohort fold across clauses**: the separation cohort combines
+/// via `sep_conj` in `combined_separation` because clauses are
+/// independent (different regions of the heap). Within-clause
+/// `&&` is heap_and (intra-clause); cross-clause is sep_conj
+/// (inter-clause). This matches the standard separation-logic
+/// clause syntax: clauses describe disjoint regions; conjuncts
+/// within a clause describe the same region.
+pub fn partition_clauses_with_descent<'a>(clauses: &[&'a Expr]) -> ClausePartition<'a> {
+    let mut separation: Vec<SepAssertion> = Vec::new();
+    let mut pure: Vec<&'a Expr> = Vec::new();
+    for clause in clauses {
+        match recognize_clause_with_descent(clause) {
+            ClauseDescentOutcome::AllPure(e) => pure.push(e),
+            ClauseDescentOutcome::AllSeparation(a) => separation.push(a),
+            ClauseDescentOutcome::Mixed { separation: a, pure_atoms } => {
+                separation.push(a);
+                pure.extend(pure_atoms);
+            }
+        }
+    }
+    ClausePartition { separation, pure }
+}
+
 /// **Verify a mixed separation+pure Hoare obligation** (#161 V7).
 ///
 /// The architectural extension on top of V6: splits `pre` and
@@ -590,6 +800,75 @@ pub enum SeparationSplitOutcome<'a> {
         /// generic SMT.
         pure_post: Vec<&'a Expr>,
     },
+}
+
+/// **Split a Hoare obligation with conjunction descent.**
+///
+/// Identical surface to [`split_separation_obligation`] but uses
+/// [`partition_clauses_with_descent`] so `&&` chains within a
+/// single clause decompose into per-atom separation/pure entries
+/// before partition.
+///
+/// ## What descent buys
+///
+/// Without descent, the splitter fails to extract any separation
+/// predicate from `requires points_to(a, av) && x > 0` because
+/// the OUTER shape is `Binary{And}`, not a separation constructor.
+/// The whole clause goes into the pure cohort and the obligation
+/// routes as a generic-SMT goal — losing the separation-logic
+/// discharge for the heap predicate.
+///
+/// With descent, the splitter flattens the `&&` chain, recognises
+/// `points_to(a, av)` as a separation atom, extracts `x > 0` as a
+/// pure atom, and routes each through the appropriate verifier.
+///
+/// Single-atom clauses (no `&&` operator) are handled identically
+/// to the non-descent splitter — the descent is a no-op.
+///
+/// ## Soundness
+///
+/// On top of the non-descent rules, descent adds:
+///   * `Sep_a && Pure_b ≡ Sep_a ∧ Pure_b ≡ Sep_a * Pure_b`
+///     (pure-conjunction lemma; Reynolds 2002 §2.4).  Pure
+///     assertions commute through `*` because they don't constrain
+///     the heap.
+///
+/// Multiple separation atoms in a single `&&` chain fold via
+/// `heap_and` (NOT `sep_conj`); see
+/// [`recognize_clause_with_descent`] for the full rule table.
+pub fn split_separation_obligation_with_descent<'a>(
+    pre_clauses: &[&'a Expr],
+    post_clauses: &[&'a Expr],
+) -> SeparationSplitOutcome<'a> {
+    let pre_partition = partition_clauses_with_descent(pre_clauses);
+    let post_partition = partition_clauses_with_descent(post_clauses);
+
+    if !pre_partition.has_separation() && !post_partition.has_separation() {
+        return SeparationSplitOutcome::NotSeparationGoal;
+    }
+
+    let pre_sep = pre_partition.combined_separation();
+    let post_sep = post_partition.combined_separation();
+    use crate::separation_logic::{EntailmentResult, SepLogicConfig, SepLogicEncoder};
+    let encoder = SepLogicEncoder::new(SepLogicConfig::default());
+    let separation_outcome = match encoder.verify_entailment(&pre_sep, &post_sep) {
+        Ok(EntailmentResult::Valid { .. }) => SepObligationOutcome::Valid,
+        Ok(EntailmentResult::Invalid { counterexample, .. }) => SepObligationOutcome::Invalid {
+            counterexample_summary: format!("{:?}", counterexample),
+        },
+        Ok(EntailmentResult::Unknown { reason, .. }) => SepObligationOutcome::Unknown {
+            reason: reason.as_str().to_string(),
+        },
+        Err(e) => SepObligationOutcome::Unknown {
+            reason: format!("encoder error: {:?}", e),
+        },
+    };
+
+    SeparationSplitOutcome::Split {
+        separation_outcome,
+        pure_pre: pre_partition.pure,
+        pure_post: post_partition.pure,
+    }
 }
 
 /// **Verify a multi-clause separation-logic Hoare obligation**
@@ -1288,6 +1567,301 @@ mod tests {
             reason: "x".into()
         }
         .is_valid());
+    }
+
+    // ----- Conjunction descent through `&&` -----
+
+    fn and_expr(left: Expr, right: Expr) -> Expr {
+        Expr::new(
+            ExprKind::Binary {
+                op: BinOp::And,
+                left: Heap::new(left),
+                right: Heap::new(right),
+            },
+            span(),
+        )
+    }
+
+    #[test]
+    fn flatten_and_chain_single_atom_yields_one_element() {
+        let e = call_expr("emp", vec![]);
+        let atoms = flatten_and_chain(&e);
+        assert_eq!(atoms.len(), 1);
+    }
+
+    #[test]
+    fn flatten_and_chain_left_associative_three_atoms() {
+        // (A && B) && C → [A, B, C].
+        let a = call_expr("emp", vec![]);
+        let b = call_expr("points_to", vec![name_path_expr("x"), name_path_expr("v")]);
+        let c = name_path_expr("pure_pred");
+        let inner = and_expr(a, b);
+        let outer = and_expr(inner, c);
+        let atoms = flatten_and_chain(&outer);
+        assert_eq!(atoms.len(), 3);
+    }
+
+    #[test]
+    fn flatten_and_chain_right_associative_three_atoms() {
+        // Defensive: parser produces left-assoc, but the helper
+        // recurses both sides so right-assoc still flattens.
+        let a = call_expr("emp", vec![]);
+        let b = call_expr("emp", vec![]);
+        let c = call_expr("emp", vec![]);
+        let inner = and_expr(b, c);
+        let outer = and_expr(a, inner);
+        let atoms = flatten_and_chain(&outer);
+        assert_eq!(atoms.len(), 3);
+    }
+
+    #[test]
+    fn descent_single_separation_atom_classifies_as_all_separation() {
+        let e = call_expr("emp", vec![]);
+        match recognize_clause_with_descent(&e) {
+            ClauseDescentOutcome::AllSeparation(SepAssertion::Emp) => {}
+            other => panic!("expected AllSeparation(Emp), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn descent_single_pure_atom_classifies_as_all_pure() {
+        let e = name_path_expr("user_predicate");
+        match recognize_clause_with_descent(&e) {
+            ClauseDescentOutcome::AllPure(_) => {}
+            other => panic!("expected AllPure, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn descent_two_pure_atoms_via_and_classifies_all_pure() {
+        // `p1 && p2` with both pure → AllPure (whole-clause).
+        let p1 = name_path_expr("p1");
+        let p2 = name_path_expr("p2");
+        let chain = and_expr(p1, p2);
+        match recognize_clause_with_descent(&chain) {
+            ClauseDescentOutcome::AllPure(e) => {
+                // Ensure it's the original chain, not a synthesised form.
+                assert!(matches!(e.kind, ExprKind::Binary { op: BinOp::And, .. }));
+            }
+            other => panic!("expected AllPure(chain), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn descent_two_separation_atoms_via_and_classifies_all_separation_heap_and() {
+        // `emp() && emp()` → AllSeparation(heap_and(Emp, Emp)).
+        // heap_and (And), NOT sep_conj (Sep): `&&` is classical
+        // conjunction (same heap), not separating conjunction
+        // (disjoint subheaps).
+        let a = call_expr("emp", vec![]);
+        let b = call_expr("emp", vec![]);
+        let chain = and_expr(a, b);
+        match recognize_clause_with_descent(&chain) {
+            ClauseDescentOutcome::AllSeparation(SepAssertion::And { left, right }) => {
+                assert!(matches!(left.as_ref(), SepAssertion::Emp));
+                assert!(matches!(right.as_ref(), SepAssertion::Emp));
+            }
+            other => panic!("expected AllSeparation(And), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn descent_three_separation_atoms_fold_left_associative_heap_and() {
+        // `emp() && emp() && emp()` → heap_and(heap_and(Emp, Emp), Emp).
+        let a = call_expr("emp", vec![]);
+        let b = call_expr("emp", vec![]);
+        let c = call_expr("emp", vec![]);
+        let chain = and_expr(and_expr(a, b), c);
+        match recognize_clause_with_descent(&chain) {
+            ClauseDescentOutcome::AllSeparation(SepAssertion::And { left, right }) => {
+                assert!(matches!(right.as_ref(), SepAssertion::Emp));
+                match left.as_ref() {
+                    SepAssertion::And { .. } => {}
+                    other => panic!("expected nested heap_and on left, got {:?}", other),
+                }
+            }
+            other => panic!("expected AllSeparation(nested And), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn descent_mixed_separation_pure_returns_mixed_with_extracted_pure() {
+        // `points_to(a, av) && pure_x_gt_0` →
+        //   Mixed { separation: PointsTo(a, av), pure_atoms: [pure_x_gt_0] }.
+        // A single clause that the whole-clause classifier would
+        // drop entirely into the pure cohort now contributes one
+        // separation atom + one pure atom.
+        let pt = call_expr("points_to", vec![name_path_expr("a"), name_path_expr("av")]);
+        let pure_p = name_path_expr("pure_x_gt_0");
+        let chain = and_expr(pt, pure_p);
+        match recognize_clause_with_descent(&chain) {
+            ClauseDescentOutcome::Mixed { separation, pure_atoms } => {
+                assert!(matches!(separation, SepAssertion::PointsTo { .. }));
+                assert_eq!(pure_atoms.len(), 1);
+            }
+            other => panic!("expected Mixed, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn descent_mixed_extracts_all_pure_atoms_in_chain() {
+        // `emp() && pure_a && pure_b && pure_c` →
+        //   Mixed { separation: Emp, pure_atoms: [pure_a, pure_b, pure_c] }.
+        let emp = call_expr("emp", vec![]);
+        let p_a = name_path_expr("pa");
+        let p_b = name_path_expr("pb");
+        let p_c = name_path_expr("pc");
+        let chain = and_expr(and_expr(and_expr(emp, p_a), p_b), p_c);
+        match recognize_clause_with_descent(&chain) {
+            ClauseDescentOutcome::Mixed { separation, pure_atoms } => {
+                assert!(matches!(separation, SepAssertion::Emp));
+                assert_eq!(pure_atoms.len(), 3);
+            }
+            other => panic!("expected Mixed, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn partition_with_descent_extracts_atoms_within_and_chain() {
+        // partition_clauses on
+        //   [points_to(a, av) && pure_x_gt_0]
+        // puts the WHOLE clause in pure (the outer Binary{And}
+        // doesn't match a separation constructor name), giving
+        //   { separation: [], pure: [<whole &&>] }.
+        // partition_clauses_with_descent gives
+        //   { separation: [PointsTo(a, av)], pure: [pure_x_gt_0] }.
+        let pt = call_expr("points_to", vec![name_path_expr("a"), name_path_expr("av")]);
+        let pure_p = name_path_expr("pure_x_gt_0");
+        let chain = and_expr(pt, pure_p);
+        let clauses = [&chain];
+
+        let whole = partition_clauses(&clauses);
+        assert!(whole.separation.is_empty(), "outer Binary{{And}} hides the separation atom");
+        assert_eq!(whole.pure.len(), 1);
+
+        let descent = partition_clauses_with_descent(&clauses);
+        assert_eq!(descent.separation.len(), 1, "descent extracts the inner separation atom");
+        assert_eq!(descent.pure.len(), 1, "descent extracts the inner pure atom");
+    }
+
+    #[test]
+    fn partition_with_descent_matches_whole_clause_for_no_and_chains() {
+        // Single-atom clauses route through identically — descent
+        // is a no-op for them.
+        let emp = call_expr("emp", vec![]);
+        let pure_p = name_path_expr("p");
+        let clauses = [&emp, &pure_p];
+
+        let whole = partition_clauses(&clauses);
+        let descent = partition_clauses_with_descent(&clauses);
+
+        assert_eq!(whole.separation.len(), descent.separation.len());
+        assert_eq!(whole.pure.len(), descent.pure.len());
+    }
+
+    #[test]
+    fn partition_with_descent_combined_separation_uses_sep_conj_across_clauses() {
+        // Cross-clause fold uses sep_conj; within-clause fold uses
+        // heap_and.  The combination after descent:
+        //   clause 1: emp() && emp() → heap_and(Emp, Emp)
+        //   clause 2: points_to(a, av) → PointsTo
+        // combined_separation should be
+        //   sep_conj(heap_and(Emp, Emp), PointsTo).
+        let inner_emp_a = call_expr("emp", vec![]);
+        let inner_emp_b = call_expr("emp", vec![]);
+        let chain1 = and_expr(inner_emp_a, inner_emp_b);
+        let pt = call_expr("points_to", vec![name_path_expr("a"), name_path_expr("av")]);
+        let clauses = [&chain1, &pt];
+        let partition = partition_clauses_with_descent(&clauses);
+        assert_eq!(partition.separation.len(), 2);
+        match partition.combined_separation() {
+            SepAssertion::Sep { left, right } => {
+                assert!(matches!(left.as_ref(), SepAssertion::And { .. }));
+                assert!(matches!(right.as_ref(), SepAssertion::PointsTo { .. }));
+            }
+            other => panic!("expected Sep(And, PointsTo), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn split_with_descent_routes_mixed_within_clause() {
+        // Pre = [points_to(a, av) && pure_p],  Post = [emp()].
+        // Without descent: post has emp() so the obligation routes;
+        // pre's whole `&&` chain falls into pure_pre as a SINGLE
+        // entry — the separation predicate inside is invisible to
+        // the whole-clause separation cohort.
+        // With descent: pre's `&&` chain decomposes; the separation
+        // atom contributes to the pre separation cohort, the pure
+        // atom contributes to pure_pre.
+        let pt = call_expr("points_to", vec![name_path_expr("a"), name_path_expr("av")]);
+        let pure_p = name_path_expr("pure_p");
+        let chain = and_expr(pt, pure_p);
+        let emp = call_expr("emp", vec![]);
+        let pre = [&chain];
+        let post = [&emp];
+
+        let whole = split_separation_obligation(&pre, &post);
+        match whole {
+            SeparationSplitOutcome::Split { pure_pre, pure_post, .. } => {
+                assert_eq!(pure_pre.len(), 1, "whole-clause sees the && as one pure entry");
+                assert!(pure_post.is_empty());
+                assert!(matches!(pure_pre[0].kind, ExprKind::Binary { op: BinOp::And, .. }));
+            }
+            other => panic!("expected Split with whole-chain pure, got {:?}", other),
+        }
+
+        let descent = split_separation_obligation_with_descent(&pre, &post);
+        match descent {
+            SeparationSplitOutcome::Split { pure_pre, pure_post, .. } => {
+                assert_eq!(pure_pre.len(), 1, "descent extracts the pure atom from the && chain");
+                assert!(pure_post.is_empty());
+                // pure_pre's entry is the bare pure atom, not the
+                // whole chain — confirming descent extracted it.
+                assert!(matches!(pure_pre[0].kind, ExprKind::Path(_)));
+            }
+            other => panic!("expected Split, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn split_with_descent_falls_back_to_not_separation_when_no_atom_recognises() {
+        // pre = [pure_p1 && pure_p2], post = [pure_q1 && pure_q2].
+        // No atom is a separation predicate; descent finds nothing
+        // → NotSeparationGoal.
+        let p1 = name_path_expr("p1");
+        let p2 = name_path_expr("p2");
+        let q1 = name_path_expr("q1");
+        let q2 = name_path_expr("q2");
+        let pre_chain = and_expr(p1, p2);
+        let post_chain = and_expr(q1, q2);
+        let pre = [&pre_chain];
+        let post = [&post_chain];
+        let outcome = split_separation_obligation_with_descent(&pre, &post);
+        assert!(matches!(outcome, SeparationSplitOutcome::NotSeparationGoal));
+    }
+
+    #[test]
+    fn split_with_descent_matches_whole_clause_for_no_and_chains() {
+        // When no `&&` chains exist, descent behaves identically
+        // to whole-clause splitting.
+        let emp = call_expr("emp", vec![]);
+        let pure_p = name_path_expr("p");
+        let pre = [&emp, &pure_p];
+        let post = [&emp];
+
+        let whole = split_separation_obligation(&pre, &post);
+        let descent = split_separation_obligation_with_descent(&pre, &post);
+
+        match (whole, descent) {
+            (
+                SeparationSplitOutcome::Split { pure_pre: a, pure_post: b, .. },
+                SeparationSplitOutcome::Split { pure_pre: c, pure_post: d, .. },
+            ) => {
+                assert_eq!(a.len(), c.len());
+                assert_eq!(b.len(), d.len());
+            }
+            other => panic!("expected matching Splits, got {:?}", other),
+        }
     }
 
     // ----- Architectural pin -----
