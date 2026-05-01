@@ -459,13 +459,24 @@ impl ExtractedWitness {
 pub struct ProgramExtractor {
     /// Statistics
     stats: ExtractionStats,
+    /// Active extraction configuration. Default for `new()`,
+    /// caller-supplied for [`Self::with_config`]. Currently only
+    /// [`ExtractionConfig::generate_docs`] is consumed by the
+    /// extractor itself ([`Self::extract_program`] populates the
+    /// extracted program's `documentation` field when set);
+    /// the other forward-looking fields (`optimize` /
+    /// `inline_small_functions` / `inline_threshold` /
+    /// `generate_contracts`) still surface a tracing::warn! at
+    /// `with_config` time.
+    config: ExtractionConfig,
 }
 
 impl ProgramExtractor {
-    /// Create a new program extractor
+    /// Create a new program extractor with default configuration.
     pub fn new() -> Self {
         Self {
             stats: ExtractionStats::default(),
+            config: ExtractionConfig::default(),
         }
     }
 
@@ -474,36 +485,36 @@ impl ProgramExtractor {
     ///
 
     /// `ExtractionConfig` is documented and populated by callers
-    /// (test suites + future @extract pipeline integration) but
-    /// `ProgramExtractor::extract_program` does not currently
-    /// gate on any of its fields — `optimize` /
-    /// `inline_small_functions` / `inline_threshold` /
-    /// `generate_contracts` / `generate_docs` would each drive a
-    /// separate post-extraction pass that has not yet been wired
-    /// (the `target` field IS consumed via `CodeGenerator::new`,
-    /// and `erase_proofs` IS consumed via `ProofEraser`, but
-    /// those are downstream consumers — neither walks back
-    /// through `ProgramExtractor`).
+    /// (test suites + future @extract pipeline integration). The
+    /// `generate_docs` field is consumed directly here:
+    /// successful extractions populate the extracted program's
+    /// `documentation` field with a derived stub.
     ///
-
-    /// Surface a warning when any forward-looking field is set
-    /// to a non-default value so a `[smt.extract] optimize =
-    /// false` setting in verum.toml doesn't silently produce
+    /// `target` and `erase_proofs` remain downstream-consumed
+    /// (`CodeGenerator::new` / `ProofEraser`); the remaining
+    /// forward-looking fields (`optimize` /
+    /// `inline_small_functions` / `inline_threshold` /
+    /// `generate_contracts`) surface a tracing::warn! when set
+    /// to non-default values so a manifest setting like
+    /// `[smt.extract] optimize = false` doesn't silently produce
     /// the same output as the default.
     pub fn with_config(config: ExtractionConfig) -> Self {
         if !config.optimize
             || !config.inline_small_functions
             || config.inline_threshold != 20
             || !config.generate_contracts
-            || !config.generate_docs
         {
             tracing::warn!(
-                "ExtractionConfig surface: optimize={}, inline_small_functions={}, \
-                 inline_threshold={}, generate_contracts={}, generate_docs={} \
-                 (these fields land on the config but ProgramExtractor::\
-                 extract_program does not currently gate on them — they're \
-                 forward-looking knobs for post-extraction passes that have \
-                 not yet been wired)",
+                "ExtractionConfig non-default forward-looking knobs: \
+                 optimize={}, inline_small_functions={}, \
+                 inline_threshold={}, generate_contracts={} \
+                 (these fields land on the config but \
+                 ProgramExtractor::extract_program does not \
+                 currently gate on them — they're forward-looking \
+                 knobs for post-extraction passes that have not \
+                 yet been wired). `generate_docs={}` IS consumed \
+                 (populates ExtractedProgram.documentation when \
+                 true).",
                 config.optimize,
                 config.inline_small_functions,
                 config.inline_threshold,
@@ -511,12 +522,10 @@ impl ProgramExtractor {
                 config.generate_docs,
             );
         }
-        // The `target` and `erase_proofs` fields ARE consumed by
-        // downstream `CodeGenerator` / `ProofEraser` callers. The
-        // current `ProgramExtractor` itself doesn't need to hold
-        // a copy.
-        let _ = config;
-        Self::new()
+        Self {
+            stats: ExtractionStats::default(),
+            config,
+        }
     }
 
     /// Extract program from a proof term
@@ -539,11 +548,49 @@ impl ProgramExtractor {
         // Extract computational content
         let result = self.extract_computational_content(proof);
 
-        if result.is_some() {
+        if let Maybe::Some(mut program) = result {
             self.stats.successful += 1;
+            // Honour `ExtractionConfig.generate_docs`. When set
+            // (default `true`), populate the extracted program's
+            // `documentation` field with a derived stub so the
+            // manifest knob has observable effect — the field is
+            // consumed by `CodeGenerator::generate_function_with_docs`
+            // (program_extraction.rs:1895) when emitting target
+            // source. Closes the inert-defense pattern around
+            // `generate_docs`: pre-fix the field surfaced only as a
+            // tracing::warn!.
+            if self.config.generate_docs && program.documentation.is_none() {
+                program.documentation =
+                    Maybe::Some(Self::derived_doc(&program.name, &program.params));
+            }
+            return Maybe::Some(program);
         }
 
-        result
+        Maybe::None
+    }
+
+    /// Build a derived documentation stub from the extracted
+    /// program's name + parameter list. Intentionally minimal — a
+    /// human-authored doc string is preferred via
+    /// `ExtractedProgram::with_documentation`, but the derived stub
+    /// gives downstream emitters something non-empty to print when
+    /// `generate_docs` is enabled.
+    fn derived_doc(name: &Text, params: &List<Parameter>) -> Text {
+        if params.is_empty() {
+            Text::from(format!(
+                "Auto-extracted from constructive proof: `{}`",
+                name.as_str()
+            ))
+        } else {
+            let param_names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
+            Text::from(format!(
+                "Auto-extracted from constructive proof: `{}` ({} param{}: {})",
+                name.as_str(),
+                params.len(),
+                if params.len() == 1 { "" } else { "s" },
+                param_names.join(", "),
+            ))
+        }
     }
 
     /// Extract witness from an existential proof
