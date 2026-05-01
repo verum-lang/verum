@@ -246,6 +246,21 @@ pub(crate) fn read_param_classification(
     found
 }
 
+/// Detect `@declassify` attribute on a FunctionDecl (#295).
+///
+/// Returns `true` when the function declares itself a
+/// declassification boundary — the call-classification walker
+/// skips its body entirely. `@declassify` accepts no arguments
+/// in this Phase 2b version (the function as a whole is the
+/// declassification boundary). A future Phase 2b-Cap variant
+/// could accept a destination level
+/// (`@declassify(public)`) to cap the escape-hatch level.
+pub(crate) fn has_declassify_attr_on_function(
+    func: &verum_ast::decl::FunctionDecl,
+) -> bool {
+    func.attributes.iter().any(|a| a.is_named("declassify"))
+}
+
 use verum_ast::decl::{FunctionBody, FunctionParamKind};
 use verum_ast::expr::{BinOp, Block, Expr, ExprKind, TypeProperty, UnOp};
 use verum_ast::literal::Literal;
@@ -6816,6 +6831,25 @@ impl TypeChecker {
         let mut errors = Vec::new();
         for item in &module.items {
             if let verum_ast::ItemKind::Function(func) = &item.kind {
+                // Phase 2b @declassify escape hatch (#295): when a
+                // function carries the `@declassify` attribute, its
+                // body is the explicit boundary where classified
+                // data is allowed to flow into lower-classification
+                // sinks. The user takes responsibility for the
+                // declassification — the down-flow walker skips
+                // call sites within this body entirely.
+                //
+                // Architectural rationale: classification is a
+                // type-level safety property; declassification is a
+                // type-level escape that the user EXPLICITLY opts
+                // into per-function. The function itself is now the
+                // declassification boundary — its callers see only
+                // its return value, and the caller's @classification
+                // (if any) governs whether the caller can in turn
+                // be a declassification site for further uses.
+                if has_declassify_attr_on_function(func) {
+                    continue;
+                }
                 if let verum_common::Maybe::Some(body) = &func.body {
                     self.walk_body_for_call_classifications(body, &mut errors);
                 }
@@ -58480,6 +58514,107 @@ mod mount_cycle_tests {
         let errors = checker.check_module_call_classifications(&module);
         assert!(errors.is_empty(),
             "public arg → secret param (over-protection) must accept");
+    }
+
+    // ============================================================
+    // MLS Phase 2b @declassify escape hatch pin tests (#295).
+    //
+    // When a function carries `@declassify`, its body is the
+    // boundary where classified data is explicitly allowed to
+    // flow into lower-classification sinks. The walker skips
+    // such functions entirely.
+    // ============================================================
+
+    /// Build a `@declassify` attribute (no args needed).
+    fn mk_declassify_attr_simple() -> verum_ast::attr::Attribute {
+        verum_ast::attr::Attribute::simple(
+            verum_common::Text::from("declassify"),
+            Span::default(),
+        )
+    }
+
+    /// Build a Module with a `@declassify`-marked caller passing a
+    /// classified arg into a public param.
+    fn mk_module_with_declassify_caller(
+        caller_has_declassify: bool,
+    ) -> verum_ast::Module {
+        let mut module = mk_module_with_call(
+            "log_visible",         // unclassified callee
+            ("msg", None),
+            "secret_data",
+            vec![("secret_data", "secret")],
+        );
+        if caller_has_declassify {
+            // The second item is the caller — promote its
+            // attributes to include @declassify.
+            if let verum_ast::ItemKind::Function(ref mut f) = module.items[1].kind {
+                f.attributes.push(mk_declassify_attr_simple());
+            }
+        }
+        module
+    }
+
+    #[test]
+    fn declassify_caller_skips_walker() {
+        // Pin: when the caller carries @declassify, the walker
+        // skips its body entirely — no leak diagnostic even though
+        // a Secret arg flows into a Public param.
+        let module = mk_module_with_declassify_caller(true);
+        let mut checker = TypeChecker::new();
+        for item in &module.items {
+            if let verum_ast::ItemKind::Function(func) = &item.kind {
+                let _ = checker.register_function_signature(func);
+            }
+        }
+        let errors = checker.check_module_call_classifications(&module);
+        assert!(errors.is_empty(),
+            "@declassify caller must skip down-flow walker; got {} errors",
+            errors.len());
+    }
+
+    #[test]
+    fn no_declassify_still_fires_walker() {
+        // Pin: same module WITHOUT @declassify still fires the
+        // leak diagnostic — regression-control for the escape
+        // hatch (it's not silently always-on).
+        let module = mk_module_with_declassify_caller(false);
+        let mut checker = TypeChecker::new();
+        for item in &module.items {
+            if let verum_ast::ItemKind::Function(func) = &item.kind {
+                let _ = checker.register_function_signature(func);
+            }
+        }
+        let errors = checker.check_module_call_classifications(&module);
+        assert_eq!(errors.len(), 1,
+            "without @declassify, the leak still fires");
+    }
+
+    #[test]
+    fn has_declassify_attr_on_function_returns_true_with_attr() {
+        let mut params = List::new();
+        params.push(mk_param("x", None));
+        let mut func = mk_function_decl_2b(params);
+        func.attributes.push(mk_declassify_attr_simple());
+        assert!(super::has_declassify_attr_on_function(&func));
+    }
+
+    #[test]
+    fn has_declassify_attr_on_function_returns_false_without_attr() {
+        let func = mk_function_decl_2b(List::new());
+        assert!(!super::has_declassify_attr_on_function(&func));
+    }
+
+    #[test]
+    fn has_declassify_ignores_other_attrs() {
+        // Pin: only @declassify produces true. Sibling attributes
+        // (@inline, @classification, etc.) don't accidentally
+        // trip the escape hatch.
+        let mut params = List::new();
+        params.push(mk_param("x", None));
+        let mut func = mk_function_decl_2b(params);
+        func.attributes.push(mk_classification_attr_2b("secret"));
+        // @classification but no @declassify → walker still fires.
+        assert!(!super::has_declassify_attr_on_function(&func));
     }
 
     #[test]
