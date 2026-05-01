@@ -715,6 +715,217 @@ impl SeparationDispatcherStats {
 }
 
 // =============================================================================
+// Routing-strategy executors — #161 V1
+// =============================================================================
+//
+// `dispatch_separation_goal` classifies a goal into one of the
+// routing verdicts (`RoutedToFrameRule` / `RoutedToHoareSequencing`
+// / `RoutedToConsequenceRule`).  The executors below take a goal
+// already routed to a specific verdict and produce a concrete
+// post-execution outcome — the discharge result, an IOU on what's
+// missing, or a rejection.
+//
+// The executors are PURE functions of the goal: no I/O, no SMT
+// invocation, no kernel re-check.  They implement the structural
+// rule-application step; downstream pipelines (verification ladder,
+// future #161 V2 work) thread the executor's outcome into the
+// proof obligation chain.
+
+/// Outcome of executing a single routing strategy.  Each variant
+/// names the ENTRY verdict the goal was routed under so the audit
+/// trail can pinpoint which executor produced the verdict.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum SeparationExecutorOutcome {
+    /// Strategy succeeded — goal is fully discharged.  The strategy
+    /// name is included for audit-trail clarity.
+    Discharged {
+        /// Which strategy ran.  Stable diagnostic tag.
+        strategy: String,
+    },
+    /// Strategy required a sub-goal that the executor surfaces as a
+    /// new sub-obligation.  Caller dispatches the sub-goal recursively.
+    SubObligation {
+        /// Which strategy produced the sub-obligation.
+        strategy: String,
+        /// The concrete sub-goal to discharge next.
+        sub_goal: SeparationGoal,
+    },
+    /// Strategy admits the goal pending an upstream-cited proof.
+    /// Mirrors `SeparationVerdict::AdmittedWithIou`.
+    AdmittedWithIou {
+        /// Which strategy.
+        strategy: String,
+        /// IOU citation.
+        iou: String,
+    },
+    /// Strategy rejected — the goal's shape doesn't match the
+    /// strategy's preconditions.  Indicates a dispatcher-side bug
+    /// (a goal was routed to the wrong strategy).
+    StrategyMismatch {
+        /// Which strategy.
+        strategy: String,
+        /// Why the strategy refused.
+        reason: String,
+    },
+}
+
+impl SeparationExecutorOutcome {
+    /// Stable diagnostic tag for the outcome variant.
+    pub fn kind_tag(&self) -> &'static str {
+        match self {
+            SeparationExecutorOutcome::Discharged { .. } => "discharged",
+            SeparationExecutorOutcome::SubObligation { .. } => "sub_obligation",
+            SeparationExecutorOutcome::AdmittedWithIou { .. } => "admitted_with_iou",
+            SeparationExecutorOutcome::StrategyMismatch { .. } => "strategy_mismatch",
+        }
+    }
+
+    /// `true` when the outcome is `Discharged`.
+    pub fn is_discharged(&self) -> bool {
+        matches!(self, SeparationExecutorOutcome::Discharged { .. })
+    }
+}
+
+/// Execute the FRAME RULE on a goal previously routed to it.
+///
+/// The frame rule states:
+///
+/// ```text
+///   {P} c {Q}        (modifies(c) ∩ FV(R) = ∅)
+///   ───────────────────────────────────────────
+///        {P * R} c {Q * R}
+/// ```
+///
+/// Strategy: strip the `frame_invariant` (R) from both pre- and
+/// post-conditions and emit a sub-goal `{P} c {Q}` for the
+/// dispatcher to discharge separately.  When the residual triple
+/// reduces to `{emp} _ {emp}`, the executor discharges directly.
+pub fn execute_frame_rule(goal: &SeparationGoal) -> SeparationExecutorOutcome {
+    if goal.frame_invariant.is_emp() {
+        return SeparationExecutorOutcome::StrategyMismatch {
+            strategy: "frame_rule".to_string(),
+            reason: "frame rule requires non-empty frame invariant".to_string(),
+        };
+    }
+
+    // Construct the residual triple {P} c {Q} with the frame removed.
+    // The frame is by construction separate from the triple's
+    // footprint (per the dispatcher's `RoutedToFrameRule` decision).
+    let residual = SeparationGoal {
+        triple: HoareTriple {
+            pre: goal.triple.pre.clone(),
+            command_term: goal.triple.command_term.clone(),
+            post: goal.triple.post.clone(),
+            footprint_capability: goal.triple.footprint_capability.clone(),
+        },
+        // Frame stripped — sub-goal carries empty frame.
+        frame_invariant: HeapPredicate::Emp,
+        source: goal.source.clone(),
+    };
+
+    // If residual is trivial {emp} _ {emp}, discharge.
+    if residual.triple.pre.is_emp() && residual.triple.post.is_emp() {
+        return SeparationExecutorOutcome::Discharged {
+            strategy: "frame_rule".to_string(),
+        };
+    }
+
+    SeparationExecutorOutcome::SubObligation {
+        strategy: "frame_rule".to_string(),
+        sub_goal: residual,
+    }
+}
+
+/// Execute HOARE SEQUENCING on a goal whose command is `App(c1, c2)`.
+///
+/// The sequencing rule:
+///
+/// ```text
+///   {P} c1 {R}    {R} c2 {Q}
+///   ────────────────────────
+///        {P} c1; c2 {Q}
+/// ```
+///
+/// Strategy: split `App(c1, c2)` into two sub-triples joined at an
+/// intermediate predicate `R`.  V1 cannot infer `R` (that's
+/// frame-inference work); we surface it as a structured IOU.
+pub fn execute_hoare_sequencing(goal: &SeparationGoal) -> SeparationExecutorOutcome {
+    let (c1, c2) = match &goal.triple.command_term {
+        Term::App(c1, c2) => (c1.as_ref().clone(), c2.as_ref().clone()),
+        _ => {
+            return SeparationExecutorOutcome::StrategyMismatch {
+                strategy: "hoare_sequencing".to_string(),
+                reason: "sequencing rule requires App(c1, c2) command term".to_string(),
+            };
+        }
+    };
+
+    // V1: emit a sub-goal for the FIRST half of the sequence.  The
+    // intermediate predicate R is left as the post of c1 = pre of c2,
+    // which we admit as the IOU until frame-inference V2.
+    let _ = c1;
+    let _ = c2;
+
+    SeparationExecutorOutcome::AdmittedWithIou {
+        strategy: "hoare_sequencing".to_string(),
+        iou: "intermediate predicate inference (R such that {P} c1 {R} ∧ {R} c2 {Q}) — frame-inference V2".to_string(),
+    }
+}
+
+/// Execute the CONSEQUENCE RULE on a goal with non-trivial pre/post.
+///
+/// The consequence rule:
+///
+/// ```text
+///   P ⊢ P'    {P'} c {Q'}    Q' ⊢ Q
+///   ────────────────────────────────
+///              {P} c {Q}
+/// ```
+///
+/// Strategy: when pre and post differ but neither is `emp`, emit an
+/// IOU on the entailment side-conditions (P ⊢ P' and Q' ⊢ Q).
+/// Without an entailment solver we can't discharge structurally;
+/// V2 will plug into Z3 for the entailment checks.
+pub fn execute_consequence_rule(goal: &SeparationGoal) -> SeparationExecutorOutcome {
+    if goal.triple.pre.is_emp() || goal.triple.post.is_emp() {
+        return SeparationExecutorOutcome::StrategyMismatch {
+            strategy: "consequence_rule".to_string(),
+            reason: "consequence rule requires non-empty pre and post".to_string(),
+        };
+    }
+    if goal.triple.pre == goal.triple.post {
+        return SeparationExecutorOutcome::StrategyMismatch {
+            strategy: "consequence_rule".to_string(),
+            reason: "consequence rule requires differing pre and post".to_string(),
+        };
+    }
+
+    SeparationExecutorOutcome::AdmittedWithIou {
+        strategy: "consequence_rule".to_string(),
+        iou: "entailment side-conditions (P ⊢ P' and Q' ⊢ Q) require Z3 entailment solver — V2"
+            .to_string(),
+    }
+}
+
+/// **Top-level executor** — dispatch + execute.  Returns
+/// `Some(outcome)` when the goal routed to a strategy that has an
+/// executor, `None` for goals that the dispatcher discharged or
+/// rejected directly (no execution needed).
+pub fn dispatch_and_execute(goal: &SeparationGoal) -> (SeparationVerdict, Option<SeparationExecutorOutcome>) {
+    let verdict = dispatch_separation_goal(goal);
+    let outcome = match &verdict {
+        SeparationVerdict::RoutedToFrameRule => Some(execute_frame_rule(goal)),
+        SeparationVerdict::RoutedToHoareSequencing => Some(execute_hoare_sequencing(goal)),
+        SeparationVerdict::RoutedToConsequenceRule => Some(execute_consequence_rule(goal)),
+        // Discharged / AdmittedWithIou / RejectIllFormed verdicts
+        // don't route to an executor — the dispatcher's verdict is
+        // the final outcome.
+        _ => None,
+    };
+    (verdict, outcome)
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -1147,5 +1358,205 @@ mod tests {
         let json2 = serde_json::to_string(&v2).unwrap();
         let restored2: SeparationVerdict = serde_json::from_str(&json2).unwrap();
         assert_eq!(restored2, v2);
+    }
+
+    // -------------------------------------------------------------
+    // Routing-strategy executors (#161 V1)
+    // -------------------------------------------------------------
+
+    #[test]
+    fn execute_frame_rule_with_emp_residual_discharges() {
+        let goal = make_goal(
+            HeapPredicate::emp(),
+            Term::Universe(0),
+            HeapPredicate::emp(),
+            Capability::None,
+            HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
+        );
+        let outcome = execute_frame_rule(&goal);
+        assert_eq!(
+            outcome,
+            SeparationExecutorOutcome::Discharged {
+                strategy: "frame_rule".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn execute_frame_rule_with_nontrivial_residual_emits_subgoal() {
+        let goal = make_goal(
+            HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
+            Term::Universe(0),
+            HeapPredicate::points_to(Term::Var(0), Term::Var(2)),
+            Capability::Write,
+            HeapPredicate::points_to(Term::Var(3), Term::Var(4)),
+        );
+        let outcome = execute_frame_rule(&goal);
+        match outcome {
+            SeparationExecutorOutcome::SubObligation { strategy, sub_goal } => {
+                assert_eq!(strategy, "frame_rule");
+                assert!(sub_goal.frame_invariant.is_emp());
+                assert_eq!(sub_goal.triple.pre, goal.triple.pre);
+                assert_eq!(sub_goal.triple.post, goal.triple.post);
+            }
+            _ => panic!("expected SubObligation, got {:?}", outcome),
+        }
+    }
+
+    #[test]
+    fn execute_frame_rule_rejects_emp_frame() {
+        let goal = make_goal(
+            HeapPredicate::emp(),
+            Term::Universe(0),
+            HeapPredicate::emp(),
+            Capability::None,
+            HeapPredicate::emp(),
+        );
+        let outcome = execute_frame_rule(&goal);
+        assert!(matches!(
+            outcome,
+            SeparationExecutorOutcome::StrategyMismatch { .. },
+        ));
+    }
+
+    #[test]
+    fn execute_hoare_sequencing_admits_with_iou() {
+        let goal = make_goal(
+            HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
+            Term::app(Term::Var(0), Term::Var(1)),
+            HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
+            Capability::Write,
+            HeapPredicate::emp(),
+        );
+        let outcome = execute_hoare_sequencing(&goal);
+        match outcome {
+            SeparationExecutorOutcome::AdmittedWithIou { strategy, iou } => {
+                assert_eq!(strategy, "hoare_sequencing");
+                assert!(iou.contains("intermediate predicate"));
+            }
+            _ => panic!("expected AdmittedWithIou, got {:?}", outcome),
+        }
+    }
+
+    #[test]
+    fn execute_hoare_sequencing_rejects_non_app_command() {
+        let goal = make_goal(
+            HeapPredicate::emp(),
+            Term::Universe(0),
+            HeapPredicate::emp(),
+            Capability::None,
+            HeapPredicate::emp(),
+        );
+        let outcome = execute_hoare_sequencing(&goal);
+        assert!(matches!(
+            outcome,
+            SeparationExecutorOutcome::StrategyMismatch { .. },
+        ));
+    }
+
+    #[test]
+    fn execute_consequence_admits_for_differing_predicates() {
+        let goal = make_goal(
+            HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
+            Term::Universe(0),
+            HeapPredicate::points_to(Term::Var(0), Term::Var(2)),
+            Capability::Write,
+            HeapPredicate::emp(),
+        );
+        let outcome = execute_consequence_rule(&goal);
+        match outcome {
+            SeparationExecutorOutcome::AdmittedWithIou { strategy, iou } => {
+                assert_eq!(strategy, "consequence_rule");
+                assert!(iou.contains("entailment"));
+            }
+            _ => panic!("expected AdmittedWithIou, got {:?}", outcome),
+        }
+    }
+
+    #[test]
+    fn execute_consequence_rejects_emp_pre_or_post() {
+        let goal = make_goal(
+            HeapPredicate::emp(),
+            Term::Universe(0),
+            HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
+            Capability::Write,
+            HeapPredicate::emp(),
+        );
+        let outcome = execute_consequence_rule(&goal);
+        assert!(matches!(
+            outcome,
+            SeparationExecutorOutcome::StrategyMismatch { .. },
+        ));
+    }
+
+    #[test]
+    fn dispatch_and_execute_routes_frame_to_executor() {
+        let goal = make_goal(
+            HeapPredicate::points_to(Term::Var(0), Term::Var(1)),
+            Term::Universe(0),
+            HeapPredicate::points_to(Term::Var(0), Term::Var(2)),
+            Capability::Write,
+            HeapPredicate::points_to(Term::Var(3), Term::Var(4)),
+        );
+        let (verdict, outcome) = dispatch_and_execute(&goal);
+        assert_eq!(verdict, SeparationVerdict::RoutedToFrameRule);
+        assert!(outcome.is_some());
+        assert!(matches!(
+            outcome.unwrap(),
+            SeparationExecutorOutcome::SubObligation { .. },
+        ));
+    }
+
+    #[test]
+    fn dispatch_and_execute_skips_executor_for_discharged() {
+        let goal = make_goal(
+            HeapPredicate::emp(),
+            Term::Universe(0),
+            HeapPredicate::emp(),
+            Capability::None,
+            HeapPredicate::emp(),
+        );
+        let (verdict, outcome) = dispatch_and_execute(&goal);
+        assert_eq!(verdict, SeparationVerdict::Discharged);
+        assert!(outcome.is_none());
+    }
+
+    #[test]
+    fn executor_outcome_kind_tags_are_stable() {
+        for (outcome, expected) in [
+            (
+                SeparationExecutorOutcome::Discharged {
+                    strategy: "x".to_string(),
+                },
+                "discharged",
+            ),
+            (
+                SeparationExecutorOutcome::AdmittedWithIou {
+                    strategy: "y".to_string(),
+                    iou: "iou".to_string(),
+                },
+                "admitted_with_iou",
+            ),
+            (
+                SeparationExecutorOutcome::StrategyMismatch {
+                    strategy: "z".to_string(),
+                    reason: "r".to_string(),
+                },
+                "strategy_mismatch",
+            ),
+        ] {
+            assert_eq!(outcome.kind_tag(), expected);
+        }
+    }
+
+    #[test]
+    fn executor_outcome_serde_round_trip() {
+        let o = SeparationExecutorOutcome::AdmittedWithIou {
+            strategy: "frame_rule".to_string(),
+            iou: "test iou".to_string(),
+        };
+        let json = serde_json::to_string(&o).unwrap();
+        let restored: SeparationExecutorOutcome = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, o);
     }
 }
