@@ -12,4 +12,12 @@ public mount .caching_sha2.{
     scramble_caching_sha2,
     CachingSha2State,
     CsFastAuthOk, CsFullAuthRequired, CsFailed,
+    classify_auth_more,
+    // Full-auth (plain-TCP RSA-OAEP path + TOFU pubkey cache).
+    FullAuthError, FaePemDecode, FaeDerDecode, FaeNotRsaKey, FaeOaep,
+    FULL_AUTH_REQUEST_PUBKEY,
+    make_cleartext_password,
+    parse_server_pubkey,
+    build_full_auth_response,
+    ServerPubkeyCache,
 };
