@@ -147,6 +147,67 @@ public fn __udp_recv_raw(fd: Int, max_len: Int) -> Text;
 public fn __udp_close_raw(fd: Int) -> Int;
 
 // =============================================================================
+// VBC-NET-RT-2 — reactor-backed timeout-bound I/O
+//
+// These intrinsics wait for socket readiness via the Tier-0 reactor
+// (kqueue on macOS, epoll on Linux) before performing the I/O.  They
+// are the host-side counterpart to the Tier-1 `core.sys.io_engine`
+// IOEngine protocol implementations (`KqueueDriver`, `EpollDriver`,
+// `IocpDriver`).
+//
+// Status convention for the entire family:
+//   >0 = bytes transferred / new fd
+//   0  = empty body or accept-with-zero-timeout-and-nothing-pending
+//   -1 = EOF / closed
+//   -2 = timeout (deadline elapsed before readiness)
+//   -3 = reactor unhealthy (no kqueue/epoll backend; fall back to
+//        the blocking variants in this module — they remain valid)
+//   -4 = I/O error after the kernel signalled readiness
+// =============================================================================
+
+/// Wait for fd to become readable, up to `timeout_ms` milliseconds.
+/// Returns 1 (ready), 0 (timeout), -1 (reactor error).
+@intrinsic("io_wait_readable")
+public fn __io_wait_readable_raw(fd: Int, timeout_ms: Int) -> Int;
+
+/// Wait for fd to become writable.  Same return convention as
+/// `__io_wait_readable_raw`.
+@intrinsic("io_wait_writable")
+public fn __io_wait_writable_raw(fd: Int, timeout_ms: Int) -> Int;
+
+/// Accept a connection on `listen_fd` with timeout.  Returns the
+/// accepted synthetic fd or a negative status code (see header).
+@intrinsic("tcp_accept_timeout")
+public fn __tcp_accept_timeout_raw(listen_fd: Int, timeout_ms: Int) -> Int;
+
+/// Send data with timeout.  Returns bytes written or negative status.
+/// Partial writes (some bytes sent before timeout) return the partial
+/// count, NOT -2 — caller can detect truncation by comparing to input
+/// length.
+@intrinsic("tcp_send_timeout")
+public fn __tcp_send_timeout_raw(fd: Int, data: Text, timeout_ms: Int) -> Int;
+
+/// Recv with timeout.  Returns the body (empty Text on timeout / EOF).
+/// To distinguish timeout from EOF, follow up with
+/// `__io_wait_readable_raw(fd, 0)` — `1` means data is queued
+/// (the empty body was a true zero-length read; rare for TCP).
+@intrinsic("tcp_recv_timeout")
+public fn __tcp_recv_timeout_raw(fd: Int, max_len: Int, timeout_ms: Int) -> Text;
+
+/// Connect with timeout.  Returns the connected synthetic fd or a
+/// negative status code.  Uses `std::net::TcpStream::connect_timeout`
+/// directly (which sets the connect-side socket non-blocking and
+/// waits via the same readiness primitive).
+@intrinsic("tcp_connect_timeout")
+public fn __tcp_connect_timeout_raw(host: Text, port: Int, timeout_ms: Int) -> Int;
+
+/// UDP recv with timeout.  Returns body Text (peer is dropped at the
+/// raw intrinsic surface — high-level wrappers should call the
+/// `udp_recv_from_timeout` intercept which preserves the peer).
+@intrinsic("udp_recv_timeout")
+public fn __udp_recv_timeout_raw(fd: Int, max_len: Int, timeout_ms: Int) -> Text;
+
+// =============================================================================
 // Time (replacing verum_time_* from C runtime)
 // =============================================================================
 

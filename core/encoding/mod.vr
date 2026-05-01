@@ -6,7 +6,9 @@
 
 module core.encoding;
 
+public module value;
 public module json;
+public module jsonb;
 public module base64;
 public module base32;
 public module base58;
@@ -49,6 +51,23 @@ public mount .bson.{
     BsonValue, BsonDocument, BsonDocumentBuilder, BsonObjectId,
     BsonBinary, BsonRegex, BsonTimestamp, BsonError,
     MAX_BSON_DOCUMENT_BYTES, MAX_BSON_NESTING, MAX_BSON_FIELDS,
+};
+
+// Re-exports — universal cross-encoder Value (interop ADT for JSON
+// ↔ BSON ↔ CBOR ↔ msgpack ↔ JSONB without re-typing).
+public mount .value.{
+    Value, ConvertError,
+    VNull, VBool, VInt, VFloat, VText, VBytes, VArray, VMap,
+    VTimestamp, VUuid, VDecimal, VExtension,
+    value_equals, from_json, to_json, to_json_lossy,
+};
+
+// Re-exports — JSONB (Postgres / SQLite-style binary JSON wire
+// format: version byte + UTF-8 JSON text).
+public mount .jsonb.{
+    JsonbValue, JsonbError,
+    JbeEmpty, JbeUnsupportedVersion, JbeBadUtf8, JbeBadJson, JbeBadValue,
+    JSONB_VERSION_1,
 };
 
 // Re-exports — Hex

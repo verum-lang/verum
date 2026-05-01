@@ -65,6 +65,7 @@ pub mod gpu_simulator;
 mod heap;
 pub mod kernel;
 pub mod permission;
+pub mod reactor;
 mod registers;
 mod stack;
 mod state;

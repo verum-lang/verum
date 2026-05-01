@@ -1,0 +1,274 @@
+// =============================================================================
+// encoding/jsonb.vr — binary JSON wire format (Postgres-style)
+// =============================================================================
+// Layer: 1 (Encoding)
+// Dependencies: core, core.collections, core.encoding.json
+// =============================================================================
+//
+// Postgres / SQLite JSONB binary wire format:
+//
+//   u8 version       — currently always 0x01; future versions will
+//                      change the layout (no version 2 has been
+//                      published as of Postgres 17).
+//   bytes payload[]  — UTF-8 JSON text of the document
+//
+// Both Postgres (since 9.4) and SQLite (since 3.45) use this exact
+// layout for their respective JSONB columns. This module is the
+// canonical implementation — `core.database.postgres.wire.codec` and
+// the SQLite native engine each delegate to `decode` / `encode`
+// here, eliminating two parallel implementations.
+//
+// `JsonbValue` is a thin wrapper around the version byte + the JSON
+// text payload; consumers either re-parse the payload through
+// `core.encoding.json.parse` (for ad-hoc queries) or let the
+// database do the work via `->` / `->>` / `#>` operators (for
+// indexed paths, the production-recommended pattern).
+//
+// `Value` integration: `decode_value` / `encode_value` parse / emit
+// the payload through `core.encoding.value.Value` — the universal
+// schema-less type that round-trips with JSON / CBOR / msgpack /
+// BSON. Use these when the application wants a typed view of the
+// JSONB document without committing to JsonValue specifically.
+//
+// # Why a separate module
+//
+//   * The version byte is a Postgres-protocol artefact, not a
+//     general JSON concern; mixing it into `core.encoding.json`
+//     would pollute the JSON encoder's surface.
+//   * Two parallel implementations (one in `postgres/wire/codec`,
+//     one in `sqlite/native/jsonb_binary_format`) are a
+//     maintenance trap — bug-fixes in one don't propagate to the
+//     other. Single source of truth here.
+//   * Future versions of the wire format (if Postgres ships v2)
+//     land in this module without touching adapter code.
+//
+// # Surface
+//
+//   decode(&[Byte])  -> Result<JsonbValue, JsonbError>
+//   encode(json_text: &Text) -> List<Byte>
+//   decode_value(&[Byte])    -> Result<Value, JsonbError>
+//   encode_value(v: &Value)  -> Result<List<Byte>, JsonbError>
+//
+//   JsonbValue { version: Int, json_text: Text }
+//   JsonbError { JbeEmpty | JbeUnsupportedVersion(Int) | JbeBadJson(JsonError) | JbeBadValue(ConvertError) }
+//
+// =============================================================================
+
+module core.encoding.jsonb;
+
+mount core.*;
+mount core.collections.List;
+mount core.encoding.json.{JsonValue, JsonError, parse as parse_json, stringify as json_stringify};
+mount core.encoding.value.{Value, ConvertError, from_json as value_from_json, to_json as value_to_json};
+
+// =============================================================================
+// Constants
+// =============================================================================
+
+/// Current binary JSONB version. Postgres 9.4 → 17 has shipped only
+/// version 1; SQLite 3.45+ uses the same layout. A future version
+/// 2 is anticipated for shape-preserving binary encoding (à la
+/// CBOR) but no public spec exists.
+public const JSONB_VERSION_1: Int = 1;
+
+// =============================================================================
+// JsonbValue — typed wrapper
+// =============================================================================
+
+public type JsonbValue is {
+    /// Version byte from the wire. Always 1 for current Postgres /
+    /// SQLite. Carried so future-version JSONBs surface as a clean
+    /// `JbeUnsupportedVersion` rather than corrupting decoded text.
+    version: Int,
+    /// UTF-8 JSON text payload (after the version byte was
+    /// stripped). The application either re-parses this through
+    /// `core.encoding.json.parse` or hands it back to the database
+    /// via `->`/`->>` operators.
+    json_text: Text,
+};
+
+implement JsonbValue {
+    public fn new(json_text: Text) -> JsonbValue {
+        JsonbValue { version: JSONB_VERSION_1, json_text: json_text }
+    }
+
+    public fn version(&self) -> Int { self.version }
+    public fn as_text(&self) -> &Text { &self.json_text }
+
+    /// Parse the JSON payload through `core.encoding.json.parse`.
+    /// Returns the typed `JsonValue` ready for application
+    /// consumption.
+    public fn parse(&self) -> Result<JsonValue, JsonError> {
+        parse_json(&self.json_text)
+    }
+
+    public fn equals(&self, other: &JsonbValue) -> Bool {
+        self.version == other.version && self.json_text == other.json_text
+    }
+}
+
+// =============================================================================
+// JsonbError
+// =============================================================================
+
+public type JsonbError is
+      JbeEmpty                              // wire payload too short for version byte
+    | JbeUnsupportedVersion(Int)            // wire version not in {1}
+    | JbeBadUtf8                            // payload bytes are not valid UTF-8
+    | JbeBadJson(JsonError)                 // payload is not valid JSON
+    | JbeBadValue(ConvertError);            // Value → JSON projection failed
+
+implement Display for JsonbError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            JbeEmpty                  => f.write_str("jsonb: empty payload"),
+            JbeUnsupportedVersion(v)  => f.write_str(f"jsonb: unsupported version {v}".as_str()),
+            JbeBadUtf8                => f.write_str("jsonb: invalid UTF-8 in payload"),
+            JbeBadJson(je)            => {
+                f.write_str("jsonb: invalid JSON: ")?;
+                je.fmt(f)
+            }
+            JbeBadValue(ce)           => {
+                f.write_str("jsonb: invalid Value: ")?;
+                ce.fmt(f)
+            }
+        }
+    }
+}
+
+implement Debug for JsonbError {
+    fn fmt_debug(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            JbeEmpty                  => f.write_str("JbeEmpty"),
+            JbeUnsupportedVersion(v)  => f.write_str(f"JbeUnsupportedVersion({v})".as_str()),
+            JbeBadUtf8                => f.write_str("JbeBadUtf8"),
+            JbeBadJson(je)            => {
+                f.write_str("JbeBadJson(")?;
+                je.fmt_debug(f)?;
+                f.write_str(")")
+            }
+            JbeBadValue(ce)           => {
+                f.write_str("JbeBadValue(")?;
+                ce.fmt_debug(f)?;
+                f.write_str(")")
+            }
+        }
+    }
+}
+
+implement Eq for JsonbError {
+    fn eq(&self, other: &JsonbError) -> Bool {
+        match (self, other) {
+            (JbeEmpty,                    JbeEmpty)                    => true,
+            (JbeUnsupportedVersion(a),    JbeUnsupportedVersion(b))    => a == b,
+            (JbeBadUtf8,                  JbeBadUtf8)                  => true,
+            (JbeBadJson(_),               JbeBadJson(_))               => true,    // best-effort
+            (JbeBadValue(a),              JbeBadValue(b))              => a == b,
+            _                                                          => false,
+        }
+    }
+}
+
+// =============================================================================
+// Decode
+// =============================================================================
+
+/// Decode a JSONB byte stream — version byte + UTF-8 JSON text —
+/// into a typed `JsonbValue`. Surfaces unsupported versions and
+/// malformed UTF-8 as structured errors rather than producing
+/// garbled text.
+///
+/// Does NOT parse the JSON payload — returns the verbatim text. Use
+/// `decode_value` if you want the parsed `Value` in one step.
+public fn decode(bytes: &[Byte]) -> Result<JsonbValue, JsonbError> {
+    let n = bytes.len() as Int;
+    if n < 1 {
+        return Err(JbeEmpty);
+    }
+    let version = (bytes[0] as Int) & 0xFF;
+    if version != JSONB_VERSION_1 {
+        return Err(JbeUnsupportedVersion(version));
+    }
+    // Body — slice from offset 1 to end.
+    let body_len = n - 1;
+    let mut body: List<Byte> = List.with_capacity(body_len);
+    let mut i: Int = 1;
+    while i < n {
+        body.push(bytes[i]);
+        i = i + 1;
+    }
+    let text = match Text.from_utf8(body) {
+        Ok(t)  => t,
+        Err(_) => return Err(JbeBadUtf8),
+    };
+    Ok(JsonbValue { version: version, json_text: text })
+}
+
+/// Decode + parse in one step. Returns the universal `Value`
+/// (interop type that round-trips with CBOR / msgpack / BSON
+/// without re-typing).
+public fn decode_value(bytes: &[Byte]) -> Result<Value, JsonbError> {
+    let jb = decode(bytes)?;
+    let jv = match parse_json(&jb.json_text) {
+        Ok(v)  => v,
+        Err(e) => return Err(JbeBadJson(e)),
+    };
+    Ok(value_from_json(&jv))
+}
+
+/// Decode + parse to `JsonValue` (as opposed to the universal
+/// `Value`). Useful when the consumer is JSON-specific and never
+/// needs interop with other binary formats.
+public fn decode_json(bytes: &[Byte]) -> Result<JsonValue, JsonbError> {
+    let jb = decode(bytes)?;
+    match parse_json(&jb.json_text) {
+        Ok(v)  => Ok(v),
+        Err(e) => Err(JbeBadJson(e)),
+    }
+}
+
+// =============================================================================
+// Encode
+// =============================================================================
+
+/// Encode a JSON text payload as JSONB. Prepends the version byte.
+/// The text is NOT validated as JSON here — callers can chain
+/// `core.encoding.json.parse` themselves if they need the
+/// invariant. Validation-on-encode would be the wrong default
+/// because re-stringifying a parsed JsonValue can shift whitespace
+/// and key ordering, which the database would index differently
+/// from the user-supplied form.
+public fn encode(json_text: &Text) -> List<Byte> {
+    let payload = json_text.as_bytes();
+    let n = payload.len() as Int;
+    let mut out: List<Byte> = List.with_capacity(n + 1);
+    out.push(JSONB_VERSION_1 as Byte);
+    let mut i: Int = 0;
+    while i < n {
+        out.push(payload[i]);
+        i = i + 1;
+    }
+    out
+}
+
+/// Encode a `Value` as JSONB. The Value is projected to `JsonValue`
+/// via `core.encoding.value.to_json`, then stringified, then
+/// version-prefixed. Variants outside the JSON subset surface as
+/// `JbeBadValue(CeUnsupportedVariant)` — round-trip with CBOR /
+/// BSON via the equivalent format-specific encoders instead.
+public fn encode_value(v: &Value) -> Result<List<Byte>, JsonbError> {
+    let jv = match value_to_json(v) {
+        Ok(j)  => j,
+        Err(e) => return Err(JbeBadValue(e)),
+    };
+    let text = json_stringify(&jv);
+    Ok(encode(&text))
+}
+
+/// Encode a `JsonValue` as JSONB. Convenience for callers that
+/// already have the JSON-specific type and don't want to round-
+/// trip through `Value`.
+public fn encode_json(jv: &JsonValue) -> List<Byte> {
+    let text = json_stringify(jv);
+    encode(&text)
+}

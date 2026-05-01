@@ -46,6 +46,12 @@ mount core.database.common.types.{
     ArenaSlice, ArenaWireBuf, ArenaWireValue, ArenaWireRow,
     AvNull, AvPresent, WireFormat, FmtBinary,
 };
+mount core.encoding.jsonb.{
+    decode as jsonb_decode_canonical,
+    encode as jsonb_encode_canonical,
+    JsonbValue, JsonbError, JSONB_VERSION_1,
+    JbeEmpty, JbeUnsupportedVersion, JbeBadUtf8,
+};
 
 // -----------------------------------------------------------------------------
 // Canonical Postgres OID table (per src/include/catalog/pg_type.dat).
@@ -284,14 +290,24 @@ fn subslice(parent: &ArenaSlice, off: Int, len: Int) -> Result<ArenaSlice, DbErr
 // JSONB — wire format = single version byte (0x01) || UTF-8 JSON text
 // -----------------------------------------------------------------------------
 //
-// This module treats Jsonb as opaque text plus the version prefix —
-// the application either re-parses through `core.encoding.json` or
-// (for indexed-paths) lets Postgres do the work via `->`/`->>`/`#>`
-// operators in the SQL itself.
+// Wire layout is identical between Postgres and SQLite (and any other
+// engine that ships JSONB v1). The canonical, format-agnostic
+// implementation lives in `core.encoding.jsonb`; this section is the
+// thin Postgres-arena adapter that:
+//
+//   * Reads the version byte directly through `slice_byte` (saves
+//     a round-trip materialisation when only the byte is needed).
+//   * Slices the body in-arena (no copy) for callers that don't
+//     need the parsed text.
+//   * Defers everything else — `core.encoding.jsonb.decode` /
+//     `encode` — to the canonical module so a bug-fix in one place
+//     reaches every adapter automatically.
 
-/// Internal representation of a decoded JSONB value — the JSON text
-/// after the version byte was stripped. Generation-bound to the
-/// arena it was decoded from.
+/// Postgres JSONB column value with arena-borrowed body. Distinct
+/// from `core.encoding.jsonb.JsonbValue` (which owns its `Text`)
+/// because the wire-decode hot path hands out an `ArenaSlice` to
+/// avoid a per-row allocation. `into_canonical` materialises the
+/// owned form when the caller needs cross-arena lifetime.
 public type PgJsonb is {
     /// Version byte from the wire — should always be 1 for current
     /// Postgres releases. Carried so future-version JSONBs surface
@@ -301,26 +317,50 @@ public type PgJsonb is {
     text: ArenaSlice,
 };
 
-/// Decode a JSONB column. Returns `None` if the wire bytes are
-/// shorter than one version byte. Fails with `DbError.DecodeError`
-/// on unsupported version.
+implement PgJsonb {
+    /// Materialise the JSON payload into a heap-owned `JsonbValue`
+    /// from `core.encoding.jsonb`. Pays one Text allocation; useful
+    /// when the caller wants to outlive the connection arena or
+    /// pass the document into a JSON parser that expects a `Text`.
+    /// Returns `None` if the underlying arena slice is stale.
+    public fn into_canonical(&self, arena: &SpindleArena) -> Maybe<JsonbValue> {
+        match self.text.to_owned(arena) {
+            None       => None,
+            Some(body) => match Text.from_utf8(body) {
+                Ok(t)  => Some(JsonbValue { version: self.version, json_text: t }),
+                Err(_) => None,
+            }
+        }
+    }
+}
+
+/// Decode a JSONB column from an arena-borrowed slice. Surfaces
+/// version mismatches and short reads as structured `DbError`. The
+/// version-byte gate matches `core.encoding.jsonb.decode` byte-for-
+/// byte — both paths are required to reject the same set of
+/// payloads.
 public fn decode_jsonb(slice: &ArenaSlice) -> Result<PgJsonb, DbError> {
     let version = match slice_byte(slice, 0) {
         Some(v) => v,
         None    => return Err(decode_fault("jsonb: empty payload".clone())),
     };
-    if version != 1 {
+    if version != JSONB_VERSION_1 {
         return Err(decode_fault(f"jsonb: unsupported version {version}"));
     }
     let body = subslice(slice, 1, slice.len - 1)?;
     Ok(PgJsonb { version: version, text: body })
 }
 
-/// Encode a JSON text payload as JSONB binary. Writes the version
-/// byte (0x01) followed by the UTF-8 text. Returns false on arena
-/// exhaustion (caller must propagate as `EncodeError`).
+/// Encode a JSON text payload as JSONB binary directly into the
+/// arena buffer. Writes the version byte (0x01) followed by the
+/// UTF-8 text. Returns false on arena exhaustion.
+///
+/// For the heap-allocated path — emit a `List<Byte>` rather than
+/// writing into an arena — call `core.encoding.jsonb.encode`
+/// instead. Both paths produce byte-identical output by
+/// construction; the difference is purely the destination buffer.
 public fn encode_jsonb(buf: &mut ArenaWireBuf, arena: &mut SpindleArena, json_text: &Text) -> Bool {
-    if !buf.put_u8(arena, 1) { return false; }
+    if !buf.put_u8(arena, JSONB_VERSION_1) { return false; }
     buf.put_bytes(arena, json_text.as_bytes())
 }
 
