@@ -44,6 +44,7 @@ pub mod apply_graph;
 pub mod coq;
 pub mod corpus_export;
 pub mod expr_translate;
+pub mod kernel_v0_manifest;
 pub mod lean;
 pub mod proof_body_translate;
 

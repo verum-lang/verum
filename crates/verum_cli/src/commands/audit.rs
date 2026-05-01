@@ -2232,6 +2232,176 @@ fn print_kernel_soundness_report_json(
 }
 
 // =============================================================================
+// audit --kernel-v0-roster — task #154 / Phase 3 of trust-base shrinkage
+// =============================================================================
+
+/// `verum audit --kernel-v0-roster` — bootstrap-meta-theory roster.
+///
+/// Walks the canonical 10-rule kernel_v0 manifest
+/// ([`verum_kernel::soundness::kernel_v0_manifest`]) and the
+/// `core/verify/kernel_v0/rules/` directory on disk; cross-references
+/// the two to detect drift (manifest entry without source file, or
+/// orphan source file without manifest entry).
+///
+/// **Three layers of observability**:
+///
+///   1. **Roster** — per-rule (name, lemma symbol, file path,
+///      Proved / Admitted, IOU citation).
+///   2. **Discharge headline** — proved-count vs admitted-count vs
+///      total.  The shrinkage roadmap target is 4-proved + 6-admitted
+///      → 10-proved across V1+ kernel iterations.
+///   3. **Drift gate** — exits non-zero on missing or orphan files.
+///      Adding a rule to `proof_checker.rs` without mirroring it in
+///      `kernel_v0/rules/k_<name>.vr` fails this gate.
+///
+/// Output: `target/audit-reports/kernel-v0-roster.json`.
+pub fn audit_kernel_v0_roster_with_format(format: AuditFormat) -> Result<()> {
+    use verum_kernel::soundness::kernel_v0_manifest::{
+        KernelV0Status, ManifestIssue, admitted_count, manifest, proved_count,
+        verify_manifest, KERNEL_V0_RULE_COUNT,
+    };
+
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("Auditing kernel_v0 bootstrap-meta-theory roster");
+    }
+
+    let manifest_dir = Manifest::find_manifest_dir()?;
+    let rules = manifest();
+    let issues = verify_manifest(&manifest_dir);
+    let proved = proved_count();
+    let admitted = admitted_count();
+
+    // Always write the JSON report — same convention as the rest
+    // of the audit gate suite (#172).
+    let report_dir = manifest_dir.join("target").join("audit-reports");
+    let _ = std::fs::create_dir_all(&report_dir);
+    let report_path = report_dir.join("kernel-v0-roster.json");
+    let payload = serde_json::json!({
+        "schema_version": 1,
+        "kernel_version": env!("CARGO_PKG_VERSION"),
+        "rule_count": KERNEL_V0_RULE_COUNT,
+        "proved_count": proved,
+        "admitted_count": admitted,
+        "rules": rules
+            .iter()
+            .map(|r| serde_json::json!({
+                "name": r.name,
+                "lemma_symbol": r.lemma_symbol,
+                "file_path": r.file_path.to_string_lossy(),
+                "status": r.status.tag(),
+                "description": r.description,
+                "iou_citation": r.iou_citation,
+            }))
+            .collect::<Vec<_>>(),
+        "issues": issues
+            .iter()
+            .map(|i| match i {
+                ManifestIssue::MissingSourceFile { rule_name, expected_path } => {
+                    serde_json::json!({
+                        "kind": "missing_source_file",
+                        "rule_name": rule_name,
+                        "expected_path": expected_path.to_string_lossy(),
+                    })
+                }
+                ManifestIssue::OrphanSourceFile { path } => serde_json::json!({
+                    "kind": "orphan_source_file",
+                    "path": path.to_string_lossy(),
+                }),
+            })
+            .collect::<Vec<_>>(),
+    });
+    let _ = std::fs::write(
+        &report_path,
+        serde_json::to_string_pretty(&payload).unwrap_or_default(),
+    );
+
+    match format {
+        AuditFormat::Plain => {
+            println!();
+            println!("kernel_v0 bootstrap-meta-theory roster");
+            println!("─────────────────────────────────────────");
+            println!("Total rules:     {}", KERNEL_V0_RULE_COUNT);
+            println!(
+                "Proved:          {} ({:.0}%)",
+                proved,
+                (proved as f64 / KERNEL_V0_RULE_COUNT as f64) * 100.0,
+            );
+            println!(
+                "Admitted (IOU):  {} ({:.0}%)",
+                admitted,
+                (admitted as f64 / KERNEL_V0_RULE_COUNT as f64) * 100.0,
+            );
+            println!();
+            for r in &rules {
+                let status_glyph = match r.status {
+                    KernelV0Status::Proved => "✓",
+                    KernelV0Status::Admitted => "○",
+                };
+                println!(
+                    "  {} {:<14}  {:<22}  {}",
+                    status_glyph,
+                    r.name,
+                    r.lemma_symbol,
+                    r.file_path.display(),
+                );
+                if !r.iou_citation.is_empty() {
+                    println!("       IOU: {}", r.iou_citation);
+                }
+            }
+            if issues.is_empty() {
+                println!();
+                println!(
+                    "{} Manifest consistent with {} files on disk.",
+                    "✓".green(),
+                    KERNEL_V0_RULE_COUNT,
+                );
+            } else {
+                println!();
+                println!("{} Manifest drift:", "✗".red());
+                for issue in &issues {
+                    match issue {
+                        ManifestIssue::MissingSourceFile { rule_name, expected_path } => {
+                            println!(
+                                "  ✗ rule {:?} references {:?} but file not found",
+                                rule_name,
+                                expected_path,
+                            );
+                        }
+                        ManifestIssue::OrphanSourceFile { path } => {
+                            println!(
+                                "  ✗ orphan source file {:?} has no manifest entry",
+                                path,
+                            );
+                        }
+                    }
+                }
+                println!();
+                println!("Report: {}", report_path.display());
+            }
+        }
+        AuditFormat::Json => {
+            println!(
+                "{}",
+                serde_json::to_string(&payload).unwrap_or_default(),
+            );
+        }
+    }
+
+    if !issues.is_empty() {
+        return Err(crate::error::CliError::Custom(
+            format!(
+                "{} kernel_v0 manifest issue(s) — see {}",
+                issues.len(),
+                report_path.display(),
+            )
+            .into(),
+        ));
+    }
+
+    Ok(())
+}
+
+// =============================================================================
 // audit --bridge-discharge — task #134 / MSFS-L4.1 entry point
 // =============================================================================
 
