@@ -18,7 +18,12 @@ module core.database.postgres.wire.backend;
 mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
-mount core.database.common.types.{WireReader, WireValue, WvNull, WvPresent, FmtBinary, FmtText};
+mount core.database.common.types.{
+    WireReader, WireValue, WvNull, WvPresent, FmtBinary, FmtText,
+    ArenaSlice, ArenaWireValue, ArenaWireRow, AvNull, AvPresent,
+};
+mount core.database.common.arena.SpindleArena;
+mount core.intrinsics.runtime.mem_raw.store_byte;
 mount core.database.postgres.wire.frame.PgFrame;
 mount core.database.postgres.wire.types.{
     BE_AUTH_REQUEST, BE_PARAMETER_STATUS, BE_BACKEND_KEY_DATA,
@@ -333,6 +338,72 @@ public fn parse_data_row(payload: List<Byte>, formats: &List<Int>) -> Result<Dat
         i = i + 1;
     }
     Ok(DataRow { values: values })
+}
+
+/// Arena-aware DataRow parser — same wire format as
+/// `parse_data_row`, but each non-NULL column's bytes are written
+/// straight into the connection arena via bump-pointer
+/// `alloc_bytes` and surfaced as an `ArenaSlice`. Result is an
+/// `ArenaWireRow` whose values point INTO the arena (zero
+/// per-row heap allocation). Lifetime: until the next arena
+/// reset (typically end-of-checkout via `PgConnection.reset_arena`).
+///
+/// Caller invokes `ArenaScope.begin/discard` around per-query
+/// usage so per-row allocations rewind cleanly when the query
+/// completes.
+public fn parse_data_row_arena(
+    payload: List<Byte>,
+    formats: &List<Int>,
+    arena: &mut SpindleArena,
+) -> Result<ArenaWireRow, BackendDecodeError> {
+    let mut r = WireReader.new(payload);
+    let n = match r.read_u16_be() {
+        Ok(v)  => v,
+        Err(_) => { return Err(BdShortPayload { wanted: 2, available: 0 }); }
+    };
+    let mut values: List<ArenaWireValue> = List.with_capacity(n);
+    let mut i = 0;
+    while i < n {
+        let len = match r.read_i32_be() {
+            Ok(v)  => v,
+            Err(_) => { return Err(BdShortPayload { wanted: 4, available: 0 }); }
+        };
+        if len < 0 {
+            values.push(AvNull);
+        } else {
+            // Read bytes from the wire reader (heap List<Byte>),
+            // then bump-allocate `len` bytes from the arena and
+            // copy in. Future optimisation: pre-arena-allocate
+            // the recv buffer so this byte-by-byte copy collapses
+            // into a memcpy from one arena slice to another.
+            let bytes = match r.read_bytes(len) {
+                Ok(b)  => b,
+                Err(_) => { return Err(BdShortPayload { wanted: len, available: 0 }); }
+            };
+            let dst = arena.alloc_bytes(len);
+            if dst == 0 {
+                return Err(BdShortPayload { wanted: len, available: -1 });
+            }
+            let mut k: Int = 0;
+            while k < len {
+                let _ = store_byte(dst + k, (bytes[k] as Int) & 0xFF);
+                k = k + 1;
+            }
+            let fmt = if i < formats.len() as Int && formats[i] == 1 {
+                FmtBinary
+            } else {
+                FmtText
+            };
+            let slice = ArenaSlice {
+                ptr: dst,
+                len: len,
+                generation: arena.generation(),
+            };
+            values.push(AvPresent { slice: slice, format: fmt });
+        }
+        i = i + 1;
+    }
+    Ok(ArenaWireRow.with_values(arena, values))
 }
 
 // -----------------------------------------------------------------------------
