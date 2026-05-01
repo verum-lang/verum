@@ -190,6 +190,139 @@ fn call_callee_bare_name(func: &Expr) -> Option<String> {
 }
 
 // =============================================================================
+// SMT-LIB rendering — #161 V3
+// =============================================================================
+
+/// Render a [`SepAssertion`] into a stable separation-theory SMT-LIB
+/// string. This is the canonical text downstream verifiers consume
+/// when emitting separation-logic obligations to Z3.
+///
+/// **Naming convention** — stable, namespace-prefixed so the SMT
+/// context can declare these as distinguished symbols without
+/// colliding with user code:
+///
+/// | `SepAssertion`              | SMT-LIB form                        |
+/// |-----------------------------|-------------------------------------|
+/// | `Emp`                       | `sep_emp`                           |
+/// | `PointsTo { loc, val }`     | `(sep_pt <loc> <val>)`              |
+/// | `Sep { left, right }`       | `(sep_star <left> <right>)`         |
+/// | `And { left, right }`       | `(sep_and <left> <right>)`          |
+/// | `Pure(expr)`                | `(sep_pure <expr>)`                 |
+/// | `Or { left, right }`        | `(sep_or <left> <right>)`           |
+/// | `Wand { left, right }`      | `(sep_wand <left> <right>)`         |
+/// | `Exists { var, body }`      | `(sep_exists <var> <body>)`         |
+/// | `Forall { var, body }`      | `(sep_forall <var> <body>)`         |
+/// | `ListSegment { from, to, _ }` | `(sep_lseg <from> <to>)`          |
+/// | `Tree { root, _, _ }`       | `(sep_tree <root>)`                 |
+/// | `Block { base, size }`      | `(sep_block <base> <size>)`         |
+/// | `ArraySegment { base, .., length, _ }` | `(sep_array_seg <base> <length>)` |
+///
+/// Inner expressions are rendered through
+/// [`crate::expr_to_smtlib::expr_to_smtlib`] — the generic AST → SMT
+/// translator. Failure to translate an inner expression bubbles up
+/// as an `Err`.
+///
+/// **Architectural role**: this function lets a verifier (or audit
+/// gate) emit separation-logic predicates in a way that downstream
+/// Z3 setup can dispatch on the `sep_*` prefix to install the
+/// matching theory.  It is the **stable interchange format** between
+/// the recogniser and the Z3 encoder.
+pub fn sep_assertion_to_smtlib(
+    assertion: &SepAssertion,
+) -> Result<String, crate::expr_to_smtlib::SmtTranslateError> {
+    use crate::expr_to_smtlib::expr_to_smtlib;
+
+    match assertion {
+        SepAssertion::Emp => Ok("sep_emp".to_string()),
+
+        SepAssertion::PointsTo { location, value } => {
+            let loc = expr_to_smtlib(location)?;
+            let val = expr_to_smtlib(value)?;
+            Ok(format!("(sep_pt {} {})", loc, val))
+        }
+
+        SepAssertion::Sep { left, right } => {
+            let l = sep_assertion_to_smtlib(left)?;
+            let r = sep_assertion_to_smtlib(right)?;
+            Ok(format!("(sep_star {} {})", l, r))
+        }
+
+        SepAssertion::And { left, right } => {
+            let l = sep_assertion_to_smtlib(left)?;
+            let r = sep_assertion_to_smtlib(right)?;
+            Ok(format!("(sep_and {} {})", l, r))
+        }
+
+        SepAssertion::Or { left, right } => {
+            let l = sep_assertion_to_smtlib(left)?;
+            let r = sep_assertion_to_smtlib(right)?;
+            Ok(format!("(sep_or {} {})", l, r))
+        }
+
+        SepAssertion::Wand { left, right } => {
+            let l = sep_assertion_to_smtlib(left)?;
+            let r = sep_assertion_to_smtlib(right)?;
+            Ok(format!("(sep_wand {} {})", l, r))
+        }
+
+        SepAssertion::Pure(prop) => {
+            let p = expr_to_smtlib(prop)?;
+            Ok(format!("(sep_pure {})", p))
+        }
+
+        SepAssertion::Exists { var, body } => {
+            let b = sep_assertion_to_smtlib(body)?;
+            Ok(format!("(sep_exists {} {})", var.as_str(), b))
+        }
+
+        SepAssertion::Forall { var, body } => {
+            let b = sep_assertion_to_smtlib(body)?;
+            Ok(format!("(sep_forall {} {})", var.as_str(), b))
+        }
+
+        SepAssertion::ListSegment { from, to, .. } => {
+            let f = expr_to_smtlib(from)?;
+            let t = expr_to_smtlib(to)?;
+            Ok(format!("(sep_lseg {} {})", f, t))
+        }
+
+        SepAssertion::Tree { root, .. } => {
+            let r = expr_to_smtlib(root)?;
+            Ok(format!("(sep_tree {})", r))
+        }
+
+        SepAssertion::Block { base, size } => {
+            let b = expr_to_smtlib(base)?;
+            let s = expr_to_smtlib(size)?;
+            Ok(format!("(sep_block {} {})", b, s))
+        }
+
+        SepAssertion::ArraySegment { base, length, .. } => {
+            let b = expr_to_smtlib(base)?;
+            let l = expr_to_smtlib(length)?;
+            Ok(format!("(sep_array_seg {} {})", b, l))
+        }
+    }
+}
+
+/// **Recognise + render** in one call. Returns `Some(smtlib_string)`
+/// when the expression is a separation-logic predicate; `None`
+/// otherwise. This is the canonical fast-path entry point for
+/// [`crate::expr_to_smtlib::expr_to_smtlib`] callers that want
+/// separation-aware translation.
+///
+/// Returns `Some(Err)` when the expression IS a separation
+/// predicate but contains an inner expression that fails the
+/// generic AST → SMT translator. Callers can decide whether to
+/// fall back to opaque-function translation or surface the error.
+pub fn try_translate_sep_predicate_to_smtlib(
+    expr: &Expr,
+) -> Option<Result<String, crate::expr_to_smtlib::SmtTranslateError>> {
+    let assertion = try_recognize_sep_assertion(expr)?;
+    Some(sep_assertion_to_smtlib(&assertion))
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 
@@ -384,6 +517,77 @@ mod tests {
             span(),
         );
         assert!(try_recognize_sep_assertion(&e).is_none());
+    }
+
+    // ----- Architectural pin -----
+
+    // ----- SMT-LIB rendering (#161 V3) -----
+
+    #[test]
+    fn render_emp_to_smtlib() {
+        let r = sep_assertion_to_smtlib(&SepAssertion::Emp).unwrap();
+        assert_eq!(r, "sep_emp");
+    }
+
+    #[test]
+    fn render_points_to_to_smtlib() {
+        let r = sep_assertion_to_smtlib(&SepAssertion::PointsTo {
+            location: name_path_expr("a"),
+            value: name_path_expr("av"),
+        })
+        .unwrap();
+        assert_eq!(r, "(sep_pt a av)");
+    }
+
+    #[test]
+    fn render_sep_conj_to_smtlib() {
+        let inner = SepAssertion::PointsTo {
+            location: name_path_expr("a"),
+            value: name_path_expr("av"),
+        };
+        let outer = SepAssertion::sep(SepAssertion::Emp, inner);
+        let r = sep_assertion_to_smtlib(&outer).unwrap();
+        assert_eq!(r, "(sep_star sep_emp (sep_pt a av))");
+    }
+
+    #[test]
+    fn render_pure_to_smtlib() {
+        let r = sep_assertion_to_smtlib(&SepAssertion::Pure(name_path_expr("ok"))).unwrap();
+        assert_eq!(r, "(sep_pure ok)");
+    }
+
+    #[test]
+    fn try_translate_sep_predicate_recognises_and_renders() {
+        // sep_conj(emp(), points_to(a, av)) → (sep_star sep_emp (sep_pt a av))
+        let inner_pt = call_expr(
+            "points_to",
+            vec![name_path_expr("a"), name_path_expr("av")],
+        );
+        let outer = call_expr("sep_conj", vec![call_expr("emp", vec![]), inner_pt]);
+        let outcome = try_translate_sep_predicate_to_smtlib(&outer);
+        match outcome {
+            Some(Ok(text)) => assert_eq!(text, "(sep_star sep_emp (sep_pt a av))"),
+            other => panic!("expected Ok(sep_star ...), got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn try_translate_sep_predicate_returns_none_for_unrecognised() {
+        let e = call_expr("user_function", vec![]);
+        assert!(try_translate_sep_predicate_to_smtlib(&e).is_none());
+    }
+
+    #[test]
+    fn render_three_level_nesting_to_smtlib() {
+        // sep_conj(emp, sep_conj(emp, points_to(a, av)))
+        let inner_pt = SepAssertion::PointsTo {
+            location: name_path_expr("a"),
+            value: name_path_expr("av"),
+        };
+        let mid = SepAssertion::sep(SepAssertion::Emp, inner_pt);
+        let outer = SepAssertion::sep(SepAssertion::Emp, mid);
+        let r = sep_assertion_to_smtlib(&outer).unwrap();
+        assert_eq!(r, "(sep_star sep_emp (sep_star sep_emp (sep_pt a av)))");
     }
 
     // ----- Architectural pin -----

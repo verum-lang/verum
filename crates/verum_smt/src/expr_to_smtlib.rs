@@ -161,6 +161,17 @@ pub fn expr_to_smtlib(expr: &Expr) -> SmtResult {
         }
 
         ExprKind::Call { func, args, .. } => {
+            // **#161 V3 fast path** — recognise separation-logic
+            // predicate calls and route through the structured
+            // `sep_*` SMT-LIB rendering so downstream Z3 setup can
+            // dispatch on the prefix to install the matching theory.
+            // Generic opaque-function translation is the fallback
+            // (preserves pre-V3 behaviour for non-separation calls).
+            if let Some(result) =
+                crate::separation_recognizer::try_translate_sep_predicate_to_smtlib(expr)
+            {
+                return result;
+            }
             let func_name = expr_to_smtlib(func)?;
             let mut parts = vec![func_name];
             for a in args.iter() {
@@ -495,5 +506,79 @@ mod tests {
         assert_eq!(expr_to_smtlib(&d).unwrap(), "(div a b)");
         let m = binop(BinOp::Rem, var_expr("a"), var_expr("b"));
         assert_eq!(expr_to_smtlib(&m).unwrap(), "(mod a b)");
+    }
+
+    // -------------------------------------------------------------
+    // #161 V3 — separation-recogniser fast path integration
+    // -------------------------------------------------------------
+
+    fn call_expr(callee: &str, args: Vec<Expr>) -> Expr {
+        Expr {
+            kind: ExprKind::Call {
+                func: verum_common::Heap::new(var_expr(callee)),
+                type_args: verum_common::List::new(),
+                args: args.into_iter().collect(),
+            },
+            span: sp(),
+            ref_kind: None,
+            check_eliminated: false,
+        }
+    }
+
+    #[test]
+    fn separation_recogniser_routes_emp_to_structured_form() {
+        // emp() — pre-V3 emitted `(emp)` (opaque function).
+        // Post-V3: routes through recogniser, emits structured `sep_emp`.
+        let e = call_expr("emp", vec![]);
+        assert_eq!(expr_to_smtlib(&e).unwrap(), "sep_emp");
+    }
+
+    #[test]
+    fn separation_recogniser_routes_points_to_to_structured_form() {
+        let e = call_expr("points_to", vec![var_expr("a"), var_expr("av")]);
+        assert_eq!(expr_to_smtlib(&e).unwrap(), "(sep_pt a av)");
+    }
+
+    #[test]
+    fn separation_recogniser_routes_sep_conj_recursively() {
+        // sep_conj(emp(), points_to(a, av))
+        let inner = call_expr("points_to", vec![var_expr("a"), var_expr("av")]);
+        let outer = call_expr("sep_conj", vec![call_expr("emp", vec![]), inner]);
+        assert_eq!(
+            expr_to_smtlib(&outer).unwrap(),
+            "(sep_star sep_emp (sep_pt a av))",
+        );
+    }
+
+    #[test]
+    fn unrecognised_call_falls_back_to_opaque_translation() {
+        // Generic user function — should still translate as opaque.
+        let e = call_expr("user_function", vec![var_expr("arg")]);
+        assert_eq!(expr_to_smtlib(&e).unwrap(), "(user_function arg)");
+    }
+
+    #[test]
+    fn separation_recogniser_with_unrecognised_inner_falls_back_at_outer_level() {
+        // sep_conj(emp(), user_function()) — outer recogniser bails
+        // because inner isn't a sep predicate; full call falls through
+        // to opaque translation: (sep_conj emp (user_function)).
+        // (Note: the inner emp() inside fallback path translates
+        // to its OPAQUE form (sep_emp resolves there too via
+        // bare-name resolution under generic translation? Let me
+        // verify what the test sees.)
+        let outer = call_expr(
+            "sep_conj",
+            vec![call_expr("emp", vec![]), call_expr("user_function", vec![])],
+        );
+        // The all-or-nothing recogniser returns None for outer because
+        // user_function is not a sep predicate. Generic Call
+        // translation kicks in: each arg is recursively translated;
+        // the inner emp() IS recognised individually and renders as
+        // `sep_emp`; user_function() renders opaque as `(user_function)`.
+        // Result: (sep_conj sep_emp (user_function))
+        assert_eq!(
+            expr_to_smtlib(&outer).unwrap(),
+            "(sep_conj sep_emp (user_function))",
+        );
     }
 }
