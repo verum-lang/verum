@@ -198,17 +198,85 @@ fn read_classification(attrs: &List<verum_ast::attr::Attribute>) -> MlsLevel {
     found
 }
 
-/// MLS surface gate (Phase 1 of #266).  Emits a diagnostic when:
-///   1. `[safety].mls_level` is non-`"public"` (the manifest floor),
-///   2. the function is FFI (extern_abi present), `unsafe fn`, or
-///      contains an `unsafe { ... }` body block, AND
-///   3. the function lacks an `@classification(<level>)` annotation
-///      with level ≥ the manifest floor.
+/// Compute the effective classification floor for a function:
+/// the JOIN (least upper bound on the lattice) of the function's
+/// own `@classification` attribute and every parameter's
+/// `@classification` attribute.  Phase 2b foundation (#288).
 ///
-/// Phase 1 covers the call-site friction layer: every dangerous
-/// declaration must explicitly opt in to the manifest's classification
-/// floor.  Phases 2/3 (full taint analysis, declassify gates) follow
-/// once Phase 1 is stable in the field.
+/// Architectural rationale: a function carrying a Secret-classified
+/// parameter must itself be at least Secret — otherwise a Secret
+/// value reaches a Public function body, leaking through the
+/// non-classified boundary.  Reading parameter attributes here
+/// lets the surface gate enforce this consistency without
+/// type-level taint propagation (which is full Phase 2b at
+/// `verum_types`).
+fn function_classification_floor(
+    func: &verum_ast::decl::FunctionDecl,
+) -> MlsLevel {
+    let mut effective = read_classification(&func.attributes);
+    for param in func.params.iter() {
+        let param_level = read_classification(&param.attributes);
+        effective = effective.join(param_level);
+    }
+    effective
+}
+
+/// Find the highest-classified parameter on `func`, returning
+/// `Some((name, level, span))` for the maximally-classified one
+/// when at least one parameter is non-Public, or `None` when every
+/// parameter is unclassified.  Used by the Phase 2b diagnostic to
+/// point users at the SOURCE of the parameter classification
+/// (otherwise the error would just say "the function" without
+/// indicating which parameter triggered the requirement).
+fn highest_classified_param(
+    func: &verum_ast::decl::FunctionDecl,
+) -> Option<(verum_common::Text, MlsLevel, verum_common::span::Span)> {
+    let mut best: Option<(verum_common::Text, MlsLevel, verum_common::span::Span)> = None;
+    for param in func.params.iter() {
+        let level = read_classification(&param.attributes);
+        if level == MlsLevel::Public {
+            continue;
+        }
+        let name = match &param.kind {
+            verum_ast::decl::FunctionParamKind::Regular { pattern, .. } => {
+                pattern_to_name(pattern)
+            }
+            _ => verum_common::Text::from("self"),
+        };
+        match &best {
+            Some((_, prev, _)) if *prev >= level => {}
+            _ => {
+                best = Some((name, level, param.span));
+            }
+        }
+    }
+    best
+}
+
+fn pattern_to_name(p: &verum_ast::pattern::Pattern) -> verum_common::Text {
+    use verum_ast::pattern::PatternKind;
+    match &p.kind {
+        PatternKind::Ident { name, .. } => name.name.clone(),
+        _ => verum_common::Text::from("<param>"),
+    }
+}
+
+/// MLS surface gate (Phase 1 of #266 + Phase 2b of #288).  Emits a
+/// diagnostic when:
+///   1. `[safety].mls_level` is non-`"public"` (the manifest floor),
+///   2. the function is FFI (extern_abi present), `unsafe fn`, OR
+///      carries any classified parameter (Phase 2b addition), AND
+///   3. the function's effective classification (its own
+///      `@classification` joined with every parameter's
+///      `@classification`) is < the manifest floor.
+///
+/// Phase 1 covered the call-site friction layer for dangerous
+/// declarations.  Phase 2b extends the trigger to functions that
+/// merely RECEIVE classified data (a Secret-classified parameter
+/// is a contract that the function handles classified data
+/// appropriately — it must itself be classified).  Full type-
+/// level taint propagation through Pi-types remains Phase 2b-full
+/// at `verum_types::infer`.
 fn check_mls_classification(
     func: &verum_ast::decl::FunctionDecl,
     policy: &SafetyPolicy,
@@ -218,36 +286,71 @@ fn check_mls_classification(
     if floor == MlsLevel::Public {
         return;  // Hot path: no manifest floor, no gate.
     }
-    // The dangerous-construct trigger: extern, unsafe modifier, OR an
-    // unsafe-block-bearing body.  The body inspection is handled at
-    // the walk_expr level (sibling gate below) so this check covers
-    // the declaration-only triggers.
     let is_ffi = matches!(&func.extern_abi, verum_common::Maybe::Some(_));
     let is_unsafe_decl = func.is_unsafe;
-    if !is_ffi && !is_unsafe_decl {
+    let highest_param = highest_classified_param(func);
+    let has_classified_param = highest_param.is_some();
+    // Phase 1 trigger: dangerous-construct declarations (ffi /
+    // unsafe). Phase 2b trigger: classified parameters without
+    // a function-level @classification matching them.
+    if !is_ffi && !is_unsafe_decl && !has_classified_param {
         return;
     }
-    let declared = read_classification(&func.attributes);
-    if declared >= floor {
-        return;  // Properly classified — passes the gate.
+
+    // Function-level declared classification. The function MUST
+    // explicitly opt in via @classification — Phase 2b's contract
+    // is that classified data flowing through a function requires
+    // an explicit handler classification, not implicit inheritance
+    // from a parameter.
+    let func_declared = read_classification(&func.attributes);
+    let param_max = highest_param
+        .as_ref()
+        .map(|(_, lvl, _)| *lvl)
+        .unwrap_or(MlsLevel::Public);
+    // The minimum acceptable function-level classification is the
+    // join of: the manifest floor (when ffi/unsafe), and the
+    // highest param classification (regardless of trigger). The
+    // function MUST be at least this high — whichever trigger
+    // fired.
+    let manifest_required = if is_ffi || is_unsafe_decl {
+        floor
+    } else {
+        MlsLevel::Public
+    };
+    let required = manifest_required.join(param_max);
+    if func_declared >= required {
+        return;
     }
 
-    let trigger = if is_ffi { "extern" } else { "unsafe" };
+    let trigger = if is_ffi {
+        "extern"
+    } else if is_unsafe_decl {
+        "unsafe"
+    } else {
+        "classified-param"
+    };
+    let mut message = format!(
+        "{trigger} function `{}` requires `@classification({})` \
+         (or higher) under `[safety].mls_level = \"{}\"`",
+        func.name.name,
+        required.as_manifest_str(),
+        floor.as_manifest_str(),
+    );
+    if let Some((param_name, param_level, _)) = &highest_param {
+        message.push_str(&format!(
+            " — parameter `{}` is classified `{}`",
+            param_name.as_str(),
+            param_level.as_manifest_str(),
+        ));
+    }
     out.push(
         DiagnosticBuilder::error()
-            .message(format!(
-                "{trigger} function `{}` requires \
-                 `@classification({})` (or higher) under \
-                 `[safety].mls_level = \"{}\"`",
-                func.name.name,
-                floor.as_manifest_str(),
-                floor.as_manifest_str(),
-            ))
+            .message(message)
             .span(super::ast_span_to_diagnostic_span(func.span, None))
             .help(format!(
                 "add `@classification({})` to the function declaration, \
                  or relax `[safety].mls_level` to `\"public\"` in Verum.toml",
-                floor.as_manifest_str(),
+                required.as_manifest_str(),
             ))
             .build(),
     );
@@ -883,5 +986,264 @@ mod tests {
             .collect();
         assert_eq!(mls_diags.len(), 0,
             "safe non-FFI function must not trigger MLS gate");
+    }
+
+    // ============================================================
+    // [safety].mls_level Phase 2b parameter-level pin tests (#288).
+    //
+    // Phase 2b extends the Phase 1 surface gate to detect functions
+    // that RECEIVE classified data via parameter-level
+    // `@classification` annotations. The function's effective
+    // classification floor is the JOIN of its own attribute and
+    // every parameter's attribute (uses the lattice from #282
+    // Phase 2a).
+    // ============================================================
+
+    /// Build a function with classified parameters.
+    fn mk_module_with_classified_param(
+        is_unsafe: bool,
+        extern_abi: Maybe<verum_common::Text>,
+        param_classification: Maybe<&'static str>,
+    ) -> Module {
+        use verum_ast::pattern::{Pattern, PatternKind};
+
+        let mut param_attrs = List::new();
+        if let Maybe::Some(level) = param_classification {
+            param_attrs.push(mk_classification_attr(level));
+        }
+
+        let param = verum_ast::decl::FunctionParam {
+            kind: verum_ast::decl::FunctionParamKind::Regular {
+                pattern: Pattern {
+                    kind: PatternKind::Ident {
+                        by_ref: false,
+                        mutable: false,
+                        name: verum_ast::ty::Ident::new("data", Span::dummy()),
+                        subpattern: Maybe::None,
+                    },
+                    span: Span::dummy(),
+                },
+                ty: verum_ast::ty::Type {
+                    kind: verum_ast::ty::TypeKind::Path(
+                        verum_ast::ty::Path::single(
+                            verum_ast::ty::Ident::new("Int", Span::dummy()),
+                        ),
+                    ),
+                    span: Span::dummy(),
+                },
+                default_value: Maybe::None,
+            },
+            attributes: param_attrs,
+            span: Span::dummy(),
+        };
+        let mut params = List::new();
+        params.push(param);
+
+        let func = FunctionDecl {
+            visibility: Default::default(),
+            name: verum_ast::ty::Ident::new("handler", Span::dummy()),
+            generics: List::new(),
+            params,
+            return_type: Maybe::None,
+            throws_clause: Maybe::None,
+            body: None,
+            attributes: List::new(),
+            is_async: false,
+            is_meta: false,
+            is_unsafe,
+            span: Span::dummy(),
+            generic_where_clause: Maybe::None,
+            meta_where_clause: Maybe::None,
+            requires: List::new(),
+            ensures: List::new(),
+            stage_level: 0,
+            is_pure: false,
+            is_generator: false,
+            is_cofix: false,
+            is_transparent: false,
+            extern_abi,
+            is_variadic: false,
+            std_attr: Maybe::None,
+            contexts: List::new(),
+        };
+        let mut items = List::new();
+        items.push(Item::new(ItemKind::Function(func), Span::dummy()));
+        Module {
+            items,
+            attributes: List::new(),
+            file_id: FileId::new(0),
+            span: Span::dummy(),
+        }
+    }
+
+    #[test]
+    fn mls_phase2b_secret_param_without_classified_function_rejected() {
+        // Pin: a function with a Secret-classified parameter must
+        // itself be at least Secret — otherwise Secret data flows
+        // through an unclassified function body.  The Phase 2b
+        // surface gate catches this even when the function is
+        // neither extern nor unsafe.
+        let module = mk_module_with_classified_param(
+            false,
+            Maybe::None,
+            Maybe::Some("secret"),
+        );
+        let mut policy = SafetyPolicy::permissive();
+        policy.mls_level = verum_common::Text::from("secret");
+        let diags = check_safety(&[module], policy);
+        let mls_diags: Vec<_> = diags.iter()
+            .filter(|d| d.message().to_string().contains("@classification"))
+            .collect();
+        assert_eq!(
+            mls_diags.len(),
+            1,
+            "classified-param-only trigger must fire under non-public mls"
+        );
+        let msg = mls_diags[0].message().to_string();
+        assert!(msg.contains("classified-param"), "got: {}", msg);
+        assert!(msg.contains("data"),
+            "diagnostic must name the offending parameter; got: {}", msg);
+        assert!(msg.contains("secret"), "got: {}", msg);
+    }
+
+    #[test]
+    fn mls_phase2b_param_classification_is_inherited_to_function() {
+        // Pin: when the function is itself @classification(secret)
+        // AND has a Secret-classified param, both consistency
+        // checks pass — no diagnostic.  The function's effective
+        // floor (join of own + params) is Secret, which subsumes
+        // the manifest floor.
+        let mut func_attrs = List::new();
+        func_attrs.push(mk_classification_attr("secret"));
+
+        // Build directly so we can attach the function-level attr.
+        let mut module = mk_module_with_classified_param(
+            false,
+            Maybe::None,
+            Maybe::Some("secret"),
+        );
+        if let ItemKind::Function(ref mut f) = module.items[0].kind {
+            f.attributes = func_attrs;
+        }
+
+        let mut policy = SafetyPolicy::permissive();
+        policy.mls_level = verum_common::Text::from("secret");
+        let diags = check_safety(&[module], policy);
+        let mls_diags: Vec<_> = diags.iter()
+            .filter(|d| d.message().to_string().contains("@classification"))
+            .collect();
+        assert_eq!(mls_diags.len(), 0,
+            "secret param + secret function must pass; got {} diags",
+            mls_diags.len());
+    }
+
+    #[test]
+    fn mls_phase2b_top_secret_param_passes_secret_floor() {
+        // Pin: lattice JOIN — TopSecret-classified param produces
+        // an effective floor of TopSecret (≥ Secret manifest floor)
+        // even when the function itself has no @classification.
+        // No: this would still need the FUNCTION to be classified
+        // (since the param's TopSecret floor must be matched).
+        // Actually: with param=TopSecret AND function=TopSecret,
+        // both pass.  Verify with explicit @classification(top_secret)
+        // on the function.
+        let mut func_attrs = List::new();
+        func_attrs.push(mk_classification_attr("top_secret"));
+
+        let mut module = mk_module_with_classified_param(
+            false,
+            Maybe::None,
+            Maybe::Some("top_secret"),
+        );
+        if let ItemKind::Function(ref mut f) = module.items[0].kind {
+            f.attributes = func_attrs;
+        }
+
+        let mut policy = SafetyPolicy::permissive();
+        policy.mls_level = verum_common::Text::from("secret");
+        let diags = check_safety(&[module], policy);
+        let mls_diags: Vec<_> = diags.iter()
+            .filter(|d| d.message().to_string().contains("@classification"))
+            .collect();
+        assert_eq!(mls_diags.len(), 0,
+            "top_secret function + top_secret param must satisfy secret floor");
+    }
+
+    #[test]
+    fn mls_phase2b_unclassified_param_does_not_trigger() {
+        // Pin: parameters WITHOUT @classification don't trigger
+        // the Phase 2b gate. The function body is still unsafe-or-
+        // ffi-checked under Phase 1 rules.
+        let module = mk_module_with_classified_param(
+            false,
+            Maybe::None,
+            Maybe::None, // No classification on param.
+        );
+        let mut policy = SafetyPolicy::permissive();
+        policy.mls_level = verum_common::Text::from("secret");
+        let diags = check_safety(&[module], policy);
+        let mls_diags: Vec<_> = diags.iter()
+            .filter(|d| d.message().to_string().contains("@classification"))
+            .collect();
+        assert_eq!(mls_diags.len(), 0,
+            "unclassified params must not trigger Phase 2b gate");
+    }
+
+    #[test]
+    fn mls_phase2b_lattice_join_uses_max_param() {
+        // Pin: when multiple params have different classifications,
+        // the lattice JOIN takes the highest. The diagnostic
+        // identifies the highest-classified param.
+        // Build two-param function: one Secret, one TopSecret.
+        let mut module = mk_module_with_classified_param(
+            false,
+            Maybe::None,
+            Maybe::Some("secret"),
+        );
+        // Add a second param at TopSecret.
+        if let ItemKind::Function(ref mut f) = module.items[0].kind {
+            use verum_ast::pattern::{Pattern, PatternKind};
+            let mut param_attrs = List::new();
+            param_attrs.push(mk_classification_attr("top_secret"));
+            let param2 = verum_ast::decl::FunctionParam {
+                kind: verum_ast::decl::FunctionParamKind::Regular {
+                    pattern: Pattern {
+                        kind: PatternKind::Ident {
+                            by_ref: false,
+                            mutable: false,
+                            name: verum_ast::ty::Ident::new("ts_data", Span::dummy()),
+                            subpattern: Maybe::None,
+                        },
+                        span: Span::dummy(),
+                    },
+                    ty: verum_ast::ty::Type {
+                        kind: verum_ast::ty::TypeKind::Path(
+                            verum_ast::ty::Path::single(
+                                verum_ast::ty::Ident::new("Int", Span::dummy()),
+                            ),
+                        ),
+                        span: Span::dummy(),
+                    },
+                    default_value: Maybe::None,
+                },
+                attributes: param_attrs,
+                span: Span::dummy(),
+            };
+            f.params.push(param2);
+        }
+
+        let mut policy = SafetyPolicy::permissive();
+        policy.mls_level = verum_common::Text::from("secret");
+        let diags = check_safety(&[module], policy);
+        let mls_diags: Vec<_> = diags.iter()
+            .filter(|d| d.message().to_string().contains("@classification"))
+            .collect();
+        assert_eq!(mls_diags.len(), 1, "two-param case must fire one diagnostic");
+        let msg = mls_diags[0].message().to_string();
+        // The highest-classified param (ts_data, TopSecret) should
+        // be cited in the diagnostic.
+        assert!(msg.contains("ts_data"),
+            "diagnostic must cite highest-classified param; got: {}", msg);
+        assert!(msg.contains("top_secret"), "got: {}", msg);
     }
 }
