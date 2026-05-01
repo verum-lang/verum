@@ -3663,6 +3663,116 @@ pub fn audit_apply_graph() -> Result<()> {
 ///   "summary": { "<gate>": "passed" | "failed" }
 /// }
 /// ```
+/// Extract a compact gate-specific metric string from the gate's
+/// already-loaded JSON report so the bundle's Plain output can show
+/// per-gate counts beside the pass/fail label.  Each gate's JSON
+/// shape is gate-specific (no shared `summary` envelope), so the
+/// extractor matches by gate name and reads the load-bearing
+/// top-level fields directly.  Returns an empty String for gates
+/// that have no useful compact metric (or when the JSON is absent
+/// / malformed — the bundle then falls back to the bare pass/fail
+/// label).
+fn bundle_gate_metric(
+    gate: &str,
+    gates: &std::collections::BTreeMap<&'static str, serde_json::Value>,
+) -> String {
+    let v = match gates.get(gate) {
+        Some(v) => v,
+        None => return String::new(),
+    };
+    let u64_at = |key: &str| -> u64 { v.get(key).and_then(|x| x.as_u64()).unwrap_or(0) };
+    let nested_u64 = |outer: &str, inner: &str| -> u64 {
+        v.get(outer)
+            .and_then(|o| o.get(inner))
+            .and_then(|x| x.as_u64())
+            .unwrap_or(0)
+    };
+    match gate {
+        "manifest_coverage" => {
+            let total = nested_u64("summary", "total");
+            let load = nested_u64("summary", "load_bearing");
+            let partial = nested_u64("summary", "load_bearing_partial");
+            let embedder = nested_u64("summary", "embedder_load_bearing");
+            let forward = nested_u64("summary", "forward_looking");
+            if total == 0 {
+                return String::new();
+            }
+            let wired = load + partial + embedder;
+            format!("{wired}/{total} wired, {forward} forward-looking")
+        }
+        "mls_coverage" => {
+            let total = nested_u64("summary", "total_functions");
+            let classified = nested_u64("summary", "classified_functions");
+            let params = nested_u64("summary", "total_classified_params");
+            let declassify = nested_u64("summary", "declassify_boundaries");
+            let sinks = nested_u64("summary", "sink_consumers");
+            if total == 0 && classified == 0 && declassify == 0 && sinks == 0 {
+                return String::new();
+            }
+            format!(
+                "{classified}/{total} classified, {params} params, {declassify} declassify, {sinks} sinks"
+            )
+        }
+        "soundness_iou" => {
+            let proved = u64_at("total_proved");
+            let admitted = u64_at("total_admitted");
+            let rules = u64_at("total_rules");
+            if rules == 0 {
+                return String::new();
+            }
+            format!("{proved}/{rules} proved, {admitted} admitted")
+        }
+        "cross_format_roundtrip" => {
+            let theorems = u64_at("theorems_walked");
+            let backends = u64_at("backend_count");
+            let foreign = u64_at("foreign_failures");
+            if theorems == 0 && backends == 0 {
+                return String::new();
+            }
+            format!("{theorems} theorems × {backends} backends, {foreign} failures")
+        }
+        "signatures" => {
+            let verified = u64_at("verified");
+            let mismatched = u64_at("mismatched");
+            let missing = u64_at("header_missing");
+            let walked = u64_at("theorems_walked");
+            if walked == 0 {
+                return String::new();
+            }
+            format!(
+                "{walked} theorems, {verified} verified, {mismatched} mismatched, {missing} no-header"
+            )
+        }
+        "apply_graph" => {
+            let walked = u64_at("theorems_walked");
+            let leaking = u64_at("leaking_theorems");
+            if walked == 0 {
+                return String::new();
+            }
+            format!("{walked} theorems, {leaking} leaking")
+        }
+        "bridge_discharge" => {
+            let modules = u64_at("modules_scanned");
+            let callsites = u64_at("total_callsites");
+            let false_disch = u64_at("total_false_discharges");
+            if modules == 0 && callsites == 0 {
+                return String::new();
+            }
+            format!("{callsites} callsites, {false_disch} false-discharges")
+        }
+        "kernel_discharged_axioms" => {
+            let total = u64_at("discharge_count");
+            let unknown = u64_at("unrecognised_count");
+            let parsed = u64_at("files_parsed");
+            if parsed == 0 {
+                return String::new();
+            }
+            format!("{total} discharges, {unknown} unrecognised, {parsed} files")
+        }
+        _ => String::new(),
+    }
+}
+
 pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
     if matches!(format, AuditFormat::Plain) {
         ui::step("Audit bundle — load-bearing L1+L2+L3+L4 gate aggregator");
@@ -3877,7 +3987,17 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
                     "passed" => "✓",
                     _ => "✗",
                 };
-                println!("  {}  {:<28} {}", marker, gate, label);
+                // Append a compact gate-specific summary line for
+                // observability gates that carry useful metrics —
+                // manifest-coverage shows wired/total, mls-coverage
+                // shows classification counts. Other gates show only
+                // their pass/fail label.
+                let metric = bundle_gate_metric(gate, &gates);
+                if metric.is_empty() {
+                    println!("  {}  {:<28} {}", marker, gate, label);
+                } else {
+                    println!("  {}  {:<28} {}  ({})", marker, gate, label, metric);
+                }
             }
             println!();
             if overall_l4 {
@@ -9044,5 +9164,168 @@ mod mls_coverage_tests {
         assert_eq!(s.declassify_boundaries, 0);
         assert_eq!(s.sink_consumers, 0);
         assert_eq!(s.total_classified_params, 0);
+    }
+}
+
+#[cfg(test)]
+mod bundle_gate_metric_tests {
+    use super::bundle_gate_metric;
+    use serde_json::json;
+    use std::collections::BTreeMap;
+
+    fn one(gate: &'static str, value: serde_json::Value) -> BTreeMap<&'static str, serde_json::Value> {
+        let mut m = BTreeMap::new();
+        m.insert(gate, value);
+        m
+    }
+
+    #[test]
+    fn manifest_coverage_renders_wired_total_and_forward_looking() {
+        let gates = one(
+            "manifest_coverage",
+            json!({
+                "summary": {
+                    "total": 42,
+                    "load_bearing": 30,
+                    "load_bearing_partial": 5,
+                    "embedder_load_bearing": 4,
+                    "forward_looking": 3,
+                    "fully_wired": false,
+                }
+            }),
+        );
+        let s = bundle_gate_metric("manifest_coverage", &gates);
+        assert_eq!(s, "39/42 wired, 3 forward-looking");
+    }
+
+    #[test]
+    fn mls_coverage_renders_classification_topology() {
+        let gates = one(
+            "mls_coverage",
+            json!({
+                "summary": {
+                    "total_functions": 100,
+                    "classified_functions": 8,
+                    "functions_with_classified_params": 4,
+                    "total_classified_params": 11,
+                    "declassify_boundaries": 2,
+                    "sink_consumers": 5,
+                }
+            }),
+        );
+        let s = bundle_gate_metric("mls_coverage", &gates);
+        assert_eq!(
+            s,
+            "8/100 classified, 11 params, 2 declassify, 5 sinks"
+        );
+    }
+
+    #[test]
+    fn soundness_iou_renders_proved_admitted_ratio() {
+        let gates = one(
+            "soundness_iou",
+            json!({
+                "total_rules": 38,
+                "total_proved": 4,
+                "total_admitted": 34,
+            }),
+        );
+        let s = bundle_gate_metric("soundness_iou", &gates);
+        assert_eq!(s, "4/38 proved, 34 admitted");
+    }
+
+    #[test]
+    fn cross_format_roundtrip_renders_theorem_backend_failure_grid() {
+        let gates = one(
+            "cross_format_roundtrip",
+            json!({
+                "theorems_walked": 37,
+                "backend_count": 2,
+                "foreign_failures": 0,
+            }),
+        );
+        let s = bundle_gate_metric("cross_format_roundtrip", &gates);
+        assert_eq!(s, "37 theorems × 2 backends, 0 failures");
+    }
+
+    #[test]
+    fn signatures_renders_verification_breakdown() {
+        let gates = one(
+            "signatures",
+            json!({
+                "theorems_walked": 37,
+                "verified": 74,
+                "mismatched": 0,
+                "header_missing": 0,
+            }),
+        );
+        let s = bundle_gate_metric("signatures", &gates);
+        assert_eq!(
+            s,
+            "37 theorems, 74 verified, 0 mismatched, 0 no-header"
+        );
+    }
+
+    #[test]
+    fn apply_graph_renders_walked_and_leaking() {
+        let gates = one(
+            "apply_graph",
+            json!({
+                "theorems_walked": 37,
+                "leaking_theorems": 0,
+            }),
+        );
+        let s = bundle_gate_metric("apply_graph", &gates);
+        assert_eq!(s, "37 theorems, 0 leaking");
+    }
+
+    #[test]
+    fn bridge_discharge_renders_callsite_breakdown() {
+        let gates = one(
+            "bridge_discharge",
+            json!({
+                "modules_scanned": 50,
+                "items_walked": 200,
+                "total_callsites": 144,
+                "total_false_discharges": 0,
+            }),
+        );
+        let s = bundle_gate_metric("bridge_discharge", &gates);
+        assert_eq!(s, "144 callsites, 0 false-discharges");
+    }
+
+    #[test]
+    fn kernel_discharged_axioms_renders_discharge_breakdown() {
+        let gates = one(
+            "kernel_discharged_axioms",
+            json!({
+                "files_parsed": 50,
+                "discharge_count": 3,
+                "unrecognised_count": 0,
+            }),
+        );
+        let s = bundle_gate_metric("kernel_discharged_axioms", &gates);
+        assert_eq!(s, "3 discharges, 0 unrecognised, 50 files");
+    }
+
+    #[test]
+    fn unknown_gate_returns_empty_string() {
+        let gates = one("nonexistent", json!({"foo": 1}));
+        assert_eq!(bundle_gate_metric("nonexistent", &gates), "");
+    }
+
+    #[test]
+    fn missing_gate_returns_empty_string() {
+        let gates: BTreeMap<&'static str, serde_json::Value> = BTreeMap::new();
+        assert_eq!(bundle_gate_metric("manifest_coverage", &gates), "");
+        assert_eq!(bundle_gate_metric("mls_coverage", &gates), "");
+    }
+
+    #[test]
+    fn malformed_summary_falls_back_to_empty() {
+        let gates = one("manifest_coverage", json!({"unrelated": "shape"}));
+        assert_eq!(bundle_gate_metric("manifest_coverage", &gates), "");
+        let gates = one("apply_graph", json!({"theorems_walked": 0}));
+        assert_eq!(bundle_gate_metric("apply_graph", &gates), "");
     }
 }
