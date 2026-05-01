@@ -3842,6 +3842,18 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
     // Always passes (observability gate — forward-looking rows
     // are accountability surface, not failures).
 
+    // 7. MLS-coverage — surface the project's MLS classification
+    //    topology (#296). Always passes (observability only); the
+    //    bundle records counts so CI can track classification
+    //    growth.
+    run_gate(
+        &mut gates,
+        &mut summary,
+        "mls_coverage",
+        report_dir.join("mls-coverage.json"),
+        || audit_mls_coverage(AuditFormat::Json),
+    );
+
     let bundle_path = report_dir.join("bundle.json");
     let payload = serde_json::json!({
         "schema_version": 1,
@@ -8752,5 +8764,285 @@ mod manifest_coverage_tests {
                 entry.field
             );
         }
+    }
+}
+
+// =============================================================================
+// `verum audit --mls-coverage` — observability for MLS classification (#296).
+//
+// Surface the MLS classification topology of a project: how many
+// functions opt into classification, what mix of @declassify
+// boundaries exist, which sink contexts (Logger/FS/Network/...)
+// are used. Drives security-review dashboards and CI gates that
+// track classification growth in regulated-environment codebases.
+// =============================================================================
+
+/// Per-function MLS classification record (#296).
+#[derive(Debug, Clone, serde::Serialize)]
+struct MlsCoverageFunction {
+    name: String,
+    function_classification: Option<String>,
+    classified_param_count: usize,
+    has_declassify: bool,
+    sink_contexts: Vec<String>,
+}
+
+/// Aggregate MLS coverage summary (#296).
+#[derive(Debug, Default, Clone, serde::Serialize)]
+struct MlsCoverageSummary {
+    total_functions: usize,
+    classified_functions: usize,
+    functions_with_classified_params: usize,
+    declassify_boundaries: usize,
+    sink_consumers: usize,
+    /// Total count of classified parameters across all functions.
+    total_classified_params: usize,
+}
+
+const MLS_LOW_CLASSIFICATION_SINKS: &[&str] = &[
+    "Logger", "FS", "FileSystem", "Network",
+    "Stdout", "Stderr", "Tracing", "Telemetry",
+];
+
+fn read_function_classification_audit(
+    attrs: &verum_common::List<verum_ast::attr::Attribute>,
+) -> Option<String> {
+    use verum_common::mls::MlsLevel;
+    let mut found: Option<MlsLevel> = None;
+    for attr in attrs.iter() {
+        if !attr.is_named("classification") {
+            continue;
+        }
+        if let verum_common::Maybe::Some(args) = &attr.args {
+            for arg in args.iter() {
+                if let verum_ast::expr::ExprKind::Path(path) = &arg.kind {
+                    if let Some(ident) = path.as_ident() {
+                        let parsed = MlsLevel::from_manifest_str(ident.as_str());
+                        match found {
+                            Some(prev) if prev >= parsed => {}
+                            _ => found = Some(parsed),
+                        }
+                    }
+                }
+            }
+        }
+    }
+    found.map(|l| l.as_manifest_str().to_string())
+}
+
+fn count_classified_params_audit(
+    func: &verum_ast::decl::FunctionDecl,
+) -> usize {
+    let mut count = 0;
+    for p in func.params.iter() {
+        if let verum_ast::decl::FunctionParamKind::Regular { .. } = &p.kind {
+            if read_function_classification_audit(&p.attributes).is_some() {
+                count += 1;
+            }
+        }
+    }
+    count
+}
+
+fn collect_sink_contexts_audit(
+    func: &verum_ast::decl::FunctionDecl,
+) -> Vec<String> {
+    let mut sinks = Vec::new();
+    for ctx in func.contexts.iter() {
+        if ctx.is_negative {
+            continue;
+        }
+        let last = ctx.path.last_segment_name();
+        if MLS_LOW_CLASSIFICATION_SINKS.iter().any(|s| *s == last) {
+            sinks.push(last.to_string());
+        }
+    }
+    sinks
+}
+
+/// Entry point: `verum audit --mls-coverage [--format FORMAT]`.
+pub fn audit_mls_coverage(format: AuditFormat) -> Result<()> {
+    if matches!(format, AuditFormat::Plain) {
+        ui::step("MLS coverage audit — classification topology");
+    }
+    let manifest_dir = Manifest::find_manifest_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let vr_files = discover_vr_files(&manifest_dir);
+
+    let mut per_function: Vec<MlsCoverageFunction> = Vec::new();
+    let mut summary = MlsCoverageSummary::default();
+
+    for path in &vr_files {
+        let module = match parse_file_for_audit(path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        for item in &module.items {
+            if let verum_ast::decl::ItemKind::Function(func) = &item.kind {
+                summary.total_functions += 1;
+                let function_classification =
+                    read_function_classification_audit(&func.attributes);
+                if function_classification.is_some() {
+                    summary.classified_functions += 1;
+                }
+                let classified_param_count = count_classified_params_audit(func);
+                summary.total_classified_params += classified_param_count;
+                if classified_param_count > 0 {
+                    summary.functions_with_classified_params += 1;
+                }
+                let has_declassify = func
+                    .attributes
+                    .iter()
+                    .any(|a| a.is_named("declassify"));
+                if has_declassify {
+                    summary.declassify_boundaries += 1;
+                }
+                let sink_contexts = collect_sink_contexts_audit(func);
+                if !sink_contexts.is_empty() {
+                    summary.sink_consumers += 1;
+                }
+                if function_classification.is_some()
+                    || classified_param_count > 0
+                    || has_declassify
+                    || !sink_contexts.is_empty()
+                {
+                    per_function.push(MlsCoverageFunction {
+                        name: func.name.name.as_str().to_string(),
+                        function_classification,
+                        classified_param_count,
+                        has_declassify,
+                        sink_contexts,
+                    });
+                }
+            }
+        }
+    }
+
+    let report_dir = manifest_dir.join("target").join("audit-reports");
+    let _ = std::fs::create_dir_all(&report_dir);
+    let report_path = report_dir.join("mls-coverage.json");
+    let json_payload = serde_json::json!({
+        "schema_version": 1,
+        "summary": summary,
+        "functions": per_function,
+    });
+    if let Ok(s) = serde_json::to_string_pretty(&json_payload) {
+        let _ = std::fs::write(&report_path, s);
+    }
+
+    match format {
+        AuditFormat::Json => {
+            if let Ok(s) = serde_json::to_string_pretty(&json_payload) {
+                ui::output(&s);
+            }
+        }
+        AuditFormat::Plain => {
+            ui::output(&format!(
+                "  Total functions: {}",
+                summary.total_functions
+            ));
+            ui::output(&format!(
+                "  Classified functions: {}",
+                summary.classified_functions
+            ));
+            ui::output(&format!(
+                "  Functions with classified parameters: {} ({} params total)",
+                summary.functions_with_classified_params,
+                summary.total_classified_params,
+            ));
+            ui::output(&format!(
+                "  @declassify boundaries: {}",
+                summary.declassify_boundaries
+            ));
+            ui::output(&format!(
+                "  Sink-context consumers: {}",
+                summary.sink_consumers
+            ));
+            ui::output(&format!("Report: {}", report_path.display()));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod mls_coverage_tests {
+    use super::*;
+
+    #[test]
+    fn read_function_classification_audit_returns_none_for_no_attr() {
+        let attrs = verum_common::List::new();
+        assert!(read_function_classification_audit(&attrs).is_none());
+    }
+
+    #[test]
+    fn read_function_classification_audit_extracts_secret() {
+        use verum_ast::expr::{Expr, ExprKind};
+        let path = verum_ast::ty::Path::single(
+            verum_ast::ty::Ident::new("secret", verum_ast::Span::default()),
+        );
+        let arg = Expr::new(ExprKind::Path(path), verum_ast::Span::default());
+        let mut args = verum_common::List::new();
+        args.push(arg);
+        let attr = verum_ast::attr::Attribute::new(
+            verum_common::Text::from("classification"),
+            verum_common::Maybe::Some(args),
+            verum_ast::Span::default(),
+        );
+        let mut attrs = verum_common::List::new();
+        attrs.push(attr);
+        assert_eq!(
+            read_function_classification_audit(&attrs),
+            Some("secret".to_string())
+        );
+    }
+
+    #[test]
+    fn read_function_classification_audit_takes_max() {
+        use verum_ast::expr::{Expr, ExprKind};
+        let mk = |level: &str| -> verum_ast::attr::Attribute {
+            let path = verum_ast::ty::Path::single(
+                verum_ast::ty::Ident::new(level, verum_ast::Span::default()),
+            );
+            let arg = Expr::new(ExprKind::Path(path), verum_ast::Span::default());
+            let mut args = verum_common::List::new();
+            args.push(arg);
+            verum_ast::attr::Attribute::new(
+                verum_common::Text::from("classification"),
+                verum_common::Maybe::Some(args),
+                verum_ast::Span::default(),
+            )
+        };
+        let mut attrs = verum_common::List::new();
+        attrs.push(mk("secret"));
+        attrs.push(mk("top_secret"));
+        assert_eq!(
+            read_function_classification_audit(&attrs),
+            Some("top_secret".to_string())
+        );
+    }
+
+    #[test]
+    fn mls_low_classification_sinks_includes_known_sinks() {
+        // Pin: every documented sink in the registry. Catches
+        // accidental removals from the static list.
+        for required in &["Logger", "FS", "Network", "Stdout"] {
+            assert!(
+                MLS_LOW_CLASSIFICATION_SINKS.contains(required),
+                "missing sink: {}",
+                required
+            );
+        }
+    }
+
+    #[test]
+    fn mls_coverage_summary_default_is_zero() {
+        // Pin: every counter starts at 0 — empty project produces
+        // zero diagnostics + zero counts.
+        let s = MlsCoverageSummary::default();
+        assert_eq!(s.total_functions, 0);
+        assert_eq!(s.classified_functions, 0);
+        assert_eq!(s.functions_with_classified_params, 0);
+        assert_eq!(s.declassify_boundaries, 0);
+        assert_eq!(s.sink_consumers, 0);
+        assert_eq!(s.total_classified_params, 0);
     }
 }
