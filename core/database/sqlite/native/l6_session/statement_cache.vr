@@ -1,0 +1,286 @@
+module core.database.sqlite.native.l6_session.statement_cache;
+
+// =============================================================================
+// l6_session/statement_cache.vr — Per-connection prepared-statement cache
+// =============================================================================
+// Layer: 6
+// Spec: sqlite-native.md §17.3
+//
+// Industrial-grade prepared-statement cache.  Pre-fix every
+// `execute(sql)` re-parsed + re-planned + re-codegen'd; post-fix
+// the second issue of the same SQL against an unchanged schema is
+// O(1) lookup + clone-through of a heap-shared `Heap<VdbeProgram>`.
+//
+// ## Architecture
+//
+//   * `entries: Map<Text, CachedSlot>` — keyed by canonical SQL text.
+//     O(1) lookup, O(1) insert, O(1) forget.
+//   * Capacity-bounded LRU eviction via `last_access_tick` —
+//     monotonically-increasing counter stamped on every access;
+//     when capacity is reached, the lowest-tick entry is evicted
+//     before insert.  Eviction scan is O(N) where N ≤ capacity
+//     (typically 64), strictly bounded by the user-configurable
+//     `capacity` knob.
+//   * Schema-generation invalidation — every cached slot remembers
+//     the schema generation at compile time; lookup miss triggers
+//     re-prepare automatically when the live generation differs.
+//   * Observability counters — hit / miss / eviction / invalidation
+//     counts surface via PRAGMA cache_*.
+//
+// ## Concurrency
+//
+// The cache is owned by `Connection` (single-writer per connection).
+// Inter-connection sharing is intentionally NOT supported — each
+// connection has its own pager + schema view, and SQLite's WAL
+// reader-snapshot semantics require statement state to remain
+// connection-local for safe step-by-step execution across
+// concurrent transactions.
+//
+// ## Affine ownership
+//
+// `VdbeProgram` is `affine` (single owner) but the cache must hand
+// the same compiled program to many lookup callers.  We solve this
+// by storing `Heap<VdbeProgram>` — Verum's heap-shared smart
+// pointer; clone copies the pointer (cheap), the affine VdbeProgram
+// itself is allocated once and freed when the last reference drops.
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l4_vdbe.VdbeProgram;
+mount core.database.sqlite.native.l6_session.schema_cache.SchemaCache;
+
+// -----------------------------------------------------------------------------
+// CachedSlot — one entry's payload
+// -----------------------------------------------------------------------------
+
+/// Heap-shared prepared program + per-entry bookkeeping.  The SQL
+/// text lives outside this struct (it's the Map key) so we don't
+/// pay for a duplicate copy.
+pub type CachedSlot is {
+    /// Schema generation captured at compile time.  Lookup with a
+    /// different live generation is a logical miss (entry stale).
+    schema_generation: Int,
+    /// The compiled program, heap-shared.
+    program: Heap<VdbeProgram>,
+    /// Monotonically-increasing access counter.  Drives LRU
+    /// eviction when capacity is reached.
+    last_access_tick: Int,
+}
+
+// -----------------------------------------------------------------------------
+// StatementCache — Map-backed bounded LRU
+// -----------------------------------------------------------------------------
+
+pub type StatementCache is {
+    entries: Map<Text, CachedSlot>,
+    capacity: Int,
+    /// Monotonic counter stamped on every access for LRU.
+    access_clock: Int,
+    /// Observability counters.
+    hit_count: Int,
+    miss_count: Int,
+    eviction_count: Int,
+    invalidation_count: Int,
+}
+
+pub fn statement_cache_new(capacity: Int) -> StatementCache {
+    let cap = if capacity < 1 { 1 } else { capacity };
+    StatementCache {
+        entries: Map.new(),
+        capacity: cap,
+        access_clock: 0,
+        hit_count: 0,
+        miss_count: 0,
+        eviction_count: 0,
+        invalidation_count: 0,
+    }
+}
+
+/// Default cache size — modest, fits any session even on embedded
+/// targets.  PRAGMA cache_size can adjust at runtime.
+pub fn statement_cache_default() -> StatementCache {
+    statement_cache_new(64)
+}
+
+implement StatementCache {
+    pub fn capacity(&self) -> Int { self.capacity }
+    pub fn len(&self) -> Int { self.entries.len() }
+    pub fn hits(&self) -> Int { self.hit_count }
+    pub fn misses(&self) -> Int { self.miss_count }
+    pub fn evictions(&self) -> Int { self.eviction_count }
+    pub fn invalidations(&self) -> Int { self.invalidation_count }
+
+    /// Hit-rate as a fraction in [0, 1].  Returns 0.0 when no
+    /// accesses have been made.
+    pub fn hit_ratio(&self) -> Float64 {
+        let total = self.hit_count + self.miss_count;
+        if total == 0 { return 0.0; }
+        (self.hit_count as Float64) / (total as Float64)
+    }
+
+    /// `true` iff the given SQL text has a cached compiled program
+    /// matching the live schema generation.  O(1).
+    pub fn contains_fresh(&self, sql: &Text, schema: &SchemaCache) -> Bool {
+        match self.entries.get(sql) {
+            Some(slot) => slot.schema_generation == schema.gen(),
+            None       => false,
+        }
+    }
+
+    /// Look up `sql`.  Returns `Some(program_handle)` on hit (where
+    /// `entry.schema_generation == schema.gen()`).  O(1) lookup +
+    /// O(1) Heap clone (pointer copy).  Updates last_access_tick
+    /// for LRU bookkeeping.
+    pub fn lookup(&mut self, sql: &Text, schema: &SchemaCache) -> Maybe<Heap<VdbeProgram>> {
+        let cur_gen = schema.gen();
+        match self.entries.get(sql) {
+            Some(slot) => {
+                if slot.schema_generation != cur_gen {
+                    self.miss_count = self.miss_count + 1;
+                    return None;
+                }
+                self.access_clock = self.access_clock + 1;
+                let program_clone = slot.program.clone();
+                let new_tick = self.access_clock;
+                // Re-insert with updated tick — Map.insert overwrites
+                // the previous slot in place (same key).
+                self.entries.insert(sql.clone(), CachedSlot {
+                    schema_generation: cur_gen,
+                    program: program_clone.clone(),
+                    last_access_tick: new_tick,
+                });
+                self.hit_count = self.hit_count + 1;
+                Some(program_clone)
+            }
+            None => {
+                self.miss_count = self.miss_count + 1;
+                None
+            }
+        }
+    }
+
+    /// Insert a freshly-compiled program.  If an entry already
+    /// exists under `sql`, it is replaced (no eviction counted).
+    /// Otherwise: if the cache is at capacity, the LRU entry is
+    /// evicted; then the new entry is inserted.
+    ///
+    /// Complexity: O(1) replace; O(N) eviction scan (N ≤ capacity).
+    pub fn insert(&mut self, sql: Text, schema: &SchemaCache, program: Heap<VdbeProgram>) {
+        self.access_clock = self.access_clock + 1;
+        let tick = self.access_clock;
+        let cur_gen = schema.gen();
+
+        // Eviction (only when truly inserting new + at capacity).
+        let already_present = self.entries.get(&sql).is_some();
+        if !already_present && self.entries.len() >= self.capacity {
+            evict_lru_entry(self);
+        }
+
+        self.entries.insert(sql, CachedSlot {
+            schema_generation: cur_gen,
+            program: program,
+            last_access_tick: tick,
+        });
+    }
+
+    /// Mark every entry stale.  Called by the connection on any
+    /// successful DDL — the next lookup misses and forces
+    /// recompilation.  O(1) — reset the entries map.
+    pub fn invalidate_all(&mut self) {
+        self.invalidation_count = self.invalidation_count + 1;
+        self.entries = Map.new();
+    }
+
+    /// Drop one entry by SQL text.  Used by FINALIZE.  Returns
+    /// `true` iff the entry was present.
+    pub fn forget(&mut self, sql: &Text) -> Bool {
+        let was_present = self.entries.get(sql).is_some();
+        if was_present {
+            self.entries = rebuild_excluding(&self.entries, sql);
+        }
+        was_present
+    }
+}
+
+// -----------------------------------------------------------------------------
+// LRU eviction — find the lowest-tick key, then remove it
+// -----------------------------------------------------------------------------
+
+/// Evict the LRU entry from `cache.entries`.  No-op if the cache
+/// is empty.  O(N) where N = current entry count (≤ capacity).
+///
+/// Implementation note: `Map.remove` returns the popped value,
+/// which Verum's analyser treats as a partial-move out of the
+/// `entries` field when the value type is affine (CachedSlot
+/// carries `Heap<VdbeProgram>`).  We sidestep by building a fresh
+/// map excluding the LRU key — `Heap::clone` is a pointer copy so
+/// the rebuild is cheap.
+fn evict_lru_entry(cache: &mut StatementCache) {
+    let lru_key = match find_lru_key(&cache.entries) {
+        Some(k) => k,
+        None    => return,
+    };
+    cache.entries = rebuild_excluding(&cache.entries, &lru_key);
+    cache.eviction_count = cache.eviction_count + 1;
+}
+
+/// Pure: returns a fresh Map containing every (key, slot) pair
+/// from `src` whose key is NOT equal to `drop_key`.  Slots are
+/// cloned (Heap pointer copies — cheap).
+fn rebuild_excluding(
+    src: &Map<Text, CachedSlot>,
+    drop_key: &Text,
+) -> Map<Text, CachedSlot> {
+    let mut out: Map<Text, CachedSlot> = Map.new();
+    let keys = src.keys();
+    let mut i: Int = 0;
+    while i < keys.len() {
+        if keys[i] != drop_key {
+            match src.get(&keys[i]) {
+                Some(slot) => {
+                    out.insert(keys[i].clone(), clone_slot(slot));
+                }
+                None => {}
+            }
+        }
+        i = i + 1;
+    }
+    out
+}
+
+fn clone_slot(src: &CachedSlot) -> CachedSlot {
+    CachedSlot {
+        schema_generation: src.schema_generation,
+        program: src.program.clone(),
+        last_access_tick: src.last_access_tick,
+    }
+}
+
+/// Pure scan — returns the SQL key of the LRU entry, or None if
+/// the map is empty.  Reads only `&Map`; never mutates.
+fn find_lru_key(entries: &Map<Text, CachedSlot>) -> Maybe<Text> {
+    let n = entries.len();
+    if n == 0 { return None; }
+    let keys = entries.keys();
+    let mut lru_key: Text = keys[0].clone();
+    let mut lru_tick: Int = match entries.get(&keys[0]) {
+        Some(slot) => slot.last_access_tick,
+        None       => 0,
+    };
+    let mut i: Int = 1;
+    while i < keys.len() {
+        match entries.get(&keys[i]) {
+            Some(slot) => {
+                if slot.last_access_tick < lru_tick {
+                    lru_tick = slot.last_access_tick;
+                    lru_key = keys[i].clone();
+                }
+            }
+            None => {}
+        }
+        i = i + 1;
+    }
+    Some(lru_key)
+}

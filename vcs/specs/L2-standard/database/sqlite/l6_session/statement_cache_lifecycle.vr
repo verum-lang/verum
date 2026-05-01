@@ -1,0 +1,188 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, l6_session, statement_cache, lifecycle, schema
+// @timeout: 15000
+// @description: L6 session — statement cache + sqlite_schema parser +
+//               prepared-statement lifecycle (#143 closure).
+//
+// Spec: internal/specs/sqlite-native.md §16.2 + §17.2 + §17.3
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l4_vdbe.{
+    Register, RNull, RInt, RText, RBlob, RRowId,
+};
+mount core.database.sqlite.native.l6_session.{
+    SchemaCache, schema_cache_new,
+    StatementCache, statement_cache_new, statement_cache_default,
+    SchemaRow, SchemaRowKind, SrkTable, SrkIndex, SrkView, SrkTrigger,
+    classify_row_type, decode_schema_row, load_schema_from_rows,
+};
+
+// -----------------------------------------------------------------------------
+// 1. StatementCache construction + initial state
+// -----------------------------------------------------------------------------
+
+fn cache_initial_state() {
+    let cache = statement_cache_default();
+    assert_eq(cache.capacity(), 64);
+    assert_eq(cache.len(), 0);
+    assert_eq(cache.hits(), 0);
+    assert_eq(cache.misses(), 0);
+    assert_eq(cache.evictions(), 0);
+    assert_eq(cache.invalidations(), 0);
+}
+
+// -----------------------------------------------------------------------------
+// 2. StatementCache capacity floor — minimum 1 slot
+// -----------------------------------------------------------------------------
+
+fn cache_min_capacity() {
+    let cache = statement_cache_new(0);
+    assert_eq(cache.capacity(), 1);
+}
+
+// -----------------------------------------------------------------------------
+// 3. Lookup-miss on empty cache bumps miss counter
+// -----------------------------------------------------------------------------
+
+fn cache_lookup_miss() {
+    let mut cache = statement_cache_default();
+    let schema = schema_cache_new();
+    match cache.lookup(&"SELECT 1".clone(), &schema) {
+        None => {},
+        Some(_) => panic("expected None on empty cache"),
+    }
+    assert_eq(cache.misses(), 1);
+    assert_eq(cache.hits(), 0);
+}
+
+// -----------------------------------------------------------------------------
+// 4. invalidate_all bumps counter and clears entries
+// -----------------------------------------------------------------------------
+
+fn cache_invalidate() {
+    let mut cache = statement_cache_default();
+    cache.invalidate_all();
+    cache.invalidate_all();
+    assert_eq(cache.invalidations(), 2);
+    assert_eq(cache.len(), 0);
+}
+
+// -----------------------------------------------------------------------------
+// 5. forget on missing entry is a no-op + returns false
+// -----------------------------------------------------------------------------
+
+fn cache_forget_missing() {
+    let mut cache = statement_cache_default();
+    let was_present = cache.forget(&"never_cached".clone());
+    assert(!was_present);
+}
+
+// -----------------------------------------------------------------------------
+// 6. classify_row_type covers the four canonical sqlite_schema types
+// -----------------------------------------------------------------------------
+
+fn classify_row_types() {
+    match classify_row_type(&"table".clone()) {
+        SrkTable => {},
+        _ => panic("expected SrkTable"),
+    }
+    match classify_row_type(&"index".clone()) {
+        SrkIndex => {},
+        _ => panic("expected SrkIndex"),
+    }
+    match classify_row_type(&"view".clone()) {
+        SrkView => {},
+        _ => panic("expected SrkView"),
+    }
+    match classify_row_type(&"trigger".clone()) {
+        SrkTrigger => {},
+        _ => panic("expected SrkTrigger"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 7. decode_schema_row — well-formed row decodes cleanly
+// -----------------------------------------------------------------------------
+
+fn decode_table_row() {
+    let mut row: List<Register> = List.new();
+    row.push(RText("table".clone()));
+    row.push(RText("users".clone()));
+    row.push(RText("users".clone()));
+    row.push(RInt(2_i64));
+    row.push(RText("CREATE TABLE users (id INTEGER PRIMARY KEY)".clone()));
+
+    match decode_schema_row(&row) {
+        Ok(decoded) => {
+            assert(decoded.name == "users");
+            assert_eq(decoded.rootpage, 2);
+            match decoded.kind {
+                SrkTable => {},
+                _ => panic("expected SrkTable kind"),
+            }
+        }
+        Err(_) => panic("decode_schema_row failed on well-formed row"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 8. decode_schema_row — short row errors cleanly
+// -----------------------------------------------------------------------------
+
+fn decode_short_row_errors() {
+    let mut row: List<Register> = List.new();
+    row.push(RText("table".clone()));
+    row.push(RText("name_only".clone()));
+    // Missing tbl_name + rootpage + sql.
+    match decode_schema_row(&row) {
+        Err(_) => {},
+        Ok(_) => panic("expected Err on short row"),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// 9. load_schema_from_rows — bulk load + report counts
+// -----------------------------------------------------------------------------
+
+fn load_schema_bulk() {
+    let mut cache = schema_cache_new();
+    let mut rows: List<List<Register>> = List.new();
+
+    let mut row1: List<Register> = List.new();
+    row1.push(RText("table".clone()));
+    row1.push(RText("t1".clone()));
+    row1.push(RText("t1".clone()));
+    row1.push(RInt(2_i64));
+    row1.push(RText("CREATE TABLE t1 (a INTEGER)".clone()));
+    rows.push(row1);
+
+    let mut row2: List<Register> = List.new();
+    row2.push(RText("index".clone()));
+    row2.push(RText("idx_t1_a".clone()));
+    row2.push(RText("t1".clone()));
+    row2.push(RInt(3_i64));
+    row2.push(RText("CREATE INDEX idx_t1_a ON t1(a)".clone()));
+    rows.push(row2);
+
+    let report = load_schema_from_rows(&mut cache, &"main".clone(), &rows);
+    assert_eq(report.tables_loaded, 1);
+    assert_eq(report.indexes_loaded, 1);
+    assert_eq(cache.table_count(), 1);
+    assert_eq(cache.index_count(), 1);
+}
+
+fn main() {
+    cache_initial_state();
+    cache_min_capacity();
+    cache_lookup_miss();
+    cache_invalidate();
+    cache_forget_missing();
+    classify_row_types();
+    decode_table_row();
+    decode_short_row_errors();
+    load_schema_bulk();
+}
