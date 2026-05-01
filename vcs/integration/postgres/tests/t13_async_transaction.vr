@@ -1,0 +1,129 @@
+// =============================================================================
+// t13_async_transaction.vr — async typed database + affine transaction
+// =============================================================================
+// Spec: internal/specs/database.md §5.4 (capability lattice),
+//       §5.5 (affine Tx), §6.1.8 (async surface).
+// =============================================================================
+//
+// Three scenarios:
+//   1. async_database_from_pool(pool).query_simple — read path
+//      compiles + works on Database<AsyncPgPool, DbReadWriteTx>.
+//   2. .into_readonly() narrows to Database<AsyncPgPool, DbRead>;
+//      query_simple still works. (Compile-time rejection of
+//      execute_simple on the narrow handle is asserted out-of-band
+//      in t13_capability_neg.vr.expectfail when it lands.)
+//   3. begin().commit_or_rollback round trip via AsyncPgTxScope —
+//      INSERT inside, ROLLBACK, table unchanged. Then INSERT,
+//      COMMIT, table contains the row.
+// =============================================================================
+
+mount conn_config.{
+    expect, expect_ok, expect_eq_int, pass,
+    TEST_HOST, TEST_PORT, TEST_DB, APP_USER, APP_PW,
+};
+mount core.database.postgres.{
+    PgConfig, PtmDisable,
+    AsyncPgPool, AsyncPoolConfig,
+    AsyncPgTxScope,
+    async_database_from_pool,
+};
+mount core.async.executor.block_on;
+
+fn pool_config() -> AsyncPoolConfig {
+    AsyncPoolConfig.default().with_size(2, 4).with_mailbox_capacity(8)
+}
+
+fn main() {
+    block_on(async move {
+        let cfg = PgConfig {
+            host: TEST_HOST.clone(),
+            port: TEST_PORT,
+            user: APP_USER.clone(),
+            password: APP_PW.clone(),
+            database: TEST_DB.clone(),
+            application_name: "spindle-itest-async-tx".clone(),
+            tls_mode: PtmDisable,
+            connect_timeout_ms: 10_000,
+        };
+        let pool = expect_ok(
+            AsyncPgPool.launch(cfg, pool_config()).await,
+            &"AsyncPgPool.launch failed".clone(),
+        );
+
+        let db = async_database_from_pool(pool);
+
+        // -------------------------------------------------------------------
+        // 1. Read path on the broad capability.
+        // -------------------------------------------------------------------
+        let r1 = expect_ok(
+            db.query_simple(&"SELECT 1::int4".clone()).await,
+            &"db.query_simple SELECT 1 failed".clone(),
+        );
+        expect_eq_int(r1.rows.len() as Int, 1, &"SELECT 1 row count".clone());
+
+        // -------------------------------------------------------------------
+        // 2. Narrow to read-only and verify read still works.
+        // -------------------------------------------------------------------
+        let db_ro = db.clone().into_readonly();
+        let r2 = expect_ok(
+            db_ro.query_simple(&"SELECT 2::int4".clone()).await,
+            &"db_ro.query_simple SELECT 2 failed".clone(),
+        );
+        expect_eq_int(r2.rows.len() as Int, 1, &"SELECT 2 row count".clone());
+
+        // -------------------------------------------------------------------
+        // 3. Tx round-trip — clean accounts table first.
+        // -------------------------------------------------------------------
+        let _ = db.execute_simple(&"DELETE FROM accounts".clone()).await;
+
+        // 3a. INSERT inside tx, ROLLBACK — must not persist.
+        let mut tx1 = expect_ok(
+            db.begin().await,
+            &"db.begin (rollback case) failed".clone(),
+        );
+        expect_ok(
+            tx1.conn_ref().execute(&
+                "INSERT INTO accounts (email, age) VALUES ('atx-rb@x.co', 25)".clone()
+            ).await,
+            &"INSERT inside tx1 failed".clone(),
+        );
+        expect_ok(
+            tx1.rollback().await,
+            &"AsyncPgTxScope.rollback failed".clone(),
+        );
+        let after_rb = expect_ok(
+            db.query_simple(&
+                "SELECT count(*)::int4 FROM accounts WHERE email = 'atx-rb@x.co'".clone()
+            ).await,
+            &"count after rollback failed".clone(),
+        );
+        expect_eq_int(after_rb.rows.len() as Int, 1, &"count rows".clone());
+
+        // 3b. INSERT inside tx, COMMIT — row visible.
+        let mut tx2 = expect_ok(
+            db.begin().await,
+            &"db.begin (commit case) failed".clone(),
+        );
+        expect_ok(
+            tx2.conn_ref().execute(&
+                "INSERT INTO accounts (email, age) VALUES ('atx-cm@x.co', 30)".clone()
+            ).await,
+            &"INSERT inside tx2 failed".clone(),
+        );
+        expect_ok(
+            tx2.commit().await,
+            &"AsyncPgTxScope.commit failed".clone(),
+        );
+        let after_cm = expect_ok(
+            db.query_simple(&
+                "SELECT email FROM accounts WHERE email = 'atx-cm@x.co'".clone()
+            ).await,
+            &"post-commit SELECT failed".clone(),
+        );
+        expect_eq_int(after_cm.rows.len() as Int, 1, &"row visible after commit".clone());
+
+        let _ = db.execute_simple(&"DELETE FROM accounts".clone()).await;
+
+        pass(&"t13_async_transaction".clone());
+    });
+}

@@ -75,7 +75,7 @@ mount core.async.task.{spawn_blocking, JoinHandle};
 /// One unit of work the actor will run synchronously on its owned
 /// `PgConnection`. New variants are additive — keep the existing
 /// reply types stable so older async clients keep working.
-type PgRequest is
+public type PgRequest is
       ReqSimpleQuery {
         sql: Text,
         reply: OneshotSender<Result<PgSimpleQueryResult, DbError>>,
@@ -85,6 +85,31 @@ type PgRequest is
         reply: OneshotSender<Result<Text, DbError>>,
     }
     | ReqPing {
+        reply: OneshotSender<Result<(), DbError>>,
+    }
+    /// Begin transaction with rendered options SQL fragment (the
+    /// caller-side wrapper computes `opts.render_sql()` before
+    /// sending; the actor doesn't know about PgTxOpts).
+    | ReqBeginTx {
+        begin_sql: Text,
+        reply: OneshotSender<Result<(), DbError>>,
+    }
+    | ReqCommitTx {
+        reply: OneshotSender<Result<(), DbError>>,
+    }
+    | ReqRollbackTx {
+        reply: OneshotSender<Result<(), DbError>>,
+    }
+    | ReqSavepoint {
+        name: Text,
+        reply: OneshotSender<Result<(), DbError>>,
+    }
+    | ReqReleaseSavepoint {
+        name: Text,
+        reply: OneshotSender<Result<(), DbError>>,
+    }
+    | ReqRollbackToSavepoint {
+        name: Text,
         reply: OneshotSender<Result<(), DbError>>,
     }
     | ReqShutdown {
@@ -113,6 +138,16 @@ implement AsyncPgConnection {
             tx: self.tx.clone(),
             join: self.join.clone(),
         }
+    }
+
+    /// Borrow the request channel for layered modules
+    /// (`async_transaction`, `async_typed_database`) that build
+    /// their own `PgRequest` variants and need to dispatch them
+    /// on the same actor. Adapter-private — typed callers should
+    /// stay on the high-level `simple_query` / `execute` /
+    /// `begin_tx_async` entry points.
+    public fn tx_ref(&self) -> &Sender<PgRequest> {
+        &self.tx
     }
 
     /// Drive `simple_query` on the actor's owned connection. The
@@ -252,6 +287,51 @@ fn run_actor(mut conn: PgConnection, mut rx: Receiver<PgRequest>) {
             }
             ReqPing { reply } => {
                 let r = match conn.simple_query(&"SELECT 1".clone()) {
+                    Ok(_)  => Ok(()),
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(r);
+            }
+            ReqBeginTx { begin_sql, reply } => {
+                let r = match conn.execute(&begin_sql) {
+                    Ok(_)  => Ok(()),
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(r);
+            }
+            ReqCommitTx { reply } => {
+                let r = match conn.execute(&"COMMIT".clone()) {
+                    Ok(_)  => Ok(()),
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(r);
+            }
+            ReqRollbackTx { reply } => {
+                let r = match conn.execute(&"ROLLBACK".clone()) {
+                    Ok(_)  => Ok(()),
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(r);
+            }
+            ReqSavepoint { name, reply } => {
+                let sql = f"SAVEPOINT {name}";
+                let r = match conn.execute(&sql) {
+                    Ok(_)  => Ok(()),
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(r);
+            }
+            ReqReleaseSavepoint { name, reply } => {
+                let sql = f"RELEASE SAVEPOINT {name}";
+                let r = match conn.execute(&sql) {
+                    Ok(_)  => Ok(()),
+                    Err(e) => Err(e),
+                };
+                let _ = reply.send(r);
+            }
+            ReqRollbackToSavepoint { name, reply } => {
+                let sql = f"ROLLBACK TO SAVEPOINT {name}";
+                let r = match conn.execute(&sql) {
                     Ok(_)  => Ok(()),
                     Err(e) => Err(e),
                 };

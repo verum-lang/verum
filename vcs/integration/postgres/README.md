@@ -101,3 +101,6 @@ Test list per `internal/specs/database.md` follow-up:
 - `t12_async_pool.vr` — AsyncPgPool fan-out: 32 concurrent tasks
   on 4 connections; wall-clock falsifies the "actor serialises
   callers" failure mode (spec §6.1.8 async surface)
+- `t13_async_transaction.vr` — async typed Database<AsyncPgPool, _>:
+  capability narrowing, AsyncPgTxScope round-trips (rollback +
+  commit) via the actor (spec §5.4 / §5.5 / §6.1.8)

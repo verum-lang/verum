@@ -47,6 +47,8 @@ public module replication;
 public module pgoutput;
 public module async_connection;
 public module async_pool;
+public module async_transaction;
+public module async_typed_database;
 
 // Re-exports — keep the user-facing surface compact.
 public mount .config.{
@@ -99,6 +101,19 @@ public mount .async_connection.{
 };
 public mount .async_pool.{
     AsyncPgPool, AsyncPoolConfig, AsyncPgPoolGuard,
+};
+public mount .async_transaction.{
+    AsyncPgTransaction,
+    begin_tx_async, begin_tx_with_async,
+    begin_tx_serializable_async, begin_tx_read_only_async,
+    commit_tx_async, rollback_tx_async,
+    savepoint_async, release_savepoint_async, rollback_to_savepoint_async,
+    with_transaction_async,
+};
+public mount .async_typed_database.{
+    AsyncPgTxScope,
+    async_database_from_pool, async_admin_database_from_pool,
+    async_readonly_database_from_pool,
 };
 public mount .adapter.PgAdapter;
 public mount .error.dberr_from_pg;

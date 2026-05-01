@@ -1,0 +1,209 @@
+// =============================================================================
+// core/database/postgres/async_typed_database.vr — async Database<P,C> surface
+// =============================================================================
+// Layer: 3 (Database — postgres adapter)
+// Spec: internal/specs/database.md §5.4 (capability lattice),
+//       §6.1.8 (async surface).
+// =============================================================================
+//
+// Mirror of `core/database/postgres/typed_database.vr` for the
+// `AsyncPgPool` parameterisation. Capability narrowing reuses the
+// `Database<P, C>.into_readonly` / `into_readwrite` infrastructure
+// (those are generic in `P`); only the per-method bodies differ —
+// they go through the actor channel instead of blocking the caller
+// thread.
+//
+// Async layered on top of sync infrastructure:
+//   * `Database<AsyncPgPool, C>` — same struct as
+//     `Database<PgPool, C>`; only the `P` parameter differs.
+//   * `acquire().await` reaches into `AsyncPgPool` (channel-based
+//     pool from `async_pool.vr`).
+//   * Returned `AsyncPgPoolGuard` releases on Drop — matches sync
+//     `PooledConnection`'s release-on-Drop with a tighter type
+//     surface (no manual `release_healthy` /
+//     `release_discard` — the V0 async surface treats every
+//     successful return as healthy and every error as fatal,
+//     dropping the connection's actor on actor-side error).
+//
+// Out of V0:
+//   * Connection-level error → discard semantics (sync uses
+//     `release_discard(reason)`; async V0 always releases
+//     healthy — connection death surfaces as ACTOR_CLOSED on
+//     the next acquire of the underlying handle).
+//   * COPY / NOTIFY / replication async (each its own follow-up).
+// =============================================================================
+
+module core.database.postgres.async_typed_database;
+
+mount core.*;
+mount base.{Result, Ok, Err, Text, Maybe, None, Some, Bool};
+mount collections.List;
+mount core.database.common.error.{DbError, AdapterId, AdPostgres};
+mount core.database.common.db_handle.Database;
+mount core.database.common.capability.{
+    Capability, CanRead, CanWrite, CanTx, CanDdl,
+    DbRead, DbReadWriteTx, DbAdmin,
+};
+
+mount core.database.postgres.async_pool.AsyncPgPool;
+mount core.database.postgres.async_connection.AsyncPgConnection;
+mount core.database.postgres.connection.PgSimpleQueryResult;
+mount core.database.postgres.async_transaction.{
+    AsyncPgTransaction, begin_tx_async, begin_tx_with_async,
+    commit_tx_async, rollback_tx_async,
+};
+mount core.database.postgres.transaction.{PgTxOpts, pg_tx_opts_default};
+
+// -----------------------------------------------------------------------------
+// Read-bound surface — every capability that satisfies CanRead.
+// -----------------------------------------------------------------------------
+
+implement<C: CanRead> Database<AsyncPgPool, C> {
+    /// Acquire a connection from the pool, dispatch
+    /// `simple_query`, release on Drop. Yields to the executor
+    /// while the actor runs the wire round-trip.
+    public async fn query_simple(&self, sql: &Text)
+        -> Result<PgSimpleQueryResult, DbError>
+    {
+        let guard = self.pool.acquire().await?;
+        guard.conn_ref().simple_query(sql).await
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Write-bound surface — DbReadWriteTx / DbAdmin / DbCopy / DbUnsafe.
+// -----------------------------------------------------------------------------
+
+implement<C: CanWrite> Database<AsyncPgPool, C> {
+    /// Run a single non-SELECT statement (INSERT / UPDATE /
+    /// DELETE) and return the command tag.
+    public async fn execute_simple(&self, sql: &Text)
+        -> Result<Text, DbError>
+    {
+        let guard = self.pool.acquire().await?;
+        guard.conn_ref().execute(sql).await
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Tx-bound surface — DbReadWriteTx / DbAdmin / DbCopy.
+// -----------------------------------------------------------------------------
+
+implement<C: CanTx> Database<AsyncPgPool, C> {
+    /// Begin a transaction with default opts. Returns an affine
+    /// scope `AsyncPgTxScope<AsyncPgPool>` that owns the pooled
+    /// connection guard for the tx lifetime — commit / rollback
+    /// consume the scope.
+    public async fn begin(&self)
+        -> Result<AsyncPgTxScope, DbError>
+    {
+        self.begin_with_opts(&pg_tx_opts_default()).await
+    }
+
+    /// Begin with explicit opts.
+    public async fn begin_with_opts(&self, opts: &PgTxOpts)
+        -> Result<AsyncPgTxScope, DbError>
+    {
+        let guard = self.pool.acquire().await?;
+        let conn = guard.conn();
+        let tx = begin_tx_with_async(&conn, opts.clone()).await?;
+        Ok(AsyncPgTxScope {
+            guard: Some(guard),
+            conn: Some(conn),
+            tx: Some(tx),
+        })
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Tx scope — affine, holds the pool guard for the tx lifetime
+// -----------------------------------------------------------------------------
+
+/// Affine — exactly one consumer; `commit` / `rollback` consume.
+/// Drops without explicit decision call `rollback` best-effort
+/// in Drop.
+public type affine AsyncPgTxScope is {
+    guard: Maybe<core.database.postgres.async_pool.AsyncPgPoolGuard>,
+    conn: Maybe<AsyncPgConnection>,
+    tx: Maybe<AsyncPgTransaction>,
+};
+
+implement AsyncPgTxScope {
+    /// Borrow the underlying connection so the caller can issue
+    /// statements inside the transaction. Each call gives the same
+    /// actor handle.
+    public fn conn_ref(&self) -> &AsyncPgConnection {
+        match &self.conn {
+            Some(c) => c,
+            None    => panic("AsyncPgTxScope: connection already taken"),
+        }
+    }
+
+    public async fn commit(mut self) -> Result<(), DbError> {
+        let conn = match self.conn.take() {
+            Some(c) => c,
+            None    => { return Err(scope_used("commit")); }
+        };
+        let tx = match self.tx.take() {
+            Some(t) => t,
+            None    => { return Err(scope_used("commit-no-tx")); }
+        };
+        let r = commit_tx_async(&conn, tx).await;
+        // Drop the guard — connection returns to the pool.
+        let _ = self.guard.take();
+        r
+    }
+
+    public async fn rollback(mut self) -> Result<(), DbError> {
+        let conn = match self.conn.take() {
+            Some(c) => c,
+            None    => { return Err(scope_used("rollback")); }
+        };
+        let tx = match self.tx.take() {
+            Some(t) => t,
+            None    => { return Err(scope_used("rollback-no-tx")); }
+        };
+        let r = rollback_tx_async(&conn, tx).await;
+        let _ = self.guard.take();
+        r
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Constructors — matching the sync `database_from_pool` family
+// -----------------------------------------------------------------------------
+
+/// Build a read-write-transactional async Database handle from
+/// an `AsyncPgPool`. Use this for typical application accounts.
+public fn async_database_from_pool(pool: AsyncPgPool)
+    -> Database<AsyncPgPool, DbReadWriteTx>
+{
+    Database.from_pool(Shared.new(pool))
+}
+
+/// Admin handle — DDL allowed. Reserve for migration runners.
+public fn async_admin_database_from_pool(pool: AsyncPgPool)
+    -> Database<AsyncPgPool, DbAdmin>
+{
+    Database.from_admin_pool(Shared.new(pool))
+}
+
+/// Read-only handle for analytics / replica-only roles.
+public fn async_readonly_database_from_pool(pool: AsyncPgPool)
+    -> Database<AsyncPgPool, DbRead>
+{
+    Database.from_readonly_pool(Shared.new(pool))
+}
+
+// =============================================================================
+// Helpers
+// =============================================================================
+
+fn scope_used(what: &str) -> DbError {
+    DbError.Adapter(core.database.common.error.AdapterSpecific {
+        adapter: AdPostgres,
+        code: "TX_SCOPE_USED".clone(),
+        message: f"AsyncPgTxScope already consumed at {what}",
+        retryable: false,
+    })
+}
