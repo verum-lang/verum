@@ -4341,6 +4341,31 @@ pub fn audit_bundle_with_format(format: AuditFormat) -> Result<()> {
         overall_l4 = false;
     }
 
+    // 9. Foundation-profiles — citation-by-foundation classifier.
+    //    Observability-only: surfaces multi-foundation pluralism but
+    //    doesn't flip the L4 verdict, since corpora can legitimately
+    //    host independent theorems in incompatible foundations as
+    //    long as no single derivation chain assumes both.
+    run_gate(
+        &mut gates,
+        &mut summary,
+        "foundation_profiles",
+        report_dir.join("foundation-profiles.json"),
+        || audit_foundation_profiles_with_format(AuditFormat::Json),
+    );
+
+    // 10. Codegen-attestation — per-pass kernel-discharge manifest
+    //     (CompCert-style verified-compilation surface).  V0 baseline
+    //     reports 0 of 6 passes attested; observability-only in V0,
+    //     flips to load-bearing when discharge work lands.
+    run_gate(
+        &mut gates,
+        &mut summary,
+        "codegen_attestation",
+        report_dir.join("codegen-attestation.json"),
+        || audit_codegen_attestation_with_format(AuditFormat::Json),
+    );
+
     let bundle_path = report_dir.join("bundle.json");
     let payload = serde_json::json!({
         "schema_version": 1,
