@@ -5087,10 +5087,32 @@ impl<'ctx> RuntimeLowering<'ctx> {
             "emit_verum_cbgr_functions",
             self.emit_verum_cbgr_functions(module)
         );
-        step!(
-            "emit_verum_networking_functions",
-            self.emit_verum_networking_functions(module)
-        );
+        // **DISABLED** (#96 fundamental fix): `emit_verum_networking_functions`
+        // is the LEGACY libc-based path that declares `socket`/`bind`/
+        // `listen`/`accept`/`connect`/`send`/`recv`/`close`/`setsockopt`/
+        // `getaddrinfo`/`recvfrom`/`sendto`/etc. with POSIX i32 ABI.
+        // The CANONICAL no-libc path is `platform_ir.rs::emit_networking`,
+        // which declares these same symbols with Verum's i64-everywhere
+        // ABI and produces wrappers that internally narrow to POSIX
+        // i32 at the syscall boundary.
+        //
+        // Pre-fix BOTH paths ran; the order-dependent declaration wins,
+        // and the loser's wrapper body had wrong-arity calls — visible
+        // in LLVM verifier output as "Call parameter type does not match
+        // function signature!" for `socket`, `__verum_libsys_socket`,
+        // `close`, `write`, `fcntl`, `clock_gettime`, `setsockopt`, etc.
+        //
+        // Disabling the legacy path: the no-libc canonical wrappers
+        // (`platform_ir.rs::emit_networking`) ARE the canonical source
+        // of `verum_tcp_*` / `verum_udp_*` / etc.; the no-libc path
+        // covers all the same surface that this legacy emit covered.
+        // step! commented out — see architecture decision in
+        // `docs/architecture/no-libc-architecture.md`.
+        //
+        // step!(
+        //     "emit_verum_networking_functions",
+        //     self.emit_verum_networking_functions(module)
+        // );
         step!(
             "emit_verum_process_functions",
             self.emit_verum_process_functions(module)
