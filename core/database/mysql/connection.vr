@@ -68,6 +68,12 @@ mount core.database.mysql.auth.caching_sha2.{
     scramble_caching_sha2,
     CachingSha2State, CsFastAuthOk, CsFullAuthRequired, CsFailed,
     classify_auth_more,
+    FULL_AUTH_REQUEST_PUBKEY,
+    make_cleartext_password,
+    parse_server_pubkey,
+    build_full_auth_response,
+    ServerPubkeyCache,
+    FullAuthError, FaePemDecode, FaeDerDecode, FaeNotRsaKey, FaeOaep,
 };
 
 // -----------------------------------------------------------------------------
@@ -756,12 +762,25 @@ fn drive_handshake(conn: &mut MysqlConnection, config: &MysqlConfig) -> Result<(
                         // Next packet must be OK.
                     }
                     CsFullAuthRequired => {
-                        conn.state = McsFailed;
-                        return Err(DbError.AuthFailed {
-                            kind: core.database.common.error.AuthErrorKind.AekRoleNotPermitted(
-                                "server demanded full caching_sha2 auth (RSA / TLS) — pending T10c".clone(),
-                            ),
-                        });
+                        // Spec §6.3.2 — full_auth flow:
+                        //   * TLS-active → cleartext password (TLS
+                        //     protects it on the wire).
+                        //   * Plain TCP → RSA-OAEP-SHA1 of
+                        //     (password XOR auth_plugin_data) using
+                        //     the server's pubkey. The pubkey is
+                        //     fetched on first contact (TOFU into
+                        //     a per-process cache) and reused
+                        //     across subsequent full_auth events.
+                        match drive_full_auth(conn, config, hs.auth_plugin_data.as_slice()) {
+                            Ok(_)  => {
+                                // Next packet must be OK or ERR;
+                                // loop continues.
+                            }
+                            Err(e) => {
+                                conn.state = McsFailed;
+                                return Err(e);
+                            }
+                        }
                     }
                     CsFailed            => {
                         conn.state = McsFailed;
@@ -788,6 +807,136 @@ fn drive_handshake(conn: &mut MysqlConnection, config: &MysqlConfig) -> Result<(
             _ => { return Err(bad_decode("unexpected packet during auth")); }
         }
     }
+}
+
+// -----------------------------------------------------------------------------
+// caching_sha2_password — full_auth driver
+// -----------------------------------------------------------------------------
+//
+// Two paths per spec §6.3.2:
+//
+//   1. **TLS active** — send password as cleartext (the TLS layer
+//      protects it on the wire). MySQL recognises the trailing
+//      NUL byte as the end-of-password.
+//
+//   2. **Plain TCP** — RSA-OAEP-SHA1 of (password XOR
+//      auth_plugin_data) using the server's public key.
+//      Procedure:
+//        a) Send a single 0x02 byte to request the pubkey.
+//        b) Read AuthMoreData containing the PEM-encoded RSA SPKI.
+//        c) Parse the PEM → SPKI DER → RsaPublicKey.
+//        d) Encrypt (password ‖ NUL) XOR-folded against the nonce.
+//        e) Send the ciphertext as the auth response.
+//        f) Caller's outer loop reads OK / ERR.
+//
+// The pubkey is fetched per-call here. A pool-shared TOFU cache
+// (`ServerPubkeyCache`) is the natural follow-up — pools that
+// open many connections to the same server amortise the PEM
+// round-trip across them. v1 keeps the helper stateless so the
+// follow-up is a clean drop-in.
+
+fn drive_full_auth(
+    conn: &mut MysqlConnection,
+    config: &MysqlConfig,
+    nonce: &[Byte],
+) -> Result<(), DbError> {
+    // TLS-active fast path — cleartext over the protected
+    // channel. MtmRequired returns TLS_PENDING in `connect`
+    // today, so this branch fires only when the TLS integration
+    // lands; the structure is wired ahead of time so the
+    // follow-up is a config-only change.
+    match config.tls_mode {
+        MtmRequired => {
+            let payload = make_cleartext_password(config.password.as_bytes());
+            // The auth packet sits in the same sequence stream as
+            // the AuthMoreData we just consumed.
+            send_packet(conn, payload.as_slice())?;
+            return Ok(());
+        }
+        MtmDisable => {}
+    }
+
+    // Plain-TCP path — RSA-OAEP exchange.
+    //
+    // Step a) Request the server's public key — single byte
+    //         (0x02). Sequence number continues from the
+    //         AuthMoreData reply.
+    let request: List<Byte> = {
+        let mut v: List<Byte> = List.with_capacity(1);
+        v.push(FULL_AUTH_REQUEST_PUBKEY);
+        v
+    };
+    send_packet(conn, request.as_slice())?;
+
+    // Step b) Read AuthMoreData carrying the PEM. The first byte
+    //         is the AuthMoreData marker (0xFE on some servers;
+    //         01 on others — `parse_auth_more` strips the leading
+    //         marker byte and returns the body).
+    let pkt = recv_packet(conn)?;
+    let body = pkt.into_payload();
+    let kind = classify(body.as_slice(), conn.capabilities);
+    match kind {
+        SkAuthMore => {}
+        SkError => {
+            let err = match parse_err(body.as_slice(), conn.capabilities) {
+                Ok(e)  => e,
+                Err(_) => { return Err(bad_decode("full_auth ERR")); }
+            };
+            return Err(dberr_from_mysql(err));
+        }
+        _ => { return Err(bad_decode("full_auth: expected AuthMoreData with PEM")); }
+    }
+    let am = match parse_auth_more(body.as_slice()) {
+        Ok(m)  => m,
+        Err(_) => { return Err(bad_decode("full_auth AuthMoreData")); }
+    };
+
+    // Step c) Parse PEM → SPKI → RsaPublicKey.
+    let pem_text = match Text.from_bytes(&am.data) {
+        Ok(t)  => t,
+        Err(_) => return Err(full_auth_err("server pubkey not valid UTF-8".clone())),
+    };
+    let pubkey = match parse_server_pubkey(&pem_text) {
+        Ok(k)  => k,
+        Err(e) => return Err(full_auth_err_from(e)),
+    };
+
+    // Step d) Build the OAEP-encrypted response.
+    let resp = match build_full_auth_response(
+        &pubkey,
+        config.password.as_bytes(),
+        nonce,
+    ) {
+        Ok(b)  => b,
+        Err(e) => return Err(full_auth_err_from(e)),
+    };
+
+    // Step e) Send the ciphertext. The outer auth-result loop
+    //         will read OK / ERR next.
+    send_packet(conn, resp.as_slice())?;
+    Ok(())
+}
+
+/// Wrap a full-auth-specific failure into the common DbError
+/// taxonomy. Surfaces as `AuthFailed { AekRoleNotPermitted(reason) }`
+/// — semantically "we couldn't authenticate against this server"
+/// rather than a transient or constraint-class error.
+fn full_auth_err(reason: Text) -> DbError {
+    DbError.AuthFailed {
+        kind: core.database.common.error.AuthErrorKind.AekRoleNotPermitted(
+            f"caching_sha2 full_auth: {reason}",
+        ),
+    }
+}
+
+fn full_auth_err_from(e: FullAuthError) -> DbError {
+    let reason: Text = match e {
+        FaePemDecode(_) => "server pubkey PEM decode failed".clone(),
+        FaeDerDecode   => "server pubkey SPKI DER decode failed".clone(),
+        FaeNotRsaKey   => "server pubkey is not RSA".clone(),
+        FaeOaep(_)     => "RSA-OAEP encryption failed".clone(),
+    };
+    full_auth_err(reason)
 }
 
 // -----------------------------------------------------------------------------
