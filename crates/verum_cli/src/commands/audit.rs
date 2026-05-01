@@ -2434,7 +2434,7 @@ fn print_kernel_soundness_report_json(
 pub fn audit_kernel_v0_roster_with_format(format: AuditFormat) -> Result<()> {
     use verum_kernel::soundness::kernel_v0_manifest::{
         KERNEL_V0_RULE_COUNT, KernelV0Status, ManifestIssue, admitted_count, manifest,
-        proved_count, verify_manifest,
+        proved_count, verify_manifest_with_search_roots,
     };
 
     if matches!(format, AuditFormat::Plain) {
@@ -2443,7 +2443,14 @@ pub fn audit_kernel_v0_roster_with_format(format: AuditFormat) -> Result<()> {
 
     let manifest_dir = Manifest::find_manifest_dir()?;
     let rules = manifest();
-    let issues = verify_manifest(&manifest_dir);
+    // Stdlib-aware lookup: kernel_v0 rule files live in the embedded
+    // Verum stdlib (`core/verify/kernel_v0/rules/`).  When auditing a
+    // corpus that doesn't contain those files locally, fall back to
+    // the stdlib disk root.  Same architectural pattern as the
+    // codegen-attestation cross-check.
+    let stdlib_root = locate_stdlib_root(&manifest_dir);
+    let extra_roots: Vec<&Path> = stdlib_root.as_ref().map(|p| vec![p.as_path()]).unwrap_or_default();
+    let issues = verify_manifest_with_search_roots(&manifest_dir, &extra_roots);
     let proved = proved_count();
     let admitted = admitted_count();
 
@@ -3886,21 +3893,33 @@ pub fn audit_signatures_with_format(format: AuditFormat) -> Result<()> {
             .trim_end_matches(".vr")
             .to_string();
         for item in &module.items {
-            let (name, decl_attrs, has_proof, proposition_expr) = match &item.kind {
+            let (name, decl_attrs, proof_body, proposition_expr) = match &item.kind {
                 verum_ast::decl::ItemKind::Theorem(d)
                 | verum_ast::decl::ItemKind::Lemma(d)
                 | verum_ast::decl::ItemKind::Corollary(d) => (
                     d.name.name.as_str().to_string(),
                     &d.attributes,
-                    matches!(&d.proof, verum_common::Maybe::Some(_)),
+                    match &d.proof {
+                        verum_common::Maybe::Some(b) => Some(b),
+                        verum_common::Maybe::None => None,
+                    },
                     d.proposition.as_ref(),
                 ),
                 _ => continue,
             };
+            let has_proof = proof_body.is_some();
             let declared_strategy = strictest_verify_strategy(&item.attributes, decl_attrs)
                 .map(|t| t.as_str().to_string());
             let proposition_text = verum_ast::pretty::format_expr(proposition_expr).to_string();
-            theorem_specs.push(TheoremSpec {
+            // **Bug fix**: the signatures gate must construct
+            // `TheoremSpec` with the SAME translator outputs the
+            // cross-format-roundtrip gate uses to emit the .v/.lean
+            // files — otherwise the recomputed signature uses null
+            // proposition + null proof tactic while the file's
+            // signature header was computed with the actual translated
+            // text. Pre-fix this caused 74/74 signatures to mismatch on
+            // the live MSFS corpus despite no real divergence.
+            let mut spec = TheoremSpec {
                 name: sanitise_theorem_name(&name),
                 module_path: module_path_text.clone(),
                 proposition_text,
@@ -3910,7 +3929,12 @@ pub fn audit_signatures_with_format(format: AuditFormat) -> Result<()> {
                 has_proof_body: has_proof,
                 per_backend_proof_tactic: std::collections::BTreeMap::new(),
                 declared_strategy,
-            });
+            }
+            .with_translated_proposition(proposition_expr);
+            if let Some(body) = proof_body {
+                spec = spec.with_translated_proof_body(body);
+            }
+            theorem_specs.push(spec);
         }
     }
 
