@@ -43,7 +43,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use verum_ast::decl::{ProofBody, ProofBodyKind, ProofStepKind, TacticExpr};
+use verum_ast::decl::{
+    ProofBody, ProofBodyKind, ProofMethod, ProofStepKind, TacticExpr,
+};
 use verum_ast::expr::{Expr, ExprKind};
 use verum_ast::ty::PathSegment;
 use verum_common::Maybe;
@@ -130,6 +132,37 @@ fn single_segment_path_name(expr: &Expr) -> Option<&str> {
     }
 }
 
+/// If `expr` is a multi-segment `Path` (e.g.,
+/// `mathlib4.lambda.ChurchRosser`), return the dot-joined form.
+/// Used to recognise mathlib4-cited / framework-cited apply
+/// targets that the corpus uses extensively.  Single-segment paths
+/// also pass through; the caller treats both shapes uniformly.
+///
+/// Returns `None` for non-`Path` shapes (Field projections, calls,
+/// closures, etc.) — those need their own classification.
+fn dotted_path_text(expr: &Expr) -> Option<String> {
+    let path = match &expr.kind {
+        ExprKind::Path(p) => p,
+        _ => return None,
+    };
+    let mut parts: Vec<&str> = Vec::with_capacity(path.segments.len());
+    for seg in path.segments.iter() {
+        match seg {
+            PathSegment::Name(ident) => parts.push(ident.name.as_str()),
+            // Generic-argument segments (e.g., `foo<T>`) don't have a
+            // foreign-tool-faithful representation in tactic-mode
+            // apply — the foreign tool's unification fills in type
+            // arguments.  Return None so the caller falls back to a
+            // safer translation strategy.
+            _ => return None,
+        }
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    Some(parts.join("."))
+}
+
 /// If `expr` is the parser's representation of `<name>(args)` —
 /// `Call { func: Path(<name>), args, type_args: [] }` — return the
 /// callee name and the call args.  The fast parser produces this
@@ -170,16 +203,33 @@ fn call_with_single_segment_callee(expr: &Expr) -> Option<(&str, &[Expr])> {
 /// the bare-path shape, the call's own args for the Call shape.
 /// Helper so both `ProofBody::Tactic` and the structured-body
 /// single-step case can share recognition.
-fn classify_apply_tactic(tactic: &TacticExpr) -> Option<(&str, &[Expr])> {
+fn classify_apply_tactic(tactic: &TacticExpr) -> Option<(String, &[Expr])> {
     let (lemma, outer_args) = match tactic {
         TacticExpr::Apply { lemma, args } => (lemma, args),
         _ => return None,
     };
+    // Single-segment bare path: `apply foo;`
     if let Some(name) = single_segment_path_name(lemma.as_ref()) {
-        return Some((name, outer_args.as_slice()));
+        return Some((name.to_string(), outer_args.as_slice()));
     }
+    // Call shape with single-segment callee: `apply foo(x, y);`
     if let Some((name, call_args)) = call_with_single_segment_callee(lemma.as_ref()) {
-        return Some((name, call_args));
+        return Some((name.to_string(), call_args));
+    }
+    // Multi-segment dotted path: `apply mathlib4.lambda.ChurchRosser;`
+    // — the dominant pattern for framework-cited theorems.
+    if let Some(dotted) = dotted_path_text(lemma.as_ref()) {
+        return Some((dotted, outer_args.as_slice()));
+    }
+    // Call shape over a multi-segment dotted callee:
+    // `apply mathlib4.foo.bar(x, y);` — render the path dotted
+    // and use the call args.
+    if let ExprKind::Call { func, args, type_args } = &lemma.as_ref().kind {
+        if type_args.is_empty() {
+            if let Some(dotted) = dotted_path_text(func.as_ref()) {
+                return Some((dotted, args.as_slice()));
+            }
+        }
     }
     None
 }
@@ -198,7 +248,7 @@ fn classify_apply_tactic(tactic: &TacticExpr) -> Option<(&str, &[Expr])> {
 ///
 /// Args are returned alongside so future translators can render them
 /// as positional arguments to `apply`.
-fn classify_single_apply(body: &ProofBody) -> Option<(&str, &[Expr])> {
+fn classify_single_apply(body: &ProofBody) -> Option<(String, &[Expr])> {
     match body {
         ProofBody::Tactic(t) => classify_apply_tactic(t),
         ProofBody::Structured(s) => {
@@ -258,12 +308,7 @@ impl ProofBodyRenderer for CoqProofBodyRenderer {
                 // `classify_single_apply`.
                 render_single_apply_coq(body)
             }
-            other => TranslatedProofBody::Fallback {
-                reason: format!(
-                    "Coq translator: proof-body kind {:?} not yet covered (V0 covers Term + single-apply)",
-                    other,
-                ),
-            },
+            ProofBodyKind::ByMethod => render_by_method_coq(body),
         }
     }
 }
@@ -343,12 +388,7 @@ impl ProofBodyRenderer for LeanProofBodyRenderer {
             ProofBodyKind::Tactic | ProofBodyKind::Structured => {
                 render_single_apply_lean(body)
             }
-            other => TranslatedProofBody::Fallback {
-                reason: format!(
-                    "Lean translator: proof-body kind {:?} not yet covered (V0 covers Term + single-apply)",
-                    other,
-                ),
-            },
+            ProofBodyKind::ByMethod => render_by_method_lean(body),
         }
     }
 }
@@ -433,11 +473,12 @@ impl ProofBodyRenderer for AgdaProofBodyRenderer {
             ProofBodyKind::Tactic | ProofBodyKind::Structured => {
                 render_single_apply_agda(body)
             }
-            other => TranslatedProofBody::Fallback {
-                reason: format!(
-                    "Agda translator: proof-body kind {:?} not yet covered (Agda has no tactic system; V0 covers Term + single-apply only)",
-                    other,
-                ),
+            // Agda has no tactic system — by-method proofs (induction
+            // / cases / contradiction) have no direct equivalent.  A
+            // future Agda backend could route to the experimental
+            // Reflection library, but V0 falls back to postulate.
+            ProofBodyKind::ByMethod => TranslatedProofBody::Fallback {
+                reason: "Agda: by-method proofs (induction/cases) have no term-mode equivalent in vanilla Agda".to_string(),
             },
         }
     }
@@ -544,11 +585,11 @@ impl ProofBodyRenderer for DeduktiProofBodyRenderer {
             ProofBodyKind::Tactic | ProofBodyKind::Structured => {
                 render_single_apply_dedukti(body)
             }
-            other => TranslatedProofBody::Fallback {
-                reason: format!(
-                    "Dedukti translator: proof-body kind {:?} not yet covered (Dedukti has no tactic system; V0 covers Term + single-apply only)",
-                    other,
-                ),
+            // Dedukti is a logical framework — no tactics, so
+            // by-method proofs fall back.  Future encoding libraries
+            // could supply Π-style induction principles as terms.
+            ProofBodyKind::ByMethod => TranslatedProofBody::Fallback {
+                reason: "Dedukti: by-method proofs require an induction-principle library, not yet wired".to_string(),
             },
         }
     }
@@ -643,12 +684,7 @@ impl ProofBodyRenderer for IsabelleProofBodyRenderer {
             ProofBodyKind::Tactic | ProofBodyKind::Structured => {
                 render_single_apply_isabelle(body)
             }
-            other => TranslatedProofBody::Fallback {
-                reason: format!(
-                    "Isabelle translator: proof-body kind {:?} not yet covered (V0 covers Term + single-apply + primitive tactics)",
-                    other,
-                ),
-            },
+            ProofBodyKind::ByMethod => render_by_method_isabelle(body),
         }
     }
 }
@@ -784,6 +820,175 @@ fn primitive_tactic_to_lean(tactic: &TacticExpr) -> Option<String> {
         TacticExpr::Omega => "by omega".to_string(),
         _ => return None,
     })
+}
+
+// =============================================================================
+// ByMethod (induction / cases / contradiction) translation
+// =============================================================================
+//
+// `proof by induction n;` parses to `ProofBody::ByMethod(Induction
+// { on: Some(n), cases: [] })`.  When the cases list is empty (the
+// theorem leaves the per-case bodies to the foreign tool's
+// automation), the translation is a single tactic:
+//
+//   Coq:      `induction <n>.`        / `destruct <e>.`
+//   Lean:     `by induction <n>`      / `by cases <e>`
+//   Isabelle: `by (induct <n>)`       / `by (cases <e>)`
+//
+// When the cases list is non-empty, Verum's per-case proof bodies
+// would need to be rendered alongside — that's V1.  V0 falls back
+// to `Admitted.` / `sorry` for the explicit-cases shape.
+
+fn classify_by_method(body: &ProofBody) -> Option<&ProofMethod> {
+    match body {
+        ProofBody::ByMethod(m) => Some(m),
+        _ => None,
+    }
+}
+
+/// Coq translation for `proof by induction <on>` / `proof by cases <on>`
+/// when the cases list is empty (auto-discharged).  Other shapes
+/// (Contradiction, StrongInduction, WellFoundedInduction, or any
+/// non-empty cases list) fall back.
+fn render_by_method_coq(body: &ProofBody) -> TranslatedProofBody {
+    let method = match classify_by_method(body) {
+        Some(m) => m,
+        None => unreachable!("called from kind() == ByMethod arm"),
+    };
+    match method {
+        ProofMethod::Induction { on, cases } if cases.iter().count() == 0 => {
+            match on {
+                Maybe::Some(ident) => TranslatedProofBody::Translated {
+                    text: format!("induction {}.", ident.name.as_str()),
+                },
+                // Bare `induction` without target — Coq accepts on
+                // the topmost hypothesis.
+                Maybe::None => TranslatedProofBody::Translated {
+                    text: "induction.".to_string(),
+                },
+            }
+        }
+        ProofMethod::Cases { on, cases } if cases.iter().count() == 0 => {
+            // Cases scrutinee is a Heap<Expr>; render it via the Coq
+            // expression translator.  When the expression doesn't
+            // translate cleanly (rare for typical scrutinees),
+            // fall back.
+            match CoqExprRenderer::new().render(on.as_ref()) {
+                TranslatedExpr::Translated { text } => TranslatedProofBody::Translated {
+                    text: format!("destruct {}.", text),
+                },
+                TranslatedExpr::Fallback { reason, .. } => TranslatedProofBody::Fallback {
+                    reason: format!("Coq cases: scrutinee untranslatable — {}", reason),
+                },
+            }
+        }
+        ProofMethod::StrongInduction { on, cases } if cases.iter().count() == 0 => {
+            // Coq's strong-induction tactic is `induction ... using
+            // strong_induction.` (or `well_founded_induction`); the
+            // bare-name form is library-dependent.  Default emits the
+            // generic-induction form and lets Coq's automation
+            // pick up the strong-induction principle from context.
+            TranslatedProofBody::Translated {
+                text: format!("induction {} using strong_induction.", on.name.as_str()),
+            }
+        }
+        // Contradiction: requires per-step rendering of the proof
+        // body. V0 falls back.
+        ProofMethod::Contradiction { .. } => TranslatedProofBody::Fallback {
+            reason: "Coq contradiction: multi-step body not yet rendered (V0)".to_string(),
+        },
+        // Non-empty cases or well-founded: V1.
+        _ => TranslatedProofBody::Fallback {
+            reason: "Coq by-method: explicit-case bodies / well-founded induction land in V1"
+                .to_string(),
+        },
+    }
+}
+
+/// Lean translation — same coverage as Coq, but Lean syntax:
+/// `by induction <n>` / `by cases <e>`.
+fn render_by_method_lean(body: &ProofBody) -> TranslatedProofBody {
+    let method = match classify_by_method(body) {
+        Some(m) => m,
+        None => unreachable!("called from kind() == ByMethod arm"),
+    };
+    match method {
+        ProofMethod::Induction { on, cases } if cases.iter().count() == 0 => match on {
+            Maybe::Some(ident) => TranslatedProofBody::Translated {
+                text: format!("by induction {}", ident.name.as_str()),
+            },
+            Maybe::None => TranslatedProofBody::Translated {
+                text: "by induction".to_string(),
+            },
+        },
+        ProofMethod::Cases { on, cases } if cases.iter().count() == 0 => {
+            match LeanExprRenderer::new().render(on.as_ref()) {
+                TranslatedExpr::Translated { text } => TranslatedProofBody::Translated {
+                    text: format!("by cases {}", text),
+                },
+                TranslatedExpr::Fallback { reason, .. } => TranslatedProofBody::Fallback {
+                    reason: format!("Lean cases: scrutinee untranslatable — {}", reason),
+                },
+            }
+        }
+        ProofMethod::StrongInduction { on, cases } if cases.iter().count() == 0 => {
+            TranslatedProofBody::Translated {
+                text: format!(
+                    "by induction {} using Nat.strong_induction_on",
+                    on.name.as_str(),
+                ),
+            }
+        }
+        ProofMethod::Contradiction { .. } => TranslatedProofBody::Fallback {
+            reason: "Lean contradiction: multi-step body not yet rendered (V0)".to_string(),
+        },
+        _ => TranslatedProofBody::Fallback {
+            reason: "Lean by-method: explicit-case bodies / well-founded induction land in V1"
+                .to_string(),
+        },
+    }
+}
+
+/// Isabelle/HOL translation — `by (induct <n>)` / `by (cases <e>)`.
+/// Isabelle's `induct` method does both structural induction and
+/// case-split selection automatically.
+fn render_by_method_isabelle(body: &ProofBody) -> TranslatedProofBody {
+    let method = match classify_by_method(body) {
+        Some(m) => m,
+        None => unreachable!("called from kind() == ByMethod arm"),
+    };
+    match method {
+        ProofMethod::Induction { on, cases } if cases.iter().count() == 0 => match on {
+            Maybe::Some(ident) => TranslatedProofBody::Translated {
+                text: format!("by (induct {})", ident.name.as_str()),
+            },
+            Maybe::None => TranslatedProofBody::Translated {
+                text: "by induct_tac".to_string(),
+            },
+        },
+        ProofMethod::Cases { on, cases } if cases.iter().count() == 0 => {
+            match IsabelleExprRenderer::new().render(on.as_ref()) {
+                TranslatedExpr::Translated { text } => TranslatedProofBody::Translated {
+                    text: format!("by (cases \"{}\")", text),
+                },
+                TranslatedExpr::Fallback { reason, .. } => TranslatedProofBody::Fallback {
+                    reason: format!("Isabelle cases: scrutinee untranslatable — {}", reason),
+                },
+            }
+        }
+        ProofMethod::StrongInduction { on, cases } if cases.iter().count() == 0 => {
+            TranslatedProofBody::Translated {
+                text: format!("by (induct {} rule: less_induct)", on.name.as_str()),
+            }
+        }
+        ProofMethod::Contradiction { .. } => TranslatedProofBody::Fallback {
+            reason: "Isabelle contradiction: multi-step body not yet rendered (V0)".to_string(),
+        },
+        _ => TranslatedProofBody::Fallback {
+            reason: "Isabelle by-method: explicit-case bodies / well-founded induction land in V1"
+                .to_string(),
+        },
+    }
 }
 
 // =============================================================================
@@ -1461,6 +1666,229 @@ mod tests {
         let body = apply_body_via_call("lemma_x", vec![name_path_expr("p")]);
         let r = DeduktiProofBodyRenderer::new().render(&body);
         assert_eq!(r.text(), Some("lemma_x"));
+    }
+
+    // -------------------------------------------------------------
+    // ByMethod (induction / cases / strong_induction) translation
+    // -------------------------------------------------------------
+
+    fn induction_body(on: Option<&str>) -> ProofBody {
+        ProofBody::ByMethod(ProofMethod::Induction {
+            on: match on {
+                Some(n) => Maybe::Some(ident(n)),
+                None => Maybe::None,
+            },
+            cases: List::from(Vec::new()),
+        })
+    }
+
+    fn cases_body(scrutinee_name: &str) -> ProofBody {
+        ProofBody::ByMethod(ProofMethod::Cases {
+            on: Heap::new(name_path_expr(scrutinee_name)),
+            cases: List::from(Vec::new()),
+        })
+    }
+
+    fn strong_induction_body(on: &str) -> ProofBody {
+        ProofBody::ByMethod(ProofMethod::StrongInduction {
+            on: ident(on),
+            cases: List::from(Vec::new()),
+        })
+    }
+
+    fn contradiction_body(assumption: &str) -> ProofBody {
+        ProofBody::ByMethod(ProofMethod::Contradiction {
+            assumption: ident(assumption),
+            proof: List::from(Vec::new()),
+        })
+    }
+
+    // -------------------------------------------------------------
+    // Multi-segment dotted-path apply targets (#153 — mathlib4 etc.)
+    // -------------------------------------------------------------
+
+    fn dotted_path_expr(segments: &[&str]) -> Expr {
+        let segs: Vec<PathSegment> = segments
+            .iter()
+            .map(|s| PathSegment::Name(ident(s)))
+            .collect();
+        let path = Path::new(List::from(segs), span());
+        Expr::new(ExprKind::Path(path), span())
+    }
+
+    fn apply_dotted(segments: &[&str], outer_args: Vec<Expr>) -> ProofBody {
+        ProofBody::Tactic(TacticExpr::Apply {
+            lemma: Heap::new(dotted_path_expr(segments)),
+            args: List::from(outer_args),
+        })
+    }
+
+    #[test]
+    fn coq_renders_apply_with_multi_segment_path() {
+        let body = apply_dotted(&["mathlib4", "lambda", "ChurchRosser"], vec![]);
+        assert_eq!(
+            CoqProofBodyRenderer::new().render(&body).text(),
+            Some("apply mathlib4.lambda.ChurchRosser."),
+        );
+    }
+
+    #[test]
+    fn lean_renders_apply_with_multi_segment_path() {
+        let body = apply_dotted(&["Mathlib", "Computability", "ChurchRosser"], vec![]);
+        assert_eq!(
+            LeanProofBodyRenderer::new().render(&body).text(),
+            Some("by apply Mathlib.Computability.ChurchRosser"),
+        );
+    }
+
+    #[test]
+    fn isabelle_renders_apply_with_multi_segment_path() {
+        let body = apply_dotted(&["HOL", "List", "rev_rev"], vec![]);
+        assert_eq!(
+            IsabelleProofBodyRenderer::new().render(&body).text(),
+            Some("by (rule HOL.List.rev_rev)"),
+        );
+    }
+
+    #[test]
+    fn agda_renders_apply_with_multi_segment_path() {
+        let body = apply_dotted(&["Agda", "Builtin", "Equality", "refl"], vec![]);
+        assert_eq!(
+            AgdaProofBodyRenderer::new().render(&body).text(),
+            Some("Agda.Builtin.Equality.refl"),
+        );
+    }
+
+    #[test]
+    fn dedukti_renders_apply_with_multi_segment_path() {
+        let body = apply_dotted(&["std", "ChurchRosser"], vec![]);
+        assert_eq!(
+            DeduktiProofBodyRenderer::new().render(&body).text(),
+            Some("std.ChurchRosser"),
+        );
+    }
+
+    #[test]
+    fn coq_renders_call_with_multi_segment_callee() {
+        // `apply mathlib4.foo.bar(x, y);` — parser places the call
+        // inside Apply.lemma.
+        let dotted = dotted_path_expr(&["mathlib4", "foo", "bar"]);
+        let call = Expr::new(
+            ExprKind::Call {
+                func: Heap::new(dotted),
+                type_args: List::new(),
+                args: List::from(vec![name_path_expr("x"), name_path_expr("y")]),
+            },
+            span(),
+        );
+        let body = ProofBody::Tactic(TacticExpr::Apply {
+            lemma: Heap::new(call),
+            args: List::new(),
+        });
+        assert_eq!(
+            CoqProofBodyRenderer::new().render(&body).text(),
+            Some("apply mathlib4.foo.bar."),
+        );
+    }
+
+    #[test]
+    fn coq_renders_induction_with_target() {
+        let body = induction_body(Some("n"));
+        assert_eq!(
+            CoqProofBodyRenderer::new().render(&body).text(),
+            Some("induction n."),
+        );
+    }
+
+    #[test]
+    fn coq_renders_induction_without_target() {
+        let body = induction_body(None);
+        assert_eq!(
+            CoqProofBodyRenderer::new().render(&body).text(),
+            Some("induction."),
+        );
+    }
+
+    #[test]
+    fn coq_renders_cases_on_scrutinee() {
+        let body = cases_body("scrut");
+        assert_eq!(
+            CoqProofBodyRenderer::new().render(&body).text(),
+            Some("destruct scrut."),
+        );
+    }
+
+    #[test]
+    fn coq_renders_strong_induction() {
+        let body = strong_induction_body("n");
+        assert_eq!(
+            CoqProofBodyRenderer::new().render(&body).text(),
+            Some("induction n using strong_induction."),
+        );
+    }
+
+    #[test]
+    fn coq_falls_back_on_contradiction() {
+        let body = contradiction_body("h");
+        assert!(matches!(
+            CoqProofBodyRenderer::new().render(&body),
+            TranslatedProofBody::Fallback { .. },
+        ));
+    }
+
+    #[test]
+    fn lean_renders_induction_with_target() {
+        let body = induction_body(Some("n"));
+        assert_eq!(
+            LeanProofBodyRenderer::new().render(&body).text(),
+            Some("by induction n"),
+        );
+    }
+
+    #[test]
+    fn lean_renders_cases_on_scrutinee() {
+        let body = cases_body("scrut");
+        assert_eq!(
+            LeanProofBodyRenderer::new().render(&body).text(),
+            Some("by cases scrut"),
+        );
+    }
+
+    #[test]
+    fn isabelle_renders_induction_with_target() {
+        let body = induction_body(Some("n"));
+        assert_eq!(
+            IsabelleProofBodyRenderer::new().render(&body).text(),
+            Some("by (induct n)"),
+        );
+    }
+
+    #[test]
+    fn isabelle_renders_cases_on_scrutinee() {
+        let body = cases_body("scrut");
+        assert_eq!(
+            IsabelleProofBodyRenderer::new().render(&body).text(),
+            Some("by (cases \"scrut\")"),
+        );
+    }
+
+    #[test]
+    fn agda_falls_back_on_by_method_induction() {
+        // Agda has no tactic-mode induction in vanilla form.
+        let body = induction_body(Some("n"));
+        assert!(matches!(
+            AgdaProofBodyRenderer::new().render(&body),
+            TranslatedProofBody::Fallback { .. },
+        ));
+    }
+
+    #[test]
+    fn dedukti_falls_back_on_by_method() {
+        let body = induction_body(Some("n"));
+        assert!(matches!(
+            DeduktiProofBodyRenderer::new().render(&body),
+            TranslatedProofBody::Fallback { .. },
+        ));
     }
 
     #[test]
