@@ -26,9 +26,18 @@
 module core.database.mysql.auth.caching_sha2;
 
 mount core.*;
-mount base.{Result, Ok, Err, Text};
+mount base.{Result, Ok, Err, Text, Maybe, None, Some};
 mount collections.List;
 mount core.security.hash.sha256.Sha256;
+mount core.encoding.pem.{decode_one as pem_decode_one, PemBlock, PemError};
+mount core.encoding.der.{DerReader};
+mount core.security.x509.spki.{
+    parse_spki, Spki, SubjectPublicKey, SpkiRsaPublicKey, Rsa,
+};
+mount core.security.sig.rsa.RsaPublicKey;
+mount core.security.encrypt.rsa_oaep.{
+    encrypt_oaep_sha1, OaepError,
+};
 
 // -----------------------------------------------------------------------------
 // Fast-path scramble.
@@ -107,4 +116,256 @@ fn arr32_to_list(arr: &[Byte; 32]) -> List<Byte> {
         i = i + 1;
     }
     out
+}
+
+// =============================================================================
+// Full-auth path — RSA-OAEP password encryption
+// =============================================================================
+//
+// When the server replies with `0x04` (CsFullAuthRequired):
+//
+//   * Over TLS — client sends `password || 0x00` in cleartext
+//     (the TLS layer protects it). Implemented inline at the
+//     connection driver: just send `make_cleartext_password(pw)`.
+//
+//   * Over plain TCP — client requests the server's RSA public
+//     key, encrypts `password XOR auth_plugin_data` with RSA-OAEP-
+//     SHA1, sends ciphertext. The server decrypts, recomputes the
+//     XOR, and confirms.
+//
+// This module provides the pieces; `connection.vr` strings them
+// together based on whether TLS is active.
+//
+// Spec ties: §6.3.2 (caching_sha2_password full_auth flow).
+// =============================================================================
+
+/// AuthMoreData first-byte sentinel asking the server to send its
+/// RSA public key. Sent by the client when the server signalled
+/// full_auth (0x04) and we're on a plain-TCP connection.
+public const FULL_AUTH_REQUEST_PUBKEY: Byte = 0x02_u8;
+
+/// Build the cleartext-password response used over TLS (RFC-style:
+/// password bytes followed by a NUL terminator).
+public fn make_cleartext_password(password: &[Byte]) -> List<Byte> {
+    let n = password.len() as Int;
+    let mut out: List<Byte> = List.with_capacity(n + 1);
+    let mut i: Int = 0;
+    while i < n {
+        out.push(password[i]);
+        i = i + 1;
+    }
+    out.push(0x00_u8);
+    out
+}
+
+/// XOR-fold a password against the 20-byte server nonce. The
+/// password may be longer or shorter than the nonce; per the
+/// MySQL protocol we wrap the nonce around (MySQL's reference
+/// libmysql does the same — `xor_string` in `viosocket.cc`).
+/// Empty password yields empty output, matching the libmysql
+/// behaviour.
+fn xor_password_with_nonce(password: &[Byte], nonce: &[Byte]) -> List<Byte> {
+    let np = password.len() as Int;
+    let nn = nonce.len() as Int;
+    if np == 0 || nn == 0 {
+        return List.new();
+    }
+    let mut out: List<Byte> = List.with_capacity(np);
+    let mut i: Int = 0;
+    while i < np {
+        let p = (password[i] as Int) & 0xFF;
+        let n = (nonce[i % nn] as Int) & 0xFF;
+        out.push(((p ^ n) & 0xFF) as Byte);
+        i = i + 1;
+    }
+    out
+}
+
+// =============================================================================
+// FullAuthError
+// =============================================================================
+
+public type FullAuthError is
+      FaePemDecode(PemError)        // server sent malformed PEM
+    | FaeDerDecode                   // PEM body is not valid SPKI DER
+    | FaeNotRsaKey                   // SPKI is for a non-RSA key
+    | FaeOaep(OaepError);            // OAEP encrypt failed (modulus
+                                     // shape, message length, RNG)
+
+implement Display for FullAuthError {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
+        match self {
+            FaePemDecode(_)   => f.write_str("caching_sha2 full_auth: PEM decode failed"),
+            FaeDerDecode      => f.write_str("caching_sha2 full_auth: SPKI DER decode failed"),
+            FaeNotRsaKey      => f.write_str("caching_sha2 full_auth: server key is not RSA"),
+            FaeOaep(oe)       => {
+                f.write_str("caching_sha2 full_auth: OAEP failure: ")?;
+                oe.fmt(f)
+            }
+        }
+    }
+}
+
+// =============================================================================
+// Public-key parsing
+// =============================================================================
+
+/// Parse the server's RSA public key from the PEM blob it sent
+/// (after a `0x02` request). Returns the typed `RsaPublicKey`
+/// ready for `encrypt_oaep_sha1`.
+///
+/// Pipeline: PEM → base64 body → SPKI DER → RsaPublicKey.
+/// Rejects non-RSA SPKI shapes (`FaeNotRsaKey`) — MySQL
+/// caching_sha2 always uses RSA, so any other algorithm is a
+/// protocol violation.
+public fn parse_server_pubkey(pem_text: &Text) -> Result<RsaPublicKey, FullAuthError> {
+    let block: PemBlock = match pem_decode_one(pem_text) {
+        Ok(b)  => b,
+        Err(e) => return Err(FaePemDecode(e)),
+    };
+    let mut reader = DerReader.from_bytes(block.contents);
+    let spki: Spki = match parse_spki(&mut reader) {
+        Ok(s)  => s,
+        Err(_) => return Err(FaeDerDecode),
+    };
+    match spki.public_key {
+        Rsa(rsa_spki) => Ok(RsaPublicKey {
+            n: rsa_spki.modulus.clone(),
+            e: rsa_spki.exponent.clone(),
+        }),
+        _ => Err(FaeNotRsaKey),
+    }
+}
+
+/// Build the auth response for plain-TCP full_auth. Steps:
+///
+///   1. XOR password (NUL-terminated) with the 20-byte nonce
+///      from the Initial Handshake (wrapping around).
+///   2. Encrypt with RSA-OAEP-SHA1 using the server's public
+///      key. Output is exactly `pubkey.modulus_bytes()` bytes.
+///
+/// The connection driver sends the result as the auth packet
+/// payload directly; the server decrypts, recomputes the XOR
+/// against the same nonce, and validates against its on-disk
+/// SHA-256 password hash.
+///
+/// Caller MUST ensure TLS is NOT active at this call site —
+/// over TLS the cleartext form (`make_cleartext_password`) is
+/// preferred per spec §6.3.2 + RFC 7677 §3.5 hardening
+/// recommendation. The `@allow_rsa_password_over_insecure`
+/// attribute (a separate compile-time gate) is the canonical
+/// audit-trail mechanism for plain-TCP full_auth.
+public fn build_full_auth_response(
+    pubkey: &RsaPublicKey,
+    password: &[Byte],
+    nonce: &[Byte],
+) -> Result<List<Byte>, FullAuthError> {
+    // Step 1: NUL-terminate the password, then XOR with nonce.
+    let nul_terminated = make_cleartext_password(password);
+    let xored = xor_password_with_nonce(nul_terminated.as_slice(), nonce);
+
+    // Step 2: RSA-OAEP-SHA1 encrypt with empty label.
+    let empty_label: List<Byte> = List.new();
+    match encrypt_oaep_sha1(pubkey, xored.as_slice(), empty_label.as_slice()) {
+        Ok(ct) => Ok(ct),
+        Err(e) => Err(FaeOaep(e)),
+    }
+}
+
+// =============================================================================
+// TOFU pubkey cache
+// =============================================================================
+//
+// Trust-on-first-use cache keyed by server-host. The first
+// full_auth call to a given host fetches the PEM via the wire
+// (one extra round-trip), parses + caches; subsequent full_auth
+// calls reuse the cached `RsaPublicKey` directly. Caches are
+// per-process and intentionally not persistent — server key
+// rotation invalidates by drop on next full_auth ER (the server
+// will reject the OAEP-encrypted password produced by the stale
+// key, the client invalidates and re-fetches).
+
+type ServerPubkeyEntry is {
+    server_host: Text,
+    pubkey: RsaPublicKey,
+};
+
+public type ServerPubkeyCache is {
+    entries: List<ServerPubkeyEntry>,
+};
+
+implement ServerPubkeyCache {
+    public fn new() -> ServerPubkeyCache {
+        ServerPubkeyCache { entries: List.new() }
+    }
+
+    /// Look up by server-host. Returns a clone of the cached
+    /// `RsaPublicKey` on hit (cheap — `RsaPublicKey { n, e }` is
+    /// two `List<Byte>` clones, ~512 bytes total for RSA-2048).
+    public fn lookup(&self, server_host: &Text) -> Maybe<RsaPublicKey> {
+        let mut i: Int = 0;
+        while i < self.entries.len() as Int {
+            if self.entries[i].server_host == *server_host {
+                return Some(RsaPublicKey {
+                    n: self.entries[i].pubkey.n.clone(),
+                    e: self.entries[i].pubkey.e.clone(),
+                });
+            }
+            i = i + 1;
+        }
+        None
+    }
+
+    /// Insert (or replace) the entry for `server_host`. Replace
+    /// semantics on hit cover the server key rotation case — a
+    /// fresh PEM from the server overrides the stale cache.
+    public fn insert(&mut self, server_host: Text, pubkey: RsaPublicKey) {
+        let mut i: Int = 0;
+        while i < self.entries.len() as Int {
+            if self.entries[i].server_host == server_host {
+                self.entries[i].pubkey = pubkey;
+                return;
+            }
+            i = i + 1;
+        }
+        self.entries.push(ServerPubkeyEntry {
+            server_host: server_host,
+            pubkey: pubkey,
+        });
+    }
+
+    /// Drop a single entry — invoked when the server rejects a
+    /// freshly-built full_auth response (the cached pubkey is
+    /// presumed stale).
+    public fn invalidate(&mut self, server_host: &Text) -> Bool {
+        let mut victim: Int = -1;
+        let mut i: Int = 0;
+        while i < self.entries.len() as Int {
+            if self.entries[i].server_host == *server_host {
+                victim = i;
+                break;
+            }
+            i = i + 1;
+        }
+        if victim < 0 { return false; }
+        let n = self.entries.len() as Int;
+        let mut new_entries: List<ServerPubkeyEntry> = List.with_capacity(n - 1);
+        let mut k: Int = 0;
+        while k < n {
+            if k != victim {
+                new_entries.push(ServerPubkeyEntry {
+                    server_host: self.entries[k].server_host.clone(),
+                    pubkey: RsaPublicKey {
+                        n: self.entries[k].pubkey.n.clone(),
+                        e: self.entries[k].pubkey.e.clone(),
+                    },
+                });
+            }
+            k = k + 1;
+        }
+        self.entries = new_entries;
+        true
+    }
+
+    public fn len(&self) -> Int { self.entries.len() as Int }
 }
