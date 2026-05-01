@@ -33,6 +33,11 @@ pub(super) mod calls;
 // Bypasses the libSystem FFI chain — see VBC-1 architecture notes.
 pub(super) mod shell_runtime;
 
+// High-level Rust intercepts for file I/O (read_to_string, write,
+// read, write_bytes, exists).  Sibling to shell_runtime; same Tier-0
+// architecture (bypass libSystem FFI, use std::fs directly).
+pub(super) mod file_runtime;
+
 // Debug, assert, panic (0xD6-0xD9)
 pub(super) mod debug;
 
