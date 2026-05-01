@@ -126,12 +126,33 @@ implement Readiness {
     }
 
     /// True iff NOT draining AND every registered check is ready.
+    ///
+    /// CRITICAL #318 fix — the previous implementation held
+    /// `self.checks.lock()` ACROSS the `c.is_ready().await` boundary
+    /// inside the loop.  Holding a non-async Mutex across `.await`
+    /// is a classic deadlock pattern: any task that called
+    /// `Readiness::add()` while a check's future was suspended
+    /// would deadlock the runtime.  Under the multi-threaded
+    /// scheduler (#271) this becomes a true cross-thread deadlock.
+    ///
+    /// The fix: clone the Heap<dyn ReadinessCheck> handles under
+    /// the lock, drop the lock, then iterate the clones.  Each
+    /// `Heap<T>` clone is a refcount bump (CBGR-tracked), so the
+    /// snapshot is cheap.  Holding-pattern is now lock-acquire →
+    /// clone N handles → lock-release → await on each.
     pub async fn is_ready(&self) -> Bool {
         if self.draining.load(MemoryOrdering.Acquire) {
             return false;
         }
-        let checks = self.checks.lock();
-        for c in checks.iter() {
+        let checks_snap: List<Heap<dyn ReadinessCheck>> = {
+            let g = self.checks.lock();
+            let mut out = List.with_capacity(g.len());
+            for c in g.iter() {
+                out.push(c.clone());
+            }
+            out
+        };
+        for c in checks_snap.iter() {
             if !c.is_ready().await {
                 return false;
             }
@@ -142,13 +163,25 @@ implement Readiness {
     /// Render a multi-line diagnostic body, one check per line. Returned
     /// as the response body when readiness fails so operators can see
     /// which dependency is blocking traffic.
+    ///
+    /// CRITICAL #318 fix — symmetric to is_ready: snapshot the
+    /// checks list under the lock, drop the lock, then iterate
+    /// the awaits.  Eliminates the held-Mutex-across-await
+    /// deadlock pattern.
     pub async fn diagnostic_body(&self) -> Text {
         let mut out = Text.builder();
         if self.draining.load(MemoryOrdering.Acquire) {
             out.push_str("draining=true\n");
         }
-        let checks = self.checks.lock();
-        for c in checks.iter() {
+        let checks_snap: List<Heap<dyn ReadinessCheck>> = {
+            let g = self.checks.lock();
+            let mut snap = List.with_capacity(g.len());
+            for c in g.iter() {
+                snap.push(c.clone());
+            }
+            snap
+        };
+        for c in checks_snap.iter() {
             let ok = c.is_ready().await;
             let mark = if ok { "ok  " } else { "FAIL" };
             out.push_str(f"{mark} {c.name()}\n");
