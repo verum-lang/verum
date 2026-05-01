@@ -34,6 +34,7 @@ module core.database.postgres.connection;
 
 mount core.*;
 mount base.{Result, Ok, Err, Text, Maybe, None, Some};
+mount base.memory.Shared;
 mount collections.List;
 mount core.net.tcp.TcpStream;
 mount core.database.common.error.{DbError, AdapterId, AdapterSpecific};
@@ -63,6 +64,7 @@ mount core.database.postgres.auth.scram.{
     scram_client_new,
 };
 mount core.database.common.types.{WireValue, WvNull, WvPresent};
+mount core.database.postgres.notify.NotifyDispatcher;
 
 // -----------------------------------------------------------------------------
 // Connection state — observable from outside.
@@ -96,9 +98,18 @@ public type PgConnection is {
     last_formats: List<Int>,
     /// FIFO buffer of LISTEN/NOTIFY async events received between
     /// query rounds. `read_message` appends here whenever it sees
-    /// a `BmNotification(...)` frame; user code drains via
-    /// `take_notifications()`. Spec database.md §6.1.7.
+    /// a `BmNotification(...)` frame AND no high-level dispatcher
+    /// is registered; user code drains via `take_notifications()`.
+    /// Spec database.md §6.1.7.
     notifications: List<NotificationResponse>,
+    /// Optional high-level dispatcher (channel-keyed fan-out + rate
+    /// warning). When `Some`, `read_message` routes
+    /// `NotificationResponse` frames through `dispatcher.dispatch(&n)`
+    /// AND still appends to the legacy buffer for backwards
+    /// compatibility. When `None`, only the legacy buffer is
+    /// populated. Caller registers via `attach_dispatcher` /
+    /// `detach_dispatcher`. Spec database.md §6.1 (LISTEN/NOTIFY).
+    dispatcher: Maybe<Shared<NotifyDispatcher>>,
 };
 
 // -----------------------------------------------------------------------------
@@ -141,6 +152,7 @@ public fn connect(config: &PgConfig) -> Result<PgConnection, DbError> {
         tx_status: TxIdle,
         last_formats: List.new(),
         notifications: List.new(),
+        dispatcher: None,
     };
 
     // Send Startup.
@@ -490,6 +502,47 @@ implement PgConnection {
     // the server is allowed to push. `read_message` demuxes them
     // into `conn.notifications`; the methods below are the public
     // drain / subscribe interface.
+    //
+    // Two consumption patterns:
+    //   * Legacy poll-based: caller invokes `take_notifications` /
+    //     `wait_for_notification` to drain the FIFO buffer.
+    //   * High-level stream-based: caller registers a
+    //     `Shared<NotifyDispatcher>` via `attach_dispatcher`;
+    //     subsequent NotificationResponse frames fan out to every
+    //     subscriber on the matching channel via the dispatcher's
+    //     channel-keyed routing. Stream API per
+    //     `core.database.postgres.notify`.
+    //
+    // Both paths coexist — registering a dispatcher does NOT
+    // suppress the legacy buffer, so backwards-compatible callers
+    // keep working. To avoid the legacy buffer growing unboundedly
+    // when only the dispatcher is consumed, callers either use one
+    // pattern or call `take_notifications` periodically as a drain.
+
+    /// Register a high-level dispatcher. NotificationResponse frames
+    /// arriving after this call fan out to every subscriber managed
+    /// by the dispatcher (channel-keyed broadcast). Calling twice
+    /// replaces the previous dispatcher.
+    public fn attach_dispatcher(&mut self, dispatcher: Shared<NotifyDispatcher>) {
+        self.dispatcher = Some(dispatcher);
+    }
+
+    /// Drop the dispatcher registration. Notifications fall back to
+    /// the legacy buffer-only behaviour. Existing subscribers on the
+    /// dispatcher continue to receive frames as long as it stays
+    /// alive elsewhere — this only severs the routing FROM this
+    /// connection.
+    public fn detach_dispatcher(&mut self) {
+        self.dispatcher = None;
+    }
+
+    /// Whether a high-level dispatcher is currently attached.
+    public fn has_dispatcher(&self) -> Bool {
+        match &self.dispatcher {
+            Some(_) => true,
+            None    => false,
+        }
+    }
 
     /// Subscribe to `channel`. Issues `LISTEN <channel>`; subsequent
     /// `NOTIFY` calls (from this or any other connection) deliver
@@ -818,6 +871,17 @@ fn read_message(conn: &mut PgConnection) -> Result<BackendMessage, DbError> {
                 // distinction; callers drain via `take_notifications`.
                 match msg {
                     BmNotification(n) => {
+                        // High-level fan-out: if a dispatcher is
+                        // registered, route the notification through
+                        // it (channel-keyed broadcast + rate-warning
+                        // metric per spec §6.1). The legacy buffer
+                        // is also populated so callers using
+                        // `take_notifications` still see the event;
+                        // both paths are non-blocking and cheap.
+                        match &conn.dispatcher {
+                            Some(d) => { d.dispatch(&n); }
+                            None    => {}
+                        }
                         conn.notifications.push(n);
                         continue;
                     }
