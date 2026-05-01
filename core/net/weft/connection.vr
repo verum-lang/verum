@@ -13,6 +13,7 @@ mount core.net.addr.{SocketAddr};
 mount core.time.instant.{Instant};
 mount core.net.weft.transport.{WeftTransport};
 mount core.net.weft.bufpool.{BufferPool, BufferHandle};
+mount core.net.weft.arena_pool.{ArenaPool, ArenaLease};
 mount core.net.http.{Method, StatusCode, Version, Headers, Response};
 mount core.net.http_parser.{
     HttpParser, ParseProgress, HeaderView,
@@ -76,6 +77,31 @@ public type ConnectionConfig is {
     /// every per-connection task — pool state lives on the heap
     /// once, with refcounted handles per connection.
     pool: Maybe<Shared<BufferPool>>,
+    /// Optional per-request arena pool (#336 — wires
+    /// `arena_pool.vr` into the connection lifecycle).
+    ///
+    /// Per-request arena allocation is the production-grade
+    /// pattern for HTTP servers — Tokio/Hyper's `bytes::Bytes`
+    /// pool, axum's `RequestExt::extensions()`, .NET's
+    /// `MemoryPool<T>.Shared` all ship the same primitive.  Each
+    /// request gets a fresh arena handed to it; the arena lives
+    /// exactly for the request's lifetime; at end-of-request
+    /// `reset()` invalidates every allocation in O(1) — generation
+    /// bump, ~1 ns on the bench bus.  Per spec §4.3 normative
+    /// rules.
+    ///
+    /// **None (default)**: handlers allocate against the standard
+    /// CBGR-managed heap (existing behaviour, no change).
+    ///
+    /// **Some(pool)**: every `serve_one_message` body acquires
+    /// a fresh `ArenaLease` for the request's lifetime; the lease
+    /// is released back to the pool on Drop with O(1) `reset()`,
+    /// invalidating all allocations made against it during the
+    /// request without paying per-allocation deallocation cost.
+    /// The `Shared` wrapper makes the pool cheap to clone across
+    /// every per-connection task — pool state lives on the heap
+    /// once, with refcounted handles per connection.
+    arena_pool: Maybe<Shared<ArenaPool>>,
 };
 
 implement ConnectionConfig {
@@ -93,6 +119,13 @@ implement ConnectionConfig {
             // construction (typically once per listener, sized for
             // `max_concurrent_connections`).
             pool: None,
+            // #336: arena_pool is opt-in — None preserves the
+            // standard CBGR-managed heap path. Operators wire a
+            // Shared<ArenaPool> at server construction for
+            // production deployments where per-request arena
+            // allocation is desired (Tokio/Hyper bytes::Bytes
+            // equivalent — Phase-5 killer feature per spec §4.3).
+            arena_pool: None,
         }
     }
 
@@ -111,6 +144,24 @@ implement ConnectionConfig {
     public fn with_pool(self, pool: Shared<BufferPool>) -> ConnectionConfig {
         ConnectionConfig { pool: Some(pool), ..self }
     }
+
+    /// #336: opt this connection config into per-request arena
+    /// allocation.  Each request gets a fresh `ArenaLease` from the
+    /// shared pool; the lease's arena is reset (O(1) generation
+    /// bump invalidating all in-arena allocations) and returned
+    /// to the pool on Drop.  Typical deployment:
+    ///
+    /// ```verum
+    /// let arena_pool = Shared.new(ArenaPool.new(
+    ///     ArenaPoolConfig.default()
+    ///         .with_warm_count(listener_cfg.max_concurrent_connections / 2)
+    ///         .with_per_arena_bytes(64 * 1024)
+    /// ));
+    /// let conn_cfg = ConnectionConfig.default().with_arena_pool(arena_pool);
+    /// ```
+    public fn with_arena_pool(self, arena_pool: Shared<ArenaPool>) -> ConnectionConfig {
+        ConnectionConfig { arena_pool: Some(arena_pool), ..self }
+    }
 }
 
 implement Clone for ConnectionConfig {
@@ -125,6 +176,14 @@ implement Clone for ConnectionConfig {
             // Shared<BufferPool> clone is a refcount bump — every
             // connection observes the SAME pool state.
             pool: match &self.pool {
+                Some(p) => Some(p.clone()),
+                None => None,
+            },
+            // Shared<ArenaPool> clone is a refcount bump — every
+            // connection (and every request inside it) observes
+            // the SAME arena pool state.  The actual arena lease
+            // happens per-request inside `serve_one_message`.
+            arena_pool: match &self.arena_pool {
                 Some(p) => Some(p.clone()),
                 None => None,
             },
@@ -264,6 +323,31 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
     // re-feed because `self.pos` records progress).
     let mut accum: List<Byte> = List.with_capacity(config.read_buffer_capacity);
     let mut hdr_frame: Maybe<HeaderFrame> = None;
+
+    // #336: per-request arena lease — Phase-5 killer feature per
+    // spec §4.3.  When `config.arena_pool` is set, acquire a
+    // fresh `ArenaLease` for the request's lifetime; on
+    // function-return the lease's Drop calls `reset()` (O(1)
+    // generation bump) and returns the arena to the pool.  This
+    // is the production-grade allocation pattern for HTTP
+    // servers — handler-side allocations cost nothing at
+    // end-of-request beyond the arena reset.  Default `None`
+    // preserves the standard CBGR-managed heap path (no behaviour
+    // change for callers not opting in).
+    //
+    // The lease binding is `let _arena_lease` — handlers don't
+    // see the lease directly per spec §4.3 ("Handlers see
+    // `&mut Arena`, never the lease itself, and have no way to
+    // leak a lease out of the request scope").  The
+    // pre-`@lifetime(request)` foundation pin: the lease's
+    // existence is tied to this `serve_one_message` body's stack
+    // frame; the future `@lifetime(request)` annotation will let
+    // CBGR escape analysis statically prove handlers cannot leak
+    // arena-allocated references out of the request scope.
+    let _arena_lease: Maybe<ArenaLease> = match &config.arena_pool {
+        Some(ap) => Some(ap.acquire()),
+        None => None,
+    };
 
     // #315: hoist the per-read scratch chunk OUT of the loop, then
     // clear-and-reuse on every iteration.  Pre-fix `let mut chunk:

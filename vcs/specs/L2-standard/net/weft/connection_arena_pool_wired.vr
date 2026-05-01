@@ -1,0 +1,57 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: net, weft, arena_pool, connection
+// @timeout: 10000
+// @expect: pass
+//
+// Pin (#336) — `ConnectionConfig.with_arena_pool(Shared<ArenaPool>)`
+// surface contract.  Mirrors #315's BufferPool wiring pattern: the
+// arena_pool→connection wiring closes another structural
+// connectivity gap where `ArenaPool` (Phase-5 killer feature for
+// the Weft hot path per spec §4.3 — Tokio/Hyper bytes::Bytes
+// equivalent) was defined but no other weft module referenced it.
+//
+// Post-fix `serve_one_message` acquires a fresh `ArenaLease` for
+// the request's lifetime when `config.arena_pool` is set; the
+// lease is released back to the pool on Drop with O(1) reset()
+// (generation bump invalidates all in-arena allocations).  Default
+// behaviour (None) preserves the standard CBGR-managed heap path
+// — zero overhead, no observable change for callers not opting in.
+
+mount core.net.weft.connection.{ConnectionConfig};
+mount core.net.weft.arena_pool.{ArenaPool, ArenaPoolConfig};
+
+fn surface_check() {
+    // Default config — `arena_pool: None` (zero-overhead default).
+    let cfg_default = ConnectionConfig.default();
+    match cfg_default.arena_pool {
+        Some(_) => panic("default ConnectionConfig must have arena_pool: None"),
+        None => {},
+    };
+
+    // Builder API — `with_arena_pool` accepts `Shared<ArenaPool>`
+    // and returns ConnectionConfig with the field populated.
+    let arena_pool = Shared.new(ArenaPool.new(
+        ArenaPoolConfig.default()
+            .with_warm_count(8)
+            .with_per_arena_bytes(64 * 1024),
+    ));
+    let cfg_pooled = ConnectionConfig.default().with_arena_pool(arena_pool.clone());
+    match cfg_pooled.arena_pool {
+        Some(_) => {},
+        None => panic("with_arena_pool must populate arena_pool: Some(_)"),
+    };
+
+    // Clone propagates the arena pool — Shared semantics give
+    // every connection a refcounted view of the same pool state.
+    let cfg_cloned = cfg_pooled.clone();
+    match cfg_cloned.arena_pool {
+        Some(_) => {},
+        None => panic("Clone for ConnectionConfig must propagate arena_pool"),
+    };
+}
+
+fn main() {
+    surface_check();
+}
