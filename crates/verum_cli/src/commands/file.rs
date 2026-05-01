@@ -315,23 +315,22 @@ pub fn run_with_tier_and_flags(
                 ..Default::default()
             };
 
-            if is_script_shaped(&input) {
-                run_script_interpreted(&input, options, args, timings, permission_flags)?;
-            } else {
-                let mut session = Session::new(options);
-                {
-                    let mut pipeline = CompilationPipeline::new(&mut session);
-                    pipeline
-                        .run_interpreter(args)
-                        .map_err(|e| CliError::RuntimeError(e.to_string()))?;
-                }
-                if timings {
-                    print_phase_timings(&session);
-                }
-                if let Some(code) = session.take_exit_code() {
-                    std::process::exit(code);
-                }
-            }
+            // Unify on `run_script_interpreted` regardless of whether
+            // the source carries a shebang or `// /// script`
+            // frontmatter.  The function gracefully degrades when the
+            // frontmatter is absent (no version check, no permission
+            // policy installation, no lockfile capture) — the pieces
+            // it adds over the legacy plain path that ALWAYS apply
+            // are the persistent VBC cache (lookup-skip-compile on
+            // hit; compile + serialise + store on miss) and the
+            // ScriptContext-driven cache key (source hash + compiler
+            // version + flags).  Pre-fix, plain `.vr` files hit a
+            // separate cache-disabled branch and paid the full
+            // stdlib-recompile cost on every invocation (~18s for
+            // typical script-mode runs); post-fix the cache is
+            // populated on first run and subsequent runs are
+            // sub-second.
+            run_script_interpreted(&input, options, args, timings, permission_flags)?;
         }
         1 => {
             // Tier 1: AOT compilation to native binary then execute.
