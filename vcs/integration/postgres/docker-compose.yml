@@ -1,0 +1,51 @@
+# Postgres integration-test harness for Spindle.
+#
+# Brings up postgres:16-alpine on 127.0.0.1:55432 with:
+#   * scram_sha_256 forced for every host connection (matches the
+#     production posture documented in spec §6.1.2 — no md5,
+#     trust, or password fallback).
+#   * pg_hba.conf bind-mounted from ./conf/pg_hba.conf.
+#   * init script ./init/init.sql creates the test role + schema.
+#   * Healthcheck via pg_isready so the runner can wait for ready.
+#   * Tmpfs data volume — every `docker compose up` is a clean DB.
+#
+# Bring up:    docker compose -f docker-compose.yml up -d
+# Wait ready:  scripts/wait_pg.sh
+# Tear down:   docker compose -f docker-compose.yml down -v
+#
+# Port choice: 55432 (instead of 5432) to avoid clashing with a
+# host-level Postgres install. The same value lives in
+# tests/conn_config.vr so test code stays in sync.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: spindle-pg-test
+    restart: "no"
+    environment:
+      POSTGRES_USER: spindle_admin
+      POSTGRES_PASSWORD: spindle_admin_pw
+      POSTGRES_DB: spindle_test
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - ./conf/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./init:/docker-entrypoint-initdb.d:ro
+    command: >
+      postgres
+        -c hba_file=/etc/postgresql/pg_hba.conf
+        -c password_encryption=scram-sha-256
+        -c log_statement=all
+        -c log_min_messages=notice
+        -c max_connections=64
+        -c shared_buffers=64MB
+    tmpfs:
+      - /var/lib/postgresql/data:rw,size=256m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spindle_admin -d spindle_test"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+      start_period: 2s
