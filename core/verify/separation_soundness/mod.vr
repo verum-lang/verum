@@ -1,0 +1,31 @@
+// =============================================================================
+// core.verify.separation_soundness — Separation-logic kernel-discharge axioms (#161)
+// =============================================================================
+//
+
+// **Kernel-discharge attestation surface for separation logic.**
+//
+
+// Mirrors `core.verify.codegen_soundness` (#162's verified-compilation
+// attestation). Each axiom in this module records a kernel-discharge
+// bridge for a separation-logic invariant — admitted-with-IOU citing
+// either a published proof or an internal kernel-side test.
+//
+
+// **Current roster** (V0):
+//
+//   1. `separation_logic_alignment` — .vr-side surface (HeapPredicate /
+//      HoareTriple / Capability in `core/logic/separation.vr`)
+//      structurally aligns with the kernel-side surface
+//      (`verum_kernel::separation_logic`). CI-pinned cardinality.
+//
+// Future entries land here as #161 progresses:
+//   * `frame_rule_soundness` — Reynolds 2002 / O'Hearn 2007.
+//   * `hoare_sequencing_soundness` — Hoare 1969 sequential composition.
+//   * `consequence_rule_soundness` — pre/post weakening.
+//   * `points_to_disjointness` — sep_conj's heap-split invariant.
+// =============================================================================
+
+module core.verify.separation_soundness.mod;
+
+mount super.separation_logic_alignment.{kernel_separation_logic_alignment_is_sound};

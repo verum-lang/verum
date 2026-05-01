@@ -49,6 +49,7 @@ public module certificate;
 public module coherence;
 public module kernel_soundness;
 public module codegen_soundness;
+public module separation_soundness;
 
 // Re-export the user-facing symbols at the umbrella so callers
 // can `public mount core.verify.*;` without traversing the sub-paths.
