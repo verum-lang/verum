@@ -26,3 +26,4 @@ public module frame;
 public module frontend;
 public module backend;
 public module types;
+public module codec;

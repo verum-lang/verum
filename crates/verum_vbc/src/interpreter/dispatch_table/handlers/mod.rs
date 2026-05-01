@@ -68,6 +68,14 @@ pub(super) mod process_runtime;
 // and friends work unchanged in `verum run`.
 pub(super) mod runtime_bridge;
 
+// Async-runtime intercepts (#334): `block_on` under interpreter
+// mode where async fns are not compiled to suspend/resume state
+// machines. The Verum-side `block_on` body calls `.poll()` on
+// the value, but in interpreter mode the value IS the awaited
+// result (not a Future). Intercept short-circuits to return
+// the value directly. AOT keeps the full Future-poll dispatch.
+pub(super) mod async_runtime;
+
 // Debug, assert, panic (0xD6-0xD9)
 pub(super) mod debug;
 
