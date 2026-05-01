@@ -407,9 +407,11 @@ impl TypeLevelEvaluator {
     }
 
     /// Read mirror of the configured maximum evaluation depth.
-    /// Forward-looking: not yet enforced inside `apply_function`,
-    /// but surfaced so embedders can confirm the value the
-    /// manifest set.
+    /// Load-bearing as of #302: enforced inside `apply_function`
+    /// via the depth-gate that returns `RecursionLimitExceeded`
+    /// when exceeded.  Surfaced as a getter so embedders can
+    /// confirm the value the manifest set without going through
+    /// the full `apply_function` execution path.
     pub fn configured_max_depth(&self) -> usize {
         self.config.max_depth
     }
