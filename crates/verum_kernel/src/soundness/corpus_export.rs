@@ -1013,9 +1013,16 @@ impl CorpusBackend for IsabelleCorpusBackend {
                         "lemma {}{}{} : \"{}\"\n",
                         spec.name, isa_generics, isa_params, isa_type,
                     ));
-                    content.push_str("  ");
-                    content.push_str(tactic.trim());
-                    content.push('\n');
+                    // Multi-line proof bodies (apply-chains, #153 V2)
+                    // need every line indented for proof-block
+                    // readability. Isabelle is whitespace-insensitive
+                    // here so this is purely cosmetic, but keeps the
+                    // emitted .thy files diff-friendly with Coq.
+                    for line in tactic.trim().lines() {
+                        content.push_str("  ");
+                        content.push_str(line);
+                        content.push('\n');
+                    }
                 }
                 _ => {
                     content.push_str(&format!(
