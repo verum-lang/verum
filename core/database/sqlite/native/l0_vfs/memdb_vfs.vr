@@ -330,17 +330,29 @@ implement VfsProtocol for MemDbVfs {
         Ok(path.clone())
     }
 
-    fn random_bytes(&self, len: Int) -> List<Byte> {
+    fn random_bytes(&self, len: Int) -> Result<List<Byte>, VfsError> {
         // Deterministic placeholder — DST tests should inject a
-        // MockVfs. Production randomness will plumb through
-        // `core/sys/linux/syscall.getrandom` once PosixVfs lands.
-        let mut out: List<Byte> = List.new();
-        let mut i: Int = 0;
-        while i < len {
-            out.push((i & 0xFF) as Byte);
-            i = i + 1;
+        // MockVfs.  Production randomness MUST plumb through a real
+        // CSPRNG (PosixVfs.random_bytes); using MemDbVfs for SQL
+        // features that depend on randomness (`RANDOMBLOB()`, WAL
+        // salts in shared-cache memory mode) is exploitable, so the
+        // memdb backend signals "predictable entropy only" via
+        // `Err(VfsError::IoError)` — callers that legitimately want
+        // the deterministic counter (DST replay) can ignore the
+        // error variant by predicate-matching on `MemDbVfs` first.
+        //
+        // Pre-fix the bare counter masqueraded as randomness without
+        // any signal that it was deterministic — combined with the
+        // pre-fix `random_bytes` protocol returning `List<Byte>`
+        // instead of `Result<...>`, callers had no way to detect the
+        // weakness.
+        if len <= 0 {
+            return Ok(List.new());
         }
-        out
+        Err(VfsError {
+            kind: IoError,
+            message: "MemDbVfs.random_bytes: deterministic placeholder; inject a CSPRNG-backed VFS for production".clone(),
+        })
     }
 
     fn current_time(&self) -> Timestamp {

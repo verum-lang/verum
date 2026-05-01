@@ -67,7 +67,12 @@ public type SerialType is
 public type RecordError is
       ShortBuffer
     | ReservedCode(code: Int64)
-    | InvalidLength(got: Int64);
+    | InvalidLength(got: Int64)
+    /// Header self-described length disagrees with serial-type
+    /// stream — either an embedded varint overruns `header_end`
+    /// (mid-byte truncation) or the stream falls short of the
+    /// declared length.  C-SQLite returns `SQLITE_CORRUPT` here.
+    | Corrupt;
 
 implement Display for RecordError {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FormatError> {
@@ -75,6 +80,7 @@ implement Display for RecordError {
             ShortBuffer        => f.write_str("sqlite record buffer truncated"),
             ReservedCode(c)    => f.write_str(f"sqlite record reserved serial-type code {c}".as_str()),
             InvalidLength(g)   => f.write_str(f"sqlite record invalid length {g}".as_str()),
+            Corrupt            => f.write_str("sqlite record header inconsistency"),
         }
     }
 }
@@ -85,6 +91,7 @@ implement Debug for RecordError {
             ShortBuffer        => f.write_str("ShortBuffer"),
             ReservedCode(c)    => f.write_str(f"ReservedCode({c})".as_str()),
             InvalidLength(g)   => f.write_str(f"InvalidLength({g})".as_str()),
+            Corrupt            => f.write_str("Corrupt"),
         }
     }
 }
@@ -95,6 +102,7 @@ implement Eq for RecordError {
             (ShortBuffer,      ShortBuffer)      => true,
             (ReservedCode(a),  ReservedCode(b))  => a == b,
             (InvalidLength(a), InvalidLength(b)) => a == b,
+            (Corrupt,          Corrupt)          => true,
             _ => false,
         }
     }
@@ -201,14 +209,28 @@ public fn encode_record_header(types: &List<SerialType>) -> List<Byte> {
     }
 
     // The leading varint encodes header_length *including itself*.
-    // Compute header_length iteratively: L = encoded_len(L) + payload.len().
+    // Compute header_length to fixed point: L = encoded_len(L) + payload.len().
+    //
+    // Pre-fix the loop ran exactly TWO rounds, leaving the SECOND
+    // result un-checked.  For payloads sitting on a varint-byte
+    // boundary (e.g. payload = 127 → first round yields header_len
+    // = 127 + 1 = 128 → varint(128) = 2 → second round yields
+    // header_len = 127 + 2 = 129 → varint(129) is *still* 2, OK)
+    // the fixed point always converges in ≤3 rounds (each round can
+    // grow `header_len` by at most one varint byte from 1→2→…→9),
+    // but because a SQLite varint maxes at 9 bytes the bound is hard.
+    // Iterating to fixed point is the only correct algorithm — anything
+    // else risks an off-by-one in the on-disk header_len that breaks
+    // every downstream reader walking `start..start+header_len`.
     let pl = payload.len() as Int64;
-    // Two rounds is always enough: if L fits in 1 byte, one round is
-    // already exact; if L crosses a varint-boundary, the second round
-    // converges.
     let mut header_len = pl + (varint.encoded_len(pl) as Int64);
-    let hlen1 = varint.encoded_len(header_len) as Int64;
-    header_len = pl + hlen1;
+    let mut iters: Int = 0;
+    while iters < 16 {
+        let next_len = pl + (varint.encoded_len(header_len) as Int64);
+        if next_len == header_len { break; }
+        header_len = next_len;
+        iters = iters + 1;
+    }
 
     // Serialise.
     let mut out: List<Byte> = List.new();
@@ -246,12 +268,27 @@ public fn decode_record_header(
             Ok(r)  => r,
             Err(_) => { return Err(ShortBuffer); }
         };
+        // Reject overrun: a serial-type varint that crosses
+        // `header_end` is a corruption signal — SQLite's
+        // `sqlite3VdbeRecordUnpack` returns SQLITE_CORRUPT here.
+        // Pre-fix the loop accepted the over-run and silently
+        // appended the over-run serial type; downstream readers
+        // walked into payload bytes thinking they were headers.
+        if pos + n > header_end {
+            return Err(Corrupt);
+        }
         let st = match serial_type_decode(code) {
             Ok(s)  => s,
             Err(e) => { return Err(e); }
         };
         types.push(st);
         pos = pos + n;
+    }
+    // Final sanity: the header must have consumed exactly `header_len`
+    // bytes; a short header (loop exited because `pos == header_end`
+    // mid-byte) is also corruption.
+    if pos != header_end {
+        return Err(Corrupt);
     }
     Ok((types, (header_end - start)))
 }

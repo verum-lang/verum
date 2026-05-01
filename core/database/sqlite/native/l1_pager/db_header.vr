@@ -239,7 +239,11 @@ public fn parse_header_from_list(buf: &List<Byte>) -> Result<DatabaseHeader, Tex
     let cache_size_raw = read_u32_be_list(buf, 48);
     let largest_root   = read_u32_be_list(buf, 52);
     let text_enc_raw   = read_u32_be_list(buf, 56);
-    let text_encoding  = match text_encoding_from_u32(text_enc_raw) {
+    // Pre-fix called the non-existent `text_encoding_from_u32` —
+    // a guaranteed runtime ICE the moment any caller invoked
+    // `parse_header_from_list`.  The actual symbol is
+    // `encoding_from_u32` (defined at line 98 of this file).
+    let text_encoding  = match encoding_from_u32(text_enc_raw) {
         Ok(t)  => t, Err(e) => { return Err(e); }
     };
     let user_version           = read_u32_be_list(buf, 60);

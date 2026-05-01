@@ -35,7 +35,7 @@ mount collections.{List, Map};
 mount base.{Result, Ok, Err, Text, Maybe};
 mount core.database.sqlite.native.l1_pager.pager.{
     Pager, PageFrame, PagerError, PagerErrorKind,
-    pager_read, pager_write,
+    pager_read, pager_write, pager_commit,
 };
 mount core.database.sqlite.native.l1_pager.page_cache.{
     CachedFrame, PageCache, page_cache_new,
@@ -175,22 +175,46 @@ public fn pager_apply(actor: &mut PagerActor, req: PagerRequest) -> PagerReply {
             }
         }
         Commit(tok) => {
-            // Bump generation → every stale cache line snapshotted
-            // before this commit is now invisible to new reads.
-            let _ = actor.cache.bump_generation();
-            actor.pending_writes = 0;
-            CommitOk(tok)
+            // Durability gate. Pre-fix Commit only bumped the cache
+            // generation and zeroed `pending_writes`; the pager was
+            // never told to flush, so every committed write was lost
+            // on the next stale-eviction or process restart. Now the
+            // pager's commit path runs FIRST (drains dirty frames
+            // through the backend's sync discipline), then the cache
+            // generation bump invalidates stale snapshots. If the
+            // pager-side commit fails (`PagerError::IoError` /
+            // `Busy` / `Locked`), the actor surfaces it via `Failed`
+            // and DOES NOT advance the visible generation — readers
+            // continue to see the last durable state.
+            match pager_commit(&mut actor.pager) {
+                Ok(_) => {
+                    let _ = actor.cache.bump_generation();
+                    actor.pending_writes = 0;
+                    CommitOk(tok)
+                }
+                Err(e) => Failed(e, tok),
+            }
         }
         Checkpoint(mode, tok) => {
-            // v0.1 :memory: pager has no WAL, so Checkpoint is a no-op
-            // modulo a cache-generation bump to make the Passive / Full
-            // / Restart / Truncate distinction observable in stats.
+            // Drain pending writes through the pager's commit path
+            // before bumping generation — same durability gate as
+            // `Commit` above. Mode-specific WAL semantics
+            // (Passive/Full/Restart/Truncate) come online once
+            // §8.3's WAL writer/reader cascade is wired through the
+            // actor (tracked via the run_checkpoint follow-up). For
+            // the :memory: backend the four modes are
+            // observationally equivalent — the public type stays
+            // honest by carrying the requested mode in stats.
             let frames_applied = actor.pending_writes;
-            actor.pending_writes = 0;
-            let _ = actor.cache.bump_generation();
-            let _ = mode;   // mode variants are functionally identical
-                            // until WAL lands in §8.3.
-            CheckpointOk(frames_applied, tok)
+            match pager_commit(&mut actor.pager) {
+                Ok(_) => {
+                    actor.pending_writes = 0;
+                    let _ = actor.cache.bump_generation();
+                    let _ = mode;
+                    CheckpointOk(frames_applied, tok)
+                }
+                Err(e) => Failed(e, tok),
+            }
         }
     }
 }

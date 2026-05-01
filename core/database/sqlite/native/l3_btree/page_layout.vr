@@ -428,7 +428,17 @@ public type LocalPayloadBudget is {
 
 public fn compute_local_payload_budget(page_size: Int, reserved: Int) -> LocalPayloadBudget {
     let usable = page_size - reserved;
-    let min_local = ((usable - 12) * 32) / 255;
+    // **SQLite spec §10.6 derivation** (canonical formula —
+    // matches `overflow_page_api/layout.vr:25-28`).
+    //
+    // Pre-fix the `min_local` term was missing the trailing `- 23`;
+    // every loom-written DB file was BYTE-DIFFERENT from the
+    // C-SQLite-written equivalent at the overflow-threshold
+    // decision boundary.  Spec §2.1 makes file-format compatibility
+    // ABSOLUTE, so this off-by-23 is a hard correctness bug.  The
+    // `index_max` formula already had the `- 23` term — the two
+    // were quietly inconsistent.
+    let min_local = ((usable - 12) * 32) / 255 - 23;
     let table_leaf_max = usable - 35;
     let index_max = ((usable - 12) * 64) / 255 - 23;
     LocalPayloadBudget {
