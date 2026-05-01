@@ -39,6 +39,7 @@ public module cursor_table;
 public module affinity_coerce;
 public module ssa;
 public module cursor_btree_bridge;
+public module cursor_btree_dispatch;
 
 public mount .opcode.{
     Opcode,
@@ -85,4 +86,9 @@ public mount .cursor_btree_bridge.{
     CursorBridgeError,
     op_open_read, op_column, op_next, op_prev, op_rewind, op_last,
     op_seek, op_insert, op_delete, op_rowid,
+};
+
+public mount .cursor_btree_dispatch.{
+    ColumnResult, AdvanceResult,
+    dispatch_column, dispatch_next, dispatch_rewind, dispatch_rowid,
 };
