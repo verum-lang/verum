@@ -262,8 +262,33 @@ implement AsyncRuntimeConfig {
 }
 
 implement Default for AsyncRuntimeConfig {
+    /// Delegates to the inherent `AsyncRuntimeConfig.default()` constructor.
+    ///
+    /// **Recursion-avoidance discipline (#330)**: cannot call
+    /// `AsyncRuntimeConfig.default()` here directly — under the
+    /// VBC interpreter's method-dispatch keying (name + arity
+    /// only) the inherent and trait `default` collide, so the
+    /// trait body recurses into itself rather than dispatching to
+    /// the inherent constructor. Pre-fix this caused
+    /// `Stack overflow: depth 16384 exceeds maximum 16384` the
+    /// instant any caller hit `AsyncRuntimeConfig::default()` via
+    /// the Default-bound-generic path. Inlining the inherent body
+    /// breaks the cycle deterministically without depending on
+    /// dispatch-table disambiguation.
     fn default() -> AsyncRuntimeConfig {
-        AsyncRuntimeConfig.default()
+        let manifest_stack = verum_get_runtime_task_stack_size();
+        let stack = if manifest_stack > 0 { manifest_stack } else { 1024 * 1024 };
+        let workers = verum_get_runtime_async_worker_threads();
+        AsyncRuntimeConfig {
+            max_tasks: 10000,
+            enable_work_stealing: true,
+            task_stack_size: stack,
+            async_worker_threads: workers,
+            enable_io: true,
+            enable_time: true,
+            io_sq_entries: DEFAULT_SQ_ENTRIES,
+            poll_budget: DEFAULT_POLL_BUDGET,
+        }
     }
 }
 

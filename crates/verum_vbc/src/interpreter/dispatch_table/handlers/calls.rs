@@ -128,6 +128,20 @@ pub(in super::super) fn handle_call(
                 state.set_reg(dst, result);
                 return Ok(DispatchResult::Continue);
             }
+            // Runtime-bridge getters (#330): supply Tier 0 defaults
+            // for `verum_get_runtime_*` so AsyncRuntimeConfig.default()
+            // and other manifest-bridge consumers work in `verum run`
+            // without AOT's `__verum_runtime_*` globals.
+            if let Some(result) = super::runtime_bridge::try_intercept_runtime_bridge(
+                state,
+                &func_name,
+                args.start.0,
+                args.count,
+                caller_base,
+            )? {
+                state.set_reg(dst, result);
+                return Ok(DispatchResult::Continue);
+            }
         }
     }
 

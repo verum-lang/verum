@@ -1,0 +1,34 @@
+// @test: run-interpreter
+// @level: L2
+// @tier: 0
+// @tags: async, runtime, worker-pool, phase-1b
+// @expected-stdout: rt-construction ok
+//
+// Phase 1B+ (#330) — executable Tier 0 pin asserting
+// `AsyncRuntime.new()` and the worker-pool accessors actually work
+// in interpreter mode.  Pre-fix this test would deadlock-recurse
+// in `AsyncRuntimeConfig::default()` (Default-impl→inherent-default
+// dispatch collision) AND fail FFI dispatch on
+// `verum_get_runtime_*` getters (extern fn declarations resolved
+// via dlsym, which doesn't have the symbols at interpreter
+// runtime).  Both fixes land together — the trait-default body is
+// inlined to break the recursion; an interpreter-side intercept
+// at FfiExtended::CallFfiC returns the documented-default 0 for
+// the getter family (matching what AOT-with-no-manifest produces).
+
+mount core.async.executor.{AsyncRuntime, AsyncRuntimeConfig};
+
+fn main() {
+    // Default config: zero workers — `worker_pool_size()` must be 0.
+    let cfg = AsyncRuntimeConfig.default();
+    assert_eq(cfg.async_worker_threads, 0);
+
+    // Constructing the runtime via the inherent constructor must
+    // not trigger the Default-impl recursion, and the runtime-
+    // bridge getters must return 0 (the documented sentinel for
+    // "use the built-in default").
+    let rt = AsyncRuntime.new();
+    assert_eq(rt.worker_pool_size(), 0);
+
+    print("rt-construction ok");
+}

@@ -61,6 +61,13 @@ pub(super) mod stdio_runtime;
 // `std::process::Command`. See VBC-PROC-2 architecture notes.
 pub(super) mod process_runtime;
 
+// Runtime-bridge intercepts (#330): `verum_get_runtime_*` getters
+// for manifest-driven runtime config. AOT emits LLVM-folded reads
+// from `__verum_runtime_*` globals; under interpreter mode we
+// return the documented `0` sentinel so AsyncRuntimeConfig.default()
+// and friends work unchanged in `verum run`.
+pub(super) mod runtime_bridge;
+
 // Debug, assert, panic (0xD6-0xD9)
 pub(super) mod debug;
 
