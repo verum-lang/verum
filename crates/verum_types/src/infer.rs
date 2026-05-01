@@ -417,6 +417,26 @@ pub struct TypeChecker {
     /// language_features.rs:419).
     /// Closes the inert-defense pattern at session.rs (#265).
     generic_associated_types_enabled: bool,
+    /// MLS classification sidecar (#289 Phase 2b foundation).
+    ///
+    /// Maps binding identity (variable name in the current scope's
+    /// flat namespace) to its `MlsLevel`.  When a function
+    /// parameter carries `@classification(secret)`, the binding
+    /// lands here at parameter-introduction time. Subsequent
+    /// `let` bindings derived from that variable inherit the
+    /// classification (taint propagation) — Phase 2b-full pipes
+    /// the propagation through unify / synth / check sites in
+    /// `infer.rs::synth_*`.
+    ///
+    /// The map is keyed by `Text` (variable name, scoped) rather
+    /// than a TypeVar id because classification is a property of
+    /// BINDINGS (not types) — two different variables can carry
+    /// the same `Type::Int` but distinct classifications.
+    /// Phase 2b-Foundation lays the storage; Phase 2b-Integration
+    /// (still pending in this task) wires the propagation rules
+    /// in the synth/check arms.
+    pub(crate) classification_map:
+        std::collections::HashMap<verum_common::Text, verum_common::mls::MlsLevel>,
     /// Name resolver for cross-module resolution
     /// Name resolution across modules: qualified paths, import disambiguation, re-exports, path resolution in imports — Name resolution across modules
     pub(crate) module_resolver: NameResolver,
@@ -1051,6 +1071,7 @@ impl TypeChecker {
             coherence_check_depth: 16,
             higher_kinded_protocols_enabled: false,
             generic_associated_types_enabled: false,
+            classification_map: std::collections::HashMap::new(),
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(parking_lot::RwLock::new(ModuleRegistry::new())),
             current_module_path: verum_common::Text::from("cog"),
@@ -1238,6 +1259,7 @@ impl TypeChecker {
             coherence_check_depth: 16,
             higher_kinded_protocols_enabled: false,
             generic_associated_types_enabled: false,
+            classification_map: std::collections::HashMap::new(),
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(parking_lot::RwLock::new(ModuleRegistry::new())),
             current_module_path: verum_common::Text::from("cog"),
@@ -1867,6 +1889,7 @@ impl TypeChecker {
             coherence_check_depth: 16,
             higher_kinded_protocols_enabled: false,
             generic_associated_types_enabled: false,
+            classification_map: std::collections::HashMap::new(),
             module_resolver: NameResolver::new(),
             module_registry: registry,
             current_module_path: verum_common::Text::from("cog"),
@@ -1985,6 +2008,7 @@ impl TypeChecker {
             coherence_check_depth: 16,
             higher_kinded_protocols_enabled: false,
             generic_associated_types_enabled: false,
+            classification_map: std::collections::HashMap::new(),
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(parking_lot::RwLock::new(ModuleRegistry::new())),
             current_module_path: verum_common::Text::from("cog"),
@@ -2104,6 +2128,7 @@ impl TypeChecker {
             coherence_check_depth: 16,
             higher_kinded_protocols_enabled: false,
             generic_associated_types_enabled: false,
+            classification_map: std::collections::HashMap::new(),
             module_resolver: NameResolver::new(),
             module_registry: Shared::new(parking_lot::RwLock::new(ModuleRegistry::new())),
             current_module_path: verum_common::Text::from("cog"),
@@ -6583,6 +6608,61 @@ impl TypeChecker {
     #[inline]
     pub fn generic_associated_types_enabled(&self) -> bool {
         self.generic_associated_types_enabled
+    }
+
+    /// MLS classification sidecar — set the classification level
+    /// for a binding (#289 Phase 2b foundation).
+    ///
+    /// Phase 2b-Integration (separate follow-up) calls this from
+    /// the parameter-introduction site in `synth_function_decl`
+    /// to seed the sidecar with each parameter's
+    /// `@classification` level. Subsequent let-binding sites
+    /// (Phase 2b-Full) propagate by reading the source variable's
+    /// classification and joining into the destination.
+    pub fn set_binding_classification(
+        &mut self,
+        name: verum_common::Text,
+        level: verum_common::mls::MlsLevel,
+    ) {
+        self.classification_map.insert(name, level);
+    }
+
+    /// Read the classification level of a binding (#289).
+    ///
+    /// Returns `MlsLevel::Public` (the safe default) for unknown
+    /// bindings. Callers that need to distinguish "not classified"
+    /// from "explicitly Public" should use `binding_classification_
+    /// explicit` instead.
+    #[inline]
+    pub fn binding_classification(
+        &self,
+        name: &verum_common::Text,
+    ) -> verum_common::mls::MlsLevel {
+        self.classification_map
+            .get(name)
+            .copied()
+            .unwrap_or(verum_common::mls::MlsLevel::Public)
+    }
+
+    /// Distinguishes "no entry" from "explicit Public" for callers
+    /// that need to detect unclassified bindings (e.g. the Phase 3
+    /// sink-detection gate which only fires on explicitly-classified
+    /// values flowing into sinks).
+    #[inline]
+    pub fn binding_classification_explicit(
+        &self,
+        name: &verum_common::Text,
+    ) -> Option<verum_common::mls::MlsLevel> {
+        self.classification_map.get(name).copied()
+    }
+
+    /// Drain the classification sidecar — exposed for diagnostics
+    /// (audit reports listing every classified binding) and for
+    /// scope-exit cleanup.
+    pub fn drain_classification_map(
+        &mut self,
+    ) -> std::collections::HashMap<verum_common::Text, verum_common::mls::MlsLevel> {
+        std::mem::take(&mut self.classification_map)
     }
 
     pub fn set_universe_poly_enabled(&mut self, enabled: bool) {
@@ -57293,6 +57373,114 @@ mod mount_cycle_tests {
             "regular zero-param associated type must register even with GAT disabled; got {:?}",
             result
         );
+    }
+
+    // ============================================================
+    // MLS classification sidecar pin tests (#289 Phase 2b-Foundation).
+    // ============================================================
+
+    #[test]
+    fn classification_sidecar_default_is_public() {
+        // Pin: looking up an unknown binding returns Public — the
+        // safe default. Lattice's join() identity element so taint
+        // propagation through unclassified contexts is a no-op.
+        let checker = TypeChecker::new();
+        let level = checker.binding_classification(&Text::from("x"));
+        assert_eq!(level, verum_common::mls::MlsLevel::Public);
+    }
+
+    #[test]
+    fn classification_sidecar_explicit_returns_none_for_unknown() {
+        // Pin: distinguishes "not in map" from "explicitly Public"
+        // for sink-detection use cases.
+        let checker = TypeChecker::new();
+        let level = checker.binding_classification_explicit(&Text::from("x"));
+        assert!(level.is_none());
+    }
+
+    #[test]
+    fn classification_sidecar_set_round_trips() {
+        // Pin: setter stores the classification; getter retrieves
+        // it. Foundation primitive — Phase 2b-Integration uses
+        // this pair at parameter-introduction sites.
+        let mut checker = TypeChecker::new();
+        let var = Text::from("secret_data");
+        checker.set_binding_classification(
+            var.clone(),
+            verum_common::mls::MlsLevel::Secret,
+        );
+        assert_eq!(
+            checker.binding_classification(&var),
+            verum_common::mls::MlsLevel::Secret
+        );
+        assert_eq!(
+            checker.binding_classification_explicit(&var),
+            Some(verum_common::mls::MlsLevel::Secret)
+        );
+    }
+
+    #[test]
+    fn classification_sidecar_overwrite_uses_latest() {
+        // Pin: re-setting overwrites — useful for shadowing scopes
+        // where a binding is rebound at higher / lower
+        // classification (Phase 2b-Full handles scoping; the
+        // sidecar primitive is the underlying storage).
+        let mut checker = TypeChecker::new();
+        let var = Text::from("v");
+        checker.set_binding_classification(
+            var.clone(),
+            verum_common::mls::MlsLevel::Public,
+        );
+        checker.set_binding_classification(
+            var.clone(),
+            verum_common::mls::MlsLevel::TopSecret,
+        );
+        assert_eq!(
+            checker.binding_classification(&var),
+            verum_common::mls::MlsLevel::TopSecret
+        );
+    }
+
+    #[test]
+    fn classification_sidecar_drain_clears_map() {
+        // Pin: drain returns the full map and empties the
+        // checker's storage. Used by audit reports + scope-exit
+        // cleanup.
+        let mut checker = TypeChecker::new();
+        checker.set_binding_classification(
+            Text::from("a"),
+            verum_common::mls::MlsLevel::Secret,
+        );
+        checker.set_binding_classification(
+            Text::from("b"),
+            verum_common::mls::MlsLevel::TopSecret,
+        );
+        let drained = checker.drain_classification_map();
+        assert_eq!(drained.len(), 2);
+        // After drain, lookups return Public again.
+        assert_eq!(
+            checker.binding_classification(&Text::from("a")),
+            verum_common::mls::MlsLevel::Public
+        );
+        assert!(checker.binding_classification_explicit(&Text::from("b")).is_none());
+    }
+
+    #[test]
+    fn classification_sidecar_uses_lattice_join_when_combining() {
+        // Pin: callers use the lattice's `join` to combine
+        // classifications across multiple sources — this test
+        // verifies the sidecar interoperates with the lattice
+        // primitive from #282 Phase 2a.
+        let mut checker = TypeChecker::new();
+        checker.set_binding_classification(
+            Text::from("source"),
+            verum_common::mls::MlsLevel::Secret,
+        );
+        let other = verum_common::mls::MlsLevel::TopSecret;
+        let combined = checker
+            .binding_classification(&Text::from("source"))
+            .join(other);
+        assert_eq!(combined, verum_common::mls::MlsLevel::TopSecret);
     }
 }
 
