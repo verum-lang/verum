@@ -29,6 +29,7 @@ public module stmt_cache;
 public module prepared;
 public module adapter;
 public module pool;
+public module typed_database;
 public module introspect;
 public module transaction;
 
@@ -53,6 +54,11 @@ public mount .stmt_cache.{
 };
 public mount .prepared.{
     PreparedSession, MY_ER_UNKNOWN_STMT_HANDLER,
+};
+public mount .typed_database.{
+    MysqlTxScope,
+    mysql_database_from_pool, mysql_admin_database_from_pool,
+    mysql_readonly_database_from_pool,
 };
 public mount .adapter.MysqlAdapter;
 public mount .error.dberr_from_mysql;
