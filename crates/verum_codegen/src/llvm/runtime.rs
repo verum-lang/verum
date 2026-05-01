@@ -13202,20 +13202,35 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
             .or_internal("missing param 1")?
             .into_int_value();
         // malloc(len + 1), memcpy, null-terminate
-        let memcpy_fn = module.get_function("memcpy").unwrap_or_else(|| {
-            // Auto-declare libc memcpy. Same architectural caveat as
-            // strlen/malloc — tracked under no-libc invariant follow-up.
-            let i64_ty = context.i64_type();
-            let ptr_ty = context.ptr_type(AddressSpace::default());
-            let fn_ty = ptr_ty.fn_type(&[ptr_ty.into(), ptr_ty.into(), i64_ty.into()], false);
-            module.add_function("memcpy", fn_ty, None)
-        });
+        let memcpy_fn = module
+            .get_function("llvm.memcpy.p0.p0.i64")
+            .unwrap_or_else(|| {
+                let void_ty = context.void_type();
+                let i64_ty = context.i64_type();
+                let ptr_ty = context.ptr_type(AddressSpace::default());
+                let bool_ty = context.bool_type();
+                let fn_ty = void_ty.fn_type(
+                    &[ptr_ty.into(), ptr_ty.into(), i64_ty.into(), bool_ty.into()],
+                    false,
+                );
+                module.add_function("llvm.memcpy.p0.p0.i64", fn_ty, None)
+            });
+        let is_volatile_false = context.bool_type().const_int(0, false);
         let alloc_size = builder
             .build_int_add(len, i64_type.const_int(1, false), "alloc_size")
             .or_llvm_err()?;
         let buf = checked_malloc(context, &builder, module, alloc_size, "buf")?;
         builder
-            .build_call(memcpy_fn, &[buf.into(), src_ptr.into(), len.into()], "")
+            .build_call(
+                memcpy_fn,
+                &[
+                    buf.into(),
+                    src_ptr.into(),
+                    len.into(),
+                    is_volatile_false.into(),
+                ],
+                "",
+            )
             .or_llvm_err()?;
         // Null-terminate
         // SAFETY: GEP to access the 'end_ptr' field at a fixed offset within a struct of known layout
@@ -13305,18 +13320,33 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
             .build_int_add(total, i64_type.const_int(1, false), "alloc_size")
             .or_llvm_err()?;
 
-        let memcpy_fn = module.get_function("memcpy").unwrap_or_else(|| {
-            // Auto-declare libc memcpy. Same architectural caveat as
-            // strlen/malloc — tracked under no-libc invariant follow-up.
-            let i64_ty = context.i64_type();
-            let ptr_ty = context.ptr_type(AddressSpace::default());
-            let fn_ty = ptr_ty.fn_type(&[ptr_ty.into(), ptr_ty.into(), i64_ty.into()], false);
-            module.add_function("memcpy", fn_ty, None)
-        });
+        let memcpy_fn = module
+            .get_function("llvm.memcpy.p0.p0.i64")
+            .unwrap_or_else(|| {
+                let void_ty = context.void_type();
+                let i64_ty = context.i64_type();
+                let ptr_ty = context.ptr_type(AddressSpace::default());
+                let bool_ty = context.bool_type();
+                let fn_ty = void_ty.fn_type(
+                    &[ptr_ty.into(), ptr_ty.into(), i64_ty.into(), bool_ty.into()],
+                    false,
+                );
+                module.add_function("llvm.memcpy.p0.p0.i64", fn_ty, None)
+            });
+        let is_volatile_false = context.bool_type().const_int(0, false);
         let buf = checked_malloc(context, &builder, module, alloc_size, "buf")?;
         // memcpy(buf, a_ptr, a_len)
         builder
-            .build_call(memcpy_fn, &[buf.into(), a_ptr.into(), a_len.into()], "")
+            .build_call(
+                memcpy_fn,
+                &[
+                    buf.into(),
+                    a_ptr.into(),
+                    a_len.into(),
+                    is_volatile_false.into(),
+                ],
+                "",
+            )
             .or_llvm_err()?;
         // memcpy(buf + a_len, b_ptr, b_len)
         // SAFETY: GEP to access the 'buf_mid' field at a fixed offset within a struct of known layout
@@ -13328,7 +13358,12 @@ pub fn define_text_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
         builder
             .build_call(
                 memcpy_fn,
-                &[buf_offset.into(), b_ptr.into(), b_len.into()],
+                &[
+                    buf_offset.into(),
+                    b_ptr.into(),
+                    b_len.into(),
+                    is_volatile_false.into(),
+                ],
                 "",
             )
             .or_llvm_err()?;
@@ -13643,18 +13678,29 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
         let copy_bytes = builder
             .build_int_mul(len, i64_type.const_int(8, false), "copy_bytes")
             .or_llvm_err()?;
-        let memcpy_fn = module.get_function("memcpy").unwrap_or_else(|| {
-            // Auto-declare libc memcpy. Same architectural caveat as
-            // strlen/malloc — tracked under no-libc invariant follow-up.
-            let i64_ty = context.i64_type();
-            let ptr_ty = context.ptr_type(AddressSpace::default());
-            let fn_ty = ptr_ty.fn_type(&[ptr_ty.into(), ptr_ty.into(), i64_ty.into()], false);
-            module.add_function("memcpy", fn_ty, None)
-        });
+        let memcpy_fn = module
+            .get_function("llvm.memcpy.p0.p0.i64")
+            .unwrap_or_else(|| {
+                let void_ty = context.void_type();
+                let i64_ty = context.i64_type();
+                let ptr_ty = context.ptr_type(AddressSpace::default());
+                let bool_ty = context.bool_type();
+                let fn_ty = void_ty.fn_type(
+                    &[ptr_ty.into(), ptr_ty.into(), i64_ty.into(), bool_ty.into()],
+                    false,
+                );
+                module.add_function("llvm.memcpy.p0.p0.i64", fn_ty, None)
+            });
+        let is_volatile_false = context.bool_type().const_int(0, false);
         builder
             .build_call(
                 memcpy_fn,
-                &[new_data.into(), old_data.into(), copy_bytes.into()],
+                &[
+                    new_data.into(),
+                    old_data.into(),
+                    copy_bytes.into(),
+                    is_volatile_false.into(),
+                ],
                 "",
             )
             .or_llvm_err()?;
@@ -14661,18 +14707,29 @@ pub fn define_list_ir_helpers<'ctx>(context: &'ctx Context, module: &Module<'ctx
         let copy_bytes = builder
             .build_int_mul(src_len, i64_type.const_int(8, false), "copy_bytes")
             .or_llvm_err()?;
-        let memcpy_fn = module.get_function("memcpy").unwrap_or_else(|| {
-            // Auto-declare libc memcpy. Same architectural caveat as
-            // strlen/malloc — tracked under no-libc invariant follow-up.
-            let i64_ty = context.i64_type();
-            let ptr_ty = context.ptr_type(AddressSpace::default());
-            let fn_ty = ptr_ty.fn_type(&[ptr_ty.into(), ptr_ty.into(), i64_ty.into()], false);
-            module.add_function("memcpy", fn_ty, None)
-        });
+        let memcpy_fn = module
+            .get_function("llvm.memcpy.p0.p0.i64")
+            .unwrap_or_else(|| {
+                let void_ty = context.void_type();
+                let i64_ty = context.i64_type();
+                let ptr_ty = context.ptr_type(AddressSpace::default());
+                let bool_ty = context.bool_type();
+                let fn_ty = void_ty.fn_type(
+                    &[ptr_ty.into(), ptr_ty.into(), i64_ty.into(), bool_ty.into()],
+                    false,
+                );
+                module.add_function("llvm.memcpy.p0.p0.i64", fn_ty, None)
+            });
+        let is_volatile_false = context.bool_type().const_int(0, false);
         builder
             .build_call(
                 memcpy_fn,
-                &[new_data.into(), src_data.into(), copy_bytes.into()],
+                &[
+                    new_data.into(),
+                    src_data.into(),
+                    copy_bytes.into(),
+                    is_volatile_false.into(),
+                ],
                 "",
             )
             .or_llvm_err()?;
