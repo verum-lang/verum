@@ -19,6 +19,7 @@ mount core.net.http_parser.{
     ChunkedDecoder, ChunkProgress,
 };
 mount core.async.cancellation.{CancellationToken};
+mount core.async.timer.{timeout_ms as future_timeout_ms, TimeoutError};
 mount core.net.weft.handler.{WeftRequest, Handler};
 mount core.net.weft.error.{WeftError, IntoResponse};
 mount core.net.weft.response_ext.{
@@ -29,6 +30,25 @@ public type ConnectionConfig is {
     max_request_size: Int,
     read_buffer_capacity: Int,
     keep_alive: Bool,
+    /// Per-request deadline for reading the request line + headers.
+    /// Closes slowloris (one-byte-per-minute drip-feed): if the
+    /// peer hasn't delivered a parseable request frame within this
+    /// budget, the connection is rejected with 408 and closed.
+    /// 0 = no deadline (NOT recommended in production — hostile
+    /// peers can hold connections indefinitely).
+    /// Default 5 s — generous for legitimate clients across slow
+    /// links (mobile hotspots), aggressive enough to evict the
+    /// classic slowloris.
+    header_deadline_ms: Int,
+    /// Per-request deadline for reading the body.  Body is
+    /// usually larger than headers + may stream over a slow
+    /// uplink, so the budget is more generous.  0 = no deadline.
+    /// Default 30 s.
+    body_deadline_ms: Int,
+    /// Idle deadline between keep-alive requests.  Prevents
+    /// holding a connection slot indefinitely after a successful
+    /// response.  0 = no deadline.  Default 60 s.
+    idle_deadline_ms: Int,
 };
 
 implement ConnectionConfig {
@@ -37,6 +57,9 @@ implement ConnectionConfig {
             max_request_size: 1 * 1024 * 1024,
             read_buffer_capacity: 16 * 1024,
             keep_alive: true,
+            header_deadline_ms: 5_000,
+            body_deadline_ms: 30_000,
+            idle_deadline_ms: 60_000,
         }
     }
 }
@@ -47,6 +70,9 @@ implement Clone for ConnectionConfig {
             max_request_size: self.max_request_size,
             read_buffer_capacity: self.read_buffer_capacity,
             keep_alive: self.keep_alive,
+            header_deadline_ms: self.header_deadline_ms,
+            body_deadline_ms: self.body_deadline_ms,
+            idle_deadline_ms: self.idle_deadline_ms,
         }
     }
 }
@@ -58,6 +84,11 @@ public type ConnError is
     | Parse(ParseError)
     | TooLarge
     | UnsupportedTransferEncoding(Text)
+    /// Header-read or body-read deadline elapsed (slowloris guard,
+    /// redteam §2).  Connection is closed; client receives 408 if
+    /// the deadline fired during header reading and the partial
+    /// state still permits a write.
+    | ReadTimeout
     | HandlerError(WeftError);
 
 implement Display for ConnError {
@@ -69,6 +100,7 @@ implement Display for ConnError {
             Parse(e)                           => f.write_str(f"connection: {e}".as_str()),
             TooLarge                           => f.write_str("connection: request too large"),
             UnsupportedTransferEncoding(t)     => f.write_str(f"connection: unsupported Transfer-Encoding ({t})".as_str()),
+            ReadTimeout                        => f.write_str("connection: read deadline exceeded"),
             HandlerError(e)                    => f.write_str(f"connection handler: {e}".as_str()),
         }
     }
@@ -83,6 +115,7 @@ implement Debug for ConnError {
             Parse(e)                           => f.write_str(f"Parse({e:?})".as_str()),
             TooLarge                           => f.write_str("TooLarge"),
             UnsupportedTransferEncoding(t)     => f.write_str(f"UnsupportedTransferEncoding({t})".as_str()),
+            ReadTimeout                        => f.write_str("ReadTimeout"),
             HandlerError(e)                    => f.write_str(f"HandlerError({e:?})".as_str()),
         }
     }
@@ -97,6 +130,7 @@ implement Eq for ConnError {
             (Parse(a),                         Parse(b))                         => a == b,
             (TooLarge,                         TooLarge)                         => true,
             (UnsupportedTransferEncoding(a),   UnsupportedTransferEncoding(b))   => a == b,
+            (ReadTimeout,                      ReadTimeout)                      => true,
             (HandlerError(a),                  HandlerError(b))                  => a == b,
             _ => false,
         }
@@ -161,12 +195,32 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
     let mut hdr_frame: Maybe<HeaderFrame> = None;
 
     loop {
-        if accum.len() > config.max_request_size {
-            let _ = write_response(stream, &mk_413()).await;
-            return Err(ConnError.TooLarge);
-        }
         let mut chunk: List<Int> = List.with_capacity(4096);
-        let rr = stream.read_cancellable(&mut chunk, token).await;
+        // Header-deadline wrap (redteam §2): the `header_deadline_ms`
+        // budget bounds total time-on-wire from the FIRST read of
+        // this request frame to the parser's `Done` verdict.
+        // Pre-fix `read_cancellable` blocked indefinitely under a
+        // slowloris drip-feed; the only escape was the listener-wide
+        // shutdown token.  Post-fix the read races against a timer;
+        // the loser is a bounded ConnError::ReadTimeout that closes
+        // the connection cleanly with 408.
+        //
+        // 0 disables the deadline (NOT recommended; allows
+        // hostile peers to hold connections indefinitely).
+        let rr = if config.header_deadline_ms > 0 {
+            match future_timeout_ms(
+                config.header_deadline_ms,
+                stream.read_cancellable(&mut chunk, token),
+            ).await {
+                Err(TimeoutError) => {
+                    let _ = write_response(stream, &mk_408()).await;
+                    return Err(ConnError.ReadTimeout);
+                }
+                Ok(rr) => rr,
+            }
+        } else {
+            stream.read_cancellable(&mut chunk, token).await
+        };
         let n = match rr {
             Err(_) => return Err(ConnError.Cancelled),
             Ok(Err(e)) => return Err(ConnError.Io(f"{e}")),
@@ -177,6 +231,17 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
                 return Ok(KeepAlive.Close);
             }
             return Err(ConnError.ClientClosed);
+        }
+        // Pre-read budget check (redteam §5): enforce
+        // `max_request_size` BEFORE the per-byte append.  Pre-fix
+        // the post-read check ran after the loop's push had already
+        // committed a coalesced TCP read of arbitrary size — a peer
+        // that delivered the entire excess in one syscall could
+        // overshoot by up to one chunk before rejection.  The
+        // check now fires on the projected post-append size.
+        if accum.len() + n > config.max_request_size {
+            let _ = write_response(stream, &mk_413()).await;
+            return Err(ConnError.TooLarge);
         }
         for i in 0..n {
             accum.push(chunk[i]);
@@ -240,7 +305,27 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
         }
         while accum.len() - hdr.body_start < body_len {
             let mut chunk: List<Int> = List.with_capacity(4096);
-            let rr = stream.read_cancellable(&mut chunk, token).await;
+            // Body-deadline wrap (redteam §2): bounds total
+            // time-on-wire for the body half of the request.
+            // Same slowloris defence as the header-read above
+            // — without this a hostile client can announce
+            // Content-Length: 1000000 then drip-feed one byte
+            // per minute to hold the connection open for 10⁶
+            // minutes.
+            let rr = if config.body_deadline_ms > 0 {
+                match future_timeout_ms(
+                    config.body_deadline_ms,
+                    stream.read_cancellable(&mut chunk, token),
+                ).await {
+                    Err(TimeoutError) => {
+                        let _ = write_response(stream, &mk_408()).await;
+                        return Err(ConnError.ReadTimeout);
+                    }
+                    Ok(rr) => rr,
+                }
+            } else {
+                stream.read_cancellable(&mut chunk, token).await
+            };
             let n = match rr {
                 Err(_) => return Err(ConnError.Cancelled),
                 Ok(Err(e)) => return Err(ConnError.Io(f"{e}")),
@@ -401,6 +486,17 @@ fn mk_400_chunk() -> Response {
     )
 }
 
+/// 408 Request Timeout — slowloris guard fired (redteam §2).
+fn mk_408() -> Response {
+    resp_with_body_text(
+        resp_with_header(
+            resp_status(StatusCode.new(408)),
+            &"connection", &"close",
+        ),
+        "request timeout",
+    )
+}
+
 /// Decode the chunked body starting at `body_start` into a fresh
 /// `List<Byte>`. Reads more bytes from the stream as needed; caps the
 /// total decoded size at `config.max_request_size`.
@@ -434,7 +530,20 @@ async fn read_chunked_body<T: WeftTransport>(
             ChunkProgress.ChunkNeedMore => {
                 // Read more bytes and re-feed.
                 let mut chunk: List<Int> = List.with_capacity(4096);
-                let rr = stream.read_cancellable(&mut chunk, token).await;
+                // Body-deadline wrap (redteam §2): chunked
+                // body's per-chunk read budget mirrors the
+                // Content-Length path's body deadline.
+                let rr = if config.body_deadline_ms > 0 {
+                    match future_timeout_ms(
+                        config.body_deadline_ms,
+                        stream.read_cancellable(&mut chunk, token),
+                    ).await {
+                        Err(TimeoutError) => return Err(ConnError.ReadTimeout),
+                        Ok(rr) => rr,
+                    }
+                } else {
+                    stream.read_cancellable(&mut chunk, token).await
+                };
                 let n = match rr {
                     Err(_)     => return Err(ConnError.Cancelled),
                     Ok(Err(e)) => return Err(ConnError.Io(f"{e}")),

@@ -185,8 +185,23 @@ public async fn accept_loop<R: ConnectionRunner + Clone + Send + Sync + 'static>
     draining: Shared<AtomicBool>,
     runner: R,
 ) -> Result<(), Text> {
-    let in_flight: Shared<AtomicInt> = Shared.new(AtomicInt.new(0));
-    let max = config.max_concurrent_connections;
+    // ConnectionLimiter: shared atomic + RAII ticket pattern.  The
+    // accept loop *acquires* a ticket before spawning the per-conn
+    // task; the ticket's `Drop` impl decrements `in_flight`
+    // unconditionally — whether the spawned future returned
+    // normally, panicked, was cancelled, or got dropped at
+    // shutdown.  Pre-fix the manual `counter.fetch_sub` after the
+    // `runner_c.run().await` ran ONLY in the happy-path return,
+    // which leaked the slot on every panic — after
+    // `max_concurrent_connections` panics the listener refused
+    // every subsequent client with 503 (silent DoS surface; see
+    // `docs/architecture/weft-redteam-2026-05-01.md` §1).
+    //
+    // The RAII pattern uses Verum's existing primitives —
+    // `Shared<AtomicInt>` for the counter, language-level Drop
+    // for the release.  No new runtime infrastructure; the type
+    // system makes the leak impossible at compile time.
+    let limiter = ConnectionLimiter.new(config.max_concurrent_connections);
 
     loop {
         if token.is_cancelled() { break; }
@@ -201,18 +216,23 @@ public async fn accept_loop<R: ConnectionRunner + Clone + Send + Sync + 'static>
                 continue;
             }
             Ok(Ok((stream, peer))) => {
-                let cur = in_flight.fetch_add(1, MemoryOrdering.AcqRel) + 1;
-                if cur > max {
-                    in_flight.fetch_sub(1, MemoryOrdering.AcqRel);
-                    runner.refuse_overloaded(stream).await;
-                    continue;
-                }
+                let ticket = match limiter.try_acquire() {
+                    Some(t) => t,
+                    None => {
+                        runner.refuse_overloaded(stream).await;
+                        continue;
+                    }
+                };
 
                 let runner_c = runner.clone();
-                let counter  = in_flight.clone();
                 let _ = task.spawn(async move {
+                    // `_ticket` outlives `runner_c.run` and is dropped
+                    // here — even if `run` panics, even if the task is
+                    // cancelled, even if a host shutdown unwinds the
+                    // future.  The slot release is the type system's
+                    // responsibility, not the developer's.
+                    let _ticket = ticket;
                     runner_c.run(stream, peer).await;
-                    counter.fetch_sub(1, MemoryOrdering.AcqRel);
                 });
             }
         }
@@ -222,11 +242,82 @@ public async fn accept_loop<R: ConnectionRunner + Clone + Send + Sync + 'static>
     // `drain_grace_ms`. Poll-based — fine for 10k connections (~200
     // ticks/sec shared across one small wait).
     let mut elapsed: Int = 0;
-    while in_flight.load(MemoryOrdering.Acquire) > 0 && elapsed < config.drain_grace_ms {
+    while limiter.in_flight() > 0 && elapsed < config.drain_grace_ms {
         timer.sleep_ms(50).await;
         elapsed = elapsed + 50;
     }
     Ok(())
+}
+
+// =============================================================================
+// ConnectionLimiter — RAII slot accounting for accept_loop
+// =============================================================================
+//
+// The accept loop bounds in-flight connections via an atomic counter
+// shared between the loop and every spawned per-connection task.
+// The counter must decrement on EVERY exit path of the per-conn
+// task — return, panic, cancellation, host shutdown — or the
+// listener leaks slots and eventually refuses every new client
+// with 503 (silent DoS).
+//
+// Pre-fix the decrement was a manual `counter.fetch_sub(...)` at
+// the end of the spawned closure.  Panic paths skipped it.  A
+// single panic-prone handler turned the listener into a slow-fuse
+// DoS.
+//
+// Post-fix the counter is wrapped in a `ConnectionLimiter` whose
+// `try_acquire` returns a `ConnectionTicket`.  The ticket's
+// `Drop` impl unconditionally decrements the counter — Verum's
+// language-level Drop runs on every exit path, so the leak
+// becomes impossible at compile time.
+
+/// In-flight connection counter with RAII acquire/release.
+public type ConnectionLimiter is {
+    in_flight: Shared<AtomicInt>,
+    max: Int,
+};
+
+implement ConnectionLimiter {
+    /// Create a limiter that admits up to `max` concurrent connections.
+    public fn new(max: Int) -> ConnectionLimiter {
+        ConnectionLimiter {
+            in_flight: Shared.new(AtomicInt.new(0)),
+            max: max,
+        }
+    }
+
+    /// Try to acquire a slot.  Returns `None` when the limiter is
+    /// at capacity — caller emits a 503 / refuses the connection.
+    /// On `Some(ticket)`, the slot is reserved until the ticket
+    /// is dropped.
+    public fn try_acquire(&self) -> Maybe<ConnectionTicket> {
+        let cur = self.in_flight.fetch_add(1, MemoryOrdering.AcqRel) + 1;
+        if cur > self.max {
+            // Race-loser: roll back the optimistic increment
+            // immediately and reject.
+            self.in_flight.fetch_sub(1, MemoryOrdering.AcqRel);
+            None
+        } else {
+            Some(ConnectionTicket { in_flight: self.in_flight.clone() })
+        }
+    }
+
+    /// Current in-flight count — for graceful-drain polling.
+    public fn in_flight(&self) -> Int {
+        self.in_flight.load(MemoryOrdering.Acquire)
+    }
+}
+
+/// RAII guard for one occupied slot.  Dropping releases the slot.
+/// Move-only by design — cloning would double-release.
+public type ConnectionTicket is {
+    in_flight: Shared<AtomicInt>,
+};
+
+implement Drop for ConnectionTicket {
+    fn drop(&mut self) {
+        self.in_flight.fetch_sub(1, MemoryOrdering.AcqRel);
+    }
 }
 
 // =============================================================================
