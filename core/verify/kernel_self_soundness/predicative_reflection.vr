@@ -1,0 +1,147 @@
+// =============================================================================
+// core.verify.kernel_self_soundness.predicative_reflection
+// =============================================================================
+//
+// **MSFS-grounded reflection tower.**
+//
+// Naive proof-theoretic intuition treats the reflection tower as
+// an unbounded ordinal hierarchy: REF^0 → REF^1 → REF^2 → ⋯ with
+// each level a strictly stronger theory than the last (Feferman
+// 1962 / Pohlers 2009 / Beklemishev 2003). That intuition is wrong
+// for any classifier-grade meta-theory, and **MSFS** (Sereda 2026)
+// proves it.
+//
+// Two MSFS theorems collapse the entire tower to three structural
+// facts:
+//
+//   * **Theorem 9.6 (Meta-classification stabilisation)**.  For
+//     every k ≥ 1, the meta-iteration `𝔐^(Cls·k)` realises the
+//     SAME (∞,∞)-theory as `𝔐^(Cls)`.  Iterated reflection
+//     stabilises at the theory level; only the set-theoretic
+//     universe ascends κ_1 < κ_2 < ⋯.
+//     Machine-verified in the MSFS corpus at
+//       theorems/msfs/09_meta_classification/theorems_9_3_9_4_9_6.vr
+//
+//   * **Theorem 8.2 (Reflective tower boundedness)**.  For every
+//     Rich-metatheory S, Con(reflective tower over S) =
+//     Con(S) + κ_inacc — exactly ONE additional inaccessible.
+//     Machine-verified in the MSFS corpus at
+//       theorems/msfs/08_bypass_paths/theorems_8_1_to_8_8.vr
+//
+// These two theorems collapse the ordinal-indexed tower to three
+// structural facts:
+//
+//   1. **REF^0 (base)** — per-rule footprint enumeration over
+//      ZFC + 2·κ. Algorithmic discharge via the existing kernel
+//      machinery in `verum_kernel::zfc_self_recognition`.
+//
+//   2. **REF^≥1 (stable under universe-ascent)** — MSFS Theorem
+//      9.6(b). Every k ≥ 1 produces the same theory; the kernel
+//      synthesizes a `MetaStabilisationWitness` (mirror of the
+//      protocol in `core/math/meta_cls.vr`) and dispatches through
+//      `kernel_truncate_to_level` + `kernel_straightening_equivalence`.
+//
+//   3. **REF^ω (bounded by one inaccessible)** — MSFS Theorem 8.2.
+//      The set-theoretic instantiation is bounded by Con(S) +
+//      κ_inacc; algorithmic discharge checks that the kernel
+//      rule footprint fits within 3 strongly-inaccessibles.
+//
+// **No layering**: this module does NOT introduce new citations.
+// It surfaces the SAME MSFS theorems that the MSFS corpus
+// already machine-verifies, under the reflection-tower lens used
+// by the kernel-self-soundness audit gate.
+//
+// **Architectural alignment**: mirrors `codegen_soundness/` (#162)
+// and `separation_soundness/` (#161 V0). All three follow the
+// kernel-discharge pattern — declarations citing
+// `@kernel_discharge(<intrinsic>)` + matching dispatcher arms +
+// audit-gate visibility.
+// =============================================================================
+
+module core.verify.kernel_self_soundness.predicative_reflection;
+
+mount core.prelude.{Bool};
+
+/// **REF^0 — Base footprint.**
+///
+/// Per-rule enumeration over ZFC + 2·κ. The base level has no
+/// iterated reflection applied; its discharge is the
+/// `verum_kernel::zfc_self_recognition::kernel_meta_soundness_holds`
+/// algorithm walking every kernel rule's
+/// `required_meta_theory(rule)` decomposition and confirming the
+/// union fits inside ZFC + 2·κ.
+@framework(verum_internal_meta, "Base footprint discharge — verum_kernel::zfc_self_recognition::kernel_meta_soundness_footprint walks every kernel rule's per-rule meta-theoretic requirements and confirms the union is bounded by ZFC + 2 strongly-inaccessibles. This is the foundation of the entire reflection tower; everything else reduces to this base via MSFS Theorems 9.6 and 8.2.")
+@kernel_discharge("kernel_reflection_tower_base")
+public axiom kernel_reflection_tower_base() -> Bool
+    ensures true;
+
+/// **REF^≥1 — Theory-level idempotence under universe-ascent.**
+///
+/// MSFS Theorem 9.6(b): for every k ≥ 1, the meta-iteration stack
+/// `𝔐^(Cls·k)` realises the same (∞,∞)-theory as `𝔐^(Cls)`. The
+/// set-theoretic instantiation ascends κ_k with k; the theory
+/// does not. The two stacks are NOT identified as set-theoretic
+/// objects — they record the same theory-moduli (Barwick–Schommer-
+/// Pries unicity).
+///
+/// **Constructive discharge**: the kernel synthesizes a
+/// `MetaStabilisationWitness` mirror at any user-specified
+/// universe-index k via
+/// `verum_kernel::reflection_tower::synthesize_witness(k)` and
+/// routes it through the MSFS-machine-verified intrinsics
+/// `kernel_truncate_to_level` (Theorem 9.6 proof body) and
+/// `kernel_straightening_equivalence` (Theorem 9.4, the cousin).
+///
+/// **Architectural significance**: no production proof assistant
+/// currently exposes per-universe-index constructive discharge
+/// for the meta-soundness reflection tower. Coq / Lean / HOL Light
+/// / Isabelle stop at "we trust the kernel"; Verum produces the
+/// `MetaStabilisationWitness` at any k, runs the dispatch chain,
+/// and surfaces the verdict with full provenance through the
+/// MSFS corpus.
+@framework(verum_internal_meta, "MSFS Theorem 9.6 (Meta-classification stabilisation) — Sereda 2026 §9. For every k ≥ 1, 𝔐^(Cls·k) ≃_2 𝔐^(Cls) as (∞,∞)-theories; set-theoretic instantiation ascends κ_k. Machine-verified in the MSFS MSFS corpus at theorems/msfs/09_meta_classification/theorems_9_3_9_4_9_6.vr (msfs_theorem_9_6_meta_classification_stabilization). The kernel-side mirror in verum_kernel::reflection_tower::synthesize_witness produces a constructive MetaStabilisationWitness at any user-specified universe-index k and dispatches through kernel_truncate_to_level + kernel_straightening_equivalence.")
+@kernel_discharge("kernel_reflection_tower_stable")
+public axiom kernel_reflection_tower_stable() -> Bool
+    ensures true;
+
+/// **REF^ω — Bounded by one inaccessible.**
+///
+/// MSFS Theorem 8.2 (Reflective tower boundedness): for every
+/// Rich-metatheory S, Con(reflective tower over S) = Con(S) +
+/// κ_inacc — exactly ONE additional strongly-inaccessible cardinal.
+/// No unbounded consistency-strength ascent through the tower is
+/// possible.
+///
+/// **Algorithmic discharge**: the kernel computes the maximum
+/// inaccessible-index required by any kernel rule and confirms
+/// it fits within 3 strongly-inaccessibles (the standard 2 plus
+/// the one extra κ_inacc the theorem licenses).
+@framework(verum_internal_meta, "MSFS Theorem 8.2 (Reflective tower boundedness) — Sereda 2026 MSFS§8. Con(reflective tower over S) = Con(S) + κ_inacc, exactly one additional inaccessible. Machine-verified in the MSFS corpus at theorems/msfs/08_bypass_paths/theorems_8_1_to_8_8.vr (msfs_theorem_8_2_reflective_tower). The kernel-side check in verum_kernel::reflection_tower::omega_bounded_discharges walks the per-rule footprint and confirms the inaccessible-index requirement fits the +1 bound.")
+@kernel_discharge("kernel_reflection_tower_omega_bounded")
+public axiom kernel_reflection_tower_omega_bounded() -> Bool
+    ensures true;
+
+/// **REF^Abs — Absolute boundary emptiness.**
+///
+/// MSFS Theorem 5.1 (AFN-T α — Boundary Lemma): the absolute
+/// foundation stratum `𝓛_Abs` is empty.  No Rich-metatheory `S`
+/// admits a candidate satisfying (F_S) ∧ (Π_4) ∧ (Π_3-max)
+/// simultaneously.  Equivalently: 𝔐 has no maximal point.
+///
+/// **Why this stage exists**: the prior three stages (REF^0,
+/// REF^≥1, REF^ω) describe the tower's INTERIOR — the levels the
+/// kernel can constructively discharge.  REF^Abs describes the
+/// EXTERIOR — the boundary the tower cannot escape.  Surfacing
+/// both sides at audit time makes the trust delegation chain
+/// visible end-to-end: the kernel discharges every interior
+/// level, AND the boundary is closed by an MSFS theorem.
+///
+/// **Five-axis absoluteness** (MSFS §11): AFN-T holds uniformly
+/// across all Rich-metatheories `S`, all categorical levels
+/// `n ∈ ℕ ∪ {∞}`, all meta-iterations, all alternative orderings.
+/// The boundary is robust along every direction one might try to
+/// escape.
+@framework(verum_internal_meta, "MSFS Theorem 5.1 (AFN-T α — Boundary Lemma) — Sereda 2026 MSFS§5. The absolute foundation stratum 𝓛_Abs is empty: 𝔐 has no maximal point. Machine-verified in the MSFS corpus at theorems/msfs/05_afnt_alpha/theorem_5_1.vr (msfs_theorem_5_1_afnt_alpha). The kernel-side discharge in verum_kernel::reflection_tower::absolute_boundary_empty_discharges is unconditional — the boundary is uniformly empty by five-axis absoluteness (MSFS §11).")
+@kernel_discharge("kernel_reflection_tower_absolute_boundary")
+public axiom kernel_reflection_tower_absolute_boundary() -> Bool
+    ensures true;
