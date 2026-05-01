@@ -142,6 +142,24 @@ pub(in super::super) fn handle_call(
                 state.set_reg(dst, result);
                 return Ok(DispatchResult::Continue);
             }
+            // Async-runtime intercept (#334): top-level `block_on`
+            // call. Under the interpreter's documented "async-as-sync"
+            // semantics (codegen/expressions.rs:12778 — async fns
+            // are NOT compiled to suspend/resume state machines),
+            // `block_on(small_work())` receives the already-computed
+            // body value (e.g. `Int(42)`), not a Future state
+            // machine. The pure-Verum `.poll()` dispatch crashes on
+            // a non-Heap receiver; intercept short-circuits.
+            if let Some(result) = super::async_runtime::try_intercept_async_runtime(
+                state,
+                &func_name,
+                args.start.0,
+                args.count,
+                caller_base,
+            )? {
+                state.set_reg(dst, result);
+                return Ok(DispatchResult::Continue);
+            }
         }
     }
 
@@ -1420,6 +1438,77 @@ fn try_dispatch_intrinsic_by_name(
         "__udp_close_raw" | "udp_close" => {
             let fd = get_i64_arg(state, 0);
             Ok(Some(Value::from_i64(super::net_runtime::udp_close(fd))))
+        }
+
+        // --- VBC-NET-RT-2: reactor-backed timeout-bound I/O ---
+        // Generic readiness primitives — these are the Tier-0
+        // host-side surface of `core/sys/io_engine` semantics.
+        // See `crate::interpreter::reactor` for the kqueue/epoll
+        // backend.
+        "__io_wait_readable_raw" | "io_wait_readable" => {
+            let fd = get_i64_arg(state, 0);
+            let timeout_ms = get_i64_arg(state, 1);
+            Ok(Some(Value::from_i64(
+                super::net_runtime::io_wait_readable(fd, timeout_ms),
+            )))
+        }
+        "__io_wait_writable_raw" | "io_wait_writable" => {
+            let fd = get_i64_arg(state, 0);
+            let timeout_ms = get_i64_arg(state, 1);
+            Ok(Some(Value::from_i64(
+                super::net_runtime::io_wait_writable(fd, timeout_ms),
+            )))
+        }
+        // Timeout-bound TCP/UDP variants.  Status codes:
+        //   >0 = bytes transferred / new fd
+        //   0  = empty body (UDP zero-length / no-op)
+        //   -1 = EOF / closed
+        //   -2 = timeout
+        //   -3 = reactor unhealthy (caller may fall back to blocking)
+        //   -4 = I/O error after readiness
+        "__tcp_accept_timeout_raw" | "tcp_accept_timeout" => {
+            let listen_fd = get_i64_arg(state, 0);
+            let timeout_ms = get_i64_arg(state, 1);
+            Ok(Some(Value::from_i64(
+                super::net_runtime::tcp_accept_timeout(listen_fd, timeout_ms),
+            )))
+        }
+        "__tcp_send_timeout_raw" | "tcp_send_timeout" => {
+            let fd = get_i64_arg(state, 0);
+            let data = super::string_helpers::resolve_string_value(&get_arg(state, 1), state);
+            let timeout_ms = get_i64_arg(state, 2);
+            Ok(Some(Value::from_i64(
+                super::net_runtime::tcp_send_timeout(fd, data.as_bytes(), timeout_ms),
+            )))
+        }
+        "__tcp_recv_timeout_raw" | "tcp_recv_timeout" => {
+            // Returns Text body; status code is observable via
+            // length=0 (caller can disambiguate timeout vs. EOF
+            // via a follow-up `__io_wait_readable_raw(fd, 0)` poll).
+            let fd = get_i64_arg(state, 0);
+            let max_len = get_i64_arg(state, 1);
+            let timeout_ms = get_i64_arg(state, 2);
+            let (_status, body) =
+                super::net_runtime::tcp_recv_timeout(fd, max_len, timeout_ms);
+            let v = super::string_helpers::alloc_string_value(state, &body)?;
+            Ok(Some(v))
+        }
+        "__tcp_connect_timeout_raw" | "tcp_connect_timeout" => {
+            let host = super::string_helpers::resolve_string_value(&get_arg(state, 0), state);
+            let port = get_i64_arg(state, 1);
+            let timeout_ms = get_i64_arg(state, 2);
+            Ok(Some(Value::from_i64(
+                super::net_runtime::tcp_connect_timeout(&host, port, timeout_ms),
+            )))
+        }
+        "__udp_recv_timeout_raw" | "udp_recv_timeout" => {
+            let fd = get_i64_arg(state, 0);
+            let max_len = get_i64_arg(state, 1);
+            let timeout_ms = get_i64_arg(state, 2);
+            let (_status, body, _peer) =
+                super::net_runtime::udp_recv_from_timeout(fd, max_len, timeout_ms);
+            let v = super::string_helpers::alloc_string_value(state, &body)?;
+            Ok(Some(v))
         }
 
         // --- Context System ---

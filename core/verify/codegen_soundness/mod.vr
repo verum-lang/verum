@@ -1,0 +1,48 @@
+// =============================================================================
+// core.verify.codegen_soundness — Verified-compilation kernel-discharge axioms (#162)
+// =============================================================================
+//
+
+// **Single import point for the 6 codegen-pass simulation theorems
+// that constitute Verum's CompCert-parity verified-compilation surface.**
+//
+
+// Each kernel-discharge axiom in this module mirrors one entry in
+// `verum_kernel::codegen_attestation::manifest()`. The Rust manifest
+// is the canonical roster; these .vr files are the source-level
+// declarations that downstream proofs / corpora can `mount` to cite
+// the codegen invariants in their own proof bodies.
+//
+
+// **Audit gate**: `verum audit --codegen-attestation` walks both
+// surfaces and reports per-pass discharge status. The current state
+// is `AdmittedWithIou` for every entry — each axiom carries a
+// `@framework(...)` citation pointing to a published proof of the
+// corresponding simulation theorem.
+//
+
+// **The CompCert-parity goal**: for every codegen pass, a kernel-
+// checked semantic-preservation proof. Verum's current state is
+// IOU — admitted with citations. Future work flips entries from
+// admitted-with-IOU to discharged via Verum-language proofs of the
+// simulation diagrams.
+//
+
+// **Pass roster** (matches `CodegenPassId` enum):
+//
+//   1. `vbc_lowering` — TypedAST → VBC bytecode.
+//   2. `ssa_construction` — alloca → SSA value lifting.
+//   3. `register_allocation` — generic regalloc preservation.
+//   4. `linear_scan_regalloc` — Poletto-Sarkar specific invariants.
+//   5. `llvm_emission` — Verum IR → LLVM IR.
+//   6. `machine_code_emission` — LLVM backend boundary (TCB exit).
+// =============================================================================
+
+module core.verify.codegen_soundness.mod;
+
+mount super.vbc_lowering.{kernel_vbc_lowering_preserves_semantics};
+mount super.ssa_construction.{kernel_ssa_construction_preserves_semantics};
+mount super.register_allocation.{kernel_register_allocation_preserves_semantics};
+mount super.linear_scan_regalloc.{kernel_linear_scan_regalloc_preserves_semantics};
+mount super.llvm_emission.{kernel_llvm_emission_preserves_semantics};
+mount super.machine_code_emission.{kernel_machine_code_emission_preserves_semantics};

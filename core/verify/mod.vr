@@ -48,6 +48,7 @@ public module attempt;
 public module certificate;
 public module coherence;
 public module kernel_soundness;
+public module codegen_soundness;
 
 // Re-export the user-facing symbols at the umbrella so callers
 // can `public mount core.verify.*;` without traversing the sub-paths.
@@ -59,3 +60,8 @@ public mount core.verify.coherence.*;
 // the meta-theoretic corpus, not a value-level API. Callers reach
 // into `core.verify.kernel_soundness.{model,judgment,…}` by
 // fully-qualified path so the namespace stays uncluttered.
+//
+// codegen_soundness is similarly meta-theoretic — the 6 codegen
+// pass simulation theorems (CompCert-parity, #162). Callers cite
+// the kernel-discharge axioms by fully-qualified path:
+// `core.verify.codegen_soundness.vbc_lowering.kernel_vbc_lowering_preserves_semantics`.
