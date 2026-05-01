@@ -1047,6 +1047,12 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     // sees a default value when reaching skipped code, far
                     // safer than crashing during process startup.
                     if let Some(llvm_fn) = self.module.get_function(func_name) {
+                        // **CRITICAL** (#96): NEVER attach a body to LLVM
+                        // intrinsics (`@llvm.*`).  See companion guard in
+                        // the bodyless-decl safety-net loop ~line 1378.
+                        if func_name.starts_with("llvm.") {
+                            continue;
+                        }
                         let builder = self.context.create_builder();
                         if llvm_fn.get_first_basic_block().is_none() {
                             // Bodyless declaration — synthesise a default-return entry.
@@ -1345,6 +1351,7 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
 
             let mut patched = 0usize;
             let mut skipped_libc = 0usize;
+            let mut skipped_intrinsic = 0usize;
             let mut func = self.module.get_first_function();
             while let Some(f) = func {
                 let next = f.get_next_function();
@@ -1353,6 +1360,27 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
                     if is_libc_extern(&name) {
                         // Leave libc decls alone — linker resolves at link time.
                         skipped_libc += 1;
+                        func = next;
+                        continue;
+                    }
+                    // **CRITICAL** (#96 fundamental fix): NEVER attach a
+                    // body to LLVM intrinsics (`@llvm.*`).  LLVM treats
+                    // them specially — they MUST be declarations only.
+                    // Defining `@llvm.sqrt.f64` / `@llvm.memset.p0.i64`
+                    // / etc. produces "Intrinsic functions should never
+                    // be defined!" verifier errors and crashes downstream
+                    // optimization passes (SimplifyCFG SIGBUS, codegen
+                    // SIGSEGV).
+                    //
+                    // Pre-fix the safety-net loop synthesised bodies for
+                    // `@llvm.*` whenever they were declared with no
+                    // basic blocks — turning legitimate intrinsic
+                    // declarations into invalid IR.  Now we explicitly
+                    // skip them so the linker's intrinsic-lowering
+                    // pipeline handles them via target-machine codegen
+                    // (the canonical LLVM mechanism for intrinsics).
+                    if name.starts_with("llvm.") {
+                        skipped_intrinsic += 1;
                         func = next;
                         continue;
                     }
@@ -1385,8 +1413,8 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
             }
             if std::env::var_os("VERUM_AOT_TRACE_RUNTIME").is_some() {
                 eprintln!(
-                    "[aot-runtime-stage] bodyless-decl safety net: patched {} (skipped {} libc externs)",
-                    patched, skipped_libc
+                    "[aot-runtime-stage] bodyless-decl safety net: patched {} (skipped {} libc externs, {} llvm intrinsics)",
+                    patched, skipped_libc, skipped_intrinsic
                 );
             }
         }
@@ -4148,6 +4176,23 @@ impl<'ctx> VbcToLlvmLowering<'ctx> {
         // `skip_body_func_ids` is non-empty, as those functions have
         // mismatched signatures that would fail verification.
         if self.has_arity_collisions || !self.skip_body_func_ids.is_empty() {
+            // **VERUM_FORCE_VERIFY=1** — diagnostic override.  Forces LLVM
+            // module verification even when we know the IR has issues.
+            // Used to locate the EXACT invalid IR that prevents `default<O2>`
+            // from running on arity-collided / skip-body modules (#96).
+            // Verifier output names the offending function + instruction.
+            if std::env::var("VERUM_FORCE_VERIFY").is_ok() {
+                if let Err(e) = self.module.verify() {
+                    eprintln!(
+                        "[verum-verify] LLVM verifier reports invalid IR (arity_collisions={}, skip_body={}):\n{}",
+                        self.has_arity_collisions,
+                        self.skip_body_func_ids.len(),
+                        e
+                    );
+                    return Err(LlvmLoweringError::VerificationFailed(e.to_string().into()));
+                }
+                eprintln!("[verum-verify] LLVM module verified clean despite arity_collisions/skip_body flags");
+            }
             tracing::debug!(
                 "Skipping LLVM module verification (arity collisions = {}, skip bodies = {})",
                 self.has_arity_collisions,
