@@ -2855,6 +2855,10 @@ fn audit_cross_format_roundtrip_inner(
         // `--docker` is set or VERUM_FOREIGN_TOOL_BACKEND=docker, the
         // foreign tool runs inside its canonical container image so
         // hosts without coqc/lean still get real per-theorem verdicts.
+        // #156-closure: dispatch to the canonical checker for every
+        // emitter backend.  Pre-this-commit only Coq + Lean had
+        // checker dispatch; Agda / Isabelle / Dedukti emitted to disk
+        // but were never re-checked.  Now the corpus walks all 5.
         let foreign_checker: Option<Box<dyn ForeignSystemChecker>> = match backend_iter.id() {
             "coq" => verum_smt::cross_format_runner::checker_for_backend(
                 verum_kernel::cross_format_gate::ExportFormat::Coq,
@@ -2862,6 +2866,18 @@ fn audit_cross_format_roundtrip_inner(
             ),
             "lean" => verum_smt::cross_format_runner::checker_for_backend(
                 verum_kernel::cross_format_gate::ExportFormat::Lean4,
+                backend,
+            ),
+            "agda" => verum_smt::cross_format_runner::checker_for_backend(
+                verum_kernel::cross_format_gate::ExportFormat::Agda,
+                backend,
+            ),
+            "isabelle" => verum_smt::cross_format_runner::checker_for_backend(
+                verum_kernel::cross_format_gate::ExportFormat::Isabelle,
+                backend,
+            ),
+            "dedukti" => verum_smt::cross_format_runner::checker_for_backend(
+                verum_kernel::cross_format_gate::ExportFormat::Dedukti,
                 backend,
             ),
             _ => None,
@@ -8676,7 +8692,7 @@ fn manifest_field_table() -> Vec<ManifestFieldEntry> {
         ManifestFieldEntry { section: "safety", field: "ffi_boundary", status: S::LoadBearing, closure_task: "", consumer_site: "SafetyPolicy.ffi_boundary strict/lenient → safety_gate" },
         ManifestFieldEntry { section: "safety", field: "capability_required", status: S::LoadBearing, closure_task: "", consumer_site: "SafetyPolicy.capability_required → safety_gate" },
         ManifestFieldEntry { section: "safety", field: "forbid_stdlib_extern", status: S::LoadBearing, closure_task: "", consumer_site: "SafetyPolicy.forbid_stdlib_extern → safety_gate" },
-        ManifestFieldEntry { section: "safety", field: "mls_level", status: S::LoadBearingPartial, closure_task: "#266 + #282 + #283", consumer_site: "Phase 1+2a+2b+3a — Pi-type propagation = #289" },
+        ManifestFieldEntry { section: "safety", field: "mls_level", status: S::LoadBearing, closure_task: "#266 + #282 + #283 + #289..#295", consumer_site: "11-layer MLS stack: declaration gate + lattice + param/function consistency + sidecar storage + seeding + expression propagation + downflow check + module walker + @declassify + sink detection" },
 
         // [test] — all 8 wired (Phase 1+2+3+4 closures #298+#273+#299).
         ManifestFieldEntry { section: "test", field: "timeout_secs", status: S::LoadBearing, closure_task: "", consumer_site: "TestRunCfg.timeout_secs → commands/test.rs" },
