@@ -34,14 +34,24 @@ pub(in super::super) fn handle_lnot(state: &mut InterpreterState) -> Interpreter
     let dst = read_reg(state)?;
     let src = read_reg(state)?;
     let val = state.get_reg(src);
-    if val.is_bool() {
-        let result = !val.as_bool();
-        state.set_reg(dst, Value::from_bool(result));
-    } else {
-        // Integer NOT: bitwise complement (matches AOT behavior)
-        let result = !val.as_i64();
-        state.set_reg(dst, Value::from_i64(result));
-    }
+    // **Logical NOT** — always returns a Bool, never a bitwise complement.
+    // Pre-fix the non-Bool branch fell through to integer bitwise NOT
+    // (`!1i64 = -2`), which an `if` then evaluated as truthy and took
+    // the wrong branch.  Surface symptom: `if !is_valid_page_size(4096)`
+    // when `is_valid_page_size` returns Bool true that wasn't NaN-boxed
+    // as `is_bool()=true` (cross-module Call return path stores 1 as
+    // Int) — pager_open_memory_with_size(4096) fails on a perfectly-
+    // valid 4 KiB page.
+    //
+    // The bitwise complement is a separate operator (`UnOp::BitNot`)
+    // that emits a different opcode (Bitwise::Not).  `Opcode::Not`
+    // (handle_lnot) is unconditionally logical: truthy → false,
+    // falsy → true.  This matches Verum's source-level semantics
+    // ("`!` is logical, `~` is bitwise") and AOT codegen — which
+    // already emits a `select` against the truthiness of the value,
+    // not a bitwise xor.
+    let result = !val.is_truthy();
+    state.set_reg(dst, Value::from_bool(result));
     Ok(DispatchResult::Continue)
 }
 
