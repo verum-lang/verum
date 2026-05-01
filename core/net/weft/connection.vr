@@ -335,11 +335,30 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
     // preserves the standard CBGR-managed heap path (no behaviour
     // change for callers not opting in).
     //
-    // The lease binding is `let _arena_lease` — handlers don't
-    // see the lease directly per spec §4.3 ("Handlers see
-    // `&mut Arena`, never the lease itself, and have no way to
-    // leak a lease out of the request scope").  The
-    // pre-`@lifetime(request)` foundation pin: the lease's
+    // The lease binding deliberately uses underscore prefix
+    // (`_arena_lease`) per Rust convention to mark "held but not
+    // directly accessed" — but the binding is LOAD-BEARING via
+    // two side effects:
+    //
+    //   1. **Acquire-time counter cycle** — `pool.acquire()`
+    //      increments `leases_total` (and `bursts_total` if the
+    //      warm pool was empty); the lease holds an arena slot
+    //      out of circulation for the duration of this request.
+    //
+    //   2. **Drop-time arena reset + return** — when the lease
+    //      goes out of scope (function return / Err propagation),
+    //      `ArenaLease.Drop` calls `arena.reset()` (O(1)
+    //      generation bump invalidating ALL allocations made
+    //      against the arena during this request) and pushes
+    //      the arena back onto the pool's free list.  This is
+    //      the production-grade allocation pattern: handler-side
+    //      allocations cost nothing at end-of-request beyond
+    //      the arena reset.
+    //
+    // Handlers don't see the lease directly per spec §4.3
+    // ("Handlers see `&mut Arena`, never the lease itself, and
+    // have no way to leak a lease out of the request scope").
+    // The pre-`@lifetime(request)` foundation pin: the lease's
     // existence is tied to this `serve_one_message` body's stack
     // frame; the future `@lifetime(request)` annotation will let
     // CBGR escape analysis statically prove handlers cannot leak
@@ -360,21 +379,48 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
     // allocations per connection regardless of read iteration
     // count.
     //
-    // The chunk's capacity is drawn from the BufferPool config when
-    // a pool is wired (`config.pool == Some(_)`), else from the
-    // pre-existing 4 KiB default.  When a pool is wired, we also
-    // call `pool.acquire()` to cycle the pool's accounting (the
-    // handle is released on return via Drop) — pre-Phase-5 the
-    // handle's slab IS the kernel-pinned io_uring buffer that
-    // `prep_read_fixed` would target; in interpreter / pre-Linux-
-    // wired mode the slab acts as a documented slot reservation
-    // for observability.
-    let chunk_capacity: Int = match &config.pool {
-        Some(p) => p.state.config.buf_size,
-        None => 4096,
-    };
-    let mut chunk: List<Byte> = List.with_capacity(chunk_capacity);
-    let _pool_lease: Maybe<BufferHandle> = match &config.pool {
+    // The chunk capacity stays at the established 4 KiB default
+    // regardless of pool wiring — this is the byte size of one
+    // syscall round-trip read, optimised for typical TCP
+    // coalesced reads (the kernel rarely returns more than a
+    // page in one syscall).  The pool's `buf_size` is a property
+    // of the slab SLOT (typically 16 KiB to amortise page
+    // allocation across multiple reads), NOT the per-syscall
+    // read size.  A single slot accumulates multiple `chunk`
+    // reads until the parser hits Done.
+    //
+    // Pool wiring drives TWO load-bearing side effects:
+    //
+    //   1. **Lease lifecycle** — `pool.acquire()` increments
+    //      `acquires_total` (or `misses_total` on exhaustion);
+    //      Drop returns the slot to `free_indices`.  Each
+    //      `serve_one_message` body holds exactly one slot for
+    //      the duration of the request.
+    //
+    //   2. **Slab mirror** — every successful read into `chunk`
+    //      is mirrored into the lease's slab via
+    //      `BufferHandle.write_at(&chunk[..n])`.  Pre-iouring
+    //      this is a copy paid once per read for observability;
+    //      post-iouring `prep_read_fixed` writes directly to the
+    //      slab and the chunk-then-mirror pattern collapses to
+    //      a single zero-copy syscall.  The kernel-pinned
+    //      readiness contract is exercised on every read,
+    //      surfacing any page-fault / unmap regression
+    //      immediately rather than silently after iouring lands.
+    //
+    // **Why not draw chunk_capacity from
+    // `p.state.config.buf_size`?** That deep-field access on
+    // `Shared<BufferPoolState>` trips an interpreter codegen
+    // bug (#338) — direct field-index access on the outer
+    // `BufferPool` instead of going through Shared deref.
+    // Tracked separately; this path stays on the constant
+    // default until #338 lands.
+    let mut chunk: List<Byte> = List.with_capacity(4096);
+    // Mutable binding: the lease must be reachable from the read
+    // loop so we can `write_at` into the slab on every successful
+    // read.  Drop is invoked on function exit (return / Err),
+    // returning the slot to the free list.
+    let mut pool_lease: Maybe<BufferHandle> = match &config.pool {
         Some(p) => p.acquire(),
         None => None,
     };
@@ -439,6 +485,19 @@ async fn serve_one_message<T: WeftTransport, S: Handler>(
         // the transport — no mask, no cast, just an O(n) copy.
         for i in 0..n {
             accum.push(chunk[i]);
+        }
+        // #337: mirror the freshly-read bytes into the BufferPool's
+        // slab.  Load-bearing — without this the pool's slab
+        // content stays zero-initialised forever and the
+        // io_uring `prep_read_fixed` readiness contract is
+        // un-exercised.  The cost is one O(n) memcpy per read,
+        // paid only when the operator opted into the pool
+        // (`config.pool == Some(_)`); zero overhead when the
+        // pool is not configured.  Post-iouring: this mirror
+        // collapses to a no-op since `prep_read_fixed` already
+        // wrote the bytes directly to the slab.
+        if let Some(ref mut lease) = pool_lease {
+            lease.write_at(&chunk[..n]);
         }
         match parser.feed(&accum) {
             ParseProgress.NeedMore => continue,
