@@ -747,7 +747,11 @@ use crate::interpreter::state::InterpreterState;
 use crate::types::TypeId;
 use crate::value::Value;
 use super::super::super::error::InterpreterResult;
-use super::string_helpers::{alloc_string_value, extract_string};
+use super::heap_helpers::{
+    alloc_byte_list, alloc_record_n_fields, extract_byte_slice, extract_text_arg,
+    is_record_typed_as, read_buffer_capacity, wrap_in_variant, write_into_byte_slice,
+};
+use super::string_helpers::alloc_string_value;
 
 pub(in super::super) fn try_intercept_net_runtime(
     state: &mut InterpreterState,
@@ -1042,24 +1046,6 @@ fn build_peer_addr_v6(
     wrap_in_variant(state, "SocketAddr", 1, &[v6]).ok()
 }
 
-fn extract_text_arg(state: &InterpreterState, reg: u16, caller_base: u32) -> String {
-    let v = state.registers.get(caller_base, crate::instruction::Reg(reg));
-    let mut unwrapped = if super::cbgr_helpers::is_cbgr_ref(&v) {
-        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v.as_i64());
-        state.registers.get_absolute(abs_index)
-    } else {
-        v
-    };
-    // ThinRef → pointee (mirrors text_extended.rs shape probe).
-    if unwrapped.is_thin_ref() {
-        let tr = unwrapped.as_thin_ref();
-        if !tr.ptr.is_null() {
-            unwrapped = unsafe { *(tr.ptr as *const Value) };
-        }
-    }
-    extract_string(&unwrapped, state)
-}
-
 fn check_net_permission(state: &mut InterpreterState) -> Option<Value> {
     if state.check_permission(PermissionScope::Network, 0) == PermissionDecision::Deny {
         return build_io_err(
@@ -1085,62 +1071,6 @@ fn build_io_err(
     let stream_err =
         alloc_record_n_fields(state, "StreamError", &[kind_variant, msg_some])?;
     wrap_in_variant(state, "Result", 1, &[stream_err])
-}
-
-fn alloc_record_n_fields(
-    state: &mut InterpreterState,
-    type_name: &str,
-    fields: &[Value],
-) -> InterpreterResult<Value> {
-    use crate::interpreter::heap::OBJECT_HEADER_SIZE;
-    let type_id = lookup_type_id_by_name(state, type_name).unwrap_or(TypeId(0x9000));
-    let payload_size = fields.len() * std::mem::size_of::<Value>();
-    let obj = state.heap.alloc(type_id, payload_size)?;
-    state.record_allocation();
-    let data_ptr = unsafe { (obj.as_ptr() as *mut u8).add(OBJECT_HEADER_SIZE) as *mut Value };
-    for (i, v) in fields.iter().enumerate() {
-        unsafe {
-            *data_ptr.add(i) = *v;
-        }
-    }
-    Ok(Value::from_ptr(obj.as_ptr() as *mut u8))
-}
-
-fn wrap_in_variant(
-    state: &mut InterpreterState,
-    type_name: &str,
-    tag: u32,
-    fields: &[Value],
-) -> InterpreterResult<Value> {
-    use crate::interpreter::heap::OBJECT_HEADER_SIZE;
-    let type_id = lookup_type_id_by_name(state, type_name).unwrap_or(TypeId(0x8000 + tag));
-    let field_count = fields.len() as u32;
-    let data_size = 8 + (fields.len() * std::mem::size_of::<Value>());
-    let obj = state.heap.alloc(type_id, data_size)?;
-    state.record_allocation();
-    let base = obj.as_ptr() as *mut u8;
-    unsafe {
-        let tag_ptr = base.add(OBJECT_HEADER_SIZE) as *mut u32;
-        *tag_ptr = tag;
-        *tag_ptr.add(1) = field_count;
-        let payload_ptr = base.add(OBJECT_HEADER_SIZE + 8) as *mut Value;
-        for (i, v) in fields.iter().enumerate() {
-            *payload_ptr.add(i) = *v;
-        }
-    }
-    Ok(Value::from_ptr(base))
-}
-
-fn lookup_type_id_by_name(state: &InterpreterState, name: &str) -> Option<TypeId> {
-    state
-        .module
-        .types
-        .iter()
-        .find(|td| {
-            state.module.strings.get(td.name) == Some(name)
-                && !matches!(td.kind, crate::types::TypeKind::Protocol)
-        })
-        .map(|td| td.id)
 }
 
 // ============================================================================
@@ -1187,10 +1117,16 @@ pub(in super::super) fn try_intercept_tcp_method(
         || is_record_typed_as(state, receiver, "UdpSocket");
     let is_listener = method_name.contains("TcpListener.")
         || is_record_typed_as(state, receiver, "TcpListener");
+    if std::env::var("VERUM_TRACE_TCP").is_ok() {
+        eprintln!(
+            "[trace-net-method] method={:?} bare={:?} args={} is_udp={} is_listener={}",
+            method_name, bare_method, arg_count, is_udp, is_listener
+        );
+    }
     if !is_udp
         && !is_listener
         && !method_name.contains("TcpStream.")
-        && !is_tcpstream_value(state, receiver)
+        && !is_record_typed_as(state, receiver, "TcpStream")
     {
         return Ok(None);
     }
@@ -1257,25 +1193,6 @@ pub(in super::super) fn try_intercept_tcp_method(
         }
         _ => Ok(None),
     }
-}
-
-/// Generic shape probe for record types — TypeId lookup matches
-/// the canonical name.  Mirror of `is_tcpstream_value` for any
-/// type name (avoids per-type duplication).
-fn is_record_typed_as(state: &InterpreterState, v: Value, name: &str) -> bool {
-    if !v.is_ptr() || v.is_nil() {
-        return false;
-    }
-    let ptr = v.as_ptr::<u8>();
-    if ptr.is_null() {
-        return false;
-    }
-    let header = unsafe { &*(ptr as *const crate::interpreter::heap::ObjectHeader) };
-    state
-        .module
-        .types
-        .iter()
-        .any(|td| td.id == header.type_id && state.module.strings.get(td.name) == Some(name))
 }
 
 /// `listener.accept() -> Result<(TcpStream, SocketAddr), IoError>` —
@@ -1510,22 +1427,6 @@ fn read_tcpstream_fd(v: Value) -> Option<i64> {
     None
 }
 
-fn is_tcpstream_value(state: &InterpreterState, v: Value) -> bool {
-    if !v.is_ptr() || v.is_nil() {
-        return false;
-    }
-    let ptr = v.as_ptr::<u8>();
-    if ptr.is_null() {
-        return false;
-    }
-    let header = unsafe { &*(ptr as *const crate::interpreter::heap::ObjectHeader) };
-    state
-        .module
-        .types
-        .iter()
-        .any(|td| td.id == header.type_id && state.module.strings.get(td.name) == Some("TcpStream"))
-}
-
 fn intercept_tcp_write(
     state: &mut InterpreterState,
     fd: i64,
@@ -1601,148 +1502,3 @@ fn intercept_tcp_read(
     Ok(Some(wrap_in_variant(state, "Result", 0, &[Value::from_i64(n)])?))
 }
 
-/// Extract a `&[Byte]` argument into an owned Vec<u8>.  Walks
-/// either a FatRef-shaped slice or a List<Byte> backing storage
-/// (one Value-slot per element, low-byte truncated).
-fn extract_byte_slice(state: &InterpreterState, reg: u16, caller_base: u32) -> Vec<u8> {
-    let v = state.registers.get(caller_base, crate::instruction::Reg(reg));
-    let unwrapped = if super::cbgr_helpers::is_cbgr_ref(&v) {
-        let (abs_index, _) = super::cbgr_helpers::decode_cbgr_ref(v.as_i64());
-        state.registers.get_absolute(abs_index)
-    } else {
-        v
-    };
-    if unwrapped.is_fat_ref() {
-        let fr = unwrapped.as_fat_ref();
-        let len = fr.len() as usize;
-        if fr.ptr().is_null() || len == 0 {
-            return Vec::new();
-        }
-        // FatRef of byte slice: elem_size 1 = packed bytes (memcpy
-        // safe).  elem_size 0 (NaN-boxed Values) requires per-slot
-        // truncation.
-        return match fr.reserved {
-            1 => unsafe { std::slice::from_raw_parts(fr.ptr(), len) }.to_vec(),
-            _ => {
-                let mut out = Vec::with_capacity(len);
-                for i in 0..len {
-                    let elem =
-                        unsafe { *(fr.ptr() as *const Value).add(i) };
-                    out.push(elem.as_i64() as u8);
-                }
-                out
-            }
-        };
-    }
-    if unwrapped.is_ptr() && !unwrapped.is_nil() {
-        let ptr = unwrapped.as_ptr::<u8>();
-        if ptr.is_null() {
-            return Vec::new();
-        }
-        let header =
-            unsafe { &*(ptr as *const crate::interpreter::heap::ObjectHeader) };
-        if header.type_id == TypeId::LIST {
-            let data_ptr = unsafe {
-                ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *const Value
-            };
-            let len = unsafe { (*data_ptr).as_i64() } as usize;
-            let backing_v = unsafe { *data_ptr.add(2) };
-            if backing_v.is_ptr() && !backing_v.is_nil() {
-                let backing = backing_v.as_ptr::<u8>();
-                if !backing.is_null() {
-                    let backing_data = unsafe {
-                        backing.add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *const Value
-                    };
-                    let mut out = Vec::with_capacity(len);
-                    for i in 0..len {
-                        out.push(unsafe { (*backing_data.add(i)).as_i64() } as u8);
-                    }
-                    return out;
-                }
-            }
-        }
-    }
-    Vec::new()
-}
-
-/// Capacity of a byte buffer for sizing recv() — the slice's
-/// declared length when it's a FatRef, the list's len when it's
-/// List<Byte>.  Returns None if the shape isn't recognised.
-fn read_buffer_capacity(v: Value) -> Option<usize> {
-    if v.is_fat_ref() {
-        return Some(v.as_fat_ref().len() as usize);
-    }
-    if v.is_ptr() && !v.is_nil() {
-        let ptr = v.as_ptr::<u8>();
-        if ptr.is_null() {
-            return None;
-        }
-        let header =
-            unsafe { &*(ptr as *const crate::interpreter::heap::ObjectHeader) };
-        if header.type_id == TypeId::LIST {
-            let data_ptr = unsafe {
-                ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *const Value
-            };
-            return Some(unsafe { (*data_ptr).as_i64() } as usize);
-        }
-    }
-    None
-}
-
-/// Write `bytes` into the backing storage of a `&mut [Byte]`-shaped
-/// value.  Best-effort; silently no-ops if the shape is unrecognised
-/// (the script's `Ok(n)` arm conveys the byte count regardless).
-fn write_into_byte_slice(v: Value, bytes: &[u8]) {
-    if v.is_fat_ref() {
-        let fr = v.as_fat_ref();
-        let cap = fr.len() as usize;
-        let n = bytes.len().min(cap);
-        if fr.ptr().is_null() || n == 0 {
-            return;
-        }
-        match fr.reserved {
-            1 => unsafe {
-                std::ptr::copy_nonoverlapping(bytes.as_ptr(), fr.ptr(), n);
-            },
-            _ => {
-                let dst = fr.ptr() as *mut Value;
-                for i in 0..n {
-                    unsafe { *dst.add(i) = Value::from_i64(bytes[i] as i64) };
-                }
-            }
-        }
-        return;
-    }
-    if v.is_ptr() && !v.is_nil() {
-        let ptr = v.as_ptr::<u8>();
-        if ptr.is_null() {
-            return;
-        }
-        let header =
-            unsafe { &*(ptr as *const crate::interpreter::heap::ObjectHeader) };
-        if header.type_id == TypeId::LIST {
-            let data_ptr = unsafe {
-                ptr.add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *const Value
-            };
-            let cap = unsafe { (*data_ptr.add(1)).as_i64() } as usize;
-            let n = bytes.len().min(cap);
-            let backing_v = unsafe { *data_ptr.add(2) };
-            if backing_v.is_ptr() && !backing_v.is_nil() {
-                let backing = backing_v.as_ptr::<u8>();
-                if !backing.is_null() {
-                    let backing_data = unsafe {
-                        backing.add(crate::interpreter::heap::OBJECT_HEADER_SIZE) as *mut Value
-                    };
-                    for i in 0..n {
-                        unsafe {
-                            *backing_data.add(i) = Value::from_i64(bytes[i] as i64);
-                        }
-                    }
-                    // Update len in header to reflect bytes written.
-                    let len_ptr = data_ptr as *mut Value;
-                    unsafe { *len_ptr = Value::from_i64(n as i64) };
-                }
-            }
-        }
-    }
-}

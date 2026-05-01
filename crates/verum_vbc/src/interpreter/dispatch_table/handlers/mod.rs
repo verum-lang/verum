@@ -8,6 +8,12 @@ pub(super) mod bytecode_io;
 pub(super) mod arith_helpers;
 pub(super) mod string_helpers;
 pub(super) mod cbgr_helpers;
+// Shared heap-marshaling primitives for the Tier-0 intercept
+// modules (shell/file/env/stdio/process/net).  Single canonical
+// source for `alloc_byte_list` / `alloc_record_n_fields` /
+// `wrap_in_variant` / `extract_byte_slice` / `extract_text_arg` /
+// `is_record_typed_as` / `lookup_type_id_by_name` etc.
+pub(super) mod heap_helpers;
 pub(super) mod net_runtime;
 
 // Data movement and type conversions (0x00-0x0F)
