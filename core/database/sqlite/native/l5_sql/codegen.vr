@@ -53,6 +53,14 @@ mount core.database.sqlite.native.l4_vdbe.{
     ResultColumn, CursorKind, CursorDecl,
     program_new,
 };
+mount core.database.sqlite.native.l5_sql.cost_annotated.CostAnnotatedPlan;
+mount core.database.sqlite.native.l5_sql.access_planning.{
+    AccessPlan, RangeBound, RangeOp, RoLt, RoLe, RoGt, RoGe,
+};
+mount core.database.sqlite.native.planner_cost.cost.{
+    AccessMethod, AmFullScan, AmRowidLookup, AmIndexSeek,
+    AmIndexRangeScan, AmCoveringIndexScan, AmEphemeralScan,
+};
 
 // -----------------------------------------------------------------------------
 // Error type
@@ -3070,4 +3078,335 @@ fn emit_binary(
         }
         _ => Err(unsupported("binop codegen pending".clone())),
     }
+}
+
+// =============================================================================
+// Annotation-aware codegen (#148) — consume CostAnnotatedPlan.seek_plan
+// =============================================================================
+//
+// `codegen_annotated` is the annotation-aware entry point.  It walks
+// the cost-annotated plan tree, and at each node checks whether the
+// annotator chose a non-FullScan access method.  When so, it emits a
+// specialised opcode sequence (rowid lookup, index seek, range scan,
+// covering scan) instead of the historical OpenRead+Rewind+Next
+// loop.  When the seek_plan is None or AmFullScan, the historical
+// `emit_plan` path runs unchanged — full backwards compatibility.
+//
+// This module ships the foundation of the dispatch surface.  The
+// AmRowidLookup case is fully realised below — it's the highest-
+// impact case (single-row primary-key fetch) and the algorithmically
+// simplest specialisation.  The AmIndexSeek / AmIndexRangeScan /
+// AmCoveringIndexScan cases recognise the seek plan, surface a
+// dedicated TODO marker, and FALL THROUGH to the existing scan
+// emission path — correctness is preserved while we ship the
+// architectural plumbing now and the index-cursor opcode lowerings
+// in follow-on tasks (#160 index seek codegen, #161 covering index
+// codegen).
+//
+// Shape of the rowid-lookup lowering for `SELECT cols FROM t WHERE rowid = K`:
+//
+//      OpenRead(t_cur, root_page=0, n_cols)
+//      <emit K into key_reg>
+//      SeekGE(t_cur, key_reg, 1, end)        // cursor lands on row >= K
+//      RowIdOp(t_cur, rid_reg)
+//      Ne(rid_reg, key_reg, end)             // jump if not exact match
+//      <emit projected columns into proj_start..proj_start+n>
+//      ResultRow(proj_start, n)
+//      end:
+//      Close(t_cur)
+//      Halt(0,0)              <-- (caller's terminator)
+//
+// O(log N) page reads — actual primary-key index lookup — vs the
+// historical O(N) full scan with row-by-row predicate evaluation.
+// =============================================================================
+
+/// Annotation-aware codegen entry point.  Walks the cost-annotated
+/// plan and dispatches to a specialised lowering when the annotator
+/// chose a non-FullScan access method; otherwise falls through to
+/// the historical `emit_plan` path.  The output VdbeProgram is
+/// observationally equivalent to `codegen(&plan)` when no seek_plan
+/// is present — back-compat is preserved.
+pub fn codegen_annotated(
+    annotated: &CostAnnotatedPlan,
+    sql: Text,
+) -> Result<VdbeProgram, CodegenError> {
+    let mut st = cg_state_new(sql);
+    match emit_annotated(&mut st, annotated) {
+        Ok(_)  => {},
+        Err(e) => { return Err(e); }
+    }
+    let _ = st.program.emit(Halt(0, 0));
+    Ok(cg_finalize(st))
+}
+
+/// Recursive emitter over the annotated tree.  At each node:
+///   1. Check for seek_plan refinement on PnFilter(PnTableScan, _)
+///      shapes — when present and the chosen access method is a
+///      seek (not AmFullScan), emit the specialised lowering.
+///   2. Recognise PnProject(PnFilter(PnTableScan, _), cols) wrappers
+///      so projection-over-seek emits both the seek and the projected
+///      result row.
+///   3. Otherwise, delegate to the historical `emit_plan` path —
+///      every node shape supported by emit_plan continues to work,
+///      and any future additions to emit_plan automatically apply.
+fn emit_annotated(st: &mut CgState, ann: &CostAnnotatedPlan) -> Result<(), CodegenError> {
+    // Project(Filter(TableScan, pred), cols) with seek_plan on the
+    // wrapped Filter.  Use the same `&**heap` deref pattern that
+    // cost_annotated.vr uses for borrowing through Heap fields —
+    // Verum's affine analyser approves it.
+    let outer_node: &PlanNode = &**(&ann.node);
+    match outer_node {
+        PnProject(_, ref cols) => {
+            if ann.children.len() == 1 {
+                let inner = &ann.children[0];
+                let inner_node: &PlanNode = &**(&inner.node);
+                match inner_node {
+                    PnFilter(_, _) => {
+                        match &inner.seek_plan {
+                            Some(ref pref) => {
+                                if access_method_is_actionable(&pref.method) {
+                                    return emit_annotated_project_seek(st, inner_node, cols, pref);
+                                }
+                            }
+                            None => {},
+                        }
+                    }
+                    _ => {},
+                }
+            }
+        }
+        // Bare Filter(TableScan, pred) with seek_plan — `SELECT *` /
+        // bare-filter shape (rare in practice but supported).
+        PnFilter(_, _) => {
+            match &ann.seek_plan {
+                Some(ref pref) => {
+                    if access_method_is_actionable(&pref.method) {
+                        return emit_annotated_filter_seek(st, outer_node, pref);
+                    }
+                }
+                None => {},
+            }
+        }
+        _ => {},
+    }
+    // Default: delegate to historical PlanNode-based codegen.
+    emit_plan(st, outer_node)
+}
+
+/// `True` when the chosen access method has a specialised codegen
+/// lowering.  AmFullScan returns false (no specialisation needed).
+/// AmIndexSeek / AmIndexRangeScan / AmCoveringIndexScan currently
+/// return false (deferred to follow-up tasks #160 / #161 — those
+/// require dedicated index-cursor opcode shapes (`IdxRowid`,
+/// `OpenIndex`) that aren't in the L4 opcode set yet).  Only
+/// AmRowidLookup returns true at this layer.
+fn access_method_is_actionable(m: &AccessMethod) -> Bool {
+    match m {
+        AmRowidLookup => true,
+        AmIndexSeek(_) => false,
+        AmIndexRangeScan(_) => false,
+        AmCoveringIndexScan(_) => false,
+        AmEphemeralScan => false,
+        AmFullScan => false,
+    }
+}
+
+/// Lower a `PnProject(PnFilter(PnTableScan, pred), cols)` shape with
+/// `AmRowidLookup` access plan.  The predicate must have produced
+/// exactly one seek key (the rowid value); the residual predicate
+/// (any non-consumed conjuncts) is evaluated AFTER the seek hits.
+fn emit_annotated_project_seek(
+    st: &mut CgState,
+    filter_plan: &PlanNode,
+    cols: &List<PlanColumn>,
+    p: &AccessPlan,
+) -> Result<(), CodegenError> {
+    match filter_plan {
+        PnFilter(ref child, _residual_or_full) => {
+            let scan_node = &**child;
+            match scan_node {
+                PnTableScan(ref _t, cid, n_cols) => {
+                    return emit_rowid_lookup_projected(st, cid, n_cols, p, cols);
+                }
+                _ => {},
+            }
+        }
+        _ => {},
+    }
+    Err(unsupported("annotated project-seek expected Filter(TableScan, _)".clone()))
+}
+
+/// Lower a bare `PnFilter(PnTableScan, pred)` with `AmRowidLookup`.
+/// Equivalent to `emit_annotated_project_seek` minus the projection
+/// step — emits every column from the matched row instead.
+fn emit_annotated_filter_seek(
+    st: &mut CgState,
+    filter_plan: &PlanNode,
+    p: &AccessPlan,
+) -> Result<(), CodegenError> {
+    match filter_plan {
+        PnFilter(ref child, _residual_or_full) => {
+            let scan_node = &**child;
+            match scan_node {
+                PnTableScan(ref _t, cid, n_cols) => {
+                    return emit_rowid_lookup_bare(st, cid, n_cols, p);
+                }
+                _ => {},
+            }
+        }
+        _ => {},
+    }
+    Err(unsupported("annotated filter-seek expected Filter(TableScan, _)".clone()))
+}
+
+/// Common rowid-lookup prologue: cursor open + key materialisation +
+/// SeekGE + RowIdOp + Ne(rowid, key) — leaves the cursor positioned
+/// on the matched row (or jumps past on miss).  Returns `(seek_idx,
+/// ne_idx, rid_reg, key_reg, residual_skip_idx)` so the caller can
+/// patch the jump targets after emitting the body + close.
+fn emit_rowid_seek_prologue(
+    st: &mut CgState,
+    cursor_id: Int,
+    n_cols: Int,
+    p: &AccessPlan,
+) -> Result<(Int, Int, Int, Int, Int), CodegenError> {
+    if p.seek_keys.len() != 1 {
+        let n = p.seek_keys.len();
+        return Err(InvalidPlan(f"rowid lookup expected 1 seek key, got {n}".as_str().to_owned()));
+    }
+    if cursor_id >= st.program.cursor_count() {
+        let _ = st.program.declare_cursor(CkTable, 0, n_cols);
+    }
+    let _ = st.program.emit(OpenRead(cursor_id, 0, n_cols));
+
+    let key_reg = st.regs.alloc();
+    match emit_expr(st, &p.seek_keys[0], key_reg) {
+        Ok(_)  => {}, Err(e) => { return Err(e); }
+    }
+
+    let seek_idx = st.program.emit(SeekGE(cursor_id, key_reg, 1, 0));
+    let rid_reg = st.regs.alloc();
+    let _ = st.program.emit(RowIdOp(cursor_id, rid_reg));
+    let ne_idx = st.program.emit(Ne(rid_reg, key_reg, 0));
+
+    // Optional residual predicate.
+    let mut residual_skip_idx: Int = -1;
+    match &p.residual_predicate {
+        Some(ref residual) => {
+            let pr = st.regs.alloc();
+            match emit_expr(st, residual, pr) {
+                Ok(_)  => {}, Err(e) => { return Err(e); }
+            }
+            residual_skip_idx = st.program.emit(IfNot(pr, 0));
+        }
+        None => {},
+    }
+    Ok((seek_idx, ne_idx, rid_reg, key_reg, residual_skip_idx))
+}
+
+/// Patch the jump targets and emit the closing Close opcode.  Each
+/// `st.program.*` call is sequenced through an explicit local-binding
+/// boundary — Verum's affine analyser is sensitive to back-to-back
+/// field-method calls on the same `&mut` struct.
+fn emit_rowid_seek_epilogue(
+    st: &mut CgState,
+    cursor_id: Int,
+    seek_idx: Int,
+    ne_idx: Int,
+    rid_reg: Int,
+    key_reg: Int,
+    residual_skip_idx: Int,
+) {
+    let after = st.program.instruction_count();
+    let new_seek = SeekGE(cursor_id, key_reg, 1, after);
+    st.program.replace(seek_idx, new_seek);
+    let new_ne = Ne(rid_reg, key_reg, after);
+    st.program.replace(ne_idx, new_ne);
+    if residual_skip_idx >= 0 {
+        let pr_reg = read_ifnot_reg(st, residual_skip_idx);
+        if pr_reg >= 0 {
+            let new_ifnot = IfNot(pr_reg, after);
+            st.program.replace(residual_skip_idx, new_ifnot);
+        }
+    }
+    emit_limit_finalize_patches(st, after);
+    let close_op = Close(cursor_id);
+    let _ = st.program.emit(close_op);
+}
+
+/// Read the register operand from an `IfNot(reg, _)` placeholder
+/// opcode at the given index, returning -1 when the opcode is
+/// missing or has a different shape.  Centralising the re-lookup
+/// here keeps the affine analyser happy in the caller.
+fn read_ifnot_reg(st: &CgState, at: Int) -> Int {
+    match st.program.get_opcode(at) {
+        Some(op) => match op {
+            IfNot(reg, _) => reg,
+            _ => -1,
+        },
+        None => -1,
+    }
+}
+
+/// Rowid-lookup with explicit projection columns (the
+/// `SELECT cols FROM t WHERE rowid = K` shape).
+fn emit_rowid_lookup_projected(
+    st: &mut CgState,
+    cursor_id: Int,
+    n_cols: Int,
+    p: &AccessPlan,
+    cols: &List<PlanColumn>,
+) -> Result<(), CodegenError> {
+    let prologue = match emit_rowid_seek_prologue(st, cursor_id, n_cols, p) {
+        Ok(t)  => t,
+        Err(e) => { return Err(e); }
+    };
+
+    let proj_start = st.regs.alloc_n(cols.len());
+    let mut i: Int = 0;
+    while i < cols.len() {
+        match emit_expr(st, &cols[i].expr, proj_start + i) {
+            Ok(_)  => {}, Err(e) => { return Err(e); }
+        }
+        i = i + 1;
+    }
+    let gp = emit_limit_body_prefix(st);
+    emit_result_row(st, proj_start, cols.len());
+    emit_limit_body_counter(st, gp);
+
+    emit_rowid_seek_epilogue(
+        st, cursor_id,
+        prologue.0, prologue.1, prologue.2, prologue.3, prologue.4,
+    );
+    Ok(())
+}
+
+/// Rowid-lookup with no explicit projection — emits every column of
+/// the matched row directly (the bare-Filter-over-TableScan shape).
+fn emit_rowid_lookup_bare(
+    st: &mut CgState,
+    cursor_id: Int,
+    n_cols: Int,
+    p: &AccessPlan,
+) -> Result<(), CodegenError> {
+    let prologue = match emit_rowid_seek_prologue(st, cursor_id, n_cols, p) {
+        Ok(t)  => t,
+        Err(e) => { return Err(e); }
+    };
+
+    let row_start = st.regs.alloc_n(n_cols);
+    let mut i: Int = 0;
+    while i < n_cols {
+        let _ = st.program.emit(Column(cursor_id, i, row_start + i));
+        i = i + 1;
+    }
+    let gp = emit_limit_body_prefix(st);
+    emit_result_row(st, row_start, n_cols);
+    emit_limit_body_counter(st, gp);
+
+    emit_rowid_seek_epilogue(
+        st, cursor_id,
+        prologue.0, prologue.1, prologue.2, prologue.3, prologue.4,
+    );
+    Ok(())
 }

@@ -31,6 +31,7 @@ public module ast;
 public module parser;
 public module planner;
 public module resolver;
+public module access_planning;
 public module codegen;
 public module cost_annotated;
 public module plan_passes;
@@ -77,7 +78,7 @@ public mount .planner.{
 
 public mount .codegen.{
     CodegenError, CgState,
-    codegen, emit_expr,
+    codegen, codegen_annotated, emit_expr,
 };
 
 public mount .resolver.{
@@ -95,7 +96,8 @@ public mount .compile.{
 
 public mount .cost_annotated.{
     CostAnnotatedPlan, StatsCatalogue,
-    annotate_with_cost, stats_catalogue_new, explain_annotated,
+    annotate_with_cost, annotate_with_cost_schema,
+    stats_catalogue_new, explain_annotated,
 };
 
 public mount .plan_passes.{
@@ -103,4 +105,9 @@ public mount .plan_passes.{
     run_plan_passes, standard_pipeline,
     flatten_project_chains, merge_filter_chains,
     limit_pushdown_unsorted, unwrap_distinct_unique,
+};
+
+public mount .access_planning.{
+    AccessPlan, RangeBound, RangeOp, RoLt, RoLe, RoGt, RoGe,
+    plan_access, full_scan_plan,
 };
