@@ -1,0 +1,141 @@
+// @test: typecheck-pass
+// @level: L2
+// @tier: 0
+// @tags: sqlite, native, vdbe, ssa, foundation
+// @timeout: 15000
+// @description: SSA IR foundation per spec §4.4 — types compose, lift round-trips
+//
+// Spec: internal/specs/sqlite-native.md §4.4 (VDBE как SSA IR)
+//
+// Asserts the SSA module surface compiles and lifting passes accept
+// real `VdbeProgram` inputs.  Does NOT yet assert semantic equivalence
+// after round-trip — that needs full phi resolution + jump patching
+// (tracked as #132 follow-ups).
+
+mount core.*;
+mount collections.List;
+mount base.{Text, Maybe};
+mount core.database.sqlite.native.l4_vdbe.{
+    Opcode, VdbeProgram, program_new
+};
+mount core.database.sqlite.native.l4_vdbe.opcode.{
+    Integer, Add, Halt
+};
+mount core.database.sqlite.native.l4_vdbe.ssa.value.{
+    SkInt, SkBool, SkAny,
+    ssa_value, value_id, kind_eq,
+};
+mount core.database.sqlite.native.l4_vdbe.ssa.block.{
+    block_id,
+};
+mount core.database.sqlite.native.l4_vdbe.ssa.cfg.cfg_new;
+mount core.database.sqlite.native.l4_vdbe.ssa.program.ssa_program_new;
+mount core.database.sqlite.native.l4_vdbe.ssa.dominator.build_dom_tree;
+mount core.database.sqlite.native.l4_vdbe.ssa.cfg_construction.build_cfg_skeleton;
+mount core.database.sqlite.native.l4_vdbe.ssa.from_register_vm.lift_vdbe_to_ssa;
+mount core.database.sqlite.native.l4_vdbe.ssa.phi_insertion.resolve_pending_phis;
+mount core.database.sqlite.native.l4_vdbe.ssa.to_register_vm.lower_ssa_to_vdbe;
+
+// -----------------------------------------------------------------------------
+// 1. Kind composition + equality
+// -----------------------------------------------------------------------------
+
+fn kind_equality_holds() {
+    assert(kind_eq(&SkInt, &SkInt));
+    assert(!kind_eq(&SkInt, &SkBool));
+    assert(kind_eq(&SkAny, &SkAny));
+}
+
+// -----------------------------------------------------------------------------
+// 2. Empty SsaProgram has one entry block
+// -----------------------------------------------------------------------------
+
+fn empty_ssa_program() {
+    let p = ssa_program_new("SELECT 1".clone());
+    assert_eq(p.block_count(), 1);
+    assert_eq(p.value_count, 1);
+    // Total instructions = phi(0) + insts(0) + 1 terminator (placeholder)
+    assert_eq(p.total_instr_count(), 1);
+}
+
+// -----------------------------------------------------------------------------
+// 3. CFG skeleton: empty program → empty skeleton
+// -----------------------------------------------------------------------------
+
+fn cfg_skeleton_empty() {
+    let mut p: VdbeProgram = program_new("".clone(), 0);
+    let skel = build_cfg_skeleton(&p.instructions);
+    assert_eq(skel.spans.len(), 0);
+    assert_eq(skel.instr_to_block.len(), 0);
+}
+
+// -----------------------------------------------------------------------------
+// 4. CFG skeleton: straight-line program → one block
+// -----------------------------------------------------------------------------
+
+fn cfg_skeleton_straightline() {
+    let mut p = program_new("".clone(), 4);
+    let _ = p.emit(Integer(1, 0));
+    let _ = p.emit(Integer(2, 1));
+    let _ = p.emit(Add(0, 1, 2));
+    let _ = p.emit(Halt(0, 0));
+    let skel = build_cfg_skeleton(&p.instructions);
+    // 4 instructions, no branches → still 1 block (the only leader is
+    // index 0; Halt is a CF op but the instruction AFTER it is past
+    // the end so no new leader is added).
+    assert_eq(skel.spans.len(), 1);
+    assert_eq(skel.spans[0].start, 0);
+    assert_eq(skel.spans[0].end, 3);
+}
+
+// -----------------------------------------------------------------------------
+// 5. Round-trip lift: program survives lift_vdbe_to_ssa
+// -----------------------------------------------------------------------------
+
+fn lift_round_trip_smoke() {
+    let mut p = program_new("SELECT 1+2".clone(), 4);
+    let _ = p.emit(Integer(1, 0));
+    let _ = p.emit(Integer(2, 1));
+    let _ = p.emit(Add(0, 1, 2));
+    let _ = p.emit(Halt(0, 0));
+
+    let mut lifted = lift_vdbe_to_ssa(&p);
+    // value_count must have grown — at least 3 destinations (two
+    // IIntImm + one IAdd) plus the entry-block reservation.
+    assert(lifted.prog.value_count >= 4);
+
+    // Block count matches CFG skeleton (single block here).
+    assert_eq(lifted.prog.block_count(), 1);
+
+    // Phi resolution doesn't crash (no pending phis on this program).
+    resolve_pending_phis(&mut lifted);
+
+    // Back-translation produces a runnable VdbeProgram.
+    let out = lower_ssa_to_vdbe(&lifted.prog);
+    assert(out.instruction_count() >= 4);
+}
+
+// -----------------------------------------------------------------------------
+// 6. Dominator tree degenerates correctly on a single-block CFG
+// -----------------------------------------------------------------------------
+
+fn dominator_single_block() {
+    let mut prog = ssa_program_new("".clone());
+    prog.cfg.compute_preds();
+    let dom = build_dom_tree(&prog.cfg);
+    // Entry block (id 0) has no dominator.
+    let imm = dom.immediate_dominator(&block_id(0));
+    match imm {
+        None => {},
+        Some(_) => panic("entry block must have no idom"),
+    }
+}
+
+fn main() {
+    kind_equality_holds();
+    empty_ssa_program();
+    cfg_skeleton_empty();
+    cfg_skeleton_straightline();
+    lift_round_trip_smoke();
+    dominator_single_block();
+}
