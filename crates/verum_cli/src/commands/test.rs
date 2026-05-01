@@ -232,6 +232,8 @@ pub fn execute(opts: TestOptions) -> Result<()> {
                 _ => None,
             }
         }),
+        property_testing: manifest.test.property_testing,
+        proptest_cases: manifest.test.proptest_cases,
     };
 
     let total = filtered.len();
@@ -247,29 +249,20 @@ pub fn execute(opts: TestOptions) -> Result<()> {
         ));
     }
 
-    // Surface inert TestConfig fields. `differential` (VBC vs LLVM
-    // AOT result agreement), `property_testing` (proptest! macro),
-    // `proptest_cases` (default case count), and `fuzzing` (cargo
-    // fuzz integration) all flow from the manifest [test] section
-    // but no current `verum test` path consults them — the harness
-    // runs each test once and asserts the expected outcome without
-    // the differential/property/fuzz expansion. Closes the
-    // inert-defense pattern by routing the values through tracing
-    // so embedders writing `[test].differential = true` see the
-    // setting was observed at the runner entry, even when the
-    // associated phase isn't realised yet.
-    if manifest.test.differential
-        || !manifest.test.property_testing
-        || manifest.test.proptest_cases != 256
-        || manifest.test.fuzzing
-    {
+    // Surface remaining inert TestConfig fields.  After #298 the
+    // `property_testing` and `proptest_cases` fields are
+    // load-bearing through `TestRunCfg.property_testing` /
+    // `proptest_cases` (the property runner consults them at
+    // dispatch and at default-runs determination, respectively).
+    // `differential` (VBC vs LLVM AOT result agreement) and
+    // `fuzzing` (cargo-fuzz integration) remain forward-looking
+    // pending #273 / #286-fuzzing.
+    if manifest.test.differential || manifest.test.fuzzing {
         tracing::debug!(
-            "test runner: differential={}, property_testing={}, proptest_cases={}, \
-             fuzzing={} — these fields are forward-looking; the current `verum test` \
-             harness runs each test once without differential/property/fuzz expansion",
+            "test runner: differential={}, fuzzing={} — these fields are \
+             forward-looking; current `verum test` harness runs each test once \
+             without differential/fuzz expansion",
             manifest.test.differential,
-            manifest.test.property_testing,
-            manifest.test.proptest_cases,
             manifest.test.fuzzing,
         );
     }
@@ -585,6 +578,20 @@ struct TestRunCfg {
     /// on a typo. Closes the inert-defense pattern for the CLI
     /// `--verify <mode>` flag.
     verify_mode_override: Option<verum_compiler::options::VerifyMode>,
+    /// Mirror of `[test].property_testing` from the manifest.  When
+    /// `false`, tests carrying the `@property(...)` attribute are
+    /// skipped with a "property testing disabled" outcome instead of
+    /// being executed — embedders can opt out of the proptest path
+    /// without removing the attribute from individual `.vr` files.
+    /// Default: `true` (matches `TestConfig::default()`).
+    property_testing: bool,
+    /// Mirror of `[test].proptest_cases` — used as the default
+    /// `runs` count when an individual `@property(runs = N)` does
+    /// not override it.  Pre-fix: hardcoded to 100 inside
+    /// `run_test_property`.  Post-fix: reads from the manifest so
+    /// a project-wide `proptest_cases = 1000` actually shapes how
+    /// many samples each property explores.
+    proptest_cases: u32,
 }
 
 enum TestResult {
@@ -616,6 +623,21 @@ struct TestFailure {
 
 fn run_single_test(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResult {
     if let Some(prop) = &test.property {
+        // When the manifest disables property testing, we treat any
+        // test carrying `@property(...)` as a configured skip rather
+        // than executing the proptest harness.  This lets embedders
+        // turn the entire property-testing surface off without
+        // editing individual `.vr` files — the attribute stays put,
+        // the runner simply records a "skipped" outcome.  Reported
+        // as a Pass with a single-line stdout so CI tooling sees a
+        // clean run rather than a synthetic failure.
+        if !cfg.property_testing {
+            return TestResult::Pass {
+                duration: Duration::from_nanos(0),
+                stdout: String::from("property testing disabled in manifest [test]"),
+                stderr: String::new(),
+            };
+        }
         return run_test_property(test, prop, cfg);
     }
     match cfg.tier {
@@ -631,7 +653,7 @@ fn run_single_test(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResu
 fn run_test_property(
     test: &Test,
     prop: &crate::commands::property::PropertyFunc,
-    _cfg: &TestRunCfg,
+    cfg: &TestRunCfg,
 ) -> TestResult {
     use crate::commands::property::{
         load_regression_db, record_regression, run_property, save_regression_db,
@@ -685,7 +707,14 @@ fn run_test_property(
     let mut db = load_regression_db();
     let replay_seeds = seeds_for(&db, test.name.as_str());
 
-    let default_runs = prop.runs_override.unwrap_or(100);
+    // Default-runs precedence: per-test `@property(runs = N)` wins
+    // over manifest `[test].proptest_cases`.  When neither is set
+    // we fall back to TestConfig::default()'s 256 (the historical
+    // hard-coded literal here was 100, which silently masked the
+    // manifest setting since the pre-fix runner ignored cfg).
+    let default_runs = prop
+        .runs_override
+        .unwrap_or(cfg.proptest_cases);
     let pinned = prop.seed_override;
 
     // Replay pass (one run each, pinned seed). If a stored seed now
@@ -1655,5 +1684,104 @@ mod tests {
         // of failing at this layer. Keeps CI tolerant of typos.
         assert_eq!(parse_verify("not-a-mode"), None);
         assert_eq!(parse_verify(""), None);
+    }
+
+    /// Build a minimal TestRunCfg for property-runner unit tests.
+    /// The fields the property dispatcher actually reads are
+    /// `property_testing` and `proptest_cases`; everything else
+    /// defaults to a placeholder shape that doesn't reach the
+    /// codepath under test.
+    fn cfg_with_property(property_testing: bool, proptest_cases: u32) -> TestRunCfg {
+        TestRunCfg {
+            timeout_secs: 60,
+            deny_warnings: false,
+            coverage: false,
+            nocapture: false,
+            language_features:
+                verum_compiler::language_features::LanguageFeatures::default(),
+            tier: Tier::Interpret,
+            release: false,
+            verify_mode_override: None,
+            property_testing,
+            proptest_cases,
+        }
+    }
+
+    #[test]
+    fn property_testing_disabled_skips_property_tests_with_pass() {
+        // Pin (#298): when [test].property_testing = false, a test
+        // carrying @property(...) yields a Pass with the disabled
+        // marker line, NOT a property-runner invocation.  This is
+        // the load-bearing dispatch contract for the manifest flag.
+        let test = Test {
+            name: "demo_property".into(),
+            file: PathBuf::from("/dev/null"),
+            ignored: false,
+            property: Some(crate::commands::property::PropertyFunc {
+                name: "demo".to_string(),
+                file: PathBuf::from("/dev/null"),
+                params: Vec::new(),
+                runs_override: None,
+                seed_override: None,
+            }),
+            case_args: None,
+            fn_name: Some("demo".to_string()),
+        };
+        let cfg = cfg_with_property(false, 256);
+        let result = run_single_test(&test, std::path::Path::new("/tmp"), &cfg);
+        match result {
+            TestResult::Pass { stdout, .. } => {
+                assert!(
+                    stdout.contains("property testing disabled"),
+                    "expected disabled marker in stdout, got: {stdout}"
+                );
+            }
+            TestResult::Fail { error, .. } => {
+                panic!("expected Pass when property testing disabled, got Fail: {error}");
+            }
+            TestResult::CompileError { error, .. } => {
+                panic!("expected Pass when property testing disabled, got CompileError: {error}");
+            }
+        }
+    }
+
+    #[test]
+    fn property_testing_enabled_does_not_short_circuit() {
+        // Pin (#298): with property_testing = true, the dispatcher
+        // routes to run_test_property — which will then fail at
+        // file-read because /dev/null isn't a real test file.  The
+        // failure mode (CompileError "read:") is the proof that the
+        // dispatcher did not short-circuit at the disabled gate.
+        let test = Test {
+            name: "demo_property".into(),
+            file: PathBuf::from("/dev/null"),
+            ignored: false,
+            property: Some(crate::commands::property::PropertyFunc {
+                name: "demo".to_string(),
+                file: PathBuf::from("/dev/null"),
+                params: Vec::new(),
+                runs_override: None,
+                seed_override: None,
+            }),
+            case_args: None,
+            fn_name: Some("demo".to_string()),
+        };
+        let cfg = cfg_with_property(true, 256);
+        let result = run_single_test(&test, std::path::Path::new("/tmp"), &cfg);
+        // /dev/null reads as an empty file; the parser then fails.
+        // Either way the result is NOT the disabled-marker Pass —
+        // that's the load-bearing assertion.
+        match result {
+            TestResult::Pass { stdout, .. } => {
+                assert!(
+                    !stdout.contains("property testing disabled"),
+                    "should not short-circuit when property_testing = true; stdout: {stdout}"
+                );
+            }
+            TestResult::Fail { .. } | TestResult::CompileError { .. } => {
+                // Expected: the runner reached run_test_property and
+                // produced a real downstream failure on /dev/null.
+            }
+        }
     }
 }
