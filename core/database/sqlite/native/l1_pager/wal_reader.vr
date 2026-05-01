@@ -1,0 +1,251 @@
+module core.database.sqlite.native.l1_pager.wal_reader;
+
+// =============================================================================
+// l1_pager/wal_reader.vr — WAL recovery + frame I/O
+// =============================================================================
+// Layer: 1
+// Spec: sqlite-native.md §8.2 (recovery) + §6.4 (frame layout)
+//
+// Two responsibilities:
+//
+//   1. **Recovery** — walk an existing WAL file, validate frame
+//      salts + checksums, rebuild the in-memory `frame_index` +
+//      `mx_frame` + `last_commit_db_size`.  Frames past the last
+//      commit-marker are silently dropped (incomplete txn).
+//
+//   2. **Frame I/O** — given a frame number, compute its offset
+//      and read the (header + payload) tuple.  Used by the
+//      WAL-aware pager when serving a page that has a WAL version.
+//
+// The reader is `&mut`-backed (no affine constraint) — multiple
+// readers can hold snapshots concurrently as long as the writer
+// stays single-threaded (the standard SQLite WAL contract).
+// =============================================================================
+
+mount core.*;
+mount collections.{List, Map};
+mount base.{Result, Ok, Err, Text, Maybe};
+mount core.database.sqlite.native.l0_vfs.posix_vfs.PosixFile;
+mount core.database.sqlite.native.l0_vfs.memdb_vfs.MemDbFile;
+mount core.database.sqlite.native.l0_vfs.vfs_protocol.VfsError;
+mount core.database.sqlite.native.wal_frame_layout.constants.{
+    file_header_size, frame_header_size,
+};
+mount core.database.sqlite.native.wal_frame_layout.frame_header.{
+    WalFrameHeader, is_commit_frame, salts_match,
+};
+mount core.database.sqlite.native.l1_pager.wal_state.WalState;
+mount core.database.sqlite.native.l1_pager.wal_writer.{
+    WalWriter, WalBackend, WbFile, WbMem, decode_frame_header,
+};
+mount core.database.sqlite.native.l1_pager.pager.{PagerError, PagerErrorKind};
+
+// -----------------------------------------------------------------------------
+// Frame offset arithmetic
+// -----------------------------------------------------------------------------
+
+/// Byte offset of frame `frame_no` within the WAL file.  Frame 1
+/// starts immediately after the 32-byte file header.
+pub fn frame_offset(frame_no: Int, page_size: Int) -> Int {
+    if frame_no < 1 { return file_header_size(); }
+    file_header_size() + (frame_no - 1) * (frame_header_size() + page_size)
+}
+
+// -----------------------------------------------------------------------------
+// RecoveryReport — result of walking an existing WAL
+// -----------------------------------------------------------------------------
+
+pub type RecoveryReport is {
+    /// Total frames found in the file (whether valid or trailing).
+    raw_frame_count: Int,
+    /// Frames accepted into the rebuilt frame_index — those with
+    /// matching salts AND that fall before/equal to the last
+    /// commit-marker.
+    accepted_frames: Int,
+    /// Frame number of the last commit-marker (0 if none).
+    last_commit_frame: Int,
+    /// db_size_after value carried by the last commit-marker.
+    last_commit_db_size: Int,
+    /// Frames AFTER the last commit-marker — incomplete txn,
+    /// silently dropped per §8.2 recovery semantics.
+    incomplete_trailer: Int,
+};
+
+fn recovery_report_empty() -> RecoveryReport {
+    RecoveryReport {
+        raw_frame_count: 0,
+        accepted_frames: 0,
+        last_commit_frame: 0,
+        last_commit_db_size: 0,
+        incomplete_trailer: 0,
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Recovery — walk the WAL file and rebuild the writer's state
+// -----------------------------------------------------------------------------
+
+/// Walk every frame in the WAL file backed by `writer.backend`,
+/// validating salts and recording the most recent valid frame per
+/// page in `writer.state.frame_index`.  Frames AFTER the last
+/// commit-marker are dropped (incomplete txn that didn't fsync).
+///
+/// Postcondition:
+///   `writer.state.mx_frame == last_commit_frame`
+///   `writer.state.frame_index` populated
+///   `writer.state.last_commit_db_size` set
+///   `writer.state.n_backfill` UNCHANGED — caller may load it from
+///       the wal_index (.shm) file separately, OR leave at 0 if
+///       the .shm wasn't found.
+///
+/// Returns a `RecoveryReport` for diagnostics + EXPLAIN-style
+/// observability.
+pub fn recover_state(writer: &mut WalWriter) -> Result<RecoveryReport, PagerError> {
+    let mut report = recovery_report_empty();
+    let page_size = writer.state.page_size;
+    let frame_stride = frame_header_size() + page_size;
+
+    // Track the rolling state: best-known commit boundary +
+    // pending-frame map (added to writer.state.frame_index only
+    // when the txn that contains them commits).
+    let mut pending_index: Map<Int, Int> = Map.new();
+    let mut frame_no: Int = 1;
+
+    while true {
+        let off = frame_offset(frame_no, page_size);
+        let mut hdr_buf: List<Byte> = List.new();
+        let mut i: Int = 0;
+        while i < frame_header_size() { hdr_buf.push(0 as Byte); i = i + 1; }
+
+        match backend_read(&mut writer.backend, &mut hdr_buf, off) {
+            Ok(_) => {}
+            Err(_) => {
+                // Short read or EOF — stop scanning.  The frames
+                // we accepted up to last_commit_frame are already
+                // in writer.state.frame_index.
+                break;
+            }
+        }
+
+        let fh = decode_frame_header(&hdr_buf, 0);
+        if !salts_match(&fh, writer.state.salt1, writer.state.salt2) {
+            // First salt mismatch terminates the scan — anything
+            // beyond here is from a previous WAL session.
+            break;
+        }
+
+        report.raw_frame_count = report.raw_frame_count + 1;
+        let page_no = fh.page_number as Int;
+        pending_index.insert(page_no, frame_no);
+
+        if is_commit_frame(&fh) {
+            // Promote pending_index into writer.state.frame_index;
+            // bump mx_frame; record commit_db_size.
+            let pending_keys = pending_index.keys();
+            let mut k: Int = 0;
+            while k < pending_keys.len() {
+                let kp = pending_keys[k];
+                match maybe_int_get(&pending_index, kp) {
+                    Some(fn_ok) => { writer.state.frame_index.insert(kp, fn_ok); }
+                    None => {}
+                }
+                k = k + 1;
+            }
+            pending_index = Map.new();
+            writer.state.mx_frame = frame_no;
+            writer.state.last_commit_db_size = fh.commit_size as Int;
+            report.last_commit_frame = frame_no;
+            report.last_commit_db_size = fh.commit_size as Int;
+            report.accepted_frames = report.accepted_frames + frame_stride_count(off, page_size);
+        }
+
+        frame_no = frame_no + 1;
+    }
+
+    // Anything in pending_index is an incomplete transaction.
+    report.incomplete_trailer = pending_index.keys().len();
+    Ok(report)
+}
+
+// -----------------------------------------------------------------------------
+// Single-frame read
+// -----------------------------------------------------------------------------
+
+pub type WalFrameRead is {
+    header: WalFrameHeader,
+    payload: List<Byte>,
+};
+
+/// Read frame `frame_no` from the WAL file.  Returns header +
+/// payload bytes.  Caller is responsible for validating salts
+/// against the writer's current state (recovery already does
+/// this; foreground page reads short-circuit when the
+/// `WalReaderSnapshot` index already says "this frame is mine").
+pub fn read_frame(
+    writer: &mut WalWriter,
+    frame_no: Int,
+) -> Result<WalFrameRead, PagerError> {
+    let page_size = writer.state.page_size;
+    if frame_no < 1 || frame_no > writer.state.mx_frame {
+        return Err(PagerError {
+            kind: IoError,
+            message: "wal read: frame out of range",
+        });
+    }
+    let off = frame_offset(frame_no, page_size);
+
+    let mut hdr_buf: List<Byte> = List.new();
+    let mut i: Int = 0;
+    while i < frame_header_size() { hdr_buf.push(0 as Byte); i = i + 1; }
+    match backend_read(&mut writer.backend, &mut hdr_buf, off) {
+        Ok(_) => {}
+        Err(_) => return Err(PagerError {
+            kind: IoError,
+            message: "wal read: header read failed",
+        }),
+    }
+    let header = decode_frame_header(&hdr_buf, 0);
+
+    let mut payload: List<Byte> = List.new();
+    let mut j: Int = 0;
+    while j < page_size { payload.push(0 as Byte); j = j + 1; }
+    match backend_read(&mut writer.backend, &mut payload, off + frame_header_size()) {
+        Ok(_) => {}
+        Err(_) => return Err(PagerError {
+            kind: IoError,
+            message: "wal read: payload read failed",
+        }),
+    }
+    Ok(WalFrameRead { header: header, payload: payload })
+}
+
+// -----------------------------------------------------------------------------
+// Backend dispatch — same shape as wal_writer.vr (intentional)
+// -----------------------------------------------------------------------------
+
+fn backend_read(b: &mut WalBackend, buf: &mut List<Byte>, offset: Int) -> Result<(), VfsError> {
+    match b {
+        WbFile(f) => f.read(buf, offset),
+        WbMem(f)  => f.read(buf, offset),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Helpers — explicit Maybe<Int> return so the matcher dispatches on
+// a sum-typed value (Verum's inline `Map<Int,Int>::get` confuses
+// pattern selection — see wal_state.vr for the same workaround).
+// -----------------------------------------------------------------------------
+
+fn maybe_int_get(m: &Map<Int, Int>, k: Int) -> Maybe<Int> {
+    m.get(&k)
+}
+
+fn frame_stride_count(offset_bytes: Int, page_size: Int) -> Int {
+    // Number of frame strides up to (and including) `offset_bytes`.
+    // Used by the recovery report for diagnostics — not load-bearing.
+    let body = offset_bytes - file_header_size();
+    if body <= 0 { return 0; }
+    let stride = frame_header_size() + page_size;
+    if stride <= 0 { return 0; }
+    (body / stride) + 1
+}
