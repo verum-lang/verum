@@ -27,6 +27,7 @@ module core.database.sqlite.native.l4_vdbe;
 
 public module opcode;
 public module register;
+public module bindings;
 public module program;
 public module interpreter;
 public module optimizer;
@@ -41,6 +42,11 @@ public mount .opcode.{
 public mount .register.{
     Register, RegisterKind, RegisterFile,
     register_file_new, register_kind, register_is_truthy, register_clone,
+};
+
+public mount .bindings.{
+    ParamBindings,
+    param_bindings_new,
 };
 
 public mount .program.{

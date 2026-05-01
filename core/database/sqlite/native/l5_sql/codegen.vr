@@ -2490,8 +2490,20 @@ public fn emit_expr(st: &mut CgState, e: &Expr, dst: Int) -> Result<(), CodegenE
         ELit(ref lit) => emit_literal(st, lit, dst),
         EUnary(op, ref inner) => emit_unary(st, op, inner, dst),
         EBinary(op, ref a, ref b) => emit_binary(st, op, a, b, dst),
-        EVar(_)        => Err(unsupported("named variable lowering pending".clone())),
-        EPositional(_) => Err(unsupported("positional variable lowering pending".clone())),
+        EVar(ref name) => {
+            // Named parameter `:name` / `@name` / `$name` — parser
+            // strips the sigil before reaching codegen.  Intern the
+            // name into the constant pool, emit `VariableNamed`.
+            let idx = st.program.constants.add(KText(name.clone()));
+            let _ = st.program.emit(VariableNamed(dst, idx));
+            Ok(())
+        }
+        EPositional(n) => {
+            // Positional parameter `?N` (1-based per SQLite).  L4
+            // interpreter reads slot `n` from `ParamBindings.positional`.
+            let _ = st.program.emit(Variable(dst, n));
+            Ok(())
+        }
         EColumn(_, _)  => Err(unsupported("EColumn reached codegen — run the resolver first".clone())),
         EColumnRef(cid, idx) => {
             let _ = st.program.emit(Column(cid, idx, dst));
