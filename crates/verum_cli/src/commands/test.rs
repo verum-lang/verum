@@ -234,6 +234,7 @@ pub fn execute(opts: TestOptions) -> Result<()> {
         }),
         property_testing: manifest.test.property_testing,
         proptest_cases: manifest.test.proptest_cases,
+        differential: manifest.test.differential,
     };
 
     let total = filtered.len();
@@ -249,21 +250,23 @@ pub fn execute(opts: TestOptions) -> Result<()> {
         ));
     }
 
-    // Surface remaining inert TestConfig fields.  After #298 the
-    // `property_testing` and `proptest_cases` fields are
-    // load-bearing through `TestRunCfg.property_testing` /
-    // `proptest_cases` (the property runner consults them at
-    // dispatch and at default-runs determination, respectively).
-    // `differential` (VBC vs LLVM AOT result agreement) and
-    // `fuzzing` (cargo-fuzz integration) remain forward-looking
-    // pending #273 / #286-fuzzing.
-    if manifest.test.differential || manifest.test.fuzzing {
+    // Surface remaining inert TestConfig fields.  After #298 +
+    // #273 the `property_testing` / `proptest_cases` /
+    // `differential` fields are all load-bearing through
+    // `TestRunCfg`.  Only `fuzzing` (cargo-fuzz integration)
+    // remains forward-looking — pending #286-fuzz.
+    if manifest.test.fuzzing {
         tracing::debug!(
-            "test runner: differential={}, fuzzing={} — these fields are \
-             forward-looking; current `verum test` harness runs each test once \
-             without differential/fuzz expansion",
-            manifest.test.differential,
+            "test runner: fuzzing={} — forward-looking; current `verum test` \
+             harness has no cargo-fuzz integration yet (pending #286-fuzz)",
             manifest.test.fuzzing,
+        );
+    }
+    if manifest.test.differential && !quiet {
+        ui::output(
+            "  [differential] every non-property test runs through both \
+             Tier 0 (interpreter) and Tier 1 (AOT) — disagreement is itself \
+             a test failure",
         );
     }
 
@@ -592,6 +595,21 @@ struct TestRunCfg {
     /// a project-wide `proptest_cases = 1000` actually shapes how
     /// many samples each property explores.
     proptest_cases: u32,
+    /// Mirror of `[test].differential` — when `true`, every
+    /// non-property test runs through BOTH the interpreter (Tier
+    /// 0, in-process VBC) AND the AOT pipeline (Tier 1, native
+    /// binary).  The differential wrapper requires both tiers to
+    /// produce a PASS for the test to count as PASS; any tier
+    /// disagreement (one passes, the other fails) surfaces as a
+    /// dedicated cross-tier failure with both tiers' diagnostics
+    /// attached.  This is the load-bearing soundness gate for
+    /// the language's two execution backends — disagreement is
+    /// the bug, not the test.  Property tests (carrying
+    /// `@property(...)`) are NOT subject to differential
+    /// expansion: they route through the interpreter by design
+    /// (per-iteration Value construction is impractical under
+    /// per-binary respawn) and are passed through unchanged.
+    differential: bool,
 }
 
 enum TestResult {
@@ -638,11 +656,156 @@ fn run_single_test(test: &Test, target_dir: &Path, cfg: &TestRunCfg) -> TestResu
                 stderr: String::new(),
             };
         }
+        // Property tests are NOT subject to differential expansion:
+        // their per-iteration Value construction is impractical
+        // under per-binary respawn (the AOT path would require
+        // re-launching the binary for every sample).  Route them
+        // through the proptest harness regardless of cfg.differential.
         return run_test_property(test, prop, cfg);
+    }
+    // Differential dispatch: run the test through BOTH tiers and
+    // require agreement.  This is the load-bearing soundness gate
+    // for the language's two execution backends.  Disagreement
+    // (one tier Pass, the other Fail) is itself the test failure.
+    if cfg.differential {
+        return run_test_differential(test, target_dir, cfg);
     }
     match cfg.tier {
         Tier::Aot => run_test_aot(test, target_dir, cfg),
         Tier::Interpret => run_test_interpret(test, cfg),
+    }
+}
+
+/// Run `test` through both Tier 0 (interpreter) and Tier 1 (AOT)
+/// and require both to PASS.  Any disagreement surfaces as a
+/// cross-tier soundness failure with both tiers' diagnostics
+/// attached so a maintainer can pinpoint which tier produced the
+/// faulty result.
+///
+/// Outcome lattice:
+///
+/// | T0 outcome  | T1 outcome  | Differential outcome           |
+/// |-------------|-------------|--------------------------------|
+/// | Pass        | Pass        | Pass (durations summed)        |
+/// | Pass        | Fail        | Fail (cross-tier disagreement) |
+/// | Fail        | Pass        | Fail (cross-tier disagreement) |
+/// | Fail        | Fail        | Fail (both tiers; first error) |
+/// | CompileErr  | *           | CompileErr (T0 short-circuits) |
+/// | Pass        | CompileErr  | Fail (T1 cannot lower)         |
+///
+/// The duration field aggregates both tiers so the test report
+/// reflects total cross-tier work.
+fn run_test_differential(
+    test: &Test,
+    target_dir: &Path,
+    cfg: &TestRunCfg,
+) -> TestResult {
+    // Run T0 first — it's the fastest path and a CompileError
+    // here short-circuits T1 (no point lowering a program that
+    // already failed at the type-checker / VBC codegen layer).
+    let t0_start = Instant::now();
+    let t0 = run_test_interpret(test, cfg);
+    let t0_dur = t0_start.elapsed();
+
+    if let TestResult::CompileError { error, .. } = &t0 {
+        return TestResult::CompileError {
+            duration: t0_dur,
+            error: format!(
+                "differential[T0=compile-error]: {error}"
+            ),
+        };
+    }
+
+    let t1_start = Instant::now();
+    let t1 = run_test_aot(test, target_dir, cfg);
+    let t1_dur = t1_start.elapsed();
+    combine_differential_outcomes(t0, t1, t0_dur + t1_dur)
+}
+
+/// Pure-function outcome combiner for differential testing.
+///
+/// Extracted from `run_test_differential` so the cross-tier
+/// agreement contract can be pinned by unit tests without
+/// driving the full compile/link/execute pipeline.  The tier
+/// inputs are already-computed `TestResult` values; this
+/// function only handles the lattice that maps two outcomes
+/// to a single `TestResult`.
+fn combine_differential_outcomes(
+    t0: TestResult,
+    t1: TestResult,
+    total_dur: Duration,
+) -> TestResult {
+    let t0_pass = matches!(t0, TestResult::Pass { .. });
+    let t1_pass = matches!(t1, TestResult::Pass { .. });
+
+    if t0_pass && t1_pass {
+        let (t0_stdout, t0_stderr) = match &t0 {
+            TestResult::Pass { stdout, stderr, .. } => (stdout.clone(), stderr.clone()),
+            _ => (String::new(), String::new()),
+        };
+        let (t1_stdout, t1_stderr) = match &t1 {
+            TestResult::Pass { stdout, stderr, .. } => (stdout.clone(), stderr.clone()),
+            _ => (String::new(), String::new()),
+        };
+        // Surface stdout drift as a soft warning on stderr — both
+        // tiers Pass so the test is GREEN, but a maintainer can
+        // see disagreement in the textual output (typically
+        // tolerable: timestamps, addresses, hashmap iteration
+        // order).  Hard-failing on stdout drift would force every
+        // test to be deterministic across both backends, which is
+        // not a goal of differential testing — agreement on the
+        // test's pass/fail verdict is the load-bearing contract.
+        let stderr = if t0_stdout != t1_stdout {
+            format!(
+                "{}{}\n[differential] stdout drift between tiers (both PASS):\n  T0: {} bytes\n  T1: {} bytes",
+                t0_stderr,
+                t1_stderr,
+                t0_stdout.len(),
+                t1_stdout.len()
+            )
+        } else {
+            format!("{}{}", t0_stderr, t1_stderr)
+        };
+        return TestResult::Pass {
+            duration: total_dur,
+            stdout: format!("[T0] {t0_stdout}\n[T1] {t1_stdout}"),
+            stderr,
+        };
+    }
+
+    let summarise = |r: &TestResult| -> String {
+        match r {
+            TestResult::Pass { stdout, .. } => format!("PASS ({} bytes stdout)", stdout.len()),
+            TestResult::Fail { error, exit_code, .. } => {
+                format!("FAIL (exit={:?}): {error}", exit_code)
+            }
+            TestResult::CompileError { error, .. } => {
+                format!("COMPILE-ERROR: {error}")
+            }
+        }
+    };
+    let t0_summary = summarise(&t0);
+    let t1_summary = summarise(&t1);
+    let header = match (t0_pass, t1_pass) {
+        (true, false) => "cross-tier disagreement: T0 PASS / T1 FAIL",
+        (false, true) => "cross-tier disagreement: T0 FAIL / T1 PASS",
+        (false, false) => "both tiers failed",
+        (true, true) => unreachable!("handled above"),
+    };
+    let error = format!(
+        "{header}\n  [T0 interpret] {t0_summary}\n  [T1 aot]       {t1_summary}"
+    );
+    let exit_code = match (&t0, &t1) {
+        (TestResult::Fail { exit_code, .. }, _) => *exit_code,
+        (_, TestResult::Fail { exit_code, .. }) => *exit_code,
+        _ => None,
+    };
+    TestResult::Fail {
+        duration: total_dur,
+        stdout: String::new(),
+        stderr: String::new(),
+        exit_code,
+        error,
     }
 }
 
@@ -1704,6 +1867,24 @@ mod tests {
             verify_mode_override: None,
             property_testing,
             proptest_cases,
+            differential: false,
+        }
+    }
+
+    fn cfg_with_differential(differential: bool) -> TestRunCfg {
+        TestRunCfg {
+            timeout_secs: 60,
+            deny_warnings: false,
+            coverage: false,
+            nocapture: false,
+            language_features:
+                verum_compiler::language_features::LanguageFeatures::default(),
+            tier: Tier::Interpret,
+            release: false,
+            verify_mode_override: None,
+            property_testing: true,
+            proptest_cases: 256,
+            differential,
         }
     }
 
@@ -1743,6 +1924,148 @@ mod tests {
                 panic!("expected Pass when property testing disabled, got CompileError: {error}");
             }
         }
+    }
+
+    fn ms(n: u64) -> Duration {
+        Duration::from_millis(n)
+    }
+    fn pass(stdout: &str) -> TestResult {
+        TestResult::Pass {
+            duration: ms(1),
+            stdout: stdout.to_string(),
+            stderr: String::new(),
+        }
+    }
+    fn fail(error: &str, exit: Option<i32>) -> TestResult {
+        TestResult::Fail {
+            duration: ms(1),
+            stdout: String::new(),
+            stderr: String::new(),
+            exit_code: exit,
+            error: error.to_string(),
+        }
+    }
+    fn compile_err(msg: &str) -> TestResult {
+        TestResult::CompileError {
+            duration: ms(1),
+            error: msg.to_string(),
+        }
+    }
+
+    #[test]
+    fn differential_both_pass_with_same_stdout_yields_pass() {
+        let r = combine_differential_outcomes(pass("hello"), pass("hello"), ms(10));
+        match r {
+            TestResult::Pass { stdout, stderr, .. } => {
+                assert!(stdout.contains("[T0] hello"));
+                assert!(stdout.contains("[T1] hello"));
+                assert!(
+                    !stderr.contains("stdout drift"),
+                    "no drift expected on identical stdout"
+                );
+            }
+            _ => panic!("expected Pass"),
+        }
+    }
+
+    #[test]
+    fn differential_both_pass_with_drift_still_passes_but_warns() {
+        // Pin: stdout drift between tiers is observability-only —
+        // agreement on the pass/fail verdict is the load-bearing
+        // contract; drift surfaces as a stderr warning so a
+        // maintainer can investigate non-determinism without the
+        // CI pipeline going red on every run.
+        let r = combine_differential_outcomes(pass("0x1234abcd"), pass("0x99887766"), ms(10));
+        match r {
+            TestResult::Pass { stderr, .. } => {
+                assert!(
+                    stderr.contains("stdout drift"),
+                    "expected drift warning in stderr, got: {stderr}"
+                );
+            }
+            _ => panic!("expected Pass with drift warning"),
+        }
+    }
+
+    #[test]
+    fn differential_t0_pass_t1_fail_yields_disagreement_failure() {
+        let r = combine_differential_outcomes(pass("ok"), fail("assertion blew up", Some(1)), ms(10));
+        match r {
+            TestResult::Fail { error, exit_code, .. } => {
+                assert!(error.contains("T0 PASS / T1 FAIL"), "header missing: {error}");
+                assert!(error.contains("[T0 interpret]"), "T0 summary missing: {error}");
+                assert!(error.contains("[T1 aot]"), "T1 summary missing: {error}");
+                assert!(error.contains("assertion blew up"), "T1 detail missing: {error}");
+                assert_eq!(exit_code, Some(1));
+            }
+            _ => panic!("expected Fail"),
+        }
+    }
+
+    #[test]
+    fn differential_t0_fail_t1_pass_yields_disagreement_failure() {
+        let r = combine_differential_outcomes(
+            fail("interp panic", Some(101)),
+            pass("ok"),
+            ms(10),
+        );
+        match r {
+            TestResult::Fail { error, exit_code, .. } => {
+                assert!(error.contains("T0 FAIL / T1 PASS"), "header missing: {error}");
+                assert!(error.contains("interp panic"), "T0 detail missing: {error}");
+                assert_eq!(exit_code, Some(101));
+            }
+            _ => panic!("expected Fail"),
+        }
+    }
+
+    #[test]
+    fn differential_both_fail_aggregates_diagnostics() {
+        let r = combine_differential_outcomes(
+            fail("interp side", Some(1)),
+            fail("aot side", Some(2)),
+            ms(10),
+        );
+        match r {
+            TestResult::Fail { error, exit_code, .. } => {
+                assert!(error.contains("both tiers failed"), "header missing: {error}");
+                assert!(error.contains("interp side"));
+                assert!(error.contains("aot side"));
+                // First-found exit-code wins (T0 is checked first).
+                assert_eq!(exit_code, Some(1));
+            }
+            _ => panic!("expected Fail"),
+        }
+    }
+
+    #[test]
+    fn differential_t1_compile_error_is_a_disagreement_failure() {
+        let r = combine_differential_outcomes(
+            pass("interp says ok"),
+            compile_err("LLVM lowering failed at f()"),
+            ms(10),
+        );
+        match r {
+            TestResult::Fail { error, .. } => {
+                assert!(error.contains("T0 PASS / T1 FAIL"));
+                assert!(error.contains("COMPILE-ERROR"));
+                assert!(error.contains("LLVM lowering"));
+            }
+            _ => panic!("expected Fail (T1 compile error counts as disagreement)"),
+        }
+    }
+
+    #[test]
+    fn differential_disabled_returns_tier_specific_path() {
+        // Pin (#273): when cfg.differential = false, the
+        // dispatcher takes the cfg.tier branch and does NOT
+        // invoke run_test_differential.  We can't observe that
+        // directly without integration scaffolding, but we can
+        // verify the cfg shape carries the flag through.
+        let cfg = cfg_with_differential(false);
+        assert!(!cfg.differential);
+        let cfg = cfg_with_differential(true);
+        assert!(cfg.differential);
     }
 
     #[test]
