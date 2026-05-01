@@ -444,6 +444,22 @@ impl Session {
         // foundation), this warning is removed and the field
         // becomes load-bearing.
         if rt.async_worker_threads > 1 {
+            // Two-channel emission:
+            //   * tracing::warn! — keeps structured logging
+            //     (VERUM_LOG=warn) for embedders ingesting telemetry.
+            //   * eprintln! — guarantees the warning surfaces to
+            //     human users at every compile.  Without the
+            //     eprintln a non-default manifest value silently
+            //     no-ops (the user expects 4 worker threads, gets
+            //     1, never sees why).  Using stderr directly so
+            //     this works without the verum_cli `ui` module
+            //     (which would create a circular dep).
+            //
+            // VERUM_SUPPRESS_RUNTIME_WARNINGS=1 silences the
+            // human-visible channel for embedders that prefer
+            // tracing-only telemetry (e.g., CI environments where
+            // stderr is reserved for hard errors).
+            let n = rt.async_worker_threads;
             tracing::warn!(
                 "manifest [runtime].async_worker_threads={} requested but the \
                  stdlib's AsyncRuntime is single-threaded today.  The manifest→runtime \
@@ -452,8 +468,18 @@ impl Session {
                  documented at docs/architecture/multi-threaded-async-scheduler.md \
                  (#271).  Programs run as if `async_worker_threads = 0` until Phase 1 \
                  lands.",
-                rt.async_worker_threads,
+                n,
             );
+            if std::env::var_os("VERUM_SUPPRESS_RUNTIME_WARNINGS").is_none() {
+                eprintln!(
+                    "warning: [runtime].async_worker_threads = {n} requested in \
+Verum.toml but the stdlib's AsyncRuntime is single-threaded today; the value \
+is observed but does not spawn worker threads.  The multi-threaded scheduler \
+lands in #271 (see docs/architecture/multi-threaded-async-scheduler.md).  Set \
+async_worker_threads = 0 (auto) or 1 to silence this warning, or set \
+VERUM_SUPPRESS_RUNTIME_WARNINGS=1 to keep the value with telemetry only."
+                );
+            }
         }
 
         // The `[codegen]` manifest section parses four fields. ALL
